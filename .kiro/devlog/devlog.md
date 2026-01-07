@@ -27,12 +27,12 @@
 ## Development Statistics
 
 ### Overall Progress
-- **Total Development Days**: 2
-- **Total Hours Logged**: 1.8h
-- **Total Commits**: 1 (initial template)
-- **Lines of Code Added**: ~437
-- **Lines of Code Removed**: 0
-- **Files Modified**: 5
+- **Total Development Days**: 3
+- **Total Hours Logged**: 2.8h
+- **Total Commits**: 4
+- **Lines of Code Added**: 3108
+- **Lines of Code Removed**: 8
+- **Files Modified**: 30
 
 ### Kiro CLI Usage
 - **Total Prompts Used**: [Auto-updated by @add-to-devlog]
@@ -260,5 +260,75 @@
 - Explore MCP (Model Context Protocol) integration options
 - Begin actual hackathon project planning and architecture decisions
 - Investigate how Powers can complement subagent workflows
+
+---
+
+## Day 3 (January 07, 2026) - Kiro CLI Exploration & Project Setup [1h]
+
+### 📊 **Daily Metrics**
+- **Time Spent**: 1 hour
+- **Commits Made**: 4
+- **Lines Added**: 3108
+- **Lines Removed**: 8
+- **Net Lines**: 3100
+- **Files Modified**: 30
+
+### 🎯 **Accomplishments**
+- Successfully adapted Claude Code skills to work with Kiro CLI through guided usage (non-native implementation)
+- Set up base Rust project structure for SHARDS (work tree manager CLI/UI)
+- Established comprehensive Kiro configuration with prompts, agents, and steering documents
+- Decided on technology stack: Rust + GPUI (similar to ZED IDE architecture)
+
+### 💻 **Technical Progress**
+**Commits Made Today:**
+- `b99f99e` Update devlog
+- `637440a` Update Kiro prompts: replace commit-push.md with commit.md  
+- `6386f34` Add commit-push prompt template
+- `26caa91` Initialize Rust project with Cargo
+
+**Code Changes:**
+- Major project initialization with 30 files added
+- Extensive Kiro configuration setup (.kiro/prompts/, .kiro/agents/, .kiro/steering/)
+- Basic Rust project structure (Cargo.toml, src/main.rs)
+- Development workflow templates and documentation
+
+### 🔧 **Work Breakdown**
+- **Kiro CLI Exploration**: 30min - Testing skills/powers compatibility and limitations
+- **Project Setup**: 20min - Rust project initialization and Kiro configuration
+- **Planning & Decision Making**: 10min - Technology stack decisions and project direction
+
+### 🚧 **Challenges & Solutions**
+**Major Blockers:**
+- Kiro powers don't support shell scripts or JSON files, making existing skills unusable
+- Powers not supported in CLI (only IDE), limiting utility for CLI-focused workflow
+- Had to abandon native power implementation approach
+
+**Solutions Applied:**
+- Successfully shoehorned Claude Code skills into Kiro CLI through guided usage
+- Proved that skills work as basic primitives with any coding agent, regardless of native support
+
+### 🧠 **Key Decisions**
+- **Project Choice**: Building SHARDS - a Rust-based work tree manager CLI and UI
+- **Technology Stack**: Rust + GPUI (following ZED IDE's architecture approach)
+- **Development Approach**: Focus on CLI-first development with Kiro CLI as primary tool
+- **Skills Strategy**: Use guided skill implementation rather than native powers
+
+### 📚 **Learnings & Insights**
+- Skills are universal primitives that can work with any coding agent through guidance
+- Kiro powers have significant limitations for shell-based workflows
+- CLI-focused development may be more practical than IDE-based powers for this project
+- Autonomous agents in Kiro show promise for future exploration
+
+### ⚡ **Kiro CLI Usage**
+- **Overall Assessment**: Disappointing today due to power limitations
+- **Workflow Discovery**: Successfully adapted non-native skill usage
+- **Configuration**: Extensive setup of prompts, agents, and steering documents
+- **Future Potential**: Autonomous agents feature identified for later exploration
+
+### 📋 **Next Session Plan**
+- Start product planning and PRD (Product Requirements Document) process
+- Research work tree manager solutions and competitive landscape
+- Begin actual code development for SHARDS project
+- Explore Rust + GPUI development patterns and best practices
 
 ---
