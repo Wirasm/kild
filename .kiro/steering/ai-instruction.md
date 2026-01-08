@@ -6,7 +6,7 @@ Shards is a CLI tool that manages multiple AI coding agents in isolated Git work
 
 ## When to Use Shards
 
-### ✅ **Perfect Use Cases**
+### ✅ **Perfect Use Cases**  
 - **Parallel development**: Work on multiple features/bugs simultaneously with different AI agents
 - **Context isolation**: Prevent agents from conflicting over the same working directory
 - **Background tasks**: Let an AI agent work on a side issue while you focus on something else
