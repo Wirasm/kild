@@ -1,0 +1,101 @@
+# Shards CLI - Current Feature Overview
+
+## ✅ **What We CAN Do Right Now**
+
+### **Core Functionality**
+- **Create isolated AI agent workspaces**: `shards start <name> <agent-command>`
+- **List all active sessions**: `shards list` with status indicators (🟢 Active/🔴 Stopped)
+- **Get detailed session info**: `shards info <name>` shows command, path, creation time, status
+- **Stop and cleanup sessions**: `shards stop <name>` removes worktree and registry entry
+- **Clean up orphaned sessions**: `shards cleanup` finds and removes stale worktrees/registry entries
+
+### **Git Integration**
+- **Automatic worktree creation** in `.shards/<name>/` directory
+- **Unique branch generation** with `shard_<uuid>` naming (e.g., `shard_a7c00fb4a4dc4686876f84f69ac837cf`)
+- **Proper Git repository detection** - must be run from within a Git repo
+- **Clean worktree removal** with proper Git cleanup
+
+### **Terminal Integration**
+- **Cross-platform terminal launching**:
+  - **macOS**: Uses AppleScript to launch Terminal.app
+  - **Linux**: Supports gnome-terminal, konsole, xterm, alacritty, kitty
+  - **Windows**: Uses Windows Terminal or cmd fallback
+- **Proper working directory setup** - agents launch in their worktree directory
+- **Command execution** - runs the specified agent command in the new terminal
+
+### **Session Management**
+- **Persistent registry** stored in `~/.shards/registry.json`
+- **Session metadata tracking**: name, path, command, creation time, status
+- **Duplicate prevention** - won't create shards with existing names
+- **Status tracking** - Active/Stopped states
+
+### **Agent-Friendly Design**
+- **Programmatic usage** - designed for AI agents to call via bash
+- **Trailing arguments support** - handles complex commands with flags
+- **Error handling** - clear error messages for common issues
+
+## ❌ **What We CANNOT Do Yet**
+
+### **Process Management Limitations**
+- **No process monitoring** - we launch terminals but don't track if the agent process is still running
+- **No process attachment** - can't attach to existing agent processes not started by Shards
+- **No process termination** - stopping a shard only cleans up worktree, doesn't kill the agent process
+- **No heartbeat system** - can't detect if an agent has crashed or exited
+
+### **Advanced Features Not Implemented**
+- **No GUI interface** - CLI only (GPUI planned for future)
+- **No PTY output parsing** - can't extract events or status from agent output
+- **No structured logging** - basic println! output only
+- **No configuration files** - no way to set default agent commands or preferences
+- **No session restoration** - can't resume a stopped session, only create new ones
+
+### **Missing Workflow Features**
+- **No branch management** - can't specify custom branch names or merge strategies
+- **No commit/PR integration** - no automatic commit creation or PR management
+- **No multi-repo support** - works only in the current Git repository
+- **No session templates** - can't save common agent configurations
+
+### **Platform/Environment Limitations**
+- **No containerization** - relies on local Git and terminal, no Docker isolation
+- **No remote execution** - can't launch agents on remote machines
+- **No resource limits** - no CPU/memory constraints on agent processes
+- **No network isolation** - agents share the same network environment
+
+## 🎯 **Current Use Cases That Work Well**
+
+1. **Parallel AI Development**: Start multiple agents (Kiro, Claude, Gemini) working on different features simultaneously
+2. **Context Isolation**: Each agent works in its own Git branch without conflicts
+3. **Session Overview**: Quick `shards list` to see what's running where
+4. **Clean Workspace Management**: Easy cleanup of completed or abandoned work
+5. **Agent Automation**: AI agents can spawn new shards programmatically
+
+## 🚧 **Immediate Next Steps for Full Vision**
+
+1. **Process tracking** - Monitor agent process health and status
+2. **PTY integration** - Parse agent output for events and progress
+3. **Session persistence** - Allow pausing/resuming sessions
+4. **GPUI frontend** - Visual dashboard for session management
+5. **Advanced Git integration** - PR creation, branch merging, commit management
+
+## 📊 **Implementation Status**
+
+### **Completed (v0.1.0)**
+- ✅ CLI framework with clap
+- ✅ Git worktree management
+- ✅ Cross-platform terminal launching
+- ✅ Session registry and tracking
+- ✅ Basic lifecycle management
+- ✅ Documentation and project structure
+
+### **In Progress**
+- 🚧 None currently
+
+### **Planned**
+- 📋 Process monitoring and health checks
+- 📋 PTY output parsing and event extraction
+- 📋 GPUI native frontend
+- 📋 Advanced session management
+- 📋 Configuration system
+- 📋 Enhanced Git workflow integration
+
+The current implementation provides a solid foundation for the "browser tabs for AI agents" vision, with the core isolation and management features working reliably!
