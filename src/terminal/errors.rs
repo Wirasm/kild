@@ -2,7 +2,7 @@ use crate::core::errors::ShardsError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalError {
-    #[error("No supported terminal found (tried: ghostty, iTerm, Terminal.app)")]
+    #[error("No supported terminal found (tried: iTerm, Terminal.app)")]
     NoTerminalFound,
 
     #[error("Terminal '{terminal}' not found or not executable")]
@@ -55,7 +55,7 @@ mod tests {
         let error = TerminalError::NoTerminalFound;
         assert_eq!(
             error.to_string(),
-            "No supported terminal found (tried: ghostty, iTerm, Terminal.app)"
+            "No supported terminal found (tried: iTerm, Terminal.app)"
         );
         assert_eq!(error.error_code(), "NO_TERMINAL_FOUND");
         assert!(error.is_user_error());
@@ -64,11 +64,11 @@ mod tests {
     #[test]
     fn test_terminal_not_found() {
         let error = TerminalError::TerminalNotFound {
-            terminal: "ghostty".to_string(),
+            terminal: "iterm".to_string(),
         };
         assert_eq!(
             error.to_string(),
-            "Terminal 'ghostty' not found or not executable"
+            "Terminal 'iterm' not found or not executable"
         );
         assert_eq!(error.error_code(), "TERMINAL_NOT_FOUND");
     }

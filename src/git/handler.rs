@@ -204,24 +204,34 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         worktree_path = %worktree_path.display()
     );
 
-    // Try to find the main repository by looking for .git in parent directories
-    let mut current_path = worktree_path;
-    let mut repo_path = None;
-    
-    // Look up the directory tree to find the main repository
-    while let Some(parent) = current_path.parent() {
-        if parent.join(".git").exists() {
-            repo_path = Some(parent);
-            break;
+    // Try to open the worktree directly first
+    let repo = if let Ok(repo) = Repository::open(worktree_path) {
+        // If we can open it as a repo, get the main repository
+        if let Some(main_repo_path) = repo.path().parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()) {
+            Repository::open(main_repo_path).map_err(|e| GitError::Git2Error { source: e })?
+        } else {
+            repo
         }
-        current_path = parent;
-    }
+    } else {
+        // Fallback: try to find the main repository by looking for .git in parent directories
+        let mut current_path = worktree_path;
+        let mut repo_path = None;
+        
+        // Look up the directory tree to find the main repository
+        while let Some(parent) = current_path.parent() {
+            if parent.join(".git").exists() && parent.join(".git").is_dir() {
+                repo_path = Some(parent);
+                break;
+            }
+            current_path = parent;
+        }
 
-    let repo_path = repo_path.ok_or_else(|| GitError::OperationFailed {
-        message: "Could not find main repository for worktree".to_string(),
-    })?;
+        let repo_path = repo_path.ok_or_else(|| GitError::OperationFailed {
+            message: "Could not find main repository for worktree".to_string(),
+        })?;
 
-    let repo = Repository::open(repo_path).map_err(|e| GitError::Git2Error { source: e })?;
+        Repository::open(repo_path).map_err(|e| GitError::Git2Error { source: e })?
+    };
 
     // Find worktree by path
     let worktrees = repo
@@ -240,9 +250,12 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     }
 
     if let Some(worktree) = found_worktree {
-        // Remove worktree
+        // Remove worktree with force flag
+        let mut prune_options = git2::WorktreePruneOptions::new();
+        prune_options.valid(true); // Allow pruning valid worktrees
+        
         worktree
-            .prune(None)
+            .prune(Some(&mut prune_options))
             .map_err(|e| GitError::Git2Error { source: e })?;
 
         // Remove directory if it still exists
