@@ -111,6 +111,30 @@ pub fn load_sessions_from_files(sessions_dir: &Path) -> Result<Vec<Session>, Ses
     Ok(sessions)
 }
 
+pub fn find_session_by_name(sessions_dir: &Path, name: &str) -> Result<Option<Session>, SessionError> {
+    let sessions = load_sessions_from_files(sessions_dir)?;
+    
+    // Find session by branch name (the "name" parameter refers to branch name)
+    for session in sessions {
+        if session.branch == name {
+            return Ok(Some(session));
+        }
+    }
+    
+    Ok(None)
+}
+
+pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), SessionError> {
+    let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
+    
+    if session_file.exists() {
+        fs::remove_file(&session_file)
+            .map_err(|e| SessionError::IoError { source: e })?;
+    }
+    
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +325,76 @@ mod tests {
 
         let sessions = load_sessions_from_files(&nonexistent_dir).unwrap();
         assert_eq!(sessions.len(), 0);
+    }
+
+    #[test]
+    fn test_find_session_by_name() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_find_session");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/feature-branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "feature-branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        // Save session
+        save_session_to_file(&session, &temp_dir).unwrap();
+
+        // Find by branch name
+        let found = find_session_by_name(&temp_dir, "feature-branch").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "test/feature-branch");
+
+        // Try to find non-existent session
+        let not_found = find_session_by_name(&temp_dir, "non-existent").unwrap();
+        assert!(not_found.is_none());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_remove_session_file() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_remove_session");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        // Save session
+        save_session_to_file(&session, &temp_dir).unwrap();
+
+        let session_file = temp_dir.join("test_branch.json");
+        assert!(session_file.exists());
+
+        // Remove session file
+        remove_session_file(&temp_dir, &session.id).unwrap();
+        assert!(!session_file.exists());
+
+        // Removing non-existent file should not error
+        assert!(remove_session_file(&temp_dir, "non-existent").is_ok());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

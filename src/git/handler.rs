@@ -198,6 +198,76 @@ pub fn remove_worktree(project: &ProjectInfo, worktree_path: &Path) -> Result<()
     Ok(())
 }
 
+pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
+    info!(
+        event = "git.worktree.remove_by_path_started",
+        worktree_path = %worktree_path.display()
+    );
+
+    // Try to find the main repository by looking for .git in parent directories
+    let mut current_path = worktree_path;
+    let mut repo_path = None;
+    
+    // Look up the directory tree to find the main repository
+    while let Some(parent) = current_path.parent() {
+        if parent.join(".git").exists() {
+            repo_path = Some(parent);
+            break;
+        }
+        current_path = parent;
+    }
+
+    let repo_path = repo_path.ok_or_else(|| GitError::OperationFailed {
+        message: "Could not find main repository for worktree".to_string(),
+    })?;
+
+    let repo = Repository::open(repo_path).map_err(|e| GitError::Git2Error { source: e })?;
+
+    // Find worktree by path
+    let worktrees = repo
+        .worktrees()
+        .map_err(|e| GitError::Git2Error { source: e })?;
+
+    let mut found_worktree = None;
+    for worktree_name in worktrees.iter().flatten() {
+        if let Ok(worktree) = repo.find_worktree(worktree_name) {
+            let wt_path = worktree.path();
+            if wt_path == worktree_path {
+                found_worktree = Some(worktree);
+                break;
+            }
+        }
+    }
+
+    if let Some(worktree) = found_worktree {
+        // Remove worktree
+        worktree
+            .prune(None)
+            .map_err(|e| GitError::Git2Error { source: e })?;
+
+        // Remove directory if it still exists
+        if worktree_path.exists() {
+            std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;
+        }
+
+        info!(
+            event = "git.worktree.remove_by_path_completed",
+            worktree_path = %worktree_path.display()
+        );
+    } else {
+        // If worktree not found in git, just remove the directory
+        if worktree_path.exists() {
+            std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;
+            info!(
+                event = "git.worktree.remove_by_path_directory_only",
+                worktree_path = %worktree_path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -35,3 +35,14 @@ Feature: file-based-persistence
   - File save is integrated into create_session flow after worktree creation but before completion
   - Tests verify both successful serialization and file system operations
 ---
+## 2026-01-09 - US-003
+- Implemented session loading from JSON files for list command
+- Files changed: src/sessions/operations.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added load_sessions_from_files() function that reads all .json files from sessions directory
+  - Function handles nonexistent directories gracefully by returning empty Vec
+  - Invalid JSON files are skipped silently (will add warning logs in US-005)
+  - list_sessions() now uses Config::new().sessions_dir() to get the correct path
+  - Tests verify both empty directory handling and successful loading of multiple sessions
+  - File loading preserves all session data including id, branch, agent, status, and created_at
+---

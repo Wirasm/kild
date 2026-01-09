@@ -1,4 +1,4 @@
-use tracing::{error, info};
+use tracing::info;
 
 use crate::core::config::Config;
 use crate::git;
@@ -96,20 +96,38 @@ pub fn list_sessions() -> Result<Vec<Session>, SessionError> {
 pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     info!(event = "session.destroy_started", name = name);
 
-    // TODO: Implement session destruction
-    // 1. Find session in database
-    // 2. Remove worktree
-    // 3. Update database record
+    let config = Config::new();
+    
+    // 1. Find session by name (branch name)
+    let session = operations::find_session_by_name(&config.sessions_dir(), name)?
+        .ok_or_else(|| SessionError::NotFound { name: name.to_string() })?;
 
-    error!(
-        event = "session.destroy_failed",
-        name = name,
-        error = "not implemented"
+    info!(
+        event = "session.destroy_found",
+        session_id = session.id,
+        worktree_path = %session.worktree_path.display()
     );
 
-    Err(SessionError::NotFound {
-        name: name.to_string(),
-    })
+    // 2. Remove git worktree
+    git::handler::remove_worktree_by_path(&session.worktree_path)
+        .map_err(|e| SessionError::GitError { source: e })?;
+
+    info!(
+        event = "session.destroy_worktree_removed",
+        session_id = session.id,
+        worktree_path = %session.worktree_path.display()
+    );
+
+    // 3. Remove session file
+    operations::remove_session_file(&config.sessions_dir(), &session.id)?;
+
+    info!(
+        event = "session.destroy_completed",
+        session_id = session.id,
+        name = name
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -125,8 +143,8 @@ mod tests {
     }
 
     #[test]
-    fn test_destroy_session_not_implemented() {
-        let result = destroy_session("test");
+    fn test_destroy_session_not_found() {
+        let result = destroy_session("non-existent");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
     }
