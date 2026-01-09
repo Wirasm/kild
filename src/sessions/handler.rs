@@ -85,9 +85,8 @@ pub fn create_session(request: CreateSessionRequest) -> Result<Session, SessionE
 pub fn list_sessions() -> Result<Vec<Session>, SessionError> {
     info!(event = "session.list_started");
 
-    // TODO: Implement database query
-    // For now, return empty list
-    let sessions = Vec::new();
+    let config = Config::new();
+    let sessions = operations::load_sessions_from_files(&config.sessions_dir())?;
 
     info!(event = "session.list_completed", count = sessions.len());
 
@@ -119,6 +118,7 @@ mod tests {
 
     #[test]
     fn test_list_sessions_empty() {
+        // This test now verifies that list_sessions handles empty/nonexistent sessions directory
         let result = list_sessions();
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 0);

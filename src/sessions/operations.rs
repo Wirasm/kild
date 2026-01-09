@@ -77,6 +77,40 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
     Ok(())
 }
 
+pub fn load_sessions_from_files(sessions_dir: &Path) -> Result<Vec<Session>, SessionError> {
+    let mut sessions = Vec::new();
+    
+    // Return empty list if sessions directory doesn't exist
+    if !sessions_dir.exists() {
+        return Ok(sessions);
+    }
+    
+    let entries = fs::read_dir(sessions_dir)
+        .map_err(|e| SessionError::IoError { source: e })?;
+    
+    for entry in entries {
+        let entry = entry.map_err(|e| SessionError::IoError { source: e })?;
+        let path = entry.path();
+        
+        // Only process .json files
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| SessionError::IoError { source: e })?;
+            
+            match serde_json::from_str::<Session>(&content) {
+                Ok(session) => sessions.push(session),
+                Err(_) => {
+                    // Skip invalid JSON files silently for now
+                    // TODO: Add warning log in US-005
+                    continue;
+                }
+            }
+        }
+    }
+    
+    Ok(sessions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +239,67 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_sessions_from_files() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_load_sessions");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Test empty directory
+        let sessions = load_sessions_from_files(&temp_dir).unwrap();
+        assert_eq!(sessions.len(), 0);
+
+        // Create test sessions
+        let session1 = Session {
+            id: "test/branch1".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch1".to_string(),
+            worktree_path: PathBuf::from("/tmp/test1"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let session2 = Session {
+            id: "test/branch2".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch2".to_string(),
+            worktree_path: PathBuf::from("/tmp/test2"),
+            agent: "kiro".to_string(),
+            status: SessionStatus::Stopped,
+            created_at: "2024-01-02T00:00:00Z".to_string(),
+        };
+
+        // Save sessions
+        save_session_to_file(&session1, &temp_dir).unwrap();
+        save_session_to_file(&session2, &temp_dir).unwrap();
+
+        // Load sessions
+        let loaded_sessions = load_sessions_from_files(&temp_dir).unwrap();
+        assert_eq!(loaded_sessions.len(), 2);
+
+        // Verify sessions (order might vary)
+        let ids: Vec<String> = loaded_sessions.iter().map(|s| s.id.clone()).collect();
+        assert!(ids.contains(&"test/branch1".to_string()));
+        assert!(ids.contains(&"test/branch2".to_string()));
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_sessions_nonexistent_directory() {
+        use std::env;
+
+        let nonexistent_dir = env::temp_dir().join("shards_test_nonexistent");
+        let _ = std::fs::remove_dir_all(&nonexistent_dir);
+
+        let sessions = load_sessions_from_files(&nonexistent_dir).unwrap();
+        assert_eq!(sessions.len(), 0);
     }
 }

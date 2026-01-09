@@ -24,3 +24,14 @@ Feature: file-based-persistence
   - Directory creation is now part of session creation flow
   - Tests verify directory creation works correctly and handles existing directories
 ---
+## 2026-01-09 - US-002
+- Implemented session file persistence with JSON serialization
+- Files changed: Cargo.toml, src/sessions/types.rs, src/sessions/operations.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added serde and serde_json dependencies for JSON serialization
+  - Made Session and SessionStatus structs serializable with #[derive(Serialize, Deserialize)]
+  - Implemented atomic file writes using temp file + rename pattern to prevent corruption
+  - Session ID with "/" is converted to "_" for filename compatibility (test/branch -> test_branch.json)
+  - File save is integrated into create_session flow after worktree creation but before completion
+  - Tests verify both successful serialization and file system operations
+---
