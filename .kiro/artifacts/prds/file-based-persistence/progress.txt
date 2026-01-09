@@ -14,3 +14,13 @@ Feature: file-based-persistence
 - src/sessions/types.rs - Session data structures
 - src/core/config.rs - Application configuration
 ---
+## 2026-01-09 - US-001
+- Implemented session registry directory structure creation
+- Files changed: src/core/config.rs, src/sessions/operations.rs, src/sessions/errors.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added sessions_dir() method to Config for consistent path management
+  - Created ensure_sessions_directory() function with proper error handling
+  - Added IoError variant to SessionError enum for filesystem operations
+  - Directory creation is now part of session creation flow
+  - Tests verify directory creation works correctly and handles existing directories
+---

@@ -64,6 +64,19 @@ pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError
     Ok(())
 }
 
+pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<(), SessionError> {
+    let session_file = sessions_dir.join(format!("{}.json", session.id.replace('/', "_")));
+    let session_json = serde_json::to_string_pretty(session)
+        .map_err(|e| SessionError::IoError { source: std::io::Error::new(std::io::ErrorKind::InvalidData, e) })?;
+    
+    // Write atomically by writing to temp file first, then renaming
+    let temp_file = session_file.with_extension("json.tmp");
+    fs::write(&temp_file, session_json)?;
+    fs::rename(&temp_file, &session_file)?;
+    
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +168,41 @@ mod tests {
         // Should not error if directory already exists
         assert!(ensure_sessions_directory(&temp_dir).is_ok());
         
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_session_to_file() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_save_session");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        // Save session
+        assert!(save_session_to_file(&session, &temp_dir).is_ok());
+
+        // Check file exists with correct name (/ replaced with _)
+        let session_file = temp_dir.join("test_branch.json");
+        assert!(session_file.exists());
+
+        // Verify content
+        let content = std::fs::read_to_string(&session_file).unwrap();
+        let loaded_session: Session = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded_session, session);
+
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

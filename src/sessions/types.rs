@@ -1,6 +1,7 @@
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
     pub project_id: String,
@@ -11,7 +12,7 @@ pub struct Session {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionStatus {
     Active,
     Stopped,

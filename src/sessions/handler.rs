@@ -69,8 +69,8 @@ pub fn create_session(request: CreateSessionRequest) -> Result<Session, SessionE
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    // TODO: Save session to database
-    // database::save_session(&session)?;
+    // 7. Save session to file
+    operations::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
         event = "session.create_completed",
