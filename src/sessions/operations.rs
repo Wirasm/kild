@@ -1,4 +1,6 @@
 use crate::sessions::{errors::SessionError, types::*};
+use std::fs;
+use std::path::Path;
 
 pub fn validate_session_request(
     name: &str,
@@ -52,6 +54,14 @@ pub fn validate_branch_name(branch: &str) -> Result<String, SessionError> {
     }
 
     Ok(trimmed.to_string())
+}
+
+pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError> {
+    if !sessions_dir.exists() {
+        fs::create_dir_all(sessions_dir)
+            .map_err(|e| SessionError::IoError { source: e })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -126,5 +136,26 @@ mod tests {
         assert!(validate_branch_name("branch..name").is_err());
         assert!(validate_branch_name("-branch").is_err());
         assert!(validate_branch_name("branch name").is_err());
+    }
+
+    #[test]
+    fn test_ensure_sessions_directory() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_sessions");
+        
+        // Clean up if exists
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        
+        // Should create directory
+        assert!(ensure_sessions_directory(&temp_dir).is_ok());
+        assert!(temp_dir.exists());
+        
+        // Should not error if directory already exists
+        assert!(ensure_sessions_directory(&temp_dir).is_ok());
+        
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

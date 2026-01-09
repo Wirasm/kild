@@ -29,6 +29,10 @@ impl Config {
     pub fn database_path(&self) -> PathBuf {
         self.shards_dir.join("state.db")
     }
+
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.shards_dir.join("sessions")
+    }
 }
 
 #[cfg(test)]
@@ -56,6 +60,12 @@ mod tests {
                 .database_path()
                 .to_string_lossy()
                 .contains("state.db")
+        );
+        assert!(
+            config
+                .sessions_dir()
+                .to_string_lossy()
+                .contains("sessions")
         );
     }
 }

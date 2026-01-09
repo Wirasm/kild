@@ -40,6 +40,10 @@ pub fn create_session(request: CreateSessionRequest) -> Result<Session, SessionE
 
     // 4. Create worktree (I/O)
     let config = Config::new();
+    
+    // Ensure sessions directory exists
+    operations::ensure_sessions_directory(&config.sessions_dir())?;
+    
     let worktree = git::handler::create_worktree(&config.shards_dir, &project, &validated.name)
         .map_err(|e| SessionError::GitError { source: e })?;
 
