@@ -1,13 +1,16 @@
 ---
 description: Execute an implementation plan
-argument-hint: [path-to-plan]
 ---
 
 # Execute: Implement from Plan
 
+## First Step: Get Plan File
+
+Ask the user: "Which plan file should I execute? (provide the path to the plan)"
+
 ## Plan to Execute
 
-Read plan file: `$ARGUMENTS`
+Read plan file: [User's response]
 
 ## Execution Instructions
 

@@ -4,7 +4,11 @@ description: "Create comprehensive feature plan with deep codebase analysis and 
 
 # Plan a new task
 
-## Feature: $ARGUMENTS
+## First Step: Get Feature Description
+
+Ask the user: "What feature do you want to implement?"
+
+## Feature: [User's response]
 
 ## Mission
 
