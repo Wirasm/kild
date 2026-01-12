@@ -39,6 +39,10 @@ pub fn build_cli() -> Command {
                         .index(1)
                 )
         )
+        .subcommand(
+            Command::new("cleanup")
+                .about("Clean up orphaned resources (branches, worktrees, sessions)")
+        )
 }
 
 pub fn get_matches() -> ArgMatches {

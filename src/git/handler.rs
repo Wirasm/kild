@@ -259,6 +259,17 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     }
 
     if let Some(worktree) = found_worktree {
+        // Get the branch name before removing the worktree
+        let branch_name = if let Ok(worktree_repo) = Repository::open(worktree.path()) {
+            if let Ok(head) = worktree_repo.head() {
+                head.shorthand().map(|s| s.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Remove worktree with force flag
         let mut prune_options = git2::WorktreePruneOptions::new();
         prune_options.valid(true); // Allow pruning valid worktrees
@@ -271,6 +282,42 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         if worktree_path.exists() {
             std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;
         }
+
+        // Delete associated branch if it exists and follows worktree naming pattern
+        if let Some(ref branch_name) = branch_name
+            && branch_name.starts_with("worktree-") {
+                match repo.find_branch(branch_name, BranchType::Local) {
+                    Ok(mut branch) => {
+                        match branch.delete() {
+                            Ok(()) => {
+                                info!(
+                                    event = "git.branch.delete_completed",
+                                    branch = branch_name,
+                                    worktree_path = %worktree_path.display()
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event = "git.branch.delete_failed",
+                                    branch = branch_name,
+                                    worktree_path = %worktree_path.display(),
+                                    error = %e
+                                );
+                                // Don't fail the whole operation if branch deletion fails
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!(
+                            event = "git.branch.not_found_for_cleanup",
+                            branch = branch_name,
+                            worktree_path = %worktree_path.display(),
+                            error = %e
+                        );
+                        // Branch already gone or not found - that's fine
+                    }
+                }
+            }
 
         info!(
             event = "git.worktree.remove_by_path_completed",

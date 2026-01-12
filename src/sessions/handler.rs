@@ -194,6 +194,9 @@ mod tests {
             // Create worktree directory so validation passes
             fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
 
+            // Create sessions directory
+            fs::create_dir_all(&config.sessions_dir()).expect("Failed to create sessions dir");
+
             // 2. Save session to file
             operations::save_session_to_file(&session, &config.sessions_dir())
                 .expect("Failed to save session");

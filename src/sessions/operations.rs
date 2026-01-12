@@ -171,7 +171,7 @@ fn validate_session_structure(session: &Session) -> Result<(), String> {
     if session.created_at.trim().is_empty() {
         return Err("created_at timestamp is empty".to_string());
     }
-    if session.worktree_path.as_os_str().len() == 0 {
+    if session.worktree_path.as_os_str().is_empty() {
         return Err("worktree path is empty".to_string());
     }
     if !session.worktree_path.exists() {
