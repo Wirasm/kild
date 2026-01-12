@@ -303,6 +303,80 @@ mod tests {
     }
 
     #[test]
+    fn test_save_session_atomic_write_temp_cleanup() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_atomic_write");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/atomic".to_string(),
+            project_id: "test".to_string(),
+            branch: "atomic".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        // Save session
+        assert!(save_session_to_file(&session, &temp_dir).is_ok());
+
+        // Verify temp file is cleaned up after successful write
+        let temp_file = temp_dir.join("test_atomic.json.tmp");
+        assert!(!temp_file.exists(), "Temp file should be cleaned up after successful write");
+
+        // Verify final file exists
+        let session_file = temp_dir.join("test_atomic.json");
+        assert!(session_file.exists(), "Final session file should exist");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_session_atomic_behavior() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_atomic_behavior");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/atomic-behavior".to_string(),
+            project_id: "test".to_string(),
+            branch: "atomic-behavior".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let session_file = temp_dir.join("test_atomic-behavior.json");
+        
+        // Create existing file with different content
+        std::fs::write(&session_file, "old content").unwrap();
+        
+        // Save session atomically
+        assert!(save_session_to_file(&session, &temp_dir).is_ok());
+        
+        // Verify file was replaced atomically (no partial writes)
+        let content = std::fs::read_to_string(&session_file).unwrap();
+        assert!(content.contains("test/atomic-behavior"));
+        assert!(!content.contains("old content"));
+        
+        // Verify it's valid JSON
+        let loaded_session: Session = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded_session, session);
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn test_load_sessions_from_files() {
         use std::env;
         use std::path::PathBuf;

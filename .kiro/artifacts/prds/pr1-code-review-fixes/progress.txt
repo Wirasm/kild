@@ -18,3 +18,12 @@ Feature: pr1-code-review-fixes
   - Silent failures in cleanup operations can hide important state inconsistencies
   - Proper logging helps users understand when system state is inconsistent
 ---
+## 2026-01-12 - US-002
+- Modified load_sessions_from_files to return tuple with skipped count
+- Updated list_sessions to log warning when sessions are skipped
+- Files changed: src/sessions/operations.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Returning structured data (tuples) allows callers to handle error counts
+  - User-facing operations should provide feedback about partial failures
+  - Test updates needed when changing function signatures
+---
