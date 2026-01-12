@@ -1,6 +1,7 @@
 use crate::sessions::{errors::SessionError, types::*};
 use std::fs;
 use std::path::Path;
+use tracing::warn;
 
 pub fn validate_session_request(
     name: &str,
@@ -181,6 +182,11 @@ pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), 
     if session_file.exists() {
         fs::remove_file(&session_file)
             .map_err(|e| SessionError::IoError { source: e })?;
+    } else {
+        warn!(
+            "Attempted to remove session file that doesn't exist: {} - possible state inconsistency",
+            session_file.display()
+        );
     }
     
     Ok(())

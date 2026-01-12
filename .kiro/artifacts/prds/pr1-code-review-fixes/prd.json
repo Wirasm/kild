@@ -70,7 +70,7 @@
         "tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Important issue in src/sessions/operations.rs:139-147"
     },
     {
