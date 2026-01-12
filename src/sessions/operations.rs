@@ -71,8 +71,20 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
     
     // Write atomically by writing to temp file first, then renaming
     let temp_file = session_file.with_extension("json.tmp");
-    fs::write(&temp_file, session_json)?;
-    fs::rename(&temp_file, &session_file)?;
+    
+    // Write to temp file
+    if let Err(e) = fs::write(&temp_file, session_json) {
+        // Clean up temp file if write failed
+        let _ = fs::remove_file(&temp_file);
+        return Err(SessionError::IoError { source: e });
+    }
+    
+    // Rename temp file to final location
+    if let Err(e) = fs::rename(&temp_file, &session_file) {
+        // Clean up temp file if rename failed
+        let _ = fs::remove_file(&temp_file);
+        return Err(SessionError::IoError { source: e });
+    }
     
     Ok(())
 }
@@ -371,6 +383,41 @@ mod tests {
         // Verify it's valid JSON
         let loaded_session: Session = serde_json::from_str(&content).unwrap();
         assert_eq!(loaded_session, session);
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_session_temp_file_cleanup_on_failure() {
+        use std::env;
+        use std::path::PathBuf;
+
+        let temp_dir = env::temp_dir().join("shards_test_temp_cleanup");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session = Session {
+            id: "test/cleanup".to_string(),
+            project_id: "test".to_string(),
+            branch: "cleanup".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        // Create a directory where the final file should be to force rename failure
+        let session_file = temp_dir.join("test_cleanup.json");
+        std::fs::create_dir_all(&session_file).unwrap(); // Create as directory to force rename failure
+
+        // Attempt to save session - should fail due to rename failure
+        let result = save_session_to_file(&session, &temp_dir);
+        assert!(result.is_err(), "Save should fail when rename fails");
+
+        // Verify temp file is cleaned up after failure
+        let temp_file = temp_dir.join("test_cleanup.json.tmp");
+        assert!(!temp_file.exists(), "Temp file should be cleaned up after rename failure");
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
