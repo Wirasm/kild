@@ -1,6 +1,6 @@
 use git2::{BranchType, Repository};
 use std::path::Path;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::git::{errors::GitError, operations, types::*};
 
@@ -268,6 +268,13 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
             worktree_path = %worktree_path.display()
         );
     } else {
+        // Worktree not found in git registry - state inconsistency detected
+        warn!(
+            event = "git.worktree.state_inconsistency",
+            worktree_path = %worktree_path.display(),
+            message = "Worktree directory exists but not registered in git - cleaning up orphaned directory"
+        );
+        
         // If worktree not found in git, just remove the directory
         if worktree_path.exists() {
             std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;

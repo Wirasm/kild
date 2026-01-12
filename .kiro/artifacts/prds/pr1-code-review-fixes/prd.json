@@ -1,0 +1,147 @@
+{
+  "branchName": "ralph/file-based-persistence",
+  "feature": "pr1-code-review-fixes",
+  "description": "Address all critical and important issues found in PR #1 code review for file-based persistence system",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix silent directory cleanup fallback in remove_worktree_by_path",
+      "acceptanceCriteria": [
+        "When worktree not in git registry, log warning instead of silent deletion",
+        "User gets clear feedback about state inconsistency",
+        "Function still cleans up directory but with proper logging",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Critical issue in src/git/handler.rs:248-258"
+    },
+    {
+      "id": "US-002", 
+      "title": "Fix silent session skipping in load_sessions_from_files",
+      "acceptanceCriteria": [
+        "Users running 'shards list' get indication when sessions fail to load",
+        "Add warning logs for skipped invalid sessions",
+        "Return count of skipped sessions or show in output",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Critical issue in src/sessions/operations.rs:85-131"
+    },
+    {
+      "id": "US-003",
+      "title": "Add atomic write pattern tests",
+      "acceptanceCriteria": [
+        "Test verifies temp file is cleaned up after successful write",
+        "Test verifies atomic behavior works correctly",
+        "Test covers failure scenarios with temp file cleanup",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Critical issue - atomic write pattern not tested in src/sessions/operations.rs:69-78"
+    },
+    {
+      "id": "US-004",
+      "title": "Add temp file cleanup on atomic write failure",
+      "acceptanceCriteria": [
+        "Orphaned .json.tmp files are cleaned up when write fails",
+        "Orphaned .json.tmp files are cleaned up when rename fails",
+        "No temp files remain after any failure scenario",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Important issue in src/sessions/operations.rs:115-125"
+    },
+    {
+      "id": "US-005",
+      "title": "Add worktree path existence validation in session validation",
+      "acceptanceCriteria": [
+        "Session validation checks if worktree_path actually exists on disk",
+        "Stale sessions are properly identified as invalid",
+        "Clear error messages when worktree path doesn't exist",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Important issue in src/sessions/operations.rs:139-147"
+    },
+    {
+      "id": "US-006",
+      "title": "Fix silent success in remove_session_file when file doesn't exist",
+      "acceptanceCriteria": [
+        "remove_session_file logs warning when file doesn't exist",
+        "Function indicates state inconsistency instead of silent success",
+        "User gets feedback about missing session files",
+        "typecheck passes", 
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Important issue in src/sessions/operations.rs:152-160"
+    },
+    {
+      "id": "US-007",
+      "title": "Improve repository opening error handling",
+      "acceptanceCriteria": [
+        "Repository opening fallback preserves original error information",
+        "Debugging is easier with specific error context",
+        "Error messages are more helpful to users",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Important issue in src/git/handler.rs:207-233"
+    },
+    {
+      "id": "US-008",
+      "title": "Add handler integration test for create-list-destroy flow",
+      "acceptanceCriteria": [
+        "Integration test covers complete create-list-destroy workflow",
+        "Test verifies primary user journey works end-to-end",
+        "Test covers session persistence across operations",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Important missing test for src/sessions/handler.rs"
+    },
+    {
+      "id": "US-009",
+      "title": "Fix TOCTOU race condition in ensure_sessions_directory",
+      "acceptanceCriteria": [
+        "Use create_dir_all unconditionally to avoid race condition",
+        "Remove check-then-create pattern",
+        "Function is thread-safe and atomic",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Suggestion in src/sessions/operations.rs:58-64"
+    },
+    {
+      "id": "US-010",
+      "title": "Improve validate_session_structure error reporting",
+      "acceptanceCriteria": [
+        "Return specific error instead of bool for validation failures",
+        "Preserve validation context in error messages",
+        "Users get clear feedback about what validation failed",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Suggestion in src/sessions/operations.rs:133-141"
+    }
+  ]
+}
