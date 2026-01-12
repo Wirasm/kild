@@ -12,7 +12,7 @@ Ask the user: "Which GitHub issue ID should I analyze?"
 
 ## Objective
 
-Investigate GitHub issue #$ARGUMENTS from this repository, identify the root cause, and document findings for future implementation.
+Investigate GitHub issue #[User's GitHub issue ID] from this repository, identify the root cause, and document findings for future implementation.
 
 **Prerequisites:**
 - Working in a local Git repository with GitHub origin

@@ -26,8 +26,8 @@ impl Config {
         self.shards_dir.join("worktrees")
     }
 
-    pub fn database_path(&self) -> PathBuf {
-        self.shards_dir.join("state.db")
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.shards_dir.join("sessions")
     }
 }
 
@@ -53,9 +53,9 @@ mod tests {
         );
         assert!(
             config
-                .database_path()
+                .sessions_dir()
                 .to_string_lossy()
-                .contains("state.db")
+                .contains("sessions")
         );
     }
 }

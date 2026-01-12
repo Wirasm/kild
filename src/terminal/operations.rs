@@ -2,9 +2,7 @@ use crate::terminal::{errors::TerminalError, types::*};
 use std::path::Path;
 
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
-    if command_exists("ghostty") {
-        Ok(TerminalType::Ghostty)
-    } else if app_exists_macos("iTerm") {
+    if app_exists_macos("iTerm") {
         Ok(TerminalType::ITerm)
     } else if app_exists_macos("Terminal") {
         Ok(TerminalType::TerminalApp)
@@ -31,7 +29,6 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
     );
 
     match config.terminal_type {
-        TerminalType::Ghostty => Ok(vec!["ghostty".to_string(), "-e".to_string(), cd_command]),
         TerminalType::ITerm => Ok(vec![
             "osascript".to_string(),
             "-e".to_string(),
@@ -72,14 +69,6 @@ pub fn validate_working_directory(path: &Path) -> Result<(), TerminalError> {
     }
 
     Ok(())
-}
-
-fn command_exists(command: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(command)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
 }
 
 fn app_exists_macos(app_name: &str) -> bool {
@@ -124,23 +113,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_spawn_command_ghostty() {
-        let config = SpawnConfig::new(
-            TerminalType::Ghostty,
-            std::env::current_dir().unwrap(), // Use current dir which should exist
-            "echo hello".to_string(),
-        );
-
-        let result = build_spawn_command(&config);
-        assert!(result.is_ok());
-
-        let command = result.unwrap();
-        assert_eq!(command[0], "ghostty");
-        assert_eq!(command[1], "-e");
-        assert!(command[2].contains("echo hello"));
-    }
-
-    #[test]
     fn test_build_spawn_command_iterm() {
         let config = SpawnConfig::new(
             TerminalType::ITerm,
@@ -177,7 +149,7 @@ mod tests {
     #[test]
     fn test_build_spawn_command_empty_command() {
         let config = SpawnConfig::new(
-            TerminalType::Ghostty,
+            TerminalType::ITerm,
             std::env::current_dir().unwrap(),
             "".to_string(),
         );
@@ -189,7 +161,7 @@ mod tests {
     #[test]
     fn test_build_spawn_command_nonexistent_directory() {
         let config = SpawnConfig::new(
-            TerminalType::Ghostty,
+            TerminalType::ITerm,
             PathBuf::from("/nonexistent/directory"),
             "echo hello".to_string(),
         );

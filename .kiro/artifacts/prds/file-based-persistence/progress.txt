@@ -14,3 +14,71 @@ Feature: file-based-persistence
 - src/sessions/types.rs - Session data structures
 - src/core/config.rs - Application configuration
 ---
+## 2026-01-09 - US-001
+- Implemented session registry directory structure creation
+- Files changed: src/core/config.rs, src/sessions/operations.rs, src/sessions/errors.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added sessions_dir() method to Config for consistent path management
+  - Created ensure_sessions_directory() function with proper error handling
+  - Added IoError variant to SessionError enum for filesystem operations
+  - Directory creation is now part of session creation flow
+  - Tests verify directory creation works correctly and handles existing directories
+---
+## 2026-01-09 - US-002
+- Implemented session file persistence with JSON serialization
+- Files changed: Cargo.toml, src/sessions/types.rs, src/sessions/operations.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added serde and serde_json dependencies for JSON serialization
+  - Made Session and SessionStatus structs serializable with #[derive(Serialize, Deserialize)]
+  - Implemented atomic file writes using temp file + rename pattern to prevent corruption
+  - Session ID with "/" is converted to "_" for filename compatibility (test/branch -> test_branch.json)
+  - File save is integrated into create_session flow after worktree creation but before completion
+  - Tests verify both successful serialization and file system operations
+---
+## 2026-01-09 - US-003
+- Implemented session loading from JSON files for list command
+- Files changed: src/sessions/operations.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Added load_sessions_from_files() function that reads all .json files from sessions directory
+  - Function handles nonexistent directories gracefully by returning empty Vec
+  - Invalid JSON files are skipped silently (will add warning logs in US-005)
+  - list_sessions() now uses Config::new().sessions_dir() to get the correct path
+  - Tests verify both empty directory handling and successful loading of multiple sessions
+  - File loading preserves all session data including id, branch, agent, status, and created_at
+---
+## 2026-01-09 - US-004
+- Implemented destroy command with file cleanup and worktree removal
+- Files changed: src/sessions/operations.rs, src/sessions/handler.rs, src/git/handler.rs
+- **Learnings:**
+  - Added find_session_by_name() function to locate sessions by branch name
+  - Added remove_session_file() function to delete session JSON files
+  - Added remove_worktree_by_path() function to git handler for worktree cleanup without needing ProjectInfo
+  - destroy_session() now properly finds session, removes worktree, and deletes session file
+  - Error handling for non-existent sessions returns SessionError::NotFound
+  - Worktree removal includes both git worktree pruning and directory cleanup
+  - Tests verify session finding, file removal, and proper error handling for missing sessions
+---
+## 2026-01-09 - US-005
+- Implemented session file validation and error handling with warning logs
+- Files changed: src/sessions/operations.rs
+- **Learnings:**
+  - Enhanced load_sessions_from_files() with comprehensive error handling for file read errors, JSON parsing errors, and validation errors
+  - Added validate_session_structure() function to check required fields are not empty
+  - Invalid JSON files now log warnings with tracing::warn! instead of failing silently
+  - File system permission errors are handled gracefully with warning logs
+  - Session structure validation ensures id, project_id, branch, agent, created_at are non-empty and worktree_path exists
+  - Tests verify handling of invalid JSON, invalid session structure, and that only valid sessions are loaded
+  - Error handling follows the pattern of logging warnings and continuing rather than failing the entire operation
+---
+## 2026-01-09 - US-006
+- Removed SQLite dependency and all database-related code
+- Files changed: Cargo.toml, src/core/config.rs, src/sessions/errors.rs, src/sessions/handler.rs
+- **Learnings:**
+  - Removed rusqlite dependency from Cargo.toml completely
+  - Removed database_path() method from Config struct and its test
+  - Removed DatabaseError variant from SessionError enum and its error_code case
+  - Removed TODO comments about database operations from session handler
+  - Project now builds and runs without any SQLite dependencies
+  - All tests pass confirming the file-based persistence system is complete
+  - File-based approach eliminates external database dependency while maintaining full functionality
+---
