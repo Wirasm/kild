@@ -138,10 +138,18 @@ mod tests {
 
     #[test]
     fn test_list_sessions_empty() {
-        // This test now verifies that list_sessions handles empty/nonexistent sessions directory
-        let result = list_sessions();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 0);
+        // Create a temporary directory for this test
+        let temp_dir = std::env::temp_dir().join("shards_test_empty_sessions");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+        
+        // Test with empty directory
+        let (sessions, skipped) = operations::load_sessions_from_files(&temp_dir).unwrap();
+        assert_eq!(sessions.len(), 0);
+        assert_eq!(skipped, 0);
+        
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -157,87 +165,66 @@ mod tests {
     #[test]
     fn test_create_list_destroy_integration_flow() {
         use std::fs;
-        use crate::core::config::Config;
-
-        // This test verifies session persistence across operations
-        // by testing the file-based storage directly
         
-        // Setup temporary sessions directory
-        let temp_dir = std::env::temp_dir().join(format!("shards_test_{}", std::process::id()));
+        // Create a unique temporary directory for this test
+        let temp_dir = std::env::temp_dir().join(format!("shards_test_integration_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
 
-        // Override sessions directory for test
-        unsafe {
-            std::env::set_var("SHARDS_SESSIONS_DIR", sessions_dir.to_str().unwrap());
-        }
+        // Test session persistence workflow using operations directly
+        // This tests the core persistence logic without git/terminal dependencies
+        
+        // 1. Create a test session manually
+        use crate::sessions::types::{Session, SessionStatus};
+        use crate::sessions::operations;
+        
+        let session = Session {
+            id: "test-project_test-branch".to_string(),
+            project_id: "test-project".to_string(),
+            branch: "test-branch".to_string(),
+            worktree_path: temp_dir.join("worktree").to_path_buf(),
+            agent: "test-agent".to_string(),
+            status: SessionStatus::Active,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
 
-        let result = std::panic::catch_unwind(|| {
-            let config = Config::new();
-            
-            // Test session persistence workflow using operations directly
-            // This tests the core persistence logic without git/terminal dependencies
-            
-            // 1. Create a test session manually
-            use crate::sessions::types::{Session, SessionStatus};
-            use crate::sessions::operations;
-            
-            let session = Session {
-                id: "test-project_test-branch".to_string(),
-                project_id: "test-project".to_string(),
-                branch: "test-branch".to_string(),
-                worktree_path: temp_dir.join("worktree").to_path_buf(),
-                agent: "test-agent".to_string(),
-                status: SessionStatus::Active,
-                created_at: chrono::Utc::now().to_rfc3339(),
-            };
+        // Create worktree directory so validation passes
+        fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
 
-            // Create worktree directory so validation passes
-            fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
+        // 2. Save session to file
+        operations::save_session_to_file(&session, &sessions_dir)
+            .expect("Failed to save session");
 
-            // Create sessions directory
-            fs::create_dir_all(&config.sessions_dir()).expect("Failed to create sessions dir");
+        // 3. List sessions - should contain our session
+        let (sessions, skipped) = operations::load_sessions_from_files(&sessions_dir)
+            .expect("Failed to load sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(skipped, 0);
+        assert_eq!(sessions[0].id, session.id);
+        assert_eq!(sessions[0].branch, "test-branch");
 
-            // 2. Save session to file
-            operations::save_session_to_file(&session, &config.sessions_dir())
-                .expect("Failed to save session");
+        // 4. Find session by name
+        let found_session = operations::find_session_by_name(&sessions_dir, "test-branch")
+            .expect("Failed to find session")
+            .expect("Session not found");
+        assert_eq!(found_session.id, session.id);
 
-            // 3. List sessions - should contain our session
-            let (sessions, skipped) = operations::load_sessions_from_files(&config.sessions_dir())
-                .expect("Failed to load sessions");
-            assert_eq!(sessions.len(), 1);
-            assert_eq!(skipped, 0);
-            assert_eq!(sessions[0].id, session.id);
-            assert_eq!(sessions[0].branch, "test-branch");
+        // 5. Remove session file
+        operations::remove_session_file(&sessions_dir, &session.id)
+            .expect("Failed to remove session");
 
-            // 4. Find session by name
-            let found_session = operations::find_session_by_name(&config.sessions_dir(), "test-branch")
-                .expect("Failed to find session")
-                .expect("Session not found");
-            assert_eq!(found_session.id, session.id);
+        // 6. List sessions - should be empty
+        let (sessions_after, _) = operations::load_sessions_from_files(&sessions_dir)
+            .expect("Failed to load sessions after removal");
+        assert_eq!(sessions_after.len(), 0);
 
-            // 5. Remove session file
-            operations::remove_session_file(&config.sessions_dir(), &session.id)
-                .expect("Failed to remove session");
-
-            // 6. List sessions - should be empty
-            let (sessions_after, _) = operations::load_sessions_from_files(&config.sessions_dir())
-                .expect("Failed to load sessions after removal");
-            assert_eq!(sessions_after.len(), 0);
-
-            // 7. Try to find removed session - should return None
-            let not_found = operations::find_session_by_name(&config.sessions_dir(), "test-branch")
-                .expect("Failed to search for removed session");
-            assert!(not_found.is_none());
-        });
+        // 7. Try to find removed session - should return None
+        let not_found = operations::find_session_by_name(&sessions_dir, "test-branch")
+            .expect("Failed to search for removed session");
+        assert!(not_found.is_none());
 
         // Cleanup
-        unsafe {
-            std::env::remove_var("SHARDS_SESSIONS_DIR");
-        }
         let _ = fs::remove_dir_all(&temp_dir);
-
-        // Check if test passed
-        result.expect("Integration test failed");
     }
 }
