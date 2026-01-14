@@ -2,6 +2,8 @@ use git2::{BranchType, Repository};
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
+use crate::core::config::ShardsConfig;
+use crate::files;
 use crate::git::{errors::GitError, operations, types::*};
 
 pub fn detect_project() -> Result<ProjectInfo, GitError> {
@@ -50,6 +52,7 @@ pub fn create_worktree(
     base_dir: &Path,
     project: &ProjectInfo,
     branch: &str,
+    config: Option<&ShardsConfig>,
 ) -> Result<WorktreeInfo, GitError> {
     let validated_branch = operations::validate_branch_name(branch)?;
 
@@ -137,6 +140,47 @@ pub fn create_worktree(
         branch = validated_branch,
         worktree_path = %worktree_path.display()
     );
+
+    // Copy include pattern files if configured
+    if let Some(config) = config
+        && let Some(include_config) = &config.include_patterns {
+        info!(
+            event = "git.worktree.file_copy_started",
+            project_id = project.id,
+            branch = validated_branch,
+            patterns = ?include_config.patterns
+        );
+        
+        match files::handler::copy_include_files(&project.path, &worktree_path, include_config) {
+            Ok((copied_count, failed_count)) => {
+                if failed_count > 0 {
+                    warn!(
+                        event = "git.worktree.file_copy_completed_with_errors",
+                        project_id = project.id,
+                        branch = validated_branch,
+                        files_copied = copied_count,
+                        files_failed = failed_count
+                    );
+                } else {
+                    info!(
+                        event = "git.worktree.file_copy_completed",
+                        project_id = project.id,
+                        branch = validated_branch,
+                        files_copied = copied_count
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    event = "git.worktree.file_copy_failed",
+                    project_id = project.id,
+                    branch = validated_branch,
+                    error = %e,
+                    message = "File copying failed, but worktree creation succeeded"
+                );
+            }
+        }
+    }
 
     Ok(worktree_info)
 }

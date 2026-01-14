@@ -38,7 +38,7 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
     operations::ensure_sessions_directory(&config.sessions_dir())?;
     
     let base_config = Config::new();
-    let worktree = git::handler::create_worktree(&base_config.shards_dir, &project, &validated.name)
+    let worktree = git::handler::create_worktree(&base_config.shards_dir, &project, &validated.name, Some(shards_config))
         .map_err(|e| SessionError::GitError { source: e })?;
 
     info!(

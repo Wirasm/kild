@@ -1,6 +1,7 @@
 pub mod cleanup;
 pub mod cli;
 pub mod core;
+pub mod files;
 pub mod git;
 pub mod sessions;
 pub mod terminal;

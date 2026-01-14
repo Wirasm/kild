@@ -38,6 +38,7 @@
 
 use std::path::PathBuf;
 use std::collections::HashMap;
+use crate::files::types::IncludeConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tracing;
@@ -56,6 +57,8 @@ pub struct ShardsConfig {
     pub terminal: TerminalConfig,
     #[serde(default)]
     pub agents: HashMap<String, AgentSettings>,
+    #[serde(default)]
+    pub include_patterns: Option<IncludeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +142,15 @@ impl ShardsConfig {
             }
         }
         
+        // Validate include patterns if configured
+        if let Some(ref include_config) = self.include_patterns {
+            if let Err(e) = include_config.validate() {
+                return Err(crate::core::errors::ConfigError::InvalidConfiguration {
+                    message: format!("Invalid include patterns: {}", e),
+                });
+            }
+        }
+        
         Ok(())
     }
     
@@ -179,6 +191,7 @@ impl ShardsConfig {
                 }
                 merged
             },
+            include_patterns: override_config.include_patterns.or(base.include_patterns),
         }
     }
     

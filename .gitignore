@@ -5,3 +5,6 @@
 
 # macOS
 .DS_Store
+.env*
+*.local.json
+build/
