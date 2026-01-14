@@ -2,12 +2,19 @@ use crate::files::{operations, types::{IncludeConfig, CopyOptions}, errors::File
 use std::path::Path;
 use tracing::{info, warn, error};
 
-/// Copy files matching include patterns from source to destination
+/// Copy files matching include patterns from source to destination.
+///
+/// Returns `Ok((copied_count, failed_count))` where:
+/// - `copied_count`: Number of files successfully copied
+/// - `failed_count`: Number of files that failed to copy
+///
+/// Individual file failures are logged but don't stop the operation.
+/// Returns `Err` only for fatal errors like pattern validation failure.
 pub fn copy_include_files(
     source_root: &Path,
     destination_root: &Path,
     config: &IncludeConfig,
-) -> Result<usize, FileError> {
+) -> Result<(usize, usize), FileError> {
     info!(
         event = "files.copy.started",
         source_root = %source_root.display(),
@@ -22,7 +29,7 @@ pub fn copy_include_files(
             event = "files.copy.skipped",
             reason = "include_patterns disabled in config"
         );
-        return Ok(0);
+        return Ok((0, 0));
     }
     
     // Early return if no patterns
@@ -31,7 +38,7 @@ pub fn copy_include_files(
             event = "files.copy.skipped",
             reason = "no patterns configured"
         );
-        return Ok(0);
+        return Ok((0, 0));
     }
     
     // Validate patterns
@@ -68,32 +75,26 @@ pub fn copy_include_files(
             files_copied = 0,
             reason = "no matching files found"
         );
-        return Ok(0);
+        return Ok((0, 0));
     }
     
-    // Parse max file size if configured
+    // Parse max file size if configured - fail fast on invalid format
     let max_file_size = if let Some(size_str) = &config.max_file_size {
-        match operations::parse_file_size(size_str) {
-            Ok(size) => Some(size),
-            Err(e) => {
-                warn!(
-                    event = "files.copy.warning",
-                    warning = %e,
-                    warning_type = "invalid_max_file_size",
-                    max_file_size = size_str,
-                    message = "Ignoring max_file_size setting"
-                );
-                None
-            }
-        }
+        Some(operations::parse_file_size(size_str).map_err(|e| {
+            error!(
+                event = "files.copy.failed",
+                error = %e,
+                error_type = "invalid_max_file_size",
+                max_file_size = size_str
+            );
+            e
+        })?)
     } else {
         None
     };
     
     // Create copy options
     let copy_options = CopyOptions {
-        source_root: source_root.to_path_buf(),
-        destination_root: destination_root.to_path_buf(),
         max_file_size,
     };
     
@@ -159,7 +160,7 @@ pub fn copy_include_files(
         );
     }
     
-    Ok(copied_count)
+    Ok((copied_count, error_count))
 }
 
 #[cfg(test)]
@@ -185,7 +186,7 @@ mod tests {
         
         let result = copy_include_files(&source, &dest, &config);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result.unwrap(), (0, 0));
     }
     
     #[test]
@@ -204,7 +205,7 @@ mod tests {
         
         let result = copy_include_files(&source, &dest, &config);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result.unwrap(), (0, 0));
     }
     
     #[test]
@@ -223,5 +224,46 @@ mod tests {
         
         let result = copy_include_files(&source, &dest, &config);
         assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_copy_include_files_overrides_gitignore() {
+        use std::process::Command;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let source = temp_dir.path().join("source");
+        let dest = temp_dir.path().join("dest");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        
+        // Initialize git repo (required for ignore crate)
+        Command::new("git")
+            .args(&["init"])
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        
+        // Create .gitignore that ignores .env files
+        fs::write(source.join(".gitignore"), ".env*\n").unwrap();
+        
+        // Create .env file that should be ignored by git
+        fs::write(source.join(".env"), "SECRET=value\n").unwrap();
+        
+        // Create .env.local file
+        fs::write(source.join(".env.local"), "LOCAL=value\n").unwrap();
+        
+        let config = IncludeConfig {
+            patterns: vec![".env*".to_string()],
+            enabled: true,
+            max_file_size: None,
+        };
+        
+        let result = copy_include_files(&source, &dest, &config);
+        assert!(result.is_ok());
+        let (copied, failed) = result.unwrap();
+        assert_eq!(copied, 2);
+        assert_eq!(failed, 0);
+        assert!(dest.join(".env").exists());
+        assert!(dest.join(".env.local").exists());
     }
 }

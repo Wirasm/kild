@@ -4,6 +4,7 @@ use glob::Pattern;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
+use tempfile::NamedTempFile;
 
 /// Validate glob patterns in the include config
 pub fn validate_patterns(config: &IncludeConfig) -> Result<Vec<PatternRule>, FileError> {
@@ -35,7 +36,20 @@ pub fn validate_patterns(config: &IncludeConfig) -> Result<Vec<PatternRule>, Fil
     Ok(rules)
 }
 
-/// Find files matching include patterns, overriding gitignore
+/// Find files matching include patterns, overriding gitignore.
+/// 
+/// Patterns are matched against relative paths from source_root.
+/// 
+/// # Pattern Examples
+/// - `.env*` matches .env, .env.local, .env.production
+/// - `*.local.json` matches any .local.json file in any directory
+/// - `build/artifacts/**` matches all files under build/artifacts/
+/// 
+/// # How It Works
+/// Patterns use glob syntax and are checked AFTER gitignore rules,
+/// effectively overriding gitignore for matching files. The `ignore`
+/// crate's override mechanism ensures gitignored files matching these
+/// patterns are still included.
 pub fn find_matching_files(
     source_root: &Path,
     rules: &[PatternRule],
@@ -114,7 +128,16 @@ pub fn find_matching_files(
     Ok(matching_files)
 }
 
-/// Copy a single file safely with atomic operations
+/// Copy a single file safely with atomic operations.
+///
+/// Uses a temporary file in the same directory as the destination,
+/// then atomically renames it to prevent partial writes or race conditions.
+///
+/// # Errors
+/// Returns an error if:
+/// - Source file doesn't exist
+/// - File exceeds max_file_size limit
+/// - I/O operations fail
 pub fn copy_file_safely(
     source: &Path,
     destination: &Path,
@@ -143,20 +166,16 @@ pub fn copy_file_safely(
         fs::create_dir_all(parent).map_err(|e| FileError::IoError { source: e })?;
     }
     
-    // Copy file atomically by copying to temp file first, then renaming
-    let temp_destination = destination.with_extension("tmp");
+    // Create temp file in same directory as destination for atomic rename
+    let temp_file = NamedTempFile::new_in(
+        destination.parent().unwrap_or_else(|| Path::new("."))
+    ).map_err(|e| FileError::IoError { source: e })?;
     
-    // Copy to temp file
-    if let Err(e) = fs::copy(source, &temp_destination) {
-        let _ = fs::remove_file(&temp_destination); // Clean up on failure
-        return Err(FileError::IoError { source: e });
-    }
+    // Copy contents to temp file
+    fs::copy(source, temp_file.path()).map_err(|e| FileError::IoError { source: e })?;
     
-    // Rename temp file to final destination
-    if let Err(e) = fs::rename(&temp_destination, destination) {
-        let _ = fs::remove_file(&temp_destination); // Clean up on failure
-        return Err(FileError::IoError { source: e });
-    }
+    // Atomically persist temp file to destination
+    temp_file.persist(destination).map_err(|e| FileError::IoError { source: e.error })?;
     
     debug!(
         event = "files.copy.completed",

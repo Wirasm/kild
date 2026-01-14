@@ -152,13 +152,23 @@ pub fn create_worktree(
         );
         
         match files::handler::copy_include_files(&project.path, &worktree_path, include_config) {
-            Ok(copied_count) => {
-                info!(
-                    event = "git.worktree.file_copy_completed",
-                    project_id = project.id,
-                    branch = validated_branch,
-                    files_copied = copied_count
-                );
+            Ok((copied_count, failed_count)) => {
+                if failed_count > 0 {
+                    warn!(
+                        event = "git.worktree.file_copy_completed_with_errors",
+                        project_id = project.id,
+                        branch = validated_branch,
+                        files_copied = copied_count,
+                        files_failed = failed_count
+                    );
+                } else {
+                    info!(
+                        event = "git.worktree.file_copy_completed",
+                        project_id = project.id,
+                        branch = validated_branch,
+                        files_copied = copied_count
+                    );
+                }
             }
             Err(e) => {
                 warn!(

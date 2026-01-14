@@ -24,6 +24,9 @@ pub enum ConfigError {
 
     #[error("Invalid agent '{agent}'. Supported agents: claude, kiro, gemini, codex, aether")]
     InvalidAgent { agent: String },
+    
+    #[error("Invalid configuration: {message}")]
+    InvalidConfiguration { message: String },
 
     #[error("IO error reading config: {source}")]
     IoError {
@@ -38,6 +41,7 @@ impl ShardsError for ConfigError {
             ConfigError::ConfigNotFound { .. } => "CONFIG_NOT_FOUND",
             ConfigError::ConfigParseError { .. } => "CONFIG_PARSE_ERROR",
             ConfigError::InvalidAgent { .. } => "INVALID_AGENT",
+            ConfigError::InvalidConfiguration { .. } => "INVALID_CONFIGURATION",
             ConfigError::IoError { .. } => "CONFIG_IO_ERROR",
         }
     }
@@ -45,7 +49,9 @@ impl ShardsError for ConfigError {
     fn is_user_error(&self) -> bool {
         matches!(
             self,
-            ConfigError::ConfigParseError { .. } | ConfigError::InvalidAgent { .. }
+            ConfigError::ConfigParseError { .. } 
+                | ConfigError::InvalidAgent { .. }
+                | ConfigError::InvalidConfiguration { .. }
         )
     }
 }
