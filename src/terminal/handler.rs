@@ -57,14 +57,22 @@ pub fn spawn_terminal(
         message: format!("Failed to execute {}: {}", spawn_command[0], e),
     })?;
 
-    // Capture PID before dropping Child
-    let process_id = Some(child.id());
+    let process_id = child.id();
+
+    // Capture process metadata immediately for PID reuse protection
+    let (process_name, process_start_time) = if let Ok(info) = crate::process::get_process_info(process_id) {
+        (Some(info.name), Some(info.start_time))
+    } else {
+        (None, None)
+    };
 
     let result = SpawnResult::new(
         terminal_type.clone(),
         command.to_string(),
         working_directory.to_path_buf(),
-        process_id,
+        Some(process_id),
+        process_name.clone(),
+        process_start_time,
     );
 
     info!(
@@ -72,7 +80,8 @@ pub fn spawn_terminal(
         terminal_type = %terminal_type,
         working_directory = %working_directory.display(),
         command = command,
-        process_id = process_id
+        process_id = process_id,
+        process_name = ?process_name
     );
 
     Ok(result)

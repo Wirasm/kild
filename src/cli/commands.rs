@@ -101,7 +101,15 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                         match process::is_process_running(pid) {
                             Ok(true) => format!("Running({})", pid),
                             Ok(false) => format!("Stopped({})", pid),
-                            Err(_) => format!("Error({})", pid),
+                            Err(e) => {
+                                tracing::warn!(
+                                    event = "cli.list_process_check_failed",
+                                    pid = pid,
+                                    session_branch = &session.branch,
+                                    error = %e
+                                );
+                                format!("Error({})", pid)
+                            }
                         }
                     } else {
                         "No PID".to_string()
@@ -198,7 +206,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                         // Try to get process info
                         if let Ok(info) = process::get_process_info(pid) {
                             println!("│ Process Name: {:<46} │", info.name);
-                            println!("│ Process Status: {:<44} │", info.status);
+                            println!("│ Process Status: {:<44} │", format!("{:?}", info.status));
                         }
                     }
                     Ok(false) => {

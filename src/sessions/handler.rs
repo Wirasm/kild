@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::{error, info};
 
 use crate::core::config::{Config, ShardsConfig};
 use crate::git;
@@ -62,6 +62,8 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         status: SessionStatus::Active,
         created_at: chrono::Utc::now().to_rfc3339(),
         process_id: spawn_result.process_id,
+        process_name: spawn_result.process_name.clone(),
+        process_start_time: spawn_result.process_start_time,
     };
 
     // 7. Save session to file
@@ -72,7 +74,8 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         session_id = session_id,
         branch = validated.name,
         agent = session.agent,
-        process_id = session.process_id
+        process_id = session.process_id,
+        process_name = ?session.process_name
     );
 
     Ok(session)
@@ -131,23 +134,31 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     // 2. Kill process if PID is tracked
     if let Some(pid) = session.process_id {
         info!(event = "session.destroy_kill_started", pid = pid);
-        
-        match crate::process::kill_process(pid) {
+
+        match crate::process::kill_process(
+            pid,
+            session.process_name.as_deref(),
+            session.process_start_time,
+        ) {
             Ok(()) => {
                 info!(event = "session.destroy_kill_completed", pid = pid);
             }
             Err(crate::process::ProcessError::NotFound { .. }) => {
-                // Process already dead, that's fine
                 info!(event = "session.destroy_kill_already_dead", pid = pid);
             }
             Err(e) => {
-                // Log error but continue with cleanup
-                tracing::warn!(
+                error!(
                     event = "session.destroy_kill_failed",
                     pid = pid,
-                    error = %e,
-                    message = "Failed to kill process, continuing with cleanup"
+                    error = %e
                 );
+                return Err(SessionError::ProcessKillFailed {
+                    pid,
+                    message: format!(
+                        "Process still running. Kill it manually or use --force flag (not yet implemented): {}",
+                        e
+                    ),
+                });
             }
         }
     }
@@ -230,6 +241,8 @@ mod tests {
             status: SessionStatus::Active,
             created_at: chrono::Utc::now().to_rfc3339(),
             process_id: None,
+            process_name: None,
+            process_start_time: None,
         };
 
         // Create worktree directory so validation passes

@@ -1,5 +1,7 @@
 pub mod errors;
 pub mod operations;
+pub mod types;
 
 pub use errors::ProcessError;
-pub use operations::{is_process_running, kill_process, get_process_info};
+pub use operations::{get_process_info, is_process_running, kill_process};
+pub use types::{Pid, ProcessInfo, ProcessMetadata, ProcessStatus};

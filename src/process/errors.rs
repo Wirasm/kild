@@ -13,6 +13,16 @@ pub enum ProcessError {
 
     #[error("System error: {message}")]
     SystemError { message: String },
+
+    #[error("Invalid PID: {pid}")]
+    InvalidPid { pid: u32 },
+
+    #[error("PID '{pid}' has been reused (expected: {expected}, actual: {actual})")]
+    PidReused {
+        pid: u32,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl ShardsError for ProcessError {
@@ -22,13 +32,17 @@ impl ShardsError for ProcessError {
             ProcessError::KillFailed { .. } => "PROCESS_KILL_FAILED",
             ProcessError::AccessDenied { .. } => "PROCESS_ACCESS_DENIED",
             ProcessError::SystemError { .. } => "PROCESS_SYSTEM_ERROR",
+            ProcessError::InvalidPid { .. } => "PROCESS_INVALID_PID",
+            ProcessError::PidReused { .. } => "PROCESS_PID_REUSED",
         }
     }
 
     fn is_user_error(&self) -> bool {
         matches!(
             self,
-            ProcessError::NotFound { .. } | ProcessError::AccessDenied { .. }
+            ProcessError::NotFound { .. }
+                | ProcessError::AccessDenied { .. }
+                | ProcessError::InvalidPid { .. }
         )
     }
 }
