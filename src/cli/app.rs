@@ -68,6 +68,27 @@ pub fn build_cli() -> Command {
             Command::new("cleanup")
                 .about("Clean up orphaned resources (branches, worktrees, sessions)")
         )
+        .subcommand(
+            Command::new("health")
+                .about("Show health status and metrics for shards")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of specific shard to check (optional)")
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Show health for all projects, not just current")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(clap::ArgAction::SetTrue)
+                )
+        )
 }
 
 pub fn get_matches() -> ArgMatches {

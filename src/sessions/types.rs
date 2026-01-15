@@ -37,6 +37,11 @@ pub struct Session {
     
     /// Process start time captured at spawn time for PID reuse protection
     pub process_start_time: Option<u64>,
+    
+    /// Timestamp of last detected activity (user input or agent output)
+    /// Used to determine if session is idle or stuck
+    #[serde(default)]
+    pub last_activity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +98,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         assert_eq!(session.branch, "branch");

@@ -4,6 +4,7 @@ use tracing::{error, info};
 use crate::cleanup;
 use crate::core::events;
 use crate::core::config::ShardsConfig;
+use crate::health;
 use crate::process;
 use crate::sessions::{handler as session_handler, types::CreateSessionRequest};
 
@@ -16,6 +17,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("cleanup", _)) => handle_cleanup_command(),
+        Some(("health", sub_matches)) => handle_health_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");
             Err("Unknown command".into())
@@ -310,6 +312,159 @@ fn handle_cleanup_command() -> Result<(), Box<dyn std::error::Error>> {
             Err(e.into())
         }
     }
+}
+
+fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches.get_one::<String>("branch");
+    let show_all = matches.get_flag("all");
+    let json_output = matches.get_flag("json");
+    
+    info!(
+        event = "cli.health_started",
+        branch = ?branch,
+        show_all = show_all,
+        json_output = json_output
+    );
+    
+    if let Some(branch_name) = branch {
+        // Single shard health
+        match health::get_health_single_session(branch_name) {
+            Ok(shard_health) => {
+                if json_output {
+                    println!("{}", serde_json::to_string_pretty(&shard_health)?);
+                } else {
+                    print_single_shard_health(&shard_health);
+                }
+                
+                info!(event = "cli.health_completed", branch = branch_name);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to get health for shard '{}': {}", branch_name, e);
+                error!(event = "cli.health_failed", branch = branch_name, error = %e);
+                events::log_app_error(&e);
+                Err(e.into())
+            }
+        }
+    } else {
+        // All shards health
+        match health::get_health_all_sessions() {
+            Ok(health_output) => {
+                if json_output {
+                    println!("{}", serde_json::to_string_pretty(&health_output)?);
+                } else {
+                    print_health_table(&health_output);
+                }
+                
+                info!(
+                    event = "cli.health_completed",
+                    total = health_output.total_count,
+                    working = health_output.working_count
+                );
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to get health status: {}", e);
+                error!(event = "cli.health_failed", error = %e);
+                events::log_app_error(&e);
+                Err(e.into())
+            }
+        }
+    }
+}
+
+fn print_health_table(output: &health::HealthOutput) {
+    if output.shards.is_empty() {
+        println!("No active shards found.");
+        return;
+    }
+    
+    println!("🏥 Shard Health Dashboard");
+    println!("┌────┬──────────────────┬─────────┬──────────┬──────────┬──────────┬─────────────────────┐");
+    println!("│ St │ Branch           │ Agent   │ CPU %    │ Memory   │ Status   │ Last Activity       │");
+    println!("├────┼──────────────────┼─────────┼──────────┼──────────┼──────────┼─────────────────────┤");
+    
+    for shard in &output.shards {
+        let status_icon = match shard.metrics.status {
+            health::HealthStatus::Working => "✅",
+            health::HealthStatus::Idle => "⏸️ ",
+            health::HealthStatus::Stuck => "⚠️ ",
+            health::HealthStatus::Crashed => "❌",
+            health::HealthStatus::Unknown => "❓",
+        };
+        
+        let cpu_str = shard.metrics.cpu_usage_percent
+            .map(|c| format!("{:.1}%", c))
+            .unwrap_or_else(|| "N/A".to_string());
+        
+        let mem_str = shard.metrics.memory_usage_mb
+            .map(|m| format!("{}MB", m))
+            .unwrap_or_else(|| "N/A".to_string());
+        
+        let activity_str = shard.metrics.last_activity
+            .as_ref()
+            .map(|a| truncate(a, 19))
+            .unwrap_or_else(|| "Never".to_string());
+        
+        println!(
+            "│ {} │ {:<16} │ {:<7} │ {:<8} │ {:<8} │ {:<8} │ {:<19} │",
+            status_icon,
+            truncate(&shard.branch, 16),
+            truncate(&shard.agent, 7),
+            truncate(&cpu_str, 8),
+            truncate(&mem_str, 8),
+            truncate(&format!("{:?}", shard.metrics.status), 8),
+            activity_str
+        );
+    }
+    
+    println!("└────┴──────────────────┴─────────┴──────────┴──────────┴──────────┴─────────────────────┘");
+    println!();
+    println!("Summary: {} total | {} working | {} idle | {} stuck | {} crashed",
+        output.total_count,
+        output.working_count,
+        output.idle_count,
+        output.stuck_count,
+        output.crashed_count
+    );
+}
+
+fn print_single_shard_health(shard: &health::ShardHealth) {
+    let status_icon = match shard.metrics.status {
+        health::HealthStatus::Working => "✅",
+        health::HealthStatus::Idle => "⏸️ ",
+        health::HealthStatus::Stuck => "⚠️ ",
+        health::HealthStatus::Crashed => "❌",
+        health::HealthStatus::Unknown => "❓",
+    };
+    
+    println!("🏥 Shard Health: {}", shard.branch);
+    println!("┌─────────────────────────────────────────────────────────────┐");
+    println!("│ Branch:      {:<47} │", shard.branch);
+    println!("│ Agent:       {:<47} │", shard.agent);
+    println!("│ Status:      {} {:<44} │", status_icon, format!("{:?}", shard.metrics.status));
+    println!("│ Created:     {:<47} │", shard.created_at);
+    println!("│ Worktree:    {:<47} │", truncate(&shard.worktree_path, 47));
+    
+    if let Some(cpu) = shard.metrics.cpu_usage_percent {
+        println!("│ CPU Usage:   {:<47} │", format!("{:.1}%", cpu));
+    } else {
+        println!("│ CPU Usage:   {:<47} │", "N/A");
+    }
+    
+    if let Some(mem) = shard.metrics.memory_usage_mb {
+        println!("│ Memory:      {:<47} │", format!("{} MB", mem));
+    } else {
+        println!("│ Memory:      {:<47} │", "N/A");
+    }
+    
+    if let Some(activity) = &shard.metrics.last_activity {
+        println!("│ Last Active: {:<47} │", truncate(activity, 47));
+    } else {
+        println!("│ Last Active: {:<47} │", "Never");
+    }
+    
+    println!("└─────────────────────────────────────────────────────────────┘");
 }
 
 #[cfg(test)]

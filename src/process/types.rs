@@ -70,3 +70,10 @@ pub struct ProcessMetadata {
     pub name: String,
     pub start_time: u64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessMetrics {
+    pub cpu_usage_percent: f32,
+    pub memory_usage_bytes: u64,
+    pub memory_usage_mb: u64,
+}

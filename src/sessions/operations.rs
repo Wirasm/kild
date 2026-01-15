@@ -419,6 +419,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Save session
@@ -464,6 +465,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Save session
@@ -508,6 +510,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         let session_file = temp_dir.join("test_atomic-behavior.json");
@@ -558,6 +561,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Create a directory where the final file should be to force rename failure
@@ -610,6 +614,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         let session2 = Session {
@@ -626,6 +631,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Save sessions
@@ -685,6 +691,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Save session
@@ -730,6 +737,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
 
         // Save session
@@ -776,6 +784,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
         save_session_to_file(&valid_session, &temp_dir).unwrap();
 
@@ -822,6 +831,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
         assert!(validate_session_structure(&valid_session).is_ok());
 
@@ -840,6 +850,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
         let result = validate_session_structure(&invalid_session);
         assert!(result.is_err());
@@ -860,6 +871,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
         let result2 = validate_session_structure(&invalid_session2);
         assert!(result2.is_err());
@@ -881,6 +893,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            last_activity: None,
         };
         let result3 = validate_session_structure(&invalid_session3);
         assert!(result3.is_err());

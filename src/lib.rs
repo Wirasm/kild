@@ -3,6 +3,7 @@ pub mod cli;
 pub mod core;
 pub mod files;
 pub mod git;
+pub mod health;
 pub mod process;
 pub mod sessions;
 pub mod terminal;

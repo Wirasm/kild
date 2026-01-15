@@ -1,7 +1,7 @@
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 
 use crate::process::errors::ProcessError;
-use crate::process::types::{Pid, ProcessInfo, ProcessStatus};
+use crate::process::types::{Pid, ProcessInfo, ProcessMetrics, ProcessStatus};
 
 /// Check if a process with the given PID is currently running
 pub fn is_process_running(pid: u32) -> Result<bool, ProcessError> {
@@ -35,15 +35,14 @@ pub fn kill_process(
                 }
             }
 
-            if let Some(start_time) = expected_start_time {
-                if process.start_time() != start_time {
+            if let Some(start_time) = expected_start_time
+                && process.start_time() != start_time {
                     return Err(ProcessError::PidReused {
                         pid,
                         expected: format!("start_time={}", start_time),
                         actual: format!("start_time={}", process.start_time()),
                     });
                 }
-            }
 
             if process.kill() {
                 Ok(())
@@ -74,6 +73,30 @@ pub fn get_process_info(pid: u32) -> Result<ProcessInfo, ProcessError> {
         None => Err(ProcessError::NotFound { pid }),
     }
 }
+
+/// Get CPU and memory usage metrics for a process
+pub fn get_process_metrics(pid: u32) -> Result<ProcessMetrics, ProcessError> {
+    let mut system = System::new();
+    let pid_obj = SysinfoPid::from_u32(pid);
+    
+    // Refresh process info with CPU usage
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
+    
+    match system.process(pid_obj) {
+        Some(process) => {
+            let memory_bytes = process.memory();
+            let memory_mb = memory_bytes / 1_024 / 1_024;
+            
+            Ok(ProcessMetrics {
+                cpu_usage_percent: process.cpu_usage(),
+                memory_usage_bytes: memory_bytes,
+                memory_usage_mb: memory_mb,
+            })
+        }
+        None => Err(ProcessError::NotFound { pid }),
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
