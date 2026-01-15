@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/shards-hero.png" alt="Shards - Manage parallel AI development agents" />
+</p>
+
 # Shards
 
 Manage parallel AI development agents in isolated Git worktrees.
