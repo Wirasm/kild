@@ -14,6 +14,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("create", sub_matches)) => handle_create_command(sub_matches),
         Some(("list", _)) => handle_list_command(),
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
+        Some(("restart", sub_matches)) => handle_restart_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("cleanup", _)) => handle_cleanup_command(),
         _ => {
@@ -170,6 +171,33 @@ fn handle_destroy_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
                 branch = branch,
                 error = %e
             );
+
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches.get_one::<String>("branch").unwrap();
+    let agent_override = matches.get_one::<String>("agent").cloned();
+
+    info!(event = "cli.restart_started", branch = branch, agent_override = ?agent_override);
+
+    match session_handler::restart_session(branch, agent_override) {
+        Ok(session) => {
+            println!("✅ Shard '{}' restarted successfully!", branch);
+            println!("   Agent: {}", session.agent);
+            println!("   Process ID: {:?}", session.process_id);
+
+            info!(event = "cli.restart_completed", branch = branch, process_id = session.process_id);
+
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to restart shard '{}': {}", branch, e);
+
+            error!(event = "cli.restart_failed", branch = branch, error = %e);
 
             events::log_app_error(&e);
             Err(e.into())

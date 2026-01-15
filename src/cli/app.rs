@@ -55,6 +55,23 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("restart")
+                .about("Restart agent in existing shard without destroying worktree")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the shard to restart")
+                        .required(true)
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("agent")
+                        .long("agent")
+                        .short('a')
+                        .help("AI agent to use (overrides current agent)")
+                        .value_parser(["claude", "kiro", "gemini", "codex", "aether"])
+                )
+        )
+        .subcommand(
             Command::new("status")
                 .about("Show detailed status of a shard")
                 .arg(

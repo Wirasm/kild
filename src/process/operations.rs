@@ -35,15 +35,14 @@ pub fn kill_process(
                 }
             }
 
-            if let Some(start_time) = expected_start_time {
-                if process.start_time() != start_time {
+            if let Some(start_time) = expected_start_time
+                && process.start_time() != start_time {
                     return Err(ProcessError::PidReused {
                         pid,
                         expected: format!("start_time={}", start_time),
                         actual: format!("start_time={}", process.start_time()),
                     });
                 }
-            }
 
             if process.kill() {
                 Ok(())

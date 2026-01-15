@@ -145,13 +145,12 @@ impl ShardsConfig {
         }
         
         // Validate include patterns if configured
-        if let Some(ref include_config) = self.include_patterns {
-            if let Err(e) = include_config.validate() {
+        if let Some(ref include_config) = self.include_patterns
+            && let Err(e) = include_config.validate() {
                 return Err(crate::core::errors::ConfigError::InvalidConfiguration {
                     message: format!("Invalid include patterns: {}", e),
                 });
             }
-        }
         
         Ok(())
     }
