@@ -92,14 +92,18 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
             if sessions.is_empty() {
                 println!("No active shards found.");
             } else {
+                const TABLE_TOP: &str = "┌──────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┬──────────────────────┐";
+                const TABLE_HEADER: &str = "│ Branch           │ Agent   │ Status  │ Created             │ Port Range  │ Process     │ Command              │";
+                const TABLE_SEP: &str = "├──────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┼──────────────────────┤";
+                
                 println!("Active shards:");
-                println!("┌──────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┬──────────────────────┐");
-                println!("│ Branch           │ Agent   │ Status  │ Created             │ Port Range  │ Process     │ Command              │");
-                println!("├──────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┼──────────────────────┤");
+                println!("{}", TABLE_TOP);
+                println!("{}", TABLE_HEADER);
+                println!("{}", TABLE_SEP);
 
                 for session in &sessions {
                     let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
-                    let process_status = if let Some(pid) = session.process_id {
+                    let process_status = session.process_id.map_or("No PID".to_string(), |pid| {
                         match process::is_process_running(pid) {
                             Ok(true) => format!("Run({})", pid),
                             Ok(false) => format!("Stop({})", pid),
@@ -113,9 +117,7 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Err({})", pid)
                             }
                         }
-                    } else {
-                        "No PID".to_string()
-                    };
+                    });
 
                     println!(
                         "│ {:<16} │ {:<7} │ {:<7} │ {:<19} │ {:<11} │ {:<11} │ {:<20} │",
@@ -129,7 +131,9 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
 
-                println!("└──────────────────┴─────────┴─────────┴─────────────────────┴─────────────┴─────────────┴──────────────────────┘");
+                const TABLE_BOTTOM: &str = "└──────────────────┴─────────┴─────────┴─────────────────────┴─────────────┴─────────────┴──────────────────────┘";
+                
+                println!("{}", TABLE_BOTTOM);
             }
 
             info!(event = "cli.list_completed", count = sessions.len());

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 fn default_port_start() -> u16 { 0 }
 fn default_port_end() -> u16 { 0 }
 fn default_port_count() -> u16 { 0 }
-fn default_command() -> String { String::new() }
+fn default_command() -> String { String::default() }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {

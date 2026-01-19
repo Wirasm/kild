@@ -91,11 +91,10 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
-        command: if spawn_result.command_executed.trim().is_empty() {
-            format!("{} (command not captured)", validated.agent)
-        } else {
-            spawn_result.command_executed.clone()
-        },
+        command: spawn_result.command_executed.trim()
+            .is_empty()
+            .then(|| format!("{} (command not captured)", validated.agent))
+            .unwrap_or_else(|| spawn_result.command_executed.clone()),
     };
 
     // 7. Save session to file
