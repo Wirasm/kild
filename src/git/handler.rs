@@ -6,10 +6,19 @@ use crate::core::config::ShardsConfig;
 use crate::files;
 use crate::git::{errors::GitError, operations, types::*};
 
+// Helper function to reduce boilerplate
+fn io_error(e: std::io::Error) -> GitError {
+    GitError::IoError { source: e }
+}
+
+fn git2_error(e: git2::Error) -> GitError {
+    GitError::Git2Error { source: e }
+}
+
 pub fn detect_project() -> Result<ProjectInfo, GitError> {
     info!(event = "git.project.detect_started");
 
-    let current_dir = std::env::current_dir().map_err(|e| GitError::IoError { source: e })?;
+    let current_dir = std::env::current_dir().map_err(io_error)?;
 
     let repo = Repository::discover(&current_dir).map_err(|_| GitError::NotInRepository)?;
 
@@ -63,7 +72,7 @@ pub fn create_worktree(
         repo_path = %project.path.display()
     );
 
-    let repo = Repository::open(&project.path).map_err(|e| GitError::Git2Error { source: e })?;
+    let repo = Repository::open(&project.path).map_err(git2_error)?;
 
     let worktree_path =
         operations::calculate_worktree_path(base_dir, &project.name, &validated_branch);
@@ -84,7 +93,7 @@ pub fn create_worktree(
 
     // Create parent directories
     if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| GitError::IoError { source: e })?;
+        std::fs::create_dir_all(parent).map_err(io_error)?;
     }
 
     // Check if branch exists
