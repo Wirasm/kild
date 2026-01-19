@@ -17,8 +17,11 @@ pub enum TerminalError {
     #[error("Command is empty or invalid")]
     InvalidCommand,
 
-    #[error("AppleScript failed: {0}")]
-    AppleScript(String),
+    #[error("AppleScript execution failed: {message}")]
+    AppleScriptExecution { message: String },
+
+    #[error("AppleScript failed with error: {stderr}")]
+    AppleScriptFailed { stderr: String },
 
     #[error("IO error during terminal operation: {source}")]
     IoError {
@@ -35,7 +38,8 @@ impl ShardsError for TerminalError {
             TerminalError::SpawnFailed { .. } => "TERMINAL_SPAWN_FAILED",
             TerminalError::WorkingDirectoryNotFound { .. } => "WORKING_DIRECTORY_NOT_FOUND",
             TerminalError::InvalidCommand => "INVALID_COMMAND",
-            TerminalError::AppleScript(..) => "APPLESCRIPT_FAILED",
+            TerminalError::AppleScriptExecution { .. } => "APPLESCRIPT_EXECUTION_FAILED",
+            TerminalError::AppleScriptFailed { .. } => "APPLESCRIPT_FAILED",
             TerminalError::IoError { .. } => "TERMINAL_IO_ERROR",
         }
     }
@@ -46,7 +50,8 @@ impl ShardsError for TerminalError {
             TerminalError::NoTerminalFound
                 | TerminalError::WorkingDirectoryNotFound { .. }
                 | TerminalError::InvalidCommand
-                | TerminalError::AppleScript(..)
+                | TerminalError::AppleScriptExecution { .. }
+                | TerminalError::AppleScriptFailed { .. }
         )
     }
 }
