@@ -75,46 +75,6 @@ pub fn get_process_info(pid: u32) -> Result<ProcessInfo, ProcessError> {
     }
 }
 
-/// Find a process by name, optionally filtering by command line pattern
-pub fn find_process_by_name(
-    name_pattern: &str,
-    command_pattern: Option<&str>,
-) -> Result<Option<ProcessInfo>, ProcessError> {
-    let mut system = System::new();
-    system.refresh_processes(ProcessesToUpdate::All, true);
-
-    for (pid, process) in system.processes() {
-        let process_name = process.name().to_string_lossy().to_string();
-
-        // Check if name matches
-        if !process_name.contains(name_pattern) {
-            continue;
-        }
-
-        // If command pattern specified, check command line
-        if let Some(cmd_pattern) = command_pattern {
-            let cmd_line = process
-                .cmd()
-                .iter()
-                .map(|s| s.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if !cmd_line.contains(cmd_pattern) {
-                continue;
-            }
-        }
-
-        return Ok(Some(ProcessInfo {
-            pid: Pid::from_raw(pid.as_u32()),
-            name: process_name,
-            status: ProcessStatus::from(process.status()),
-            start_time: process.start_time(),
-        }));
-    }
-
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,19 +90,13 @@ mod tests {
     #[test]
     fn test_get_process_info_with_invalid_pid() {
         let result = get_process_info(999999);
-        assert!(matches!(
-            result,
-            Err(ProcessError::NotFound { pid: 999999 })
-        ));
+        assert!(matches!(result, Err(ProcessError::NotFound { pid: 999999 })));
     }
 
     #[test]
     fn test_kill_process_with_invalid_pid() {
         let result = kill_process(999999, None, None);
-        assert!(matches!(
-            result,
-            Err(ProcessError::NotFound { pid: 999999 })
-        ));
+        assert!(matches!(result, Err(ProcessError::NotFound { pid: 999999 })));
     }
 
     #[test]
@@ -172,6 +126,8 @@ mod tests {
 
     #[test]
     fn test_find_process_by_name() {
+        use std::process::{Command, Stdio};
+
         // Spawn a test process
         let mut child = Command::new("sleep")
             .arg("10")
@@ -199,4 +155,40 @@ mod tests {
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
+}
+
+/// Find a process by name, optionally filtering by command line pattern
+pub fn find_process_by_name(
+    name_pattern: &str,
+    command_pattern: Option<&str>,
+) -> Result<Option<ProcessInfo>, ProcessError> {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    for (pid, process) in system.processes() {
+        let process_name = process.name().to_string_lossy();
+        
+        if !process_name.contains(name_pattern) {
+            continue;
+        }
+
+        if let Some(cmd_pattern) = command_pattern {
+            let cmd_line = process.cmd().iter()
+                .map(|s| s.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !cmd_line.contains(cmd_pattern) {
+                continue;
+            }
+        }
+
+        return Ok(Some(ProcessInfo {
+            pid: Pid::from_raw(pid.as_u32()),
+            name: process_name.to_string(),
+            status: ProcessStatus::from(process.status()),
+            start_time: process.start_time(),
+        }));
+    }
+
+    Ok(None)
 }

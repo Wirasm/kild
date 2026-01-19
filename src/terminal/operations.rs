@@ -102,13 +102,8 @@ fn applescript_escape(s: &str) -> String {
 }
 
 /// Extract the executable name from a command string
-/// Examples: "kiro-cli chat" -> "kiro-cli", "claude-code" -> "claude-code"
 pub fn extract_command_name(command: &str) -> String {
-    command
-        .split_whitespace()
-        .next()
-        .unwrap_or(command)
-        .to_string()
+    command.split_whitespace().next().unwrap_or(command).to_string()
 }
 
 #[cfg(test)]
