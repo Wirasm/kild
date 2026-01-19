@@ -5,7 +5,10 @@ use crate::git;
 use crate::sessions::{errors::SessionError, operations, types::*};
 use crate::terminal;
 
-pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfig) -> Result<Session, SessionError> {
+pub fn create_session(
+    request: CreateSessionRequest,
+    shards_config: &ShardsConfig,
+) -> Result<Session, SessionError> {
     let agent = request.agent_or_default(&shards_config.agent.default);
     let agent_command = shards_config.get_agent_command(&agent);
 
@@ -33,16 +36,17 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
     // 3. Create worktree (I/O)
     let config = Config::new();
     let session_id = operations::generate_session_id(&project.id, &validated.name);
-    
+
     // Ensure sessions directory exists
     operations::ensure_sessions_directory(&config.sessions_dir())?;
-    
+
     // 4. Allocate port range (I/O)
     let (port_start, port_end) = operations::allocate_port_range(
         &config.sessions_dir(),
         config.default_port_count,
         config.base_port_range,
-    ).map_err(|e| {
+    )
+    .map_err(|e| {
         error!(
             event = "session.port_allocation_failed",
             session_id = %session_id,
@@ -60,10 +64,15 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         port_range_end = port_end,
         port_count = config.default_port_count
     );
-    
+
     let base_config = Config::new();
-    let worktree = git::handler::create_worktree(&base_config.shards_dir, &project, &validated.name, Some(shards_config))
-        .map_err(|e| SessionError::GitError { source: e })?;
+    let worktree = git::handler::create_worktree(
+        &base_config.shards_dir,
+        &project,
+        &validated.name,
+        Some(shards_config),
+    )
+    .map_err(|e| SessionError::GitError { source: e })?;
 
     info!(
         event = "session.worktree_created",
@@ -73,8 +82,9 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
     );
 
     // 5. Launch terminal (I/O)
-    let spawn_result = terminal::handler::spawn_terminal(&worktree.path, &validated.command, shards_config)
-        .map_err(|e| SessionError::TerminalError { source: e })?;
+    let spawn_result =
+        terminal::handler::spawn_terminal(&worktree.path, &validated.command, shards_config)
+            .map_err(|e| SessionError::TerminalError { source: e })?;
 
     // 6. Create session record
     let session = Session {
@@ -82,7 +92,7 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         project_id: project.id,
         branch: validated.name.clone(),
         worktree_path: worktree.path,
-        agent: validated.agent,
+        agent: validated.agent.clone(),
         status: SessionStatus::Active,
         created_at: chrono::Utc::now().to_rfc3339(),
         port_range_start: port_start,
@@ -91,7 +101,10 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
-        last_activity: Some(chrono::Utc::now().to_rfc3339()),
+        command: spawn_result.command_executed.trim()
+            .is_empty()
+            .then(|| format!("{} (command not captured)", validated.agent))
+            .unwrap_or_else(|| spawn_result.command_executed.clone()),
     };
 
     // 7. Save session to file
@@ -147,10 +160,14 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     info!(event = "session.destroy_started", name = name);
 
     let config = Config::new();
-    
+
     // 1. Find session by name (branch name)
-    let session = operations::find_session_by_name(&config.sessions_dir(), name)?
-        .ok_or_else(|| SessionError::NotFound { name: name.to_string() })?;
+    let session =
+        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+            SessionError::NotFound {
+                name: name.to_string(),
+            }
+        })?;
 
     info!(
         event = "session.destroy_found",
@@ -222,6 +239,117 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
+pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Session, SessionError> {
+    let start_time = std::time::Instant::now();
+    info!(event = "session.restart_started", name = name, agent_override = ?agent_override);
+
+    let config = Config::new();
+    
+    // 1. Find session by name (branch name)
+    let mut session = operations::find_session_by_name(&config.sessions_dir(), name)?
+        .ok_or_else(|| SessionError::NotFound { name: name.to_string() })?;
+
+    info!(
+        event = "session.restart_found",
+        session_id = session.id,
+        current_agent = session.agent,
+        process_id = session.process_id
+    );
+
+    // 2. Kill process if PID is tracked
+    if let Some(pid) = session.process_id {
+        info!(event = "session.restart_kill_started", pid = pid);
+
+        match crate::process::kill_process(
+            pid,
+            session.process_name.as_deref(),
+            session.process_start_time,
+        ) {
+            Ok(()) => info!(event = "session.restart_kill_completed", pid = pid),
+            Err(crate::process::ProcessError::NotFound { .. }) => {
+                info!(event = "session.restart_kill_process_not_found", pid = pid)
+            }
+            Err(crate::process::ProcessError::AccessDenied { .. }) => {
+                error!(event = "session.restart_kill_access_denied", pid = pid);
+                return Err(SessionError::ProcessKillFailed {
+                    pid,
+                    message: "Access denied - insufficient permissions to kill process".to_string(),
+                });
+            }
+            Err(e) => {
+                error!(event = "session.restart_kill_failed", pid = pid, error = %e);
+                return Err(SessionError::ProcessKillFailed {
+                    pid,
+                    message: format!("Process still running: {}", e),
+                });
+            }
+        }
+    }
+
+    // 3. Validate worktree still exists
+    if !session.worktree_path.exists() {
+        error!(
+            event = "session.restart_worktree_missing",
+            session_id = session.id,
+            worktree_path = %session.worktree_path.display()
+        );
+        return Err(SessionError::WorktreeNotFound {
+            path: session.worktree_path.clone(),
+        });
+    }
+
+    // 4. Determine agent and command
+    let shards_config = ShardsConfig::load_hierarchy().unwrap_or_default();
+    let agent = agent_override.unwrap_or(session.agent.clone());
+    let agent_command = shards_config.get_agent_command(&agent);
+
+    info!(
+        event = "session.restart_agent_selected",
+        session_id = session.id,
+        agent = agent,
+        command = agent_command
+    );
+
+    // 5. Relaunch terminal in existing worktree
+    info!(event = "session.restart_spawn_started", worktree_path = %session.worktree_path.display());
+
+    let spawn_result = terminal::handler::spawn_terminal(&session.worktree_path, &agent_command, &shards_config)
+        .map_err(|e| SessionError::TerminalError { source: e })?;
+
+    info!(
+        event = "session.restart_spawn_completed",
+        process_id = spawn_result.process_id,
+        process_name = ?spawn_result.process_name
+    );
+
+    // Capture process metadata immediately for PID reuse protection
+    let (process_name, process_start_time) = spawn_result.process_id
+        .and_then(|pid| crate::process::get_process_info(pid).ok())
+        .map(|info| (Some(info.name), Some(info.start_time)))
+        .unwrap_or((spawn_result.process_name.clone(), spawn_result.process_start_time));
+
+    // 6. Update session with new process info
+    session.agent = agent;
+    session.process_id = spawn_result.process_id;
+    session.process_name = process_name;
+    session.process_start_time = process_start_time;
+    session.status = SessionStatus::Active;
+
+    // 7. Save updated session to file
+    operations::save_session_to_file(&session, &config.sessions_dir())?;
+
+    info!(
+        event = "session.restart_completed",
+        session_id = session.id,
+        branch = name,
+        agent = session.agent,
+        process_id = session.process_id,
+        duration_ms = start_time.elapsed().as_millis()
+    );
+
+    Ok(session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,12 +360,12 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("shards_test_empty_sessions");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-        
+
         // Test with empty directory
         let (sessions, skipped) = operations::load_sessions_from_files(&temp_dir).unwrap();
         assert_eq!(sessions.len(), 0);
         assert_eq!(skipped, 0);
-        
+
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -255,20 +383,21 @@ mod tests {
     #[test]
     fn test_create_list_destroy_integration_flow() {
         use std::fs;
-        
+
         // Create a unique temporary directory for this test
-        let temp_dir = std::env::temp_dir().join(format!("shards_test_integration_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("shards_test_integration_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
 
         // Test session persistence workflow using operations directly
         // This tests the core persistence logic without git/terminal dependencies
-        
+
         // 1. Create a test session manually
-        use crate::sessions::types::{Session, SessionStatus};
         use crate::sessions::operations;
-        
+        use crate::sessions::types::{Session, SessionStatus};
+
         let session = Session {
             id: "test-project_test-branch".to_string(),
             project_id: "test-project".to_string(),
@@ -283,19 +412,18 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Create worktree directory so validation passes
         fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
 
         // 2. Save session to file
-        operations::save_session_to_file(&session, &sessions_dir)
-            .expect("Failed to save session");
+        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // 3. List sessions - should contain our session
-        let (sessions, skipped) = operations::load_sessions_from_files(&sessions_dir)
-            .expect("Failed to load sessions");
+        let (sessions, skipped) =
+            operations::load_sessions_from_files(&sessions_dir).expect("Failed to load sessions");
         assert_eq!(sessions.len(), 1);
         assert_eq!(skipped, 0);
         assert_eq!(sessions[0].id, session.id);

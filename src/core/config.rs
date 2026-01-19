@@ -73,10 +73,21 @@ pub struct AgentConfig {
     pub flags: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConfig {
     #[serde(default)]
     pub preferred: Option<String>,
+    #[serde(default)]
+    pub spawn_delay_ms: u64,
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            preferred: None,
+            spawn_delay_ms: 500,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +195,7 @@ impl ShardsConfig {
             },
             terminal: TerminalConfig {
                 preferred: override_config.terminal.preferred.or(base.terminal.preferred),
+                spawn_delay_ms: override_config.terminal.spawn_delay_ms,
             },
             agents: {
                 let mut merged = base.agents;

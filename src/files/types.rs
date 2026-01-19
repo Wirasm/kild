@@ -22,11 +22,11 @@ pub struct IncludeConfig {
     /// Examples: ".env*", "*.local.json", "build/artifacts/**"
     #[serde(default)]
     pub patterns: Vec<String>,
-    
+
     /// Whether include pattern copying is enabled. Defaults to true.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    
+
     /// Optional maximum file size limit (e.g., "10MB", "1GB").
     /// Files exceeding this limit will be skipped with a warning.
     #[serde(default)]

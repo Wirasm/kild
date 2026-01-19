@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ResourceType {
@@ -25,7 +25,12 @@ pub struct CleanupSummary {
 }
 
 impl OrphanedResource {
-    pub fn new(resource_type: ResourceType, path: PathBuf, name: String, description: String) -> Self {
+    pub fn new(
+        resource_type: ResourceType,
+        path: PathBuf,
+        name: String,
+        description: String,
+    ) -> Self {
         Self {
             resource_type,
             path,

@@ -5,49 +5,51 @@ use std::path::{Path, PathBuf};
 pub fn validate_cleanup_request() -> Result<(), CleanupError> {
     // Check if we're in a git repository
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-    
+
     Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
-    
+
     Ok(())
 }
 
 pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, CleanupError> {
     let mut orphaned_branches = Vec::new();
-    
+
     // Get all local branches
-    let branches = repo
-        .branches(Some(BranchType::Local))
-        .map_err(|e| CleanupError::BranchScanFailed {
-            message: format!("Failed to list branches: {}", e),
-        })?;
-    
+    let branches =
+        repo.branches(Some(BranchType::Local))
+            .map_err(|e| CleanupError::BranchScanFailed {
+                message: format!("Failed to list branches: {}", e),
+            })?;
+
     // Get all worktrees to check which branches are in use
     let worktrees = repo
         .worktrees()
         .map_err(|e| CleanupError::WorktreeScanFailed {
             message: format!("Failed to list worktrees: {}", e),
         })?;
-    
+
     let mut active_branches = std::collections::HashSet::new();
-    
+
     // Collect branches that are actively used by worktrees
     for worktree_name in worktrees.iter().flatten() {
         if let Ok(worktree) = repo.find_worktree(worktree_name) {
             // Try to get the branch name from the worktree
             if let Ok(worktree_repo) = Repository::open(worktree.path())
                 && let Ok(head) = worktree_repo.head()
-                && let Some(branch_name) = head.shorthand() {
-                    active_branches.insert(branch_name.to_string());
-                }
+                && let Some(branch_name) = head.shorthand()
+            {
+                active_branches.insert(branch_name.to_string());
+            }
         }
     }
-    
+
     // Also add the main branch (current HEAD of main repo)
     if let Ok(head) = repo.head()
-        && let Some(branch_name) = head.shorthand() {
-            active_branches.insert(branch_name.to_string());
-        }
-    
+        && let Some(branch_name) = head.shorthand()
+    {
+        active_branches.insert(branch_name.to_string());
+    }
+
     // Check each branch to see if it's orphaned
     for (branch, _) in branches.flatten() {
         if let Some(branch_name) = branch.name().ok().flatten() {
@@ -57,23 +59,23 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
             }
         }
     }
-    
+
     Ok(orphaned_branches)
 }
 
 pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, CleanupError> {
     let mut orphaned_worktrees = Vec::new();
-    
+
     let worktrees = repo
         .worktrees()
         .map_err(|e| CleanupError::WorktreeScanFailed {
             message: format!("Failed to list worktrees: {}", e),
         })?;
-    
+
     for worktree_name in worktrees.iter().flatten() {
         if let Ok(worktree) = repo.find_worktree(worktree_name) {
             let worktree_path = worktree.path();
-            
+
             // Check if worktree directory exists but is in a bad state
             if worktree_path.exists() {
                 // Try to open the worktree as a repository
@@ -101,23 +103,24 @@ pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, Clea
             }
         }
     }
-    
+
     Ok(orphaned_worktrees)
 }
 
 pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, CleanupError> {
     let mut stale_sessions = Vec::new();
-    
+
     if !sessions_dir.exists() {
         return Ok(stale_sessions);
     }
-    
-    let entries = std::fs::read_dir(sessions_dir).map_err(|e| CleanupError::IoError { source: e })?;
-    
+
+    let entries =
+        std::fs::read_dir(sessions_dir).map_err(|e| CleanupError::IoError { source: e })?;
+
     for entry in entries {
         let entry = entry.map_err(|e| CleanupError::IoError { source: e })?;
         let path = entry.path();
-        
+
         if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
             // Try to read the session file
             match std::fs::read_to_string(&path) {
@@ -126,11 +129,15 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
                     match serde_json::from_str::<serde_json::Value>(&content) {
                         Ok(session) => {
                             // Check if the worktree path exists
-                            if let Some(worktree_path) = session.get("worktree_path").and_then(|v| v.as_str()) {
+                            if let Some(worktree_path) =
+                                session.get("worktree_path").and_then(|v| v.as_str())
+                            {
                                 let worktree_path = PathBuf::from(worktree_path);
                                 if !worktree_path.exists() {
                                     // Session references non-existent worktree
-                                    if let Some(session_id) = session.get("id").and_then(|v| v.as_str()) {
+                                    if let Some(session_id) =
+                                        session.get("id").and_then(|v| v.as_str())
+                                    {
                                         stale_sessions.push(session_id.to_string());
                                     }
                                 }
@@ -153,15 +160,15 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
             }
         }
     }
-    
+
     Ok(stale_sessions)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::env;
+    use std::fs;
 
     #[test]
     fn test_validate_cleanup_request_not_in_repo() {
@@ -196,7 +203,7 @@ mod tests {
     #[test]
     fn test_detect_stale_sessions_nonexistent_dir() {
         let nonexistent_dir = std::env::temp_dir().join("shards_test_nonexistent");
-        
+
         let result = detect_stale_sessions(&nonexistent_dir);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 0);
@@ -282,7 +289,11 @@ mod tests {
             "branch": "valid-branch",
             "agent": "test-agent"
         });
-        fs::write(&temp_dir.join("valid-session.json"), valid_session.to_string()).unwrap();
+        fs::write(
+            &temp_dir.join("valid-session.json"),
+            valid_session.to_string(),
+        )
+        .unwrap();
 
         // Create a stale session
         let stale_session = serde_json::json!({
@@ -291,7 +302,11 @@ mod tests {
             "branch": "stale-branch",
             "agent": "test-agent"
         });
-        fs::write(&temp_dir.join("stale-session.json"), stale_session.to_string()).unwrap();
+        fs::write(
+            &temp_dir.join("stale-session.json"),
+            stale_session.to_string(),
+        )
+        .unwrap();
 
         // Create a non-JSON file (should be ignored)
         fs::write(&temp_dir.join("not-a-session.txt"), "not json").unwrap();

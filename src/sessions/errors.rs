@@ -8,6 +8,9 @@ pub enum SessionError {
     #[error("Session '{name}' not found")]
     NotFound { name: String },
 
+    #[error("Worktree not found at path: {path}")]
+    WorktreeNotFound { path: std::path::PathBuf },
+
     #[error("Invalid session name: cannot be empty")]
     InvalidName,
 
@@ -56,6 +59,7 @@ impl ShardsError for SessionError {
         match self {
             SessionError::AlreadyExists { .. } => "SESSION_ALREADY_EXISTS",
             SessionError::NotFound { .. } => "SESSION_NOT_FOUND",
+            SessionError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
             SessionError::InvalidName => "INVALID_SESSION_NAME",
             SessionError::InvalidCommand => "INVALID_COMMAND",
             SessionError::InvalidPortCount => "INVALID_PORT_COUNT",
@@ -75,6 +79,7 @@ impl ShardsError for SessionError {
             self,
             SessionError::AlreadyExists { .. }
                 | SessionError::NotFound { .. }
+                | SessionError::WorktreeNotFound { .. }
                 | SessionError::InvalidName
                 | SessionError::InvalidCommand
                 | SessionError::InvalidPortCount

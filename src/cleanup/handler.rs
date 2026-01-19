@@ -1,5 +1,5 @@
-use tracing::{error, info, warn};
 use git2::{BranchType, Repository};
+use tracing::{error, info, warn};
 
 use crate::cleanup::{errors::CleanupError, operations, types::*};
 use crate::core::config::Config;
@@ -89,7 +89,9 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     Ok(summary)
 }
 
-pub fn cleanup_orphaned_resources(summary: &CleanupSummary) -> Result<CleanupSummary, CleanupError> {
+pub fn cleanup_orphaned_resources(
+    summary: &CleanupSummary,
+) -> Result<CleanupSummary, CleanupError> {
     info!(
         event = "cleanup.cleanup_started",
         total_resources = summary.total_cleaned
@@ -227,7 +229,10 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
                             );
                             return Err(CleanupError::CleanupFailed {
                                 name: branch_name.clone(),
-                                message: format!("Failed to delete branch (not a race condition): {}", e),
+                                message: format!(
+                                    "Failed to delete branch (not a race condition): {}",
+                                    e
+                                ),
                             });
                         }
                     }
@@ -248,7 +253,9 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
     Ok(cleaned_branches)
 }
 
-fn cleanup_orphaned_worktrees(worktree_paths: &[std::path::PathBuf]) -> Result<Vec<std::path::PathBuf>, CleanupError> {
+fn cleanup_orphaned_worktrees(
+    worktree_paths: &[std::path::PathBuf],
+) -> Result<Vec<std::path::PathBuf>, CleanupError> {
     // Early return for empty list
     if worktree_paths.is_empty() {
         return Ok(Vec::new());

@@ -4,5 +4,5 @@ pub mod events;
 pub mod logging;
 
 // Re-export commonly used types
-pub use config::{ShardsConfig, AgentConfig, TerminalConfig};
+pub use config::{AgentConfig, ShardsConfig, TerminalConfig};
 pub use errors::ConfigError;

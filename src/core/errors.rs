@@ -24,7 +24,7 @@ pub enum ConfigError {
 
     #[error("Invalid agent '{agent}'. Supported agents: claude, kiro, gemini, codex, aether")]
     InvalidAgent { agent: String },
-    
+
     #[error("Invalid configuration: {message}")]
     InvalidConfiguration { message: String },
 
@@ -49,7 +49,7 @@ impl ShardsError for ConfigError {
     fn is_user_error(&self) -> bool {
         matches!(
             self,
-            ConfigError::ConfigParseError { .. } 
+            ConfigError::ConfigParseError { .. }
                 | ConfigError::InvalidAgent { .. }
                 | ConfigError::InvalidConfiguration { .. }
         )
@@ -83,7 +83,10 @@ mod tests {
         let error = ConfigError::ConfigParseError {
             message: "invalid TOML syntax".to_string(),
         };
-        assert_eq!(error.to_string(), "Failed to parse config file: invalid TOML syntax");
+        assert_eq!(
+            error.to_string(),
+            "Failed to parse config file: invalid TOML syntax"
+        );
         assert_eq!(error.error_code(), "CONFIG_PARSE_ERROR");
         assert!(error.is_user_error());
     }

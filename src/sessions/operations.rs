@@ -38,10 +38,11 @@ pub fn allocate_port_range(
     base_port: u16,
 ) -> Result<(u16, u16), SessionError> {
     let (existing_sessions, _) = load_sessions_from_files(sessions_dir)?;
-    
+
     // Find next available port range
-    let (start_port, end_port) = find_next_available_range(&existing_sessions, port_count, base_port)?;
-    
+    let (start_port, end_port) =
+        find_next_available_range(&existing_sessions, port_count, base_port)?;
+
     Ok((start_port, end_port))
 }
 
@@ -53,40 +54,40 @@ pub fn find_next_available_range(
     if port_count == 0 {
         return Err(SessionError::InvalidPortCount);
     }
-    
+
     // Collect all allocated port ranges
     let mut allocated_ranges: Vec<(u16, u16)> = existing_sessions
         .iter()
         .map(|s| (s.port_range_start, s.port_range_end))
         .collect();
-    
+
     // Sort by start port
     allocated_ranges.sort_by_key(|&(start, _)| start);
-    
+
     // Try to find a gap starting from base_port
     let mut current_port = base_port;
-    
+
     for &(allocated_start, allocated_end) in &allocated_ranges {
         let proposed_end = current_port
             .checked_add(port_count)
             .and_then(|sum| sum.checked_sub(1))
             .ok_or(SessionError::PortRangeExhausted)?;
-        
+
         // Check if proposed range fits before this allocated range
         if proposed_end < allocated_start {
             return Ok((current_port, proposed_end));
         }
-        
+
         // Move past this allocated range
         current_port = allocated_end + 1;
     }
-    
+
     // Check if we can allocate after all existing ranges
     let proposed_end = current_port
         .checked_add(port_count)
         .and_then(|sum| sum.checked_sub(1))
         .ok_or(SessionError::PortRangeExhausted)?;
-    
+
     Ok((current_port, proposed_end))
 }
 
@@ -106,9 +107,18 @@ pub fn is_port_range_available(
 
 pub fn generate_port_env_vars(session: &Session) -> Vec<(String, String)> {
     vec![
-        ("SHARD_PORT_RANGE_START".to_string(), session.port_range_start.to_string()),
-        ("SHARD_PORT_RANGE_END".to_string(), session.port_range_end.to_string()),
-        ("SHARD_PORT_COUNT".to_string(), session.port_count.to_string()),
+        (
+            "SHARD_PORT_RANGE_START".to_string(),
+            session.port_range_start.to_string(),
+        ),
+        (
+            "SHARD_PORT_RANGE_END".to_string(),
+            session.port_range_end.to_string(),
+        ),
+        (
+            "SHARD_PORT_COUNT".to_string(),
+            session.port_count.to_string(),
+        ),
     ]
 }
 
@@ -138,52 +148,54 @@ pub fn validate_branch_name(branch: &str) -> Result<String, SessionError> {
 }
 
 pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError> {
-    fs::create_dir_all(sessions_dir)
-        .map_err(|e| SessionError::IoError { source: e })?;
+    fs::create_dir_all(sessions_dir).map_err(|e| SessionError::IoError { source: e })?;
     Ok(())
 }
 
 pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<(), SessionError> {
     let session_file = sessions_dir.join(format!("{}.json", session.id.replace('/', "_")));
-    let session_json = serde_json::to_string_pretty(session)
-        .map_err(|e| SessionError::IoError { source: std::io::Error::new(std::io::ErrorKind::InvalidData, e) })?;
-    
+    let session_json =
+        serde_json::to_string_pretty(session).map_err(|e| SessionError::IoError {
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        })?;
+
     // Write atomically by writing to temp file first, then renaming
     let temp_file = session_file.with_extension("json.tmp");
-    
+
     // Write to temp file
     if let Err(e) = fs::write(&temp_file, session_json) {
         // Clean up temp file if write failed
         let _ = fs::remove_file(&temp_file);
         return Err(SessionError::IoError { source: e });
     }
-    
+
     // Rename temp file to final location
     if let Err(e) = fs::rename(&temp_file, &session_file) {
         // Clean up temp file if rename failed
         let _ = fs::remove_file(&temp_file);
         return Err(SessionError::IoError { source: e });
     }
-    
+
     Ok(())
 }
 
-pub fn load_sessions_from_files(sessions_dir: &Path) -> Result<(Vec<Session>, usize), SessionError> {
+pub fn load_sessions_from_files(
+    sessions_dir: &Path,
+) -> Result<(Vec<Session>, usize), SessionError> {
     let mut sessions = Vec::new();
     let mut skipped_count = 0;
-    
+
     // Return empty list if sessions directory doesn't exist
     if !sessions_dir.exists() {
         return Ok((sessions, skipped_count));
     }
-    
-    let entries = fs::read_dir(sessions_dir)
-        .map_err(|e| SessionError::IoError { source: e })?;
-    
+
+    let entries = fs::read_dir(sessions_dir).map_err(|e| SessionError::IoError { source: e })?;
+
     for entry in entries {
         let entry = entry.map_err(|e| SessionError::IoError { source: e })?;
         let path = entry.path();
-        
+
         // Only process .json files
         if path.extension().and_then(|s| s.to_str()) == Some("json") {
             match fs::read_to_string(&path) {
@@ -230,15 +242,17 @@ pub fn load_sessions_from_files(sessions_dir: &Path) -> Result<(Vec<Session>, us
             }
         }
     }
-    
+
     Ok((sessions, skipped_count))
 }
 
 pub fn load_session_from_file(name: &str, sessions_dir: &Path) -> Result<Session, SessionError> {
     // Find session by branch name
-    let session = find_session_by_name(sessions_dir, name)?
-        .ok_or_else(|| SessionError::NotFound { name: name.to_string() })?;
-    
+    let session =
+        find_session_by_name(sessions_dir, name)?.ok_or_else(|| SessionError::NotFound {
+            name: name.to_string(),
+        })?;
+
     Ok(session)
 }
 
@@ -263,37 +277,42 @@ fn validate_session_structure(session: &Session) -> Result<(), String> {
         return Err("worktree path is empty".to_string());
     }
     if !session.worktree_path.exists() {
-        return Err(format!("worktree path does not exist: {}", session.worktree_path.display()));
+        return Err(format!(
+            "worktree path does not exist: {}",
+            session.worktree_path.display()
+        ));
     }
     Ok(())
 }
 
-pub fn find_session_by_name(sessions_dir: &Path, name: &str) -> Result<Option<Session>, SessionError> {
+pub fn find_session_by_name(
+    sessions_dir: &Path,
+    name: &str,
+) -> Result<Option<Session>, SessionError> {
     let (sessions, _) = load_sessions_from_files(sessions_dir)?;
-    
+
     // Find session by branch name (the "name" parameter refers to branch name)
     for session in sessions {
         if session.branch == name {
             return Ok(Some(session));
         }
     }
-    
+
     Ok(None)
 }
 
 pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), SessionError> {
     let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
-    
+
     if session_file.exists() {
-        fs::remove_file(&session_file)
-            .map_err(|e| SessionError::IoError { source: e })?;
+        fs::remove_file(&session_file).map_err(|e| SessionError::IoError { source: e })?;
     } else {
         warn!(
             "Attempted to remove session file that doesn't exist: {} - possible state inconsistency",
             session_file.display()
         );
     }
-    
+
     Ok(())
 }
 
@@ -377,17 +396,17 @@ mod tests {
         use std::path::PathBuf;
 
         let temp_dir = env::temp_dir().join("shards_test_sessions");
-        
+
         // Clean up if exists
         let _ = std::fs::remove_dir_all(&temp_dir);
-        
+
         // Should create directory
         assert!(ensure_sessions_directory(&temp_dir).is_ok());
         assert!(temp_dir.exists());
-        
+
         // Should not error if directory already exists
         assert!(ensure_sessions_directory(&temp_dir).is_ok());
-        
+
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -419,7 +438,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Save session
@@ -465,7 +484,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Save session
@@ -473,7 +492,10 @@ mod tests {
 
         // Verify temp file is cleaned up after successful write
         let temp_file = temp_dir.join("test_atomic.json.tmp");
-        assert!(!temp_file.exists(), "Temp file should be cleaned up after successful write");
+        assert!(
+            !temp_file.exists(),
+            "Temp file should be cleaned up after successful write"
+        );
 
         // Verify final file exists
         let session_file = temp_dir.join("test_atomic.json");
@@ -510,22 +532,22 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         let session_file = temp_dir.join("test_atomic-behavior.json");
-        
+
         // Create existing file with different content
         std::fs::write(&session_file, "old content").unwrap();
-        
+
         // Save session atomically
         assert!(save_session_to_file(&session, &temp_dir).is_ok());
-        
+
         // Verify file was replaced atomically (no partial writes)
         let content = std::fs::read_to_string(&session_file).unwrap();
         assert!(content.contains("test/atomic-behavior"));
         assert!(!content.contains("old content"));
-        
+
         // Verify it's valid JSON
         let loaded_session: Session = serde_json::from_str(&content).unwrap();
         assert_eq!(loaded_session, session);
@@ -561,7 +583,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Create a directory where the final file should be to force rename failure
@@ -574,7 +596,10 @@ mod tests {
 
         // Verify temp file is cleaned up after failure
         let temp_file = temp_dir.join("test_cleanup.json.tmp");
-        assert!(!temp_file.exists(), "Temp file should be cleaned up after rename failure");
+        assert!(
+            !temp_file.exists(),
+            "Temp file should be cleaned up after rename failure"
+        );
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -614,7 +639,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         let session2 = Session {
@@ -631,7 +656,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Save sessions
@@ -691,7 +716,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Save session
@@ -737,7 +762,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
 
         // Save session
@@ -784,7 +809,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
         save_session_to_file(&valid_session, &temp_dir).unwrap();
 
@@ -794,7 +819,11 @@ mod tests {
 
         // Create file with invalid session structure (missing required fields)
         let invalid_structure_file = temp_dir.join("invalid_structure.json");
-        std::fs::write(&invalid_structure_file, r#"{"id": "", "project_id": "test"}"#).unwrap();
+        std::fs::write(
+            &invalid_structure_file,
+            r#"{"id": "", "project_id": "test"}"#,
+        )
+        .unwrap();
 
         // Load sessions - should only return the valid one
         let (sessions, skipped) = load_sessions_from_files(&temp_dir).unwrap();
@@ -808,8 +837,8 @@ mod tests {
 
     #[test]
     fn test_validate_session_structure() {
-        use std::path::PathBuf;
         use std::env;
+        use std::path::PathBuf;
 
         // Create a temporary directory that exists
         let temp_dir = env::temp_dir().join("shards_test_validation");
@@ -831,7 +860,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
         assert!(validate_session_structure(&valid_session).is_ok());
 
@@ -850,7 +879,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
         let result = validate_session_structure(&invalid_session);
         assert!(result.is_err());
@@ -871,7 +900,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
         let result2 = validate_session_structure(&invalid_session2);
         assert!(result2.is_err());
@@ -893,11 +922,15 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
-            last_activity: None,
+            command: "test-command".to_string(),
         };
         let result3 = validate_session_structure(&invalid_session3);
         assert!(result3.is_err());
-        assert!(result3.unwrap_err().contains("worktree path does not exist"));
+        assert!(
+            result3
+                .unwrap_err()
+                .contains("worktree path does not exist")
+        );
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

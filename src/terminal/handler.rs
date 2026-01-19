@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::core::config::ShardsConfig;
 use crate::terminal::{errors::TerminalError, operations, types::*};
@@ -53,24 +53,35 @@ pub fn spawn_terminal(
         cmd.args(&spawn_command[1..]);
     }
 
-    let child = cmd.spawn().map_err(|e| TerminalError::SpawnFailed {
+    let _child = cmd.spawn().map_err(|e| TerminalError::SpawnFailed {
         message: format!("Failed to execute {}: {}", spawn_command[0], e),
     })?;
 
-    let process_id = child.id();
+    // Wait for terminal to spawn the agent process
+    let delay_ms = config.terminal.spawn_delay_ms;
+    info!(event = "terminal.waiting_for_agent_spawn", delay_ms, command);
+    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 
-    // Capture process metadata immediately for PID reuse protection
-    let (process_name, process_start_time) = if let Ok(info) = crate::process::get_process_info(process_id) {
-        (Some(info.name), Some(info.start_time))
-    } else {
-        (None, None)
-    };
+    // Try to find the actual agent process
+    let agent_name = operations::extract_command_name(command);
+    let (process_id, process_name, process_start_time) = 
+        match crate::process::find_process_by_name(&agent_name, Some(command)) {
+            Ok(Some(info)) => (Some(info.pid.as_u32()), Some(info.name), Some(info.start_time)),
+            _ => {
+                warn!(
+                    event = "terminal.agent_process_not_found",
+                    agent_name, command,
+                    message = "Agent process not found - session created but process tracking unavailable"
+                );
+                (None, None, None)
+            }
+        };
 
     let result = SpawnResult::new(
         terminal_type.clone(),
         command.to_string(),
         working_directory.to_path_buf(),
-        Some(process_id),
+        process_id,
         process_name.clone(),
         process_start_time,
     );

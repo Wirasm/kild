@@ -143,14 +143,15 @@ pub fn create_worktree(
 
     // Copy include pattern files if configured
     if let Some(config) = config
-        && let Some(include_config) = &config.include_patterns {
+        && let Some(include_config) = &config.include_patterns
+    {
         info!(
             event = "git.worktree.file_copy_started",
             project_id = project.id,
             branch = validated_branch,
             patterns = ?include_config.patterns
         );
-        
+
         match files::handler::copy_include_files(&project.path, &worktree_path, include_config) {
             Ok((copied_count, failed_count)) => {
                 if failed_count > 0 {
@@ -251,7 +252,12 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     // Try to open the worktree directly first
     let repo = if let Ok(repo) = Repository::open(worktree_path) {
         // If we can open it as a repo, get the main repository
-        if let Some(main_repo_path) = repo.path().parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()) {
+        if let Some(main_repo_path) = repo
+            .path()
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+        {
             Repository::open(main_repo_path).map_err(|e| GitError::Git2Error { source: e })?
         } else {
             repo
@@ -260,7 +266,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         // Fallback: try to find the main repository by looking for .git in parent directories
         let mut current_path = worktree_path;
         let mut repo_path = None;
-        
+
         // Look up the directory tree to find the main repository
         while let Some(parent) = current_path.parent() {
             if parent.join(".git").exists() && parent.join(".git").is_dir() {
@@ -317,7 +323,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         // Remove worktree with force flag
         let mut prune_options = git2::WorktreePruneOptions::new();
         prune_options.valid(true); // Allow pruning valid worktrees
-        
+
         worktree
             .prune(Some(&mut prune_options))
             .map_err(|e| GitError::Git2Error { source: e })?;
@@ -329,52 +335,55 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
 
         // Delete associated branch if it exists and follows worktree naming pattern
         if let Some(ref branch_name) = branch_name
-            && branch_name.starts_with("worktree-") {
-                match repo.find_branch(branch_name, BranchType::Local) {
-                    Ok(mut branch) => {
-                        match branch.delete() {
-                            Ok(()) => {
-                                info!(
-                                    event = "git.branch.delete_completed",
+            && branch_name.starts_with("worktree-")
+        {
+            match repo.find_branch(branch_name, BranchType::Local) {
+                Ok(mut branch) => {
+                    match branch.delete() {
+                        Ok(()) => {
+                            info!(
+                                event = "git.branch.delete_completed",
+                                branch = branch_name,
+                                worktree_path = %worktree_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            // Handle potential race conditions where branch might be deleted concurrently
+                            let error_msg = e.to_string();
+                            if error_msg.contains("not found")
+                                || error_msg.contains("does not exist")
+                            {
+                                debug!(
+                                    event = "git.branch.delete_race_condition",
                                     branch = branch_name,
-                                    worktree_path = %worktree_path.display()
+                                    worktree_path = %worktree_path.display(),
+                                    message = "Branch was deleted by another process"
+                                );
+                            } else {
+                                warn!(
+                                    event = "git.branch.delete_failed",
+                                    branch = branch_name,
+                                    worktree_path = %worktree_path.display(),
+                                    error = %e,
+                                    error_type = "concurrent_operation_or_permission"
                                 );
                             }
-                            Err(e) => {
-                                // Handle potential race conditions where branch might be deleted concurrently
-                                let error_msg = e.to_string();
-                                if error_msg.contains("not found") || error_msg.contains("does not exist") {
-                                    debug!(
-                                        event = "git.branch.delete_race_condition",
-                                        branch = branch_name,
-                                        worktree_path = %worktree_path.display(),
-                                        message = "Branch was deleted by another process"
-                                    );
-                                } else {
-                                    warn!(
-                                        event = "git.branch.delete_failed",
-                                        branch = branch_name,
-                                        worktree_path = %worktree_path.display(),
-                                        error = %e,
-                                        error_type = "concurrent_operation_or_permission"
-                                    );
-                                }
-                                // Don't fail the whole operation if branch deletion fails
-                            }
+                            // Don't fail the whole operation if branch deletion fails
                         }
                     }
-                    Err(e) => {
-                        debug!(
-                            event = "git.branch.not_found_for_cleanup",
-                            branch = branch_name,
-                            worktree_path = %worktree_path.display(),
-                            error = %e,
-                            message = "Branch already deleted or never existed"
-                        );
-                        // Branch already gone or not found - that's fine
-                    }
+                }
+                Err(e) => {
+                    debug!(
+                        event = "git.branch.not_found_for_cleanup",
+                        branch = branch_name,
+                        worktree_path = %worktree_path.display(),
+                        error = %e,
+                        message = "Branch already deleted or never existed"
+                    );
+                    // Branch already gone or not found - that's fine
                 }
             }
+        }
 
         info!(
             event = "git.worktree.remove_by_path_completed",
@@ -387,7 +396,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
             worktree_path = %worktree_path.display(),
             message = "Worktree directory exists but not registered in git - cleaning up orphaned directory"
         );
-        
+
         // If worktree not found in git, just remove the directory
         if worktree_path.exists() {
             std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;

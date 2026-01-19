@@ -27,6 +27,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("create", sub_matches)) => handle_create_command(sub_matches),
         Some(("list", _)) => handle_list_command(),
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
+        Some(("restart", sub_matches)) => handle_restart_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("cleanup", _)) => handle_cleanup_command(),
         Some(("health", sub_matches)) => handle_health_command(sub_matches),
@@ -106,14 +107,18 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
             if sessions.is_empty() {
                 println!("No active shards found.");
             } else {
+                const TABLE_TOP: &str = "┌──────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┬──────────────────────┐";
+                const TABLE_HEADER: &str = "│ Branch           │ Agent   │ Status  │ Created             │ Port Range  │ Process     │ Command              │";
+                const TABLE_SEP: &str = "├──────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┼──────────────────────┤";
+                
                 println!("Active shards:");
-                println!("┌──────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┐");
-                println!("│ Branch           │ Agent   │ Status  │ Created             │ Port Range  │ Process     │");
-                println!("├──────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┤");
+                println!("{}", TABLE_TOP);
+                println!("{}", TABLE_HEADER);
+                println!("{}", TABLE_SEP);
 
                 for session in &sessions {
                     let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
-                    let process_status = if let Some(pid) = session.process_id {
+                    let process_status = session.process_id.map_or("No PID".to_string(), |pid| {
                         match process::is_process_running(pid) {
                             Ok(true) => format!("Run({})", pid),
                             Ok(false) => format!("Stop({})", pid),
@@ -127,22 +132,23 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Err({})", pid)
                             }
                         }
-                    } else {
-                        "No PID".to_string()
-                    };
+                    });
 
                     println!(
-                        "│ {:<16} │ {:<7} │ {:<7} │ {:<19} │ {:<11} │ {:<11} │",
+                        "│ {:<16} │ {:<7} │ {:<7} │ {:<19} │ {:<11} │ {:<11} │ {:<20} │",
                         truncate(&session.branch, 16),
                         truncate(&session.agent, 7),
                         format!("{:?}", session.status).to_lowercase(),
                         truncate(&session.created_at, 19),
                         truncate(&port_range, 11),
-                        truncate(&process_status, 11)
+                        truncate(&process_status, 11),
+                        truncate(&session.command, 20)
                     );
                 }
 
-                println!("└──────────────────┴─────────┴─────────┴─────────────────────┴─────────────┘");
+                const TABLE_BOTTOM: &str = "└──────────────────┴─────────┴─────────┴─────────────────────┴─────────────┴─────────────┴──────────────────────┘";
+                
+                println!("{}", TABLE_BOTTOM);
             }
 
             info!(event = "cli.list_completed", count = sessions.len());
@@ -185,6 +191,30 @@ fn handle_destroy_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
                 error = %e
             );
 
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches.get_one::<String>("branch").unwrap();
+    let agent_override = matches.get_one::<String>("agent").cloned();
+
+    info!(event = "cli.restart_started", branch = branch, agent_override = ?agent_override);
+
+    match session_handler::restart_session(branch, agent_override) {
+        Ok(session) => {
+            println!("✅ Shard '{}' restarted successfully!", branch);
+            println!("   Agent: {}", session.agent);
+            println!("   Process ID: {:?}", session.process_id);
+            println!("   Worktree: {}", session.worktree_path.display());
+            info!(event = "cli.restart_completed", branch = branch, process_id = session.process_id);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to restart shard '{}': {}", branch, e);
+            error!(event = "cli.restart_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
