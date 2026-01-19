@@ -1,24 +1,12 @@
 use crate::terminal::{errors::TerminalError, types::*};
 use std::path::Path;
-use tracing::{debug, info, warn};
 
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
-    info!(event = "terminal.detect_started");
-
     if app_exists_macos("iTerm") {
-        info!(event = "terminal.detect_completed", terminal_type = "iTerm");
         Ok(TerminalType::ITerm)
     } else if app_exists_macos("Terminal") {
-        info!(
-            event = "terminal.detect_completed",
-            terminal_type = "Terminal"
-        );
         Ok(TerminalType::TerminalApp)
     } else {
-        warn!(
-            event = "terminal.detect_failed",
-            message = "No supported terminal found"
-        );
         Err(TerminalError::NoTerminalFound)
     }
 }
@@ -41,29 +29,19 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
     );
 
     match config.terminal_type {
-        TerminalType::ITerm => {
-            let script = format!(
+        TerminalType::ITerm => Ok(vec![
+            "osascript".to_string(),
+            "-e".to_string(),
+            format!(
                 r#"tell application "iTerm"
-                        try
-                            if (count of windows) = 0 then
-                                create window with default profile
-                            end if
-                            tell current session of current window
-                                write text "{}"
-                            end tell
-                        on error
-                            create window with default profile
-                            tell current session of current window
-                                write text "{}"
-                            end tell
-                        end try
+                        create window with default profile
+                        tell current session of current window
+                            write text "{}"
+                        end tell
                     end tell"#,
-                applescript_escape(&cd_command),
                 applescript_escape(&cd_command)
-            );
-
-            Ok(vec!["osascript".to_string(), "-e".to_string(), script])
-        }
+            ),
+        ]),
         TerminalType::TerminalApp => Ok(vec![
             "osascript".to_string(),
             "-e".to_string(),
@@ -93,7 +71,7 @@ pub fn validate_working_directory(path: &Path) -> Result<(), TerminalError> {
     Ok(())
 }
 
-pub fn app_exists_macos(app_name: &str) -> bool {
+fn app_exists_macos(app_name: &str) -> bool {
     std::process::Command::new("osascript")
         .arg("-e")
         .arg(format!(r#"tell application "System Events" to exists application process "{}""#, app_name))
@@ -123,30 +101,9 @@ fn applescript_escape(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
-pub fn execute_applescript(script: &str) -> Result<(), TerminalError> {
-    debug!(event = "terminal.applescript_execution_started");
-
-    let result = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|e| TerminalError::AppleScriptExecution {
-            message: format!("Failed to execute osascript: {}", e),
-        })?;
-
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        warn!(
-            event = "terminal.applescript_execution_failed",
-            stderr = %stderr
-        );
-        return Err(TerminalError::AppleScriptFailed {
-            stderr: stderr.to_string(),
-        });
-    }
-
-    debug!(event = "terminal.applescript_execution_completed");
-    Ok(())
+/// Extract the executable name from a command string
+pub fn extract_command_name(command: &str) -> String {
+    command.split_whitespace().next().unwrap_or(command).to_string()
 }
 
 #[cfg(test)]
@@ -243,5 +200,13 @@ mod tests {
         assert_eq!(applescript_escape("hello\"world"), "hello\\\"world");
         assert_eq!(applescript_escape("hello\\world"), "hello\\\\world");
         assert_eq!(applescript_escape("hello\nworld"), "hello\\nworld");
+    }
+
+    #[test]
+    fn test_extract_command_name() {
+        assert_eq!(extract_command_name("kiro-cli chat"), "kiro-cli");
+        assert_eq!(extract_command_name("claude-code"), "claude-code");
+        assert_eq!(extract_command_name("  cc  "), "cc");
+        assert_eq!(extract_command_name("echo hello world"), "echo");
     }
 }

@@ -19,40 +19,9 @@ pub fn spawn_terminal(
     let terminal_type = if let Some(preferred) = &config.terminal.preferred {
         // Try to use preferred terminal, fall back to detection if not available
         match preferred.as_str() {
-            "iterm2" | "iterm" => {
-                // Verify iTerm2 is actually available
-                if operations::app_exists_macos("iTerm") {
-                    TerminalType::ITerm
-                } else {
-                    warn!(
-                        event = "terminal.preferred_not_available",
-                        preferred = "iTerm",
-                        message = "Preferred terminal not found, falling back to detection"
-                    );
-                    operations::detect_terminal()?
-                }
-            }
-            "terminal" => {
-                // Verify Terminal.app is actually available
-                if operations::app_exists_macos("Terminal") {
-                    TerminalType::TerminalApp
-                } else {
-                    warn!(
-                        event = "terminal.preferred_not_available",
-                        preferred = "Terminal",
-                        message = "Preferred terminal not found, falling back to detection"
-                    );
-                    operations::detect_terminal()?
-                }
-            }
-            _ => {
-                warn!(
-                    event = "terminal.preferred_unknown",
-                    preferred = preferred,
-                    message = "Unknown preferred terminal, falling back to detection"
-                );
-                operations::detect_terminal()?
-            }
+            "iterm2" | "iterm" => TerminalType::ITerm,
+            "terminal" => TerminalType::TerminalApp,
+            _ => operations::detect_terminal()?,
         }
     } else {
         operations::detect_terminal()?
@@ -78,62 +47,41 @@ pub fn spawn_terminal(
         command_args = ?spawn_command
     );
 
-    info!(
-        event = "terminal.launching",
-        terminal_type = %terminal_type,
-        message = "Launching terminal..."
-    );
-
-    // For AppleScript commands, use our enhanced execution function
-    if spawn_command[0] == "osascript" && spawn_command.len() >= 3 {
-        operations::execute_applescript(&spawn_command[2])?;
-
-        info!(
-            event = "terminal.spawn_completed",
-            terminal_type = %terminal_type,
-            working_directory = %working_directory.display(),
-            command = command,
-            message = "Terminal launched successfully"
-        );
-
-        // For AppleScript, we don't get a direct process ID, so return None
-        let result = SpawnResult::new(
-            terminal_type.clone(),
-            command.to_string(),
-            working_directory.to_path_buf(),
-            None,
-            None,
-            None,
-        );
-
-        return Ok(result);
-    }
-
     // Execute the command asynchronously (don't wait for terminal to close)
     let mut cmd = Command::new(&spawn_command[0]);
     if spawn_command.len() > 1 {
         cmd.args(&spawn_command[1..]);
     }
 
-    let child = cmd.spawn().map_err(|e| TerminalError::SpawnFailed {
+    let _child = cmd.spawn().map_err(|e| TerminalError::SpawnFailed {
         message: format!("Failed to execute {}: {}", spawn_command[0], e),
     })?;
 
-    let process_id = child.id();
+    // Wait for terminal to spawn the agent process
+    let delay_ms = config.terminal.spawn_delay_ms;
+    info!(event = "terminal.waiting_for_agent_spawn", delay_ms, command);
+    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 
-    // Capture process metadata immediately for PID reuse protection
-    let (process_name, process_start_time) =
-        if let Ok(info) = crate::process::get_process_info(process_id) {
-            (Some(info.name), Some(info.start_time))
-        } else {
-            (None, None)
+    // Try to find the actual agent process
+    let agent_name = operations::extract_command_name(command);
+    let (process_id, process_name, process_start_time) = 
+        match crate::process::find_process_by_name(&agent_name, Some(command)) {
+            Ok(Some(info)) => (Some(info.pid.as_u32()), Some(info.name), Some(info.start_time)),
+            _ => {
+                warn!(
+                    event = "terminal.agent_process_not_found",
+                    agent_name, command,
+                    message = "Agent process not found - session created but process tracking unavailable"
+                );
+                (None, None, None)
+            }
         };
 
     let result = SpawnResult::new(
         terminal_type.clone(),
         command.to_string(),
         working_directory.to_path_buf(),
-        Some(process_id),
+        process_id,
         process_name.clone(),
         process_start_time,
     );
@@ -144,8 +92,7 @@ pub fn spawn_terminal(
         working_directory = %working_directory.display(),
         command = command,
         process_id = process_id,
-        process_name = ?process_name,
-        message = "Terminal launched successfully"
+        process_name = ?process_name
     );
 
     Ok(result)

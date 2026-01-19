@@ -92,7 +92,7 @@ pub fn create_session(
         project_id: project.id,
         branch: validated.name.clone(),
         worktree_path: worktree.path,
-        agent: validated.agent,
+        agent: validated.agent.clone(),
         status: SessionStatus::Active,
         created_at: chrono::Utc::now().to_rfc3339(),
         port_range_start: port_start,
@@ -101,6 +101,10 @@ pub fn create_session(
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
+        command: spawn_result.command_executed.trim()
+            .is_empty()
+            .then(|| format!("{} (command not captured)", validated.agent))
+            .unwrap_or_else(|| spawn_result.command_executed.clone()),
     };
 
     // 7. Save session to file
@@ -297,6 +301,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            command: "test-command".to_string(),
         };
 
         // Create worktree directory so validation passes
