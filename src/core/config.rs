@@ -77,8 +77,7 @@ pub struct AgentConfig {
 pub struct TerminalConfig {
     #[serde(default)]
     pub preferred: Option<String>,
-    /// Time to wait (in milliseconds) for terminal to spawn agent process before searching
-    #[serde(default = "default_spawn_delay_ms")]
+    #[serde(default)]
     pub spawn_delay_ms: u64,
 }
 
@@ -86,13 +85,9 @@ impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
             preferred: None,
-            spawn_delay_ms: default_spawn_delay_ms(),
+            spawn_delay_ms: 500,
         }
     }
-}
-
-fn default_spawn_delay_ms() -> u64 {
-    500
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -57,35 +57,24 @@ pub fn spawn_terminal(
         message: format!("Failed to execute {}: {}", spawn_command[0], e),
     })?;
 
-    // Wait for terminal to spawn the agent process before searching
-    // This delay allows the terminal emulator to launch and start the agent command
+    // Wait for terminal to spawn the agent process
     let delay_ms = config.terminal.spawn_delay_ms;
-    info!(
-        event = "terminal.waiting_for_agent_spawn",
-        delay_ms = delay_ms,
-        command = command
-    );
+    info!(event = "terminal.waiting_for_agent_spawn", delay_ms, command);
     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 
-    // Extract agent command name for process search
-    let agent_name = operations::extract_command_name(command);
-
     // Try to find the actual agent process
-    let (process_id, process_name, process_start_time) =
-        if let Ok(Some(info)) = crate::process::find_process_by_name(&agent_name, Some(command)) {
-            (
-                Some(info.pid.as_u32()),
-                Some(info.name),
-                Some(info.start_time),
-            )
-        } else {
-            warn!(
-                event = "terminal.agent_process_not_found",
-                agent_name = agent_name,
-                command = command,
-                message = "Agent process not found - session created but process tracking unavailable"
-            );
-            (None, None, None)
+    let agent_name = operations::extract_command_name(command);
+    let (process_id, process_name, process_start_time) = 
+        match crate::process::find_process_by_name(&agent_name, Some(command)) {
+            Ok(Some(info)) => (Some(info.pid.as_u32()), Some(info.name), Some(info.start_time)),
+            _ => {
+                warn!(
+                    event = "terminal.agent_process_not_found",
+                    agent_name, command,
+                    message = "Agent process not found - session created but process tracking unavailable"
+                );
+                (None, None, None)
+            }
         };
 
     let result = SpawnResult::new(

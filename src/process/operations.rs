@@ -166,18 +166,14 @@ pub fn find_process_by_name(
     system.refresh_processes(ProcessesToUpdate::All, true);
 
     for (pid, process) in system.processes() {
-        let process_name = process.name().to_string_lossy().to_string();
-
-        // Check if name matches
+        let process_name = process.name().to_string_lossy();
+        
         if !process_name.contains(name_pattern) {
             continue;
         }
 
-        // If command pattern specified, check command line
         if let Some(cmd_pattern) = command_pattern {
-            let cmd_line = process
-                .cmd()
-                .iter()
+            let cmd_line = process.cmd().iter()
                 .map(|s| s.to_string_lossy())
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -188,7 +184,7 @@ pub fn find_process_by_name(
 
         return Ok(Some(ProcessInfo {
             pid: Pid::from_raw(pid.as_u32()),
-            name: process_name,
+            name: process_name.to_string(),
             status: ProcessStatus::from(process.status()),
             start_time: process.start_time(),
         }));
