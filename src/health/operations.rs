@@ -55,7 +55,7 @@ pub fn enrich_session_with_health(
 ) -> ShardHealth {
     let status = calculate_health_status(
         process_running,
-        session.last_activity.as_deref(),
+        None, // TODO: Implement last_activity tracking
         false, // TODO: Track last message sender in future
     );
     
@@ -71,7 +71,7 @@ pub fn enrich_session_with_health(
         cpu_usage_percent: process_metrics.as_ref().map(|m| m.cpu_usage_percent),
         memory_usage_mb: process_metrics.as_ref().map(|m| m.memory_usage_mb()),
         process_status: if process_running { "Running".to_string() } else { "Stopped".to_string() },
-        last_activity: session.last_activity.clone(),
+        last_activity: None, // TODO: Implement last_activity tracking
         status,
         status_icon: status_icon.to_string(),
     };

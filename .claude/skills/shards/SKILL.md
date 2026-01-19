@@ -12,7 +12,7 @@ Shards creates isolated Git worktrees for parallel AI development sessions. Each
 
 ### Create a Shard
 ```bash
-shards create <branch> [--agent <agent>] [--terminal <terminal>]
+shards create <branch> [--agent <agent>] [--flags <flags>] [--terminal <terminal>] [--startup-command <command>]
 ```
 
 Creates an isolated workspace with:
@@ -24,10 +24,12 @@ Creates an isolated workspace with:
 
 **Supported agents**: claude, kiro, gemini, codex, aether
 
+**Note**: `--flags` accepts space-separated syntax: `--flags '--trust-all-tools'`
+
 **Example**:
 ```bash
 shards create feature-auth --agent kiro
-shards create bug-fix-123 --agent claude
+shards create bug-fix-123 --agent claude --flags '--trust-all-tools'
 ```
 
 ### List All Shards
@@ -42,6 +44,7 @@ Shows table with:
 - Creation timestamp
 - Port range allocation
 - Process status (Running/Stopped with PID)
+- Command executed (actual command with flags)
 
 ### Check Shard Status
 ```bash
@@ -53,6 +56,53 @@ Detailed view of specific shard:
 - Worktree path
 - Process status and metadata
 - Port range allocation
+
+### Restart a Shard
+```bash
+shards restart <branch> [--agent <agent>]
+```
+
+Restarts agent process without destroying worktree:
+- Kills existing process (if tracked)
+- Launches new terminal with same or different agent
+- Preserves worktree and uncommitted changes
+- Updates session metadata with new process info
+
+**Example**:
+```bash
+shards restart feature-auth
+shards restart bug-fix-123 --agent claude
+```
+
+### Check Shard Status
+```bash
+shards status <branch>
+```
+
+Detailed view of specific shard:
+- Branch and agent info
+- Worktree path
+- Process status and metadata
+- Port range allocation
+
+### Check Health Status
+```bash
+shards health [branch] [--json] [--all]
+```
+
+Shows health dashboard with:
+- Process status (Working/Idle/Stuck/Crashed/Unknown)
+- CPU and memory usage metrics
+- Last activity tracking (planned feature)
+- Summary statistics
+- JSON output for programmatic use
+
+**Example**:
+```bash
+shards health                    # Dashboard for current project
+shards health feature-auth       # Specific shard details
+shards health --json            # JSON output
+```
 
 ### Destroy a Shard
 ```bash
@@ -66,13 +116,21 @@ Complete cleanup:
 
 ### Cleanup Orphaned Resources
 ```bash
-shards cleanup
+shards cleanup [--no-pid] [--stopped] [--older-than <days>] [--all]
 ```
 
-Scans and removes:
-- Orphaned branches (no worktree)
-- Orphaned worktrees (invalid Git state)
-- Stale sessions (worktree deleted)
+Enhanced cleanup strategies:
+- `--no-pid`: Clean sessions without PID tracking
+- `--stopped`: Clean sessions with stopped processes  
+- `--older-than N`: Clean sessions older than N days
+- `--all`: Clean all orphaned resources (default)
+
+**Example**:
+```bash
+shards cleanup                   # Clean all orphaned resources
+shards cleanup --no-pid         # Clean sessions without PID tracking
+shards cleanup --older-than 7   # Clean sessions older than 7 days
+```
 
 ## Configuration
 
