@@ -82,7 +82,7 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         project_id: project.id,
         branch: validated.name.clone(),
         worktree_path: worktree.path,
-        agent: validated.agent,
+        agent: validated.agent.clone(),
         status: SessionStatus::Active,
         created_at: chrono::Utc::now().to_rfc3339(),
         port_range_start: port_start,
@@ -91,7 +91,10 @@ pub fn create_session(request: CreateSessionRequest, shards_config: &ShardsConfi
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
-        command: spawn_result.command_executed.clone(),
+        command: spawn_result.command_executed.trim()
+            .is_empty()
+            .then(|| format!("{} (command not captured)", validated.agent))
+            .unwrap_or_else(|| spawn_result.command_executed.clone()),
     };
 
     // 7. Save session to file
