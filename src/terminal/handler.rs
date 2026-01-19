@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_spawn_terminal_empty_command() {
-        let current_dir = std::env::current_dir().unwrap();
+        let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let config = ShardsConfig::default();
         let result = spawn_terminal(&current_dir, "", &config);
 
