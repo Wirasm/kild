@@ -222,6 +222,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
 }
 
 pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Session, SessionError> {
+    let start_time = std::time::Instant::now();
     info!(event = "session.restart_started", name = name, agent_override = ?agent_override);
 
     let config = Config::new();
@@ -250,7 +251,14 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
                 info!(event = "session.restart_kill_completed", pid = pid);
             }
             Err(crate::process::ProcessError::NotFound { .. }) => {
-                info!(event = "session.restart_kill_already_dead", pid = pid);
+                info!(event = "session.restart_kill_process_not_found", pid = pid);
+            }
+            Err(crate::process::ProcessError::AccessDenied { .. }) => {
+                error!(event = "session.restart_kill_access_denied", pid = pid);
+                return Err(SessionError::ProcessKillFailed {
+                    pid,
+                    message: "Access denied - insufficient permissions to kill process".to_string(),
+                });
             }
             Err(e) => {
                 error!(event = "session.restart_kill_failed", pid = pid, error = %e);
@@ -262,7 +270,19 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
         }
     }
 
-    // 3. Determine agent and command
+    // 3. Validate worktree still exists
+    if !session.worktree_path.exists() {
+        error!(
+            event = "session.restart_worktree_missing",
+            session_id = session.id,
+            worktree_path = %session.worktree_path.display()
+        );
+        return Err(SessionError::WorktreeNotFound {
+            path: session.worktree_path.clone(),
+        });
+    }
+
+    // 4. Determine agent and command
     let shards_config = ShardsConfig::load_hierarchy().unwrap_or_default();
     let agent = agent_override.unwrap_or_else(|| session.agent.clone());
     let agent_command = shards_config.get_agent_command(&agent);
@@ -274,7 +294,7 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
         command = agent_command
     );
 
-    // 4. Relaunch terminal in existing worktree
+    // 5. Relaunch terminal in existing worktree
     info!(event = "session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
     let spawn_result = terminal::handler::spawn_terminal(&session.worktree_path, &agent_command, &shards_config)
@@ -286,14 +306,25 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
         process_name = ?spawn_result.process_name
     );
 
-    // 5. Update session with new process info
+    // Capture process metadata immediately for PID reuse protection
+    let (process_name, process_start_time) = if let Some(pid) = spawn_result.process_id {
+        if let Ok(info) = crate::process::get_process_info(pid) {
+            (Some(info.name), Some(info.start_time))
+        } else {
+            (spawn_result.process_name.clone(), spawn_result.process_start_time)
+        }
+    } else {
+        (spawn_result.process_name.clone(), spawn_result.process_start_time)
+    };
+
+    // 6. Update session with new process info
     session.agent = agent;
     session.process_id = spawn_result.process_id;
-    session.process_name = spawn_result.process_name;
-    session.process_start_time = spawn_result.process_start_time;
+    session.process_name = process_name;
+    session.process_start_time = process_start_time;
     session.status = SessionStatus::Active;
 
-    // 6. Save updated session to file
+    // 7. Save updated session to file
     operations::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
@@ -301,7 +332,8 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
         session_id = session.id,
         branch = name,
         agent = session.agent,
-        process_id = session.process_id
+        process_id = session.process_id,
+        duration_ms = start_time.elapsed().as_millis()
     );
 
     Ok(session)

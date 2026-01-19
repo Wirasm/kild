@@ -189,6 +189,7 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
             println!("✅ Shard '{}' restarted successfully!", branch);
             println!("   Agent: {}", session.agent);
             println!("   Process ID: {:?}", session.process_id);
+            println!("   Worktree: {}", session.worktree_path.display());
 
             info!(event = "cli.restart_completed", branch = branch, process_id = session.process_id);
 

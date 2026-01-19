@@ -26,14 +26,14 @@ cargo install --path .
 
 ## Usage
 
-### Start a new shard
+### Create a new shard
 ```bash
-shards start <name> <agent-command>
+shards create <branch> --agent <agent>
 
 # Examples:
-shards start kiro-session "kiro-cli chat"
-shards start claude-work "claude-code"
-shards start gemini-task "gemini-cli"
+shards create kiro-session --agent kiro
+shards create claude-work --agent claude
+shards create gemini-task --agent gemini
 ```
 
 ### List active shards
@@ -41,14 +41,23 @@ shards start gemini-task "gemini-cli"
 shards list
 ```
 
-### Get shard information
+### Restart a shard
 ```bash
-shards info <name>
+# Restart with same agent
+shards restart <branch>
+
+# Restart with different agent  
+shards restart <branch> --agent <agent>
 ```
 
-### Stop a shard
+### Get shard information
 ```bash
-shards stop <name>
+shards status <branch>
+```
+
+### Destroy a shard
+```bash
+shards destroy <branch>
 ```
 
 ### Clean up orphaned shards
