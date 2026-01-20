@@ -73,6 +73,7 @@ git worktree list
 | Current State | Action |
 |---------------|--------|
 | In worktree | Use it (log: "Using worktree") |
+| Branch matches plan | Use existing branch (check if current branch contains plan keywords) |
 | On main, clean | Create branch: `git checkout -b feature/{plan-slug}` |
 | On main, dirty | STOP: "Stash or commit changes first" |
 | On feature branch | Use it (log: "Using existing branch") |

@@ -136,10 +136,20 @@ git status
 
 ### 3.2 Decision Tree
 
+```bash
+# Check if current branch is appropriate for this issue
+current_branch=$(git branch --show-current)
+```
+
 ```
 ┌─ IN WORKTREE?
 │  └─ YES → Use it (assume it's for this work)
 │           Log: "Using worktree at {path}"
+│
+├─ BRANCH CONTAINS ISSUE NUMBER?
+│  └─ if [[ "$current_branch" =~ issue-{number} ]] || [[ "$current_branch" =~ fix.*{number} ]]; then
+│     └─ Use existing branch (already appropriate for this work)
+│        Log: "✅ Current branch '$current_branch' is appropriate for issue #{number}"
 │
 ├─ ON MAIN/MASTER?
 │  └─ Q: Working directory clean?
