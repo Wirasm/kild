@@ -29,7 +29,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
         Some(("restart", sub_matches)) => handle_restart_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
-        Some(("cleanup", _)) => handle_cleanup_command(),
+        Some(("cleanup", sub_matches)) => handle_cleanup_command(sub_matches),
         Some(("health", sub_matches)) => handle_health_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");
@@ -295,10 +295,20 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     }
 }
 
-fn handle_cleanup_command() -> Result<(), Box<dyn std::error::Error>> {
+fn handle_cleanup_command(sub_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.cleanup_started");
+    
+    let strategy = if sub_matches.get_flag("no-pid") {
+        cleanup::CleanupStrategy::NoPid
+    } else if sub_matches.get_flag("stopped") {
+        cleanup::CleanupStrategy::Stopped
+    } else if let Some(days) = sub_matches.get_one::<u64>("older-than") {
+        cleanup::CleanupStrategy::OlderThan(*days)
+    } else {
+        cleanup::CleanupStrategy::All
+    };
 
-    match cleanup::cleanup_all() {
+    match cleanup::cleanup_all_with_strategy(strategy) {
         Ok(summary) => {
             println!("✅ Cleanup completed successfully!");
             

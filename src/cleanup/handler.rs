@@ -183,6 +183,72 @@ pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
     Ok(cleanup_summary)
 }
 
+pub fn cleanup_all_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
+    info!(event = "cleanup.cleanup_all_with_strategy_started", strategy = ?strategy);
+
+    // First scan for orphaned resources with strategy
+    let scan_summary = scan_for_orphans_with_strategy(strategy)?;
+
+    if scan_summary.total_cleaned == 0 {
+        info!(event = "cleanup.cleanup_all_with_strategy_no_resources");
+        return Err(CleanupError::NoOrphanedResources);
+    }
+
+    // Then clean them up
+    let cleanup_summary = cleanup_orphaned_resources(&scan_summary)?;
+
+    info!(
+        event = "cleanup.cleanup_all_with_strategy_completed",
+        total_cleaned = cleanup_summary.total_cleaned
+    );
+
+    Ok(cleanup_summary)
+}
+
+pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
+    info!(event = "cleanup.scan_with_strategy_started", strategy = ?strategy);
+
+    operations::validate_cleanup_request()?;
+
+    let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
+    let _repo = Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
+    let config = Config::new();
+
+    let mut summary = CleanupSummary::new();
+
+    match strategy {
+        CleanupStrategy::All => {
+            // Use existing scan_for_orphans logic
+            return scan_for_orphans();
+        }
+        CleanupStrategy::NoPid => {
+            let sessions = operations::detect_sessions_without_pid(&config.sessions_dir())?;
+            for session_id in sessions {
+                summary.add_session(session_id);
+            }
+        }
+        CleanupStrategy::Stopped => {
+            let sessions = operations::detect_sessions_with_stopped_processes(&config.sessions_dir())?;
+            for session_id in sessions {
+                summary.add_session(session_id);
+            }
+        }
+        CleanupStrategy::OlderThan(days) => {
+            let sessions = operations::detect_old_sessions(&config.sessions_dir(), days)?;
+            for session_id in sessions {
+                summary.add_session(session_id);
+            }
+        }
+    }
+
+    info!(
+        event = "cleanup.scan_with_strategy_completed",
+        total_sessions = summary.stale_sessions.len()
+    );
+
+    Ok(summary)
+}
+
 fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, CleanupError> {
     // Early return for empty list - no Git access needed
     if branches.is_empty() {
