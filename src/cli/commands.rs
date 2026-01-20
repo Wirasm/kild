@@ -108,9 +108,9 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
             if sessions.is_empty() {
                 println!("No active shards found.");
             } else {
-                const TABLE_TOP: &str = "┌──────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┬──────────────────────┐";
-                const TABLE_HEADER: &str = "│ Branch           │ Agent   │ Status  │ Created             │ Port Range  │ Process     │ Command              │";
-                const TABLE_SEP: &str = "├──────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┼──────────────────────┤";
+                const TABLE_TOP: &str = "┌────────────────────────────────────┬─────────┬─────────┬─────────────────────┬─────────────┬─────────────┬──────────────────────┐";
+                const TABLE_HEADER: &str = "│ Branch                             │ Agent   │ Status  │ Created             │ Port Range  │ Process     │ Command              │";
+                const TABLE_SEP: &str = "├────────────────────────────────────┼─────────┼─────────┼─────────────────────┼─────────────┼─────────────┼──────────────────────┤";
                 
                 println!("Active shards:");
                 println!("{}", TABLE_TOP);
@@ -136,8 +136,8 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     println!(
-                        "│ {:<16} │ {:<7} │ {:<7} │ {:<19} │ {:<11} │ {:<11} │ {:<20} │",
-                        truncate(&session.branch, 16),
+                        "│ {:<32} │ {:<7} │ {:<7} │ {:<19} │ {:<11} │ {:<11} │ {:<20} │",
+                        truncate(&session.branch, 32),
                         truncate(&session.agent, 7),
                         format!("{:?}", session.status).to_lowercase(),
                         truncate(&session.created_at, 19),
@@ -147,7 +147,7 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
 
-                const TABLE_BOTTOM: &str = "└──────────────────┴─────────┴─────────┴─────────────────────┴─────────────┴─────────────┴──────────────────────┘";
+                const TABLE_BOTTOM: &str = "└────────────────────────────────────┴─────────┴─────────┴─────────────────────┴─────────────┴─────────────┴──────────────────────┘";
                 
                 println!("{}", TABLE_BOTTOM);
             }
