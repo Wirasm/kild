@@ -35,10 +35,10 @@
 ## ❌ **What We CANNOT Do Yet**
 
 ### **Process Management Limitations**
-- **No process monitoring** - we launch terminals but don't track if the agent process is still running
+- **Limited process monitoring** - we track agent processes during startup with retry logic, but don't continuously monitor if they remain running
 - **No process attachment** - can't attach to existing agent processes not started by Shards
 - **No process termination** - stopping a shard only cleans up worktree, doesn't kill the agent process
-- **No heartbeat system** - can't detect if an agent has crashed or exited
+- **No heartbeat system** - can't detect if an agent has crashed or exited after startup
 
 ### **Advanced Features Not Implemented**
 - **No GUI interface** - CLI only (GPUI planned for future)

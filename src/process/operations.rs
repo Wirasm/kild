@@ -193,13 +193,29 @@ mod tests {
         let patterns = generate_search_patterns("kiro-cli");
         assert!(patterns.contains(&"kiro-cli".to_string()));
         assert!(patterns.contains(&"kiro".to_string()));
+        assert_eq!(patterns.len(), 2); // No duplicates
         
         let patterns = generate_search_patterns("claude-code");
         assert!(patterns.contains(&"claude-code".to_string()));
         assert!(patterns.contains(&"claude".to_string()));
+        assert_eq!(patterns.len(), 2); // No duplicates
         
         let patterns = generate_search_patterns("simple");
         assert_eq!(patterns, vec!["simple".to_string()]);
+        
+        // Edge cases
+        let patterns = generate_search_patterns("");
+        assert_eq!(patterns, vec!["".to_string()]);
+        
+        let patterns = generate_search_patterns("no-match-agent");
+        assert!(patterns.contains(&"no-match-agent".to_string()));
+        assert!(patterns.contains(&"no".to_string()));
+        assert_eq!(patterns.len(), 2);
+        
+        let patterns = generate_search_patterns("very-long-agent-name-with-many-dashes");
+        assert!(patterns.contains(&"very-long-agent-name-with-many-dashes".to_string()));
+        assert!(patterns.contains(&"very".to_string()));
+        assert_eq!(patterns.len(), 2);
     }
 
     #[test]
@@ -212,23 +228,37 @@ mod tests {
 }
 
 /// Generate multiple search patterns for better process matching
+/// 
+/// Creates a deduplicated list of search patterns to improve process detection reliability.
+/// Includes the original pattern, partial matches (before first dash), and known agent variations.
+/// 
+/// # Examples
+/// 
+/// ```
+/// let patterns = generate_search_patterns("kiro-cli");
+/// // Returns: ["kiro-cli", "kiro"] (deduplicated)
+/// 
+/// let patterns = generate_search_patterns("simple");
+/// // Returns: ["simple"]
+/// ```
 fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
-    let mut patterns = vec![name_pattern.to_string()];
+    let mut patterns = std::collections::HashSet::new();
+    patterns.insert(name_pattern.to_string());
     
     // Add partial matches
     if name_pattern.contains('-') {
-        patterns.push(name_pattern.split('-').next().unwrap_or(name_pattern).to_string());
+        patterns.insert(name_pattern.split('-').next().unwrap_or(name_pattern).to_string());
     }
     
     // Add common variations
     match name_pattern {
-        "kiro-cli" => patterns.extend(vec!["kiro".to_string(), "kiro-cli".to_string()]),
-        "claude-code" => patterns.extend(vec!["claude".to_string(), "claude-code".to_string()]),
-        "gemini-cli" => patterns.extend(vec!["gemini".to_string(), "gemini-cli".to_string()]),
+        "kiro-cli" => { patterns.insert("kiro".to_string()); },
+        "claude-code" => { patterns.insert("claude".to_string()); },
+        "gemini-cli" => { patterns.insert("gemini".to_string()); },
         _ => {}
     }
     
-    patterns
+    patterns.into_iter().collect()
 }
 
 /// Find a process by name, optionally filtering by command line pattern
@@ -259,11 +289,10 @@ pub fn find_process_by_name(
         }
 
         // If command pattern specified, it must match
-        if let Some(cmd_pattern) = command_pattern {
-            if !cmd_line.contains(cmd_pattern) {
+        if let Some(cmd_pattern) = command_pattern
+            && !cmd_line.contains(cmd_pattern) {
                 continue;
             }
-        }
 
         return Ok(Some(ProcessInfo {
             pid: Pid::from_raw(pid.as_u32()),

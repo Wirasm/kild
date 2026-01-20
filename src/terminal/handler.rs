@@ -11,7 +11,7 @@ fn find_agent_process_with_retry(
     command: &str,
     config: &ShardsConfig,
 ) -> Result<(Option<u32>, Option<String>, Option<u64>), TerminalError> {
-    let max_attempts = 5;
+    let max_attempts = config.terminal.max_retry_attempts;
     let mut delay_ms = config.terminal.spawn_delay_ms;
     
     for attempt in 1..=max_attempts {
@@ -28,9 +28,11 @@ fn find_agent_process_with_retry(
         
         match crate::process::find_process_by_name(agent_name, Some(command)) {
             Ok(Some(info)) => {
+                let total_delay_ms = config.terminal.spawn_delay_ms * (2_u64.pow(attempt) - 1);
                 info!(
                     event = "terminal.agent_process_found",
                     attempt,
+                    total_delay_ms,
                     pid = info.pid.as_u32(),
                     process_name = info.name,
                     agent_name
@@ -66,8 +68,8 @@ fn find_agent_process_with_retry(
             }
         }
         
-        // Exponential backoff: 500ms, 1s, 2s, 4s, 8s
-        delay_ms *= 2;
+        // Exponential backoff with cap: 1s, 2s, 4s, 8s, 8s
+        delay_ms = std::cmp::min(delay_ms * 2, 8000);
     }
     
     Ok((None, None, None))

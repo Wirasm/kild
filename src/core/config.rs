@@ -79,6 +79,8 @@ pub struct TerminalConfig {
     pub preferred: Option<String>,
     #[serde(default)]
     pub spawn_delay_ms: u64,
+    #[serde(default)]
+    pub max_retry_attempts: u32,
 }
 
 impl Default for TerminalConfig {
@@ -86,6 +88,7 @@ impl Default for TerminalConfig {
         Self {
             preferred: None,
             spawn_delay_ms: 1000,
+            max_retry_attempts: 5,
         }
     }
 }
@@ -196,6 +199,7 @@ impl ShardsConfig {
             terminal: TerminalConfig {
                 preferred: override_config.terminal.preferred.or(base.terminal.preferred),
                 spawn_delay_ms: override_config.terminal.spawn_delay_ms,
+                max_retry_attempts: override_config.terminal.max_retry_attempts,
             },
             agents: {
                 let mut merged = base.agents;
