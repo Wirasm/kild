@@ -87,6 +87,7 @@ pub fn create_session(
             .map_err(|e| SessionError::TerminalError { source: e })?;
 
     // 6. Create session record
+    let now = chrono::Utc::now().to_rfc3339();
     let session = Session {
         id: session_id.clone(),
         project_id: project.id,
@@ -94,8 +95,8 @@ pub fn create_session(
         worktree_path: worktree.path,
         agent: validated.agent.clone(),
         status: SessionStatus::Active,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        last_activity: Some(chrono::Utc::now().to_rfc3339()),
+        created_at: now.clone(),
+        last_activity: Some(now),
         port_range_start: port_start,
         port_range_end: port_end,
         port_count: config.default_port_count,

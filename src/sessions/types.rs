@@ -5,6 +5,7 @@ fn default_port_start() -> u16 { 0 }
 fn default_port_end() -> u16 { 0 }
 fn default_port_count() -> u16 { 0 }
 fn default_command() -> String { String::default() }
+fn default_last_activity() -> Option<String> { None }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
@@ -51,10 +52,11 @@ pub struct Session {
     /// Timestamp of last detected activity for health monitoring.
     /// 
     /// This tracks when the session was last active for health status calculation.
+    /// Used by the health monitoring system to distinguish between Idle, Stuck, and Crashed states.
     /// Initially set to session creation time, updated by activity monitoring.
     /// 
     /// Format: RFC3339 timestamp string (e.g., "2024-01-01T12:00:00Z")
-    #[serde(default)]
+    #[serde(default = "default_last_activity")]
     pub last_activity: Option<String>,
 }
 
@@ -119,6 +121,31 @@ mod tests {
         assert_eq!(session.branch, "branch");
         assert_eq!(session.status, SessionStatus::Active);
         assert_eq!(session.command, "claude-code");
+    }
+
+    #[test]
+    fn test_session_backward_compatibility() {
+        // Test that sessions without last_activity field can be deserialized
+        let json_without_last_activity = r#"{
+            "id": "test/branch",
+            "project_id": "test",
+            "branch": "branch",
+            "worktree_path": "/tmp/test",
+            "agent": "claude",
+            "status": "Active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "port_range_start": 3000,
+            "port_range_end": 3009,
+            "port_count": 10,
+            "process_id": null,
+            "process_name": null,
+            "process_start_time": null,
+            "command": "claude-code"
+        }"#;
+
+        let session: Session = serde_json::from_str(json_without_last_activity).unwrap();
+        assert_eq!(session.last_activity, None);
+        assert_eq!(session.branch, "branch");
     }
 
     #[test]
