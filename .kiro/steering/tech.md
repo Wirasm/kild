@@ -4,7 +4,7 @@
 - **Language**: Rust (2024 edition)
 - **CLI Framework**: clap 4.0 with derive macros
 - **Git Operations**: git2 crate for worktree management
-- **Terminal Integration**: Platform-specific terminal launching (osascript for macOS, gnome-terminal/konsole for Linux, Windows Terminal/cmd for Windows)
+- **Terminal Integration**: Platform-specific terminal launching with terminal type selection (Ghostty, iTerm, Terminal.app, Native on macOS; planned for Linux/Windows)
 - **Session Storage**: File-based persistence in `.shards/sessions/` (planned)
 - **Logging**: Structured JSON logging with tracing and tracing-subscriber
 - **Error Handling**: thiserror for feature-specific error types

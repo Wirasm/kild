@@ -12,7 +12,7 @@ Shards creates isolated Git worktrees for parallel AI development sessions. Each
 
 ### Create a Shard
 ```bash
-shards create <branch> [--agent <agent>] [--flags <flags>] [--terminal <terminal>] [--startup-command <command>]
+shards create <branch> [--agent <agent>] [--flags <flags>] [--terminal-type <type>] [--startup-command <command>]
 ```
 
 Creates an isolated workspace with:
@@ -23,12 +23,13 @@ Creates an isolated workspace with:
 - Session metadata saved to `~/.shards/sessions/`
 
 **Supported agents**: claude, kiro, gemini, codex, aether
+**Supported terminal types**: ghostty, iterm, terminal, native
 
 **Note**: `--flags` accepts space-separated syntax: `--flags '--trust-all-tools'`
 
 **Example**:
 ```bash
-shards create feature-auth --agent kiro
+shards create feature-auth --agent kiro --terminal-type ghostty
 shards create bug-fix-123 --agent claude --flags '--trust-all-tools'
 ```
 

@@ -91,7 +91,16 @@ pub fn spawn_terminal(
         match preferred.as_str() {
             "iterm2" | "iterm" => TerminalType::ITerm,
             "terminal" => TerminalType::TerminalApp,
-            _ => operations::detect_terminal()?,
+            "ghostty" => TerminalType::Ghostty,
+            "native" => TerminalType::Native,
+            _ => {
+                warn!(
+                    event = "terminal.unknown_preference",
+                    preferred = preferred,
+                    message = "Unknown terminal preference, falling back to detection"
+                );
+                operations::detect_terminal()?
+            }
         }
     } else {
         operations::detect_terminal()?
