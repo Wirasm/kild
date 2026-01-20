@@ -70,10 +70,15 @@ git worktree list
 
 ### 2.2 Branch Decision
 
+```bash
+# Check if current branch is appropriate for this plan
+current_branch=$(git branch --show-current)
+```
+
 | Current State | Action |
 |---------------|--------|
 | In worktree | Use it (log: "Using worktree") |
-| Branch matches plan | Use existing branch (check if current branch contains plan keywords) |
+| Branch contains plan keywords | if [[ "$current_branch" =~ $PLAN_SLUG ]]; then use existing branch (log: "✅ Current branch '$current_branch' matches plan pattern") |
 | On main, clean | Create branch: `git checkout -b feature/{plan-slug}` |
 | On main, dirty | STOP: "Stash or commit changes first" |
 | On feature branch | Use it (log: "Using existing branch") |

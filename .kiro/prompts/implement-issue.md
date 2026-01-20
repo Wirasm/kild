@@ -147,9 +147,9 @@ current_branch=$(git branch --show-current)
 │           Log: "Using worktree at {path}"
 │
 ├─ BRANCH CONTAINS ISSUE NUMBER?
-│  └─ if [[ "$current_branch" =~ issue-{number} ]] || [[ "$current_branch" =~ fix.*{number} ]]; then
+│  └─ if [[ "$current_branch" =~ issue-$ISSUE_NUMBER ]] || [[ "$current_branch" =~ fix.*$ISSUE_NUMBER ]]; then
 │     └─ Use existing branch (already appropriate for this work)
-│        Log: "✅ Current branch '$current_branch' is appropriate for issue #{number}"
+│        Log: "✅ Current branch '$current_branch' matches issue #$ISSUE_NUMBER pattern"
 │
 ├─ ON MAIN/MASTER?
 │  └─ Q: Working directory clean?
