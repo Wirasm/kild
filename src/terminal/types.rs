@@ -105,6 +105,26 @@ mod tests {
     }
 
     #[test]
+    fn test_native_terminal_type() {
+        let config = SpawnConfig::new(
+            TerminalType::Native,
+            PathBuf::from("/tmp/test"),
+            "echo hello".to_string(),
+        );
+        
+        assert_eq!(config.terminal_type, TerminalType::Native);
+        assert_eq!(config.working_directory, PathBuf::from("/tmp/test"));
+        assert_eq!(config.command, "echo hello");
+    }
+
+    #[test]
+    fn test_terminal_type_equality() {
+        assert_eq!(TerminalType::Native, TerminalType::Native);
+        assert_ne!(TerminalType::Native, TerminalType::Ghostty);
+        assert_ne!(TerminalType::Ghostty, TerminalType::ITerm);
+    }
+
+    #[test]
     fn test_spawn_result() {
         let result = SpawnResult::new(
             TerminalType::ITerm,

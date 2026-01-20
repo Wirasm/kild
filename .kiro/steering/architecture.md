@@ -10,7 +10,7 @@ src/
 ├── shared/            # Cross-feature utilities (3+ features only)
 ├── sessions/          # Feature slice: session lifecycle
 ├── git/               # Feature slice: worktree management
-└── terminal/          # Feature slice: terminal launching
+└── terminal/          # Feature slice: terminal launching (Ghostty, iTerm, Terminal.app, Native)
 ```
 
 ### Feature Slice Structure

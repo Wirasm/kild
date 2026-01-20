@@ -1,17 +1,56 @@
 use crate::terminal::{errors::TerminalError, types::*};
 use std::path::Path;
+use tracing::{debug, warn};
 
+// AppleScript templates for terminal launching
+const ITERM_SCRIPT: &str = r#"tell application "iTerm"
+        create window with default profile
+        tell current session of current window
+            write text "{}"
+        end tell
+    end tell"#;
+
+const TERMINAL_SCRIPT: &str = r#"tell application "Terminal"
+        do script "{}"
+    end tell"#;
+
+const GHOSTTY_SCRIPT: &str = r#"try
+        tell application "Ghostty"
+            activate
+            delay 0.5
+        end tell
+        tell application "System Events"
+            keystroke "{}"
+            keystroke return
+        end tell
+    on error errMsg
+        error "Failed to launch Ghostty: " & errMsg
+    end try"#;
+
+#[cfg(target_os = "macos")]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
+    debug!(event = "terminal.detection_started");
+    
     // Check for Ghostty first (user preference)
     if app_exists_macos("Ghostty") {
+        debug!(event = "terminal.detected", terminal = "ghostty");
         Ok(TerminalType::Ghostty)
     } else if app_exists_macos("iTerm") {
+        debug!(event = "terminal.detected", terminal = "iterm");
         Ok(TerminalType::ITerm)
     } else if app_exists_macos("Terminal") {
+        debug!(event = "terminal.detected", terminal = "terminal");
         Ok(TerminalType::TerminalApp)
     } else {
+        warn!(event = "terminal.none_found", checked = "Ghostty,iTerm,Terminal");
         Err(TerminalError::NoTerminalFound)
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
+    warn!(event = "terminal.platform_not_supported", platform = std::env::consts::OS);
+    Err(TerminalError::NoTerminalFound)
 }
 
 pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, TerminalError> {
@@ -35,44 +74,24 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
         TerminalType::ITerm => Ok(vec![
             "osascript".to_string(),
             "-e".to_string(),
-            format!(
-                r#"tell application "iTerm"
-                        create window with default profile
-                        tell current session of current window
-                            write text "{}"
-                        end tell
-                    end tell"#,
-                applescript_escape(&cd_command)
-            ),
+            ITERM_SCRIPT.replace("{}", &applescript_escape(&cd_command)),
         ]),
         TerminalType::TerminalApp => Ok(vec![
             "osascript".to_string(),
             "-e".to_string(),
-            format!(
-                r#"tell application "Terminal"
-                        do script "{}"
-                    end tell"#,
-                applescript_escape(&cd_command)
-            ),
+            TERMINAL_SCRIPT.replace("{}", &applescript_escape(&cd_command)),
         ]),
         TerminalType::Ghostty => Ok(vec![
             "osascript".to_string(),
             "-e".to_string(),
-            format!(
-                r#"tell application "Ghostty"
-                        activate
-                        delay 0.5
-                    end tell
-                    tell application "System Events"
-                        keystroke "{}"
-                        keystroke return
-                    end tell"#,
-                applescript_escape(&cd_command)
-            ),
+            GHOSTTY_SCRIPT.replace("{}", &applescript_escape(&cd_command)),
         ]),
         TerminalType::Native => {
             // Use system default (detect and delegate)
             let detected = detect_terminal()?;
+            if detected == TerminalType::Native {
+                return Err(TerminalError::NoTerminalFound);
+            }
             let native_config = SpawnConfig::new(detected, config.working_directory.clone(), config.command.clone());
             build_spawn_command(&native_config)
         }

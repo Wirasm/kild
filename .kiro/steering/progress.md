@@ -21,6 +21,7 @@
   - **macOS**: Detects and uses Ghostty, iTerm, or Terminal.app with AppleScript automation
   - **Linux**: Supports gnome-terminal, konsole, xterm, alacritty, kitty (planned)
   - **Windows**: Uses Windows Terminal or cmd fallback (planned)
+- **Terminal type selection**: CLI `--terminal-type` option supports ghostty, iterm, terminal, native
 - **Proper working directory setup** - agents launch in their worktree directory
 - **Async terminal spawning** - doesn't block CLI while terminal launches
 - **Agent command mapping** - Maps agent names (claude, kiro, gemini, codex) to commands
