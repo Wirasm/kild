@@ -1,6 +1,17 @@
+//! Cleanup operations for detecting and managing orphaned resources.
+//!
+//! Current cleanup strategies focus on:
+//! - detect_stale_sessions: Sessions with missing/invalid worktrees
+//! - detect_orphaned_branches: Git branches without corresponding sessions
+//! - detect_orphaned_worktrees: Worktrees without corresponding sessions
+//!
+//! Note: Session-based detection strategies (PID-based, age-based) were
+//! considered but not integrated into the cleanup workflow as of 2026-01-20.
+
 use crate::cleanup::errors::CleanupError;
 use git2::{BranchType, Repository};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 pub fn validate_cleanup_request() -> Result<(), CleanupError> {
     // Check if we're in a git repository
@@ -143,16 +154,28 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
                                 }
                             }
                         }
-                        Err(_) => {
-                            // Invalid JSON - consider it stale
+                        Err(e) => {
+                            // Invalid JSON - consider it stale and log for debugging
+                            warn!(
+                                event = "cleanup.malformed_session_file",
+                                file_path = %path.display(),
+                                error = %e,
+                                "Found malformed session file during cleanup scan"
+                            );
                             if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
                                 stale_sessions.push(file_name.to_string());
                             }
                         }
                     }
                 }
-                Err(_) => {
-                    // Can't read session file - consider it stale
+                Err(e) => {
+                    // Can't read session file - consider it stale and log for debugging
+                    warn!(
+                        event = "cleanup.unreadable_session_file",
+                        file_path = %path.display(),
+                        error = %e,
+                        "Found unreadable session file during cleanup scan"
+                    );
                     if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
                         stale_sessions.push(file_name.to_string());
                     }
@@ -357,6 +380,64 @@ mod tests {
 
             let _ = std::env::set_current_dir(original_dir);
         }
+    }
+
+    #[test]
+    fn test_cleanup_workflow_integration() {
+        use std::env;
+        use std::fs;
+
+        // Create a temporary directory for testing
+        let temp_dir = env::temp_dir().join("shards_cleanup_integration_test");
+        let _ = fs::create_dir_all(&temp_dir);
+
+        // Test that all detection functions work together
+        let stale_result = detect_stale_sessions(&temp_dir);
+        assert!(stale_result.is_ok());
+
+        // Test with a malformed session file
+        let malformed_content = "{ invalid json }";
+        fs::write(&temp_dir.join("malformed.json"), malformed_content).unwrap();
+
+        let stale_result = detect_stale_sessions(&temp_dir);
+        assert!(stale_result.is_ok());
+        let stale_sessions = stale_result.unwrap();
+        assert_eq!(stale_sessions.len(), 1);
+        assert_eq!(stale_sessions[0], "malformed");
+
+        // Test with a valid session file pointing to non-existent worktree
+        let valid_session = serde_json::json!({
+            "id": "test-session",
+            "worktree_path": "/non/existent/path",
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        fs::write(&temp_dir.join("valid.json"), valid_session.to_string()).unwrap();
+
+        let stale_result = detect_stale_sessions(&temp_dir);
+        assert!(stale_result.is_ok());
+        let stale_sessions = stale_result.unwrap();
+        assert_eq!(stale_sessions.len(), 2); // malformed + valid with missing worktree
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_cleanup_workflow_empty_directory() {
+        use std::env;
+        use std::fs;
+
+        // Test cleanup workflow with empty directory
+        let temp_dir = env::temp_dir().join("shards_cleanup_empty_test");
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let stale_result = detect_stale_sessions(&temp_dir);
+        assert!(stale_result.is_ok());
+        let stale_sessions = stale_result.unwrap();
+        assert_eq!(stale_sessions.len(), 0);
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
 
