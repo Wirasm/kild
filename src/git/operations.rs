@@ -1,5 +1,6 @@
 use crate::git::errors::GitError;
 use std::path::{Path, PathBuf};
+use tracing::debug;
 
 pub fn calculate_worktree_path(base_dir: &Path, project_name: &str, branch: &str) -> PathBuf {
     base_dir.join("worktrees").join(project_name).join(branch)
@@ -66,16 +67,27 @@ pub fn validate_branch_name(branch: &str) -> Result<String, GitError> {
     Ok(trimmed.to_string())
 }
 
+/// Gets the current branch name from the repository.
+/// 
+/// Returns `None` if the repository is in a detached HEAD state.
+/// 
+/// # Errors
+/// Returns `GitError::Git2Error` if the repository HEAD cannot be accessed.
 pub fn get_current_branch(repo: &git2::Repository) -> Result<Option<String>, GitError> {
     let head = repo.head().map_err(|e| GitError::Git2Error { source: e })?;
     
     if let Some(branch_name) = head.shorthand() {
         Ok(Some(branch_name.to_string()))
     } else {
+        // Detached HEAD state - no current branch
+        debug!("Repository is in detached HEAD state, no current branch available");
         Ok(None)
     }
 }
 
+/// Determines if the current branch should be used for the worktree.
+/// 
+/// Returns `true` if the current branch name exactly matches the requested branch name.
 pub fn should_use_current_branch(current_branch: &str, requested_branch: &str) -> bool {
     current_branch == requested_branch
 }

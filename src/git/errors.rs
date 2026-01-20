@@ -23,12 +23,6 @@ pub enum GitError {
     #[error("Git operation failed: {message}")]
     OperationFailed { message: String },
 
-    #[error("Branch '{branch}' conflicts with current branch '{current}'")]
-    BranchConflict { 
-        branch: String, 
-        current: String 
-    },
-
     #[error("Git2 library error: {source}")]
     Git2Error {
         #[from]
@@ -52,7 +46,6 @@ impl ShardsError for GitError {
             GitError::WorktreeAlreadyExists { .. } => "WORKTREE_ALREADY_EXISTS",
             GitError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
             GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
-            GitError::BranchConflict { .. } => "BRANCH_CONFLICT",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",
         }
@@ -65,7 +58,6 @@ impl ShardsError for GitError {
                 | GitError::BranchAlreadyExists { .. }
                 | GitError::BranchNotFound { .. }
                 | GitError::WorktreeAlreadyExists { .. }
-                | GitError::BranchConflict { .. }
         )
     }
 }
