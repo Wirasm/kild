@@ -47,6 +47,15 @@ pub struct Session {
     /// Empty string for sessions created before this field was added.
     #[serde(default = "default_command")]
     pub command: String,
+
+    /// Timestamp of last detected activity for health monitoring.
+    /// 
+    /// This tracks when the session was last active for health status calculation.
+    /// Initially set to session creation time, updated by activity monitoring.
+    /// 
+    /// Format: RFC3339 timestamp string (e.g., "2024-01-01T12:00:00Z")
+    #[serde(default)]
+    pub last_activity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,6 +113,7 @@ mod tests {
             process_name: None,
             process_start_time: None,
             command: "claude-code".to_string(),
+            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
         };
 
         assert_eq!(session.branch, "branch");

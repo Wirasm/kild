@@ -95,6 +95,7 @@ pub fn create_session(
         agent: validated.agent.clone(),
         status: SessionStatus::Active,
         created_at: chrono::Utc::now().to_rfc3339(),
+        last_activity: Some(chrono::Utc::now().to_rfc3339()),
         port_range_start: port_start,
         port_range_end: port_end,
         port_count: config.default_port_count,
@@ -334,6 +335,7 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     session.process_name = process_name;
     session.process_start_time = process_start_time;
     session.status = SessionStatus::Active;
+    session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
     // 7. Save updated session to file
     operations::save_session_to_file(&session, &config.sessions_dir())?;
@@ -413,6 +415,7 @@ mod tests {
             process_name: None,
             process_start_time: None,
             command: "test-command".to_string(),
+            last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };
 
         // Create worktree directory so validation passes
