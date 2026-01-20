@@ -37,6 +37,13 @@ pub enum CleanupError {
         #[from]
         source: std::io::Error,
     },
+
+    #[error("Cleanup strategy '{strategy}' failed: {source}")]
+    StrategyFailed {
+        strategy: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 impl ShardsError for CleanupError {
@@ -51,6 +58,7 @@ impl ShardsError for CleanupError {
             CleanupError::GitError { .. } => "CLEANUP_GIT_ERROR",
             CleanupError::SessionError { .. } => "CLEANUP_SESSION_ERROR",
             CleanupError::IoError { .. } => "CLEANUP_IO_ERROR",
+            CleanupError::StrategyFailed { .. } => "CLEANUP_STRATEGY_FAILED",
         }
     }
 

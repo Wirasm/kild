@@ -183,13 +183,23 @@ pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
     Ok(cleanup_summary)
 }
 
+/// Cleanup all orphaned resources using the specified strategy.
+/// 
+/// # Arguments
+/// * `strategy` - The cleanup strategy to use (All, NoPid, Stopped, OlderThan)
+/// 
+/// # Returns
+/// * `Ok(CleanupSummary)` - Summary of cleaned resources
+/// * `Err(CleanupError)` - If cleanup fails or no resources found
 pub fn cleanup_all_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
     info!(event = "cleanup.cleanup_all_with_strategy_started", strategy = ?strategy);
 
     // First scan for orphaned resources with strategy
     let scan_summary = scan_for_orphans_with_strategy(strategy)?;
 
-    if scan_summary.total_cleaned == 0 {
+    if scan_summary.stale_sessions.is_empty() 
+        && scan_summary.orphaned_branches.is_empty() 
+        && scan_summary.orphaned_worktrees.is_empty() {
         info!(event = "cleanup.cleanup_all_with_strategy_no_resources");
         return Err(CleanupError::NoOrphanedResources);
     }
@@ -205,36 +215,72 @@ pub fn cleanup_all_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSum
     Ok(cleanup_summary)
 }
 
+/// Scan for orphaned resources using the specified cleanup strategy.
+/// 
+/// # Arguments
+/// * `strategy` - The cleanup strategy to determine which resources to scan for
+/// 
+/// # Returns
+/// * `Ok(CleanupSummary)` - Summary of found orphaned resources
+/// * `Err(CleanupError)` - If scanning fails
 pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
     info!(event = "cleanup.scan_with_strategy_started", strategy = ?strategy);
 
     operations::validate_cleanup_request()?;
 
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-    let _repo = Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
+    let _repo = Repository::discover(&current_dir).map_err(|e| {
+        error!(event = "cleanup.git_discovery_failed", error = %e);
+        CleanupError::GitError { source: crate::git::errors::GitError::Git2Error { source: e } }
+    })?;
     let config = Config::new();
 
     let mut summary = CleanupSummary::new();
 
     match strategy {
         CleanupStrategy::All => {
-            // Use existing scan_for_orphans logic
-            return scan_for_orphans();
+            // All strategy delegates to legacy scan_for_orphans()
+            info!(event = "cleanup.strategy_all_delegating");
+            return scan_for_orphans().map_err(|e| {
+                error!(event = "cleanup.strategy_all_failed", error = %e);
+                e
+            });
         }
         CleanupStrategy::NoPid => {
-            let sessions = operations::detect_sessions_without_pid(&config.sessions_dir())?;
+            let sessions = operations::detect_sessions_without_pid(&config.sessions_dir())
+                .map_err(|e| {
+                    error!(event = "cleanup.strategy_failed", strategy = "NoPid", error = %e);
+                    CleanupError::StrategyFailed { 
+                        strategy: "NoPid".to_string(), 
+                        source: Box::new(e) 
+                    }
+                })?;
             for session_id in sessions {
                 summary.add_session(session_id);
             }
         }
         CleanupStrategy::Stopped => {
-            let sessions = operations::detect_sessions_with_stopped_processes(&config.sessions_dir())?;
+            let sessions = operations::detect_sessions_with_stopped_processes(&config.sessions_dir())
+                .map_err(|e| {
+                    error!(event = "cleanup.strategy_failed", strategy = "Stopped", error = %e);
+                    CleanupError::StrategyFailed { 
+                        strategy: "Stopped".to_string(), 
+                        source: Box::new(e) 
+                    }
+                })?;
             for session_id in sessions {
                 summary.add_session(session_id);
             }
         }
         CleanupStrategy::OlderThan(days) => {
-            let sessions = operations::detect_old_sessions(&config.sessions_dir(), days)?;
+            let sessions = operations::detect_old_sessions(&config.sessions_dir(), days)
+                .map_err(|e| {
+                    error!(event = "cleanup.strategy_failed", strategy = "OlderThan", error = %e);
+                    CleanupError::StrategyFailed { 
+                        strategy: format!("OlderThan({})", days), 
+                        source: Box::new(e) 
+                    }
+                })?;
             for session_id in sessions {
                 summary.add_session(session_id);
             }
