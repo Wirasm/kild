@@ -61,6 +61,39 @@ pub struct ShardsConfig {
     pub agents: HashMap<String, AgentSettings>,
     #[serde(default)]
     pub include_patterns: Option<IncludeConfig>,
+    #[serde(default)]
+    pub health: HealthConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthConfig {
+    #[serde(default = "default_idle_threshold")]
+    pub idle_threshold_minutes: i64,
+    #[serde(default = "default_stuck_threshold")]
+    pub stuck_threshold_minutes: i64,
+    #[serde(default = "default_refresh_interval")]
+    pub refresh_interval_secs: u64,
+    #[serde(default)]
+    pub history_enabled: bool,
+    #[serde(default = "default_history_retention")]
+    pub history_retention_days: u64,
+}
+
+fn default_idle_threshold() -> i64 { 10 }
+fn default_stuck_threshold() -> i64 { 30 }
+fn default_refresh_interval() -> u64 { 5 }
+fn default_history_retention() -> u64 { 7 }
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            idle_threshold_minutes: 10,
+            stuck_threshold_minutes: 30,
+            refresh_interval_secs: 5,
+            history_enabled: false,
+            history_retention_days: 7,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +242,13 @@ impl ShardsConfig {
                 merged
             },
             include_patterns: override_config.include_patterns.or(base.include_patterns),
+            health: HealthConfig {
+                idle_threshold_minutes: override_config.health.idle_threshold_minutes,
+                stuck_threshold_minutes: override_config.health.stuck_threshold_minutes,
+                refresh_interval_secs: override_config.health.refresh_interval_secs,
+                history_enabled: override_config.health.history_enabled || base.health.history_enabled,
+                history_retention_days: override_config.health.history_retention_days,
+            },
         }
     }
     
@@ -431,7 +471,7 @@ flags = "--yolo"
         // Test empty config
         let empty_config: ShardsConfig = toml::from_str("").unwrap();
         assert_eq!(empty_config.agent.default, "claude");
-        
+
         // Test partial config
         let partial_config: ShardsConfig = toml::from_str(r#"
 [terminal]
@@ -439,9 +479,35 @@ preferred = "iterm2"
 "#).unwrap();
         assert_eq!(partial_config.agent.default, "claude"); // Should use default
         assert_eq!(partial_config.terminal.preferred, Some("iterm2".to_string()));
-        
+
         // Test invalid TOML should fail
         let invalid_result: Result<ShardsConfig, _> = toml::from_str("invalid toml [[[");
         assert!(invalid_result.is_err());
+    }
+
+    #[test]
+    fn test_health_config_defaults() {
+        let config = ShardsConfig::default();
+        assert_eq!(config.health.idle_threshold_minutes, 10);
+        assert_eq!(config.health.stuck_threshold_minutes, 30);
+        assert_eq!(config.health.refresh_interval_secs, 5);
+        assert!(!config.health.history_enabled);
+        assert_eq!(config.health.history_retention_days, 7);
+    }
+
+    #[test]
+    fn test_health_config_from_toml() {
+        let config: ShardsConfig = toml::from_str(r#"
+[health]
+idle_threshold_minutes = 5
+stuck_threshold_minutes = 15
+history_enabled = true
+"#).unwrap();
+        assert_eq!(config.health.idle_threshold_minutes, 5);
+        assert_eq!(config.health.stuck_threshold_minutes, 15);
+        assert!(config.health.history_enabled);
+        // Defaults should still apply for unspecified fields
+        assert_eq!(config.health.refresh_interval_secs, 5);
+        assert_eq!(config.health.history_retention_days, 7);
     }
 }

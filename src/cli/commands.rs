@@ -327,14 +327,63 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     let branch = matches.get_one::<String>("branch");
     let show_all = matches.get_flag("all");
     let json_output = matches.get_flag("json");
-    
+    let watch_mode = matches.get_flag("watch");
+    let interval = matches.get_one::<u64>("interval").copied().unwrap_or(5);
+
     info!(
         event = "cli.health_started",
         branch = ?branch,
         show_all = show_all,
-        json_output = json_output
+        json_output = json_output,
+        watch_mode = watch_mode,
+        interval = interval
     );
-    
+
+    if watch_mode {
+        run_health_watch_loop(branch, show_all, json_output, interval)
+    } else {
+        run_health_once(branch, show_all, json_output)
+    }
+}
+
+fn run_health_watch_loop(
+    branch: Option<&String>,
+    _show_all: bool,
+    json_output: bool,
+    interval_secs: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{self, Write};
+
+    let config = ShardsConfig::load_hierarchy().unwrap_or_default();
+
+    loop {
+        // Clear screen (ANSI escape)
+        print!("\x1B[2J\x1B[1;1H");
+        io::stdout().flush()?;
+
+        run_health_once(branch, _show_all, json_output)?;
+
+        // Save snapshot if history is enabled
+        if config.health.history_enabled {
+            if let Ok(output) = health::get_health_all_sessions() {
+                let snapshot = health::HealthSnapshot::from(&output);
+                if let Err(e) = health::save_snapshot(&snapshot) {
+                    info!(event = "cli.health_history_save_failed", error = %e);
+                }
+            }
+        }
+
+        println!("\nRefreshing every {}s. Press Ctrl+C to exit.", interval_secs);
+
+        std::thread::sleep(std::time::Duration::from_secs(interval_secs));
+    }
+}
+
+fn run_health_once(
+    branch: Option<&String>,
+    _show_all: bool,
+    json_output: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(branch_name) = branch {
         // Validate branch name
         if !is_valid_branch_name(branch_name) {
@@ -342,7 +391,7 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             error!(event = "cli.health_invalid_branch", branch = branch_name);
             return Err("Invalid branch name".into());
         }
-        
+
         // Single shard health
         match health::get_health_single_session(branch_name) {
             Ok(shard_health) => {
@@ -351,7 +400,7 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 } else {
                     print_single_shard_health(&shard_health);
                 }
-                
+
                 info!(event = "cli.health_completed", branch = branch_name);
                 Ok(())
             }
@@ -371,7 +420,7 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 } else {
                     print_health_table(&health_output);
                 }
-                
+
                 info!(
                     event = "cli.health_completed",
                     total = health_output.total_count,

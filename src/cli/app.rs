@@ -132,6 +132,21 @@ pub fn build_cli() -> Command {
                         .help("Output in JSON format")
                         .action(clap::ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("watch")
+                        .long("watch")
+                        .short('w')
+                        .help("Continuously refresh health display")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("interval")
+                        .long("interval")
+                        .short('i')
+                        .help("Refresh interval in seconds (default: 5)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("5")
+                )
         )
 }
 
@@ -219,7 +234,7 @@ mod tests {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec![
             "shards",
-            "create", 
+            "create",
             "test-branch",
             "--agent",
             "kiro",
@@ -227,12 +242,40 @@ mod tests {
             "--trust-all-tools --verbose --debug",
         ]);
         assert!(matches.is_ok());
-        
+
         let matches = matches.unwrap();
         let create_matches = matches.subcommand_matches("create").unwrap();
         assert_eq!(
             create_matches.get_one::<String>("flags").unwrap(),
             "--trust-all-tools --verbose --debug"
         );
+    }
+
+    #[test]
+    fn test_cli_health_watch_mode() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "shards", "health", "--watch", "--interval", "10"
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let health_matches = matches.subcommand_matches("health").unwrap();
+        assert!(health_matches.get_flag("watch"));
+        assert_eq!(*health_matches.get_one::<u64>("interval").unwrap(), 10);
+    }
+
+    #[test]
+    fn test_cli_health_default_interval() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "shards", "health", "--watch"
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let health_matches = matches.subcommand_matches("health").unwrap();
+        assert!(health_matches.get_flag("watch"));
+        assert_eq!(*health_matches.get_one::<u64>("interval").unwrap(), 5);
     }
 }
