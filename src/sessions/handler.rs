@@ -103,6 +103,7 @@ pub fn create_session(
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
+        terminal_type: Some(spawn_result.terminal_type.clone()),
         command: spawn_result.command_executed.trim()
             .is_empty()
             .then(|| format!("{} (command not captured)", validated.agent))
@@ -180,7 +181,14 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         process_id = session.process_id
     );
 
-    // 2. Kill process if PID is tracked
+    // 2. Close terminal window first (before killing process)
+    if let Some(ref terminal_type) = session.terminal_type {
+        info!(event = "session.destroy_close_terminal", terminal_type = %terminal_type);
+        // Best-effort - don't fail destroy if terminal close fails
+        let _ = terminal::handler::close_terminal(terminal_type);
+    }
+
+    // 3. Kill process if PID is tracked
     if let Some(pid) = session.process_id {
         info!(event = "session.destroy_kill_started", pid = pid);
 
@@ -335,6 +343,7 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     session.process_id = spawn_result.process_id;
     session.process_name = process_name;
     session.process_start_time = process_start_time;
+    session.terminal_type = Some(spawn_result.terminal_type.clone());
     session.status = SessionStatus::Active;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
@@ -415,6 +424,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            terminal_type: None,
             command: "test-command".to_string(),
             last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };

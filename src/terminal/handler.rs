@@ -175,6 +175,30 @@ pub fn detect_available_terminal() -> Result<TerminalType, TerminalError> {
     Ok(terminal_type)
 }
 
+/// Close a terminal window for a session
+///
+/// This is a best-effort operation used during session destruction.
+/// It will not fail if the terminal window is already closed or the terminal
+/// application is not running.
+pub fn close_terminal(terminal_type: &TerminalType) -> Result<(), TerminalError> {
+    info!(event = "terminal.close_started", terminal_type = %terminal_type);
+
+    let result = operations::close_terminal_window(terminal_type);
+
+    match &result {
+        Ok(()) => info!(event = "terminal.close_completed", terminal_type = %terminal_type),
+        Err(e) => warn!(
+            event = "terminal.close_failed",
+            terminal_type = %terminal_type,
+            error = %e,
+            message = "Continuing with destroy despite terminal close failure"
+        ),
+    }
+
+    // Always return Ok - terminal close failure should not block destroy
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

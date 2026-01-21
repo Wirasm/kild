@@ -23,6 +23,9 @@ pub enum TerminalError {
     #[error("AppleScript failed with error: {stderr}")]
     AppleScriptFailed { stderr: String },
 
+    #[error("Failed to close terminal window for {terminal}: {message}")]
+    TerminalCloseFailed { terminal: String, message: String },
+
     #[error("IO error during terminal operation: {source}")]
     IoError {
         #[from]
@@ -40,6 +43,7 @@ impl ShardsError for TerminalError {
             TerminalError::InvalidCommand => "INVALID_COMMAND",
             TerminalError::AppleScriptExecution { .. } => "APPLESCRIPT_EXECUTION_FAILED",
             TerminalError::AppleScriptFailed { .. } => "APPLESCRIPT_FAILED",
+            TerminalError::TerminalCloseFailed { .. } => "TERMINAL_CLOSE_FAILED",
             TerminalError::IoError { .. } => "TERMINAL_IO_ERROR",
         }
     }

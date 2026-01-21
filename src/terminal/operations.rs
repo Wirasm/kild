@@ -27,6 +27,27 @@ const GHOSTTY_SCRIPT: &str = r#"try
         error "Failed to launch Ghostty: " & errMsg
     end try"#;
 
+// AppleScript templates for terminal closing
+const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
+        if (count of windows) > 0 then
+            close current window
+        end if
+    end tell"#;
+
+const TERMINAL_CLOSE_SCRIPT: &str = r#"tell application "Terminal"
+        if (count of windows) > 0 then
+            close front window
+        end if
+    end tell"#;
+
+const GHOSTTY_CLOSE_SCRIPT: &str = r#"tell application "Ghostty"
+        if it is running then
+            tell application "System Events"
+                keystroke "w" using {command down}
+            end tell
+        end if
+    end tell"#;
+
 #[cfg(target_os = "macos")]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     debug!(event = "terminal.detection_started");
@@ -149,6 +170,64 @@ pub fn extract_command_name(command: &str) -> String {
     command.split_whitespace().next().unwrap_or(command).to_string()
 }
 
+/// Close a terminal window by terminal type
+///
+/// Uses AppleScript (macOS) to close the frontmost/current window of the terminal.
+/// This is a best-effort operation - it will not fail if the window is already closed.
+#[cfg(target_os = "macos")]
+pub fn close_terminal_window(terminal_type: &TerminalType) -> Result<(), TerminalError> {
+    let script = match terminal_type {
+        TerminalType::ITerm => ITERM_CLOSE_SCRIPT,
+        TerminalType::TerminalApp => TERMINAL_CLOSE_SCRIPT,
+        TerminalType::Ghostty => GHOSTTY_CLOSE_SCRIPT,
+        TerminalType::Native => {
+            // For Native, try to detect what terminal is running
+            let detected = detect_terminal()?;
+            return close_terminal_window(&detected);
+        }
+    };
+
+    debug!(event = "terminal.close_started", terminal_type = %terminal_type);
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| TerminalError::AppleScriptExecution {
+            message: format!("Failed to execute close script: {}", e),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Don't fail if window was already closed - this is expected behavior
+        if stderr.contains("window") || stderr.contains("count") {
+            debug!(
+                event = "terminal.close_window_not_found",
+                terminal_type = %terminal_type,
+                message = "Window may have been closed manually"
+            );
+            return Ok(());
+        }
+        warn!(
+            event = "terminal.close_failed",
+            terminal_type = %terminal_type,
+            stderr = %stderr
+        );
+        // Non-fatal - don't block destroy on terminal close failure
+        return Ok(());
+    }
+
+    debug!(event = "terminal.close_completed", terminal_type = %terminal_type);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn close_terminal_window(_terminal_type: &TerminalType) -> Result<(), TerminalError> {
+    // Terminal closing not yet implemented for non-macOS platforms
+    debug!(event = "terminal.close_not_supported", platform = std::env::consts::OS);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +330,23 @@ mod tests {
         assert_eq!(extract_command_name("claude-code"), "claude-code");
         assert_eq!(extract_command_name("  cc  "), "cc");
         assert_eq!(extract_command_name("echo hello world"), "echo");
+    }
+
+    #[test]
+    fn test_close_terminal_scripts_defined() {
+        // Verify close scripts are non-empty
+        assert!(!ITERM_CLOSE_SCRIPT.is_empty());
+        assert!(!TERMINAL_CLOSE_SCRIPT.is_empty());
+        assert!(!GHOSTTY_CLOSE_SCRIPT.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_close_terminal_window_graceful_fallback() {
+        // Closing when no window exists should not error
+        // This tests the graceful fallback behavior
+        let result = close_terminal_window(&TerminalType::ITerm);
+        // Should succeed even if no iTerm window exists
+        assert!(result.is_ok());
     }
 }

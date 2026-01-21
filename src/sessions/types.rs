@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use crate::terminal::types::TerminalType;
 
 fn default_port_start() -> u16 { 0 }
 fn default_port_end() -> u16 { 0 }
@@ -39,7 +40,14 @@ pub struct Session {
     
     /// Process start time captured at spawn time for PID reuse protection
     pub process_start_time: Option<u64>,
-    
+
+    /// Terminal type used to launch this session (iTerm, Terminal.app, Ghostty)
+    ///
+    /// Used to close the terminal window during destroy.
+    /// None for sessions created before this field was added.
+    #[serde(default)]
+    pub terminal_type: Option<TerminalType>,
+
     /// The full command that was executed to start the agent
     /// 
     /// This is the actual command passed to the terminal, e.g.,
@@ -114,6 +122,7 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            terminal_type: None,
             command: "claude-code".to_string(),
             last_activity: Some("2024-01-01T00:00:00Z".to_string()),
         };
@@ -169,5 +178,56 @@ mod tests {
 
         assert_eq!(validated.name, "test");
         assert_eq!(validated.command, "echo hello");
+    }
+
+    #[test]
+    fn test_session_with_terminal_type() {
+        let session = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 3000,
+            port_range_end: 3009,
+            port_count: 10,
+            process_id: Some(12345),
+            process_name: Some("claude-code".to_string()),
+            process_start_time: Some(1234567890),
+            terminal_type: Some(TerminalType::ITerm),
+            command: "claude-code".to_string(),
+            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
+        };
+
+        // Test serialization round-trip
+        let json = serde_json::to_string(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.terminal_type, Some(TerminalType::ITerm));
+    }
+
+    #[test]
+    fn test_session_backward_compatibility_terminal_type() {
+        // Test that sessions without terminal_type field can be deserialized
+        let json_without_terminal_type = r#"{
+            "id": "test/branch",
+            "project_id": "test",
+            "branch": "branch",
+            "worktree_path": "/tmp/test",
+            "agent": "claude",
+            "status": "Active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "port_range_start": 3000,
+            "port_range_end": 3009,
+            "port_count": 10,
+            "process_id": null,
+            "process_name": null,
+            "process_start_time": null,
+            "command": "claude-code"
+        }"#;
+
+        let session: Session = serde_json::from_str(json_without_terminal_type).unwrap();
+        assert_eq!(session.terminal_type, None);
     }
 }
