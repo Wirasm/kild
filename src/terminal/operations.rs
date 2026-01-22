@@ -216,7 +216,7 @@ pub fn execute_spawn_script(
         // Format: \033]2;title\007 - ESC ] 2 ; title BEL
         // This title is embedded in the command line, allowing pkill -f to match it.
         let ghostty_command = format!(
-            "printf '\\033]2;'{}'\007' && {}",
+            "printf '\\033]2;'{}'\\007' && {}",
             escaped_title, cd_command
         );
 
