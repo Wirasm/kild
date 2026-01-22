@@ -1,29 +1,80 @@
 # GPUI Native Terminal UI for Shards
 
+## Meta: How to Think About This PRD
+
+**This document is written for an AI agent who will implement the code.** Read this section first to understand the philosophy.
+
+### First Principles Thinking
+
+We build from the ground up. Each phase adds ONE primitive capability. No phase should "assume" functionality from a later phase. If you find yourself thinking "I'll need X from Phase 6 to make Phase 3 work" - stop. Phase 3 should work standalone.
+
+### Shards-First, Not Terminal-First
+
+**Critical insight**: We're building a shard management dashboard that happens to show terminals, NOT a terminal app that happens to manage shards.
+
+The core value is:
+1. See all your shards in one place
+2. Create/destroy/restart shards with clicks
+3. Track status and health
+
+Embedded terminals are a **future enhancement**, not the MVP. For MVP, we launch external terminals (iTerm, Ghostty) exactly like the CLI does today. This:
+- Delivers value faster
+- Reuses existing, working code
+- Defers the hardest technical challenge (terminal rendering)
+
+### KISS and YAGNI
+
+- **Keep It Simple, Stupid**: The simplest solution that works is the right solution
+- **You Aren't Gonna Need It**: Don't build for hypothetical future needs
+
+If you're writing code and think "this could be useful later" - delete it. Only write code that's needed for the current phase's validation criteria.
+
+### macOS First
+
+We're building for macOS first. The CLI already has working AppleScript integration for iTerm/Ghostty/Terminal.app. The UI will reuse this. Cross-platform support (Linux/Windows) comes later with embedded terminals.
+
+### Why Feature-Gated?
+
+The UI adds dependencies (GPUI, graphics backends). CLI users shouldn't pay this cost. The `--features ui` flag keeps the CLI lean. Never add UI dependencies outside the feature gate.
+
+### Why Two Frontends?
+
+CLI and UI serve different use cases. Neither replaces the other:
+- CLI: scripting, CI/CD, quick one-off shards, headless servers
+- UI: visual management, dashboard, favorites
+
+Both share the same core (sessions, git, config). Don't duplicate core logic in the UI.
+
+---
+
 ## Problem Statement
 
-Shards currently launches AI agents in external terminal windows via AppleScript (macOS only), immediately losing all process control. Developers cannot read agent output programmatically, send prompts to running sessions, detect task completion, or coordinate work across multiple shards. This fire-and-forget model prevents the core use case: a main orchestrating agent that coordinates child shards working on different parts of a codebase.
+Shards CLI works well but requires remembering commands and running them repeatedly. There's no visual dashboard to see all shards at once, check their status, or manage them with clicks. We need a GUI that provides visual shard management while reusing the CLI's proven terminal-launching code.
 
 ## Evidence
 
-- Current implementation in `src/terminal/operations.rs` uses AppleScript to spawn external terminals
-- No mechanism exists to read PTY output or send input after spawn
-- Session tracking relies solely on PID, with no output capture
-- macOS-only: Linux and Windows users cannot use the tool at all
-- User workflow requires manual Alt-Tab between terminal windows
+- Managing multiple shards requires repeated `shards list` / `shards status` commands
+- No visual overview of all active shards
+- Users must remember CLI syntax for create/destroy/restart
+- No favorites system for frequently-used repositories
 
 ## Proposed Solution
 
-Build a native GPUI application with embedded terminals powered by `alacritty_terminal` **as a separate frontend** to the existing CLI. The CLI continues to work exactly as it does today - launching agents in external terminals (iTerm, Ghostty, Terminal.app). The UI provides an alternative for users who want orchestration capabilities.
+Build a native GPUI application as a **visual dashboard** for shard management. For MVP, shard creation launches external terminals (exactly like CLI). The UI provides:
 
-**Architecture Principle: Two Frontends, One Core**
+1. **Visual dashboard** - See all shards in a list with status
+2. **Click-to-manage** - Create, destroy, restart with buttons
+3. **Status tracking** - Running/stopped, process health, last activity
+4. **Favorites** - Quick access to frequently-used repositories
+
+**Architecture: Two Frontends, One Core**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    shards-core (library)                         │
 │     sessions │ git │ process │ config │ errors │ cleanup        │
 │                                                                  │
-│  SHARED: Session persistence, config, git operations, etc.      │
+│  THIS CODE ALREADY EXISTS. UI reuses it, doesn't duplicate it.  │
 └─────────────────────────────────────────────────────────────────┘
            │                                    │
     ┌──────┴──────┐                      ┌─────┴─────┐
@@ -31,15 +82,13 @@ Build a native GPUI application with embedded terminals powered by `alacritty_te
 ┌─────────────────┴───┐              ┌───┴─────────────────┐
 │   shards (CLI)      │              │   shards-ui         │
 │                     │              │                     │
-│ • Launch iTerm      │              │ • Embedded PTY      │
-│ • Launch Ghostty    │              │ • Multi-shard tabs  │
-│ • Launch Terminal   │              │ • Orchestration     │
-│ • Fire-and-forget   │              │ • Full I/O control  │
+│ • Launch iTerm      │              │ • Visual dashboard  │
+│ • Launch Ghostty    │              │ • Create/destroy UI │
+│ • Fire-and-forget   │              │ • Status tracking   │
+│                     │              │ • Favorites         │
 │                     │              │                     │
-│ Use case:           │              │ Use case:           │
-│ Quick one-off shard │              │ Multi-agent coord   │
-│ Scripting/CI        │              │ Visual monitoring   │
-│ Headless servers    │              │ Main agent control  │
+│                     │              │ REUSES terminal     │
+│                     │              │ launching from CLI  │
 └─────────────────────┘              └─────────────────────┘
                     │                │
                     └───────┬────────┘
@@ -47,483 +96,491 @@ Build a native GPUI application with embedded terminals powered by `alacritty_te
                 SHARED: ~/.shards/sessions/*.json
 ```
 
-**Key Points:**
-- CLI is NOT being replaced - it keeps full external terminal support
-- UI is an ADDITIONAL option for users who want orchestration
-- Both share the same session state - a shard created in CLI appears in UI and vice versa
-- Core library remains terminal-agnostic
+---
 
-**Why this approach:**
-- GPUI is production-proven (powers Zed editor on all platforms)
-- `alacritty_terminal` is the standard for embedded Rust terminals
-- CLI users get zero bloat - UI dependencies are feature-gated
-- Each frontend excels at its use case
+## What We're Building (MVP)
 
-## Key Hypothesis
+| Feature | Description |
+|---------|-------------|
+| Shard list view | See all shards with names, status, branch |
+| Create button | Opens dialog, creates shard → launches external terminal |
+| Destroy button | Destroys shard (worktree cleanup, terminal close) |
+| Restart button | Restarts agent in existing shard |
+| Status indicators | Running/stopped, process health |
+| Favorites | Quick-spawn into favorite repositories |
 
-We believe embedded PTY terminals with cross-shard communication will enable developers to orchestrate multiple AI agents from a single interface.
-We'll know we're right when users can spawn 3+ shards and have a main agent read their outputs and send them commands without manual window switching.
+## What We're NOT Building (MVP)
 
-## What We're NOT Building
-
-- **Replacing CLI** - CLI remains fully functional with external terminal support (iTerm, Ghostty, etc.)
-- **Removing external terminal support** - CLI keeps AppleScript/platform-native terminal launching
-- **Remote terminals (SSH)** - Local execution only for v1
-- **Terminal multiplexing (tmux-style splits)** - One terminal per shard
-- **Custom themes** - Use GPUI/system defaults
-- **Settings UI** - Config via TOML files
-- **Plugin system** - No extensibility hooks
-- **Session sync** - No cloud sync across machines
+| Feature | Why Not |
+|---------|---------|
+| Embedded terminals | Future enhancement, not MVP |
+| Cross-platform (Linux/Windows) | macOS first, cross-platform comes with embedded terminals |
+| Cross-shard orchestration | Future vision |
+| Terminal multiplexing | Out of scope |
+| Custom themes | Use defaults |
 
 ## Success Metrics
 
 | Metric | Target | How Measured |
 |--------|--------|--------------|
-| Multi-shard orchestration | 3+ shards controlled from main session | Manual testing |
-| Cross-platform | Works on macOS, Linux, Windows | CI builds + manual testing |
-| CLI parity | All CLI-created sessions visible in UI | Integration test |
+| Feature parity | All CLI operations available in UI | Manual testing |
 | Startup time | < 500ms to interactive | Benchmark |
-
-## Open Questions
-
-- [ ] Should we use gpui-component library for pre-built UI widgets or build custom?
-- [ ] What's the right command syntax for cross-shard communication (`@shard:name` vs other)?
-- [ ] Should output buffer be bounded (ring buffer) or unbounded with pagination?
-- [ ] How do we detect when an AI agent is "idle" vs "thinking"?
-
----
-
-## Users & Context
-
-**Primary User**
-- **Who**: Developer using multiple AI coding agents (Claude, Codex, etc.) on different branches/features
-- **Current behavior**: Manually switches between terminal windows, copies output to share between agents
-- **Trigger**: Starting work that spans multiple features or requires parallel agent coordination
-- **Success state**: Single window showing all agents, with main agent orchestrating child shards
-
-**Job to Be Done**
-When I'm working on a complex feature that needs multiple parallel workstreams, I want to orchestrate AI agents from a single interface, so I can coordinate their work without context-switching between terminal windows.
-
-**Non-Users**
-- Users who only need one agent at a time (CLI is sufficient)
-- Users who prefer tmux/terminal-native workflows
-- Teams requiring shared/collaborative agent sessions
-
----
-
-## CLI vs UI: When to Use Which
-
-Both frontends are first-class citizens. Neither is "better" - they serve different use cases.
-
-| Use Case | Recommended | Why |
-|----------|-------------|-----|
-| Quick one-off shard | **CLI** | `shards create feature-x` → iTerm opens, done |
-| Scripting/automation | **CLI** | No GUI dependencies, scriptable |
-| CI/CD pipelines | **CLI** | Headless, no display required |
-| Headless servers | **CLI** | No GPU/display needed |
-| Multi-agent orchestration | **UI** | Main session controls child shards |
-| Visual monitoring | **UI** | See all shards in tabs, status indicators |
-| Reading agent output | **UI** | Full PTY access, can query output |
-| Sending prompts to running agents | **UI** | Direct PTY write access |
-
-### Interoperability Examples
-
-```bash
-# CLI creates a shard (opens in iTerm)
-shards create auth-fix --agent claude
-
-# UI can see and monitor that shard (read-only for external terminals)
-shards ui
-# → auth-fix appears in session list with status "external"
-
-# UI creates a shard (embedded PTY)
-# → Click [+] in UI, creates "feature-x" shard
-
-# CLI can see UI-created shards
-shards list
-# → Shows both auth-fix (external) and feature-x (embedded)
-
-# CLI can destroy any shard
-shards destroy feature-x
-# → UI updates to reflect destruction
-```
-
-**Note**: For external terminal shards (CLI-created), the UI can show status but cannot read output or send commands. Full orchestration only works for embedded PTY shards created in the UI.
-
----
-
-## Solution Detail
-
-### Core Capabilities (MoSCoW)
-
-| Priority | Capability | Rationale |
-|----------|------------|-----------|
-| Must | Embedded PTY terminals with full I/O control | Foundation for all features |
-| Must | Multi-shard tab interface | Visual management of multiple agents |
-| Must | Cross-platform support (macOS, Linux, Windows) | GPUI now supports all three |
-| Must | Session persistence (survives app restart) | Parity with CLI |
-| Should | Main session can read any shard's output | Core orchestration feature |
-| Should | Main session can send commands to any shard | Core orchestration feature |
-| Should | Visual status indicators (running/idle/stopped) | UX for monitoring |
-| Could | Keyboard shortcuts for shard switching | Power user efficiency |
-| Could | Output search/filtering | Finding relevant agent output |
-| Won't | Terminal multiplexing (splits) | Out of scope, adds complexity |
-| Won't | Custom themes | Use system/GPUI defaults |
-
-### MVP Scope
-
-**Phase 1-2 (PTY + Basic UI)**: Single terminal window that can spawn a shell, accept input, display output with ANSI colors. Validates the GPUI + alacritty_terminal integration works.
-
-**Phase 3 (Multi-Shard)**: Tab bar for multiple shards, create/destroy via UI, session persistence integration.
-
-**Phase 4 (Orchestration)**: Main session can read/write to child shards via `@shard:name` syntax.
-
-### User Flow
-
-```
-1. User runs `shards ui`
-2. Main session terminal appears
-3. User clicks [+] or types command to create shard "auth-fix"
-4. New tab appears with "auth-fix" shard running claude
-5. User switches to main session tab
-6. User types: @shard:auth-fix status
-7. Main session displays recent output from auth-fix shard
-8. User types: @shard:auth-fix "Now add tests for the login flow"
-9. Command appears in auth-fix shard's input
-10. User monitors progress, coordinates multiple shards
-```
-
----
-
-## Technical Approach
-
-**Feasibility**: HIGH
-
-GPUI + alacritty_terminal is a proven combination (Zed editor uses this exact stack). The main complexity is threading: PTY I/O is blocking and must run on background threads with event marshaling to the UI thread.
-
-**Architecture: Two Frontends, One Core**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    shards-core (library crate)                   │
-│                                                                  │
-│  ┌──────────┐ ┌─────┐ ┌─────────┐ ┌────────┐ ┌────────┐        │
-│  │ sessions │ │ git │ │ process │ │ config │ │ errors │        │
-│  └──────────┘ └─────┘ └─────────┘ └────────┘ └────────┘        │
-│                                                                  │
-│  • Session CRUD (create, list, destroy, restart)                │
-│  • Git worktree management                                       │
-│  • Process tracking with PID validation                          │
-│  • Config hierarchy (defaults → user → project → CLI)           │
-│  • NO terminal-specific code - frontends handle that            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────────┐   ┌─────────────────────────────┐
-│   CLI Frontend              │   │   UI Frontend               │
-│   `shards create/list/...`  │   │   `shards ui`               │
-│                             │   │                             │
-│  src/terminal/ (existing)   │   │  src/ui/ (new, feature-gated)│
-│  • iTerm via AppleScript    │   │  src/pty/ (new)             │
-│  • Ghostty via AppleScript  │   │  src/shard_manager/ (new)   │
-│  • Terminal.app             │   │                             │
-│  • Fire-and-forget spawn    │   │  • GPUI window              │
-│                             │   │  • Embedded PTY terminals   │
-│  UNCHANGED by this PRD      │   │  • Multi-shard tabs         │
-│                             │   │  • Full I/O control         │
-│                             │   │  • Cross-shard orchestration│
-└─────────────────────────────┘   └─────────────────────────────┘
-              │                               │
-              └───────────────┬───────────────┘
-                              ▼
-                SHARED: ~/.shards/sessions/*.json
-                (CLI-created shards visible in UI and vice versa)
-```
-
-**Threading Model** (following Zed's pattern)
-
-```
-┌──────────────────┐     ┌─────────────────────┐     ┌──────────────┐
-│   UI Thread      │     │  PTY Event Loop     │     │   PTY I/O    │
-│   (GPUI main)    │◄────│  (background task)  │◄────│  (blocking)  │
-│                  │     │  batches @ 4ms      │     │              │
-└──────────────────┘     └─────────────────────┘     └──────────────┘
-        │                         ▲
-        │ input events            │ output events
-        └─────────────────────────┘
-```
-
-**Key Technical Decisions**
-
-| Decision | Choice | Alternatives | Rationale |
-|----------|--------|--------------|-----------|
-| UI Framework | GPUI | egui, iced, tauri | Production-proven with Zed, native performance |
-| Terminal emulation | alacritty_terminal | vte, termwiz | Battle-tested, Zed uses same approach |
-| PTY threading | tokio spawn_blocking + channels | std::thread | Better integration with async ecosystem |
-| State sync | Arc<FairMutex<Term>> | RwLock, std Mutex | parking_lot's FairMutex prevents starvation |
-| Output buffer | Ring buffer (VecDeque) | Unbounded Vec | Memory bounded, configurable size |
-
-**Technical Risks**
-
-| Risk | Likelihood | Mitigation |
-|------|------------|------------|
-| GPUI breaking changes (pre-1.0) | HIGH | Pin to specific version, prepare for updates |
-| PTY I/O blocking UI | MEDIUM | Background thread + channel pattern from Zed |
-| Windows PTY differences | MEDIUM | Use conpty, test early on Windows |
-| Terminal rendering complexity | MEDIUM | Start with basic grid, iterate on ANSI support |
+| Session display | All shards visible with correct status | Manual testing |
 
 ---
 
 ## Implementation Phases
 
+**Philosophy**: Each phase is ONE PR. Each phase has ONE focus. Each phase is testable in isolation.
+
 ### Phase Overview
 
-| # | Phase | Description | Complexity | Risk | Depends |
-|---|-------|-------------|------------|------|---------|
-| 1 | PTY Foundation | PTY spawn/read/write with threading model | Medium | Medium | - |
-| 2 | Basic GPUI Shell | Single terminal window with keyboard input | **High** | High | 1 |
-| 3 | Multi-Shard Management | Tab bar, create/destroy, session persistence | Medium | Low | 2 |
-| 4 | Cross-Shard Orchestration | @shard commands, output reading, streaming | Medium | Medium | 3 |
+| # | Phase | Focus | Deliverable |
+|---|-------|-------|-------------|
+| 1 | Project Scaffolding | GPUI deps, feature gate | `cargo check --features ui` passes |
+| 2 | Empty Window | GPUI opens a window | Window appears |
+| 3 | Shard List View | Display existing shards | See shards from ~/.shards/sessions/ |
+| 4 | Create Shard | Create button + dialog | Creates shard, launches external terminal |
+| 5 | Destroy & Restart | Management buttons | Can destroy and restart shards |
+| 6 | Status Dashboard | Health indicators, refresh | Live status updates |
+| 7 | Favorites | Quick-spawn repos | Favorites work |
 
 ### Dependency Graph
 
 ```
-Phase 1: PTY Foundation
-    │
-    │ provides: PtyHandle, spawn_pty(), channels for I/O
-    │
-    ▼
-Phase 2: Basic GPUI Shell
-    │
-    │ provides: GPUI app, TerminalView, single working terminal
-    │
-    ▼
-Phase 3: Multi-Shard Management
-    │
-    │ provides: ShardTabs, multiple terminals, session persistence
-    │
-    ▼
-Phase 4: Cross-Shard Orchestration
-    │
-    │ provides: @shard commands, output reading, orchestration API
-    │
-    ▼
-[MVP Complete]
+Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
+   │         │         │          │          │          │         │
+   │         │         │          │          │          │         └─ Convenience
+   │         │         │          │          │          └─ Polish (live updates)
+   │         │         │          │          └─ Full management (destroy, restart)
+   │         │         │          └─ Core action (create shard)
+   │         │         └─ Core view (see shards)
+   │         └─ GPUI works
+   └─ Build system works
 ```
-
-### Phase-to-File Mapping
-
-| Phase | New Files | Modified Files |
-|-------|-----------|----------------|
-| **1** | `src/pty/mod.rs`, `src/pty/types.rs`, `src/pty/handler.rs`, `src/pty/errors.rs`, `src/pty/event_loop.rs`, `src/shard_manager/mod.rs`, `src/shard_manager/types.rs`, `src/shard_manager/handler.rs`, `src/shard_manager/errors.rs` | `Cargo.toml`, `src/lib.rs` |
-| **2** | `src/ui/mod.rs`, `src/ui/app.rs`, `src/ui/views/mod.rs`, `src/ui/views/main_view.rs`, `src/ui/views/terminal_view.rs` | `src/cli/app.rs`, `src/main.rs`, `src/core/config.rs` |
-| **3** | `src/ui/views/shard_tabs.rs`, `src/ui/views/status_bar.rs` | `src/ui/views/main_view.rs`, `src/shard_manager/handler.rs` |
-| **4** | `src/ui/commands.rs` | `src/shard_manager/handler.rs`, `src/ui/views/main_view.rs`, `src/ui/views/terminal_view.rs` |
 
 ---
 
-### Phase 1: PTY Foundation
+### Phase 1: Project Scaffolding
 
-**Goal**: Establish PTY infrastructure with proper threading - NO UI yet
+**Goal**: Feature-gated dependencies compile. No functionality yet.
 
-**Why First**: Everything else depends on being able to spawn and communicate with PTY processes. This phase is pure backend work that can be unit tested without any UI.
+**Why this phase exists**: Validate that GPUI can be added as an optional dependency without breaking the existing CLI build.
 
-**Deliverables**:
-| Deliverable | Description | Validation |
-|-------------|-------------|------------|
-| `src/pty/types.rs` | PtyHandle, PtySize, PtyStatus, OutputBuffer | `cargo check --features ui` |
-| `src/pty/handler.rs` | spawn_pty(), write_to_pty(), read_from_pty(), resize_pty() | Unit tests |
-| `src/pty/errors.rs` | PtyError enum with ShardsError impl | `cargo check` |
-| `src/pty/event_loop.rs` | Background thread with channel-based event marshaling | Integration test |
-| `src/shard_manager/types.rs` | ManagedShard, ShardStatus | `cargo check` |
-| `src/shard_manager/handler.rs` | ShardManager with create/destroy/list | Unit tests |
-| `Cargo.toml` | Feature-gated deps (gpui, alacritty_terminal, tokio, parking_lot) | `cargo check` passes without `--features ui` |
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/mod.rs` | `#[cfg(feature = "ui")] mod` declarations only |
 
-**Success Criteria**:
-```bash
-# 1. Build passes
-cargo check --features ui
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `Cargo.toml` | Add `ui` feature with optional deps |
+| `src/lib.rs` | Conditionally export `ui` module |
 
-# 2. Unit test passes
-cargo test --features ui pty::
-cargo test --features ui shard_manager::
+**Cargo.toml additions**:
+```toml
+[features]
+default = []
+ui = ["dep:gpui"]
 
-# 3. Integration test: spawn PTY, write, read back
-# (test spawns shell, writes "echo hello", reads "hello" from output channel)
+[dependencies]
+gpui = { version = "0.2", optional = true }
 ```
 
-**Risks**:
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| PTY platform differences | Medium | High | Test on macOS + Linux early, use portable_pty crate if needed |
-| Blocking I/O stalls | Medium | High | Background thread pattern from Zed |
-| Channel backpressure | Low | Medium | Use unbounded channels initially, add bounds later if needed |
+**Validation**:
+```bash
+cargo check                    # CLI still works (MUST pass)
+cargo check --features ui      # UI feature compiles (MUST pass)
+cargo build                    # CLI binary size unchanged
+```
+
+**What NOT to do**:
+- Don't write any implementation code
+- Don't add dependencies outside the feature gate
+- Don't modify any existing CLI code paths
 
 ---
 
-### Phase 2: Basic GPUI Shell
+### Phase 2: Empty Window
 
-**Goal**: Functional single-terminal window - the hardest phase
+**Goal**: `shards ui` opens a GPUI window with placeholder text.
 
-**Why Second**: Need a working terminal to iterate on. Once we have one terminal working, adding more (Phase 3) is incremental.
+**Why this phase exists**: Validate GPUI works on this system. Window management, event loop, basic rendering.
 
-**Why High Complexity**:
-- GPUI is pre-1.0 with sparse documentation
-- Terminal rendering requires understanding alacritty_terminal's grid model
-- Input handling must correctly forward to PTY
-- ANSI escape sequence rendering is subtle
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/app.rs` | GPUI Application setup |
+| `src/ui/views/mod.rs` | Views module |
+| `src/ui/views/main_view.rs` | Shows "Shards" title text |
 
-**Deliverables**:
-| Deliverable | Description | Validation |
-|-------------|-------------|------------|
-| `src/ui/app.rs` | GPUI Application setup, window creation | Window opens |
-| `src/ui/views/terminal_view.rs` | Terminal grid rendering with alacritty_terminal | See characters on screen |
-| `src/ui/views/main_view.rs` | Main layout (just terminal for now) | Layout correct |
-| `src/cli/app.rs` update | Add `ui` subcommand | `shards ui` recognized |
-| Keyboard input | Forward keystrokes to PTY | Can type commands |
-| ANSI colors | Render colored output | Colors display correctly |
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/cli/app.rs` | Add `ui` subcommand (feature-gated) |
+| `src/main.rs` | Handle `ui` command |
 
-**Success Criteria**:
+**Validation**:
 ```bash
-# 1. Command works
 cargo run --features ui -- ui
-# → Window opens
-
-# 2. Can interact
-# Type: echo "hello world"
-# See: hello world (in terminal)
-
-# 3. Colors work
-# Type: ls --color
-# See: colored output
-
-# 4. Resize works
-# Drag window corner
-# Terminal adjusts grid size
+# Window opens with "Shards" title
+# Window can be resized
+# Window can be closed (app exits cleanly)
 ```
 
-**Risks**:
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| GPUI API breaks | High | High | Pin to exact version, prepare for updates |
-| Terminal rendering bugs | High | Medium | Start simple (monochrome), add features incrementally |
-| Input handling edge cases | Medium | Medium | Follow Zed's input handling patterns |
-
-**Suggested Sub-phases** (for detailed planning):
-- 2a: GPUI window opens with placeholder content
-- 2b: Connect PTY, show raw output (no formatting)
-- 2c: Proper terminal grid rendering
-- 2d: Keyboard input handling
-- 2e: ANSI color support
+**What NOT to do**:
+- Don't load any shard data yet
+- Don't add any buttons or interactions
+- Don't connect to shards-core
 
 ---
 
-### Phase 3: Multi-Shard Management
+### Phase 3: Shard List View
 
-**Goal**: Manage multiple shards via tab interface
+**Goal**: Display existing shards from `~/.shards/sessions/`.
 
-**Why Third**: Single terminal is working, now we add the multi-shard capability that differentiates us from just running a terminal.
+**Why this phase exists**: The core value - seeing all your shards in one place. Read-only for now.
 
-**Deliverables**:
-| Deliverable | Description | Validation |
-|-------------|-------------|------------|
-| `src/ui/views/shard_tabs.rs` | Tab bar with shard names | Tabs render |
-| `src/ui/views/status_bar.rs` | Shard count, active shard name | Status shows |
-| Create shard UI | Button or Cmd+T to create new shard | Can create shard |
-| Destroy shard UI | Close button on tab | Can close shard |
-| Tab switching | Click tab or Cmd+1/2/3 | Can switch shards |
-| Session persistence | Read/write ~/.shards/sessions/ | Shards survive restart |
-| Status indicators | Visual dot (running/idle/stopped) | Status visible |
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/views/shard_list.rs` | List component showing shards |
+| `src/ui/state.rs` | UI state management (list of shards) |
 
-**Success Criteria**:
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/app.rs` | Load sessions on startup |
+| `src/ui/views/main_view.rs` | Embed shard list |
+
+**What to display per shard**:
+- Shard name (branch name)
+- Project name
+- Status: "Running" or "Stopped" (based on process check)
+- Agent type (claude, kiro, etc.)
+
+**Validation**:
 ```bash
-# 1. Create multiple shards
-# Click [+] three times
-# → Three tabs appear
+# First, create some shards via CLI
+shards create test-shard-1
+shards create test-shard-2
 
-# 2. Switch between them
-# Click each tab
-# → Correct terminal shows
+# Then open UI
+cargo run --features ui -- ui
+# See: list showing test-shard-1, test-shard-2
+# See: correct status for each (Running if process exists)
 
-# 3. Persistence
-# Close app, reopen
-# → Same three shards restored
+# Destroy a shard via CLI
+shards destroy test-shard-1
 
-# 4. CLI interop
+# Refresh/reopen UI
+# See: only test-shard-2 remains
+```
+
+**What NOT to do**:
+- Don't add create/destroy buttons yet
+- Don't add click interactions
+- Don't implement refresh button (manual reopen is fine)
+
+---
+
+### Phase 4: Create Shard
+
+**Goal**: Create button that opens dialog, creates shard, launches external terminal.
+
+**Why this phase exists**: The primary action - creating new shards from the UI.
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/views/create_dialog.rs` | Modal/dialog for shard creation |
+| `src/ui/actions.rs` | Action handlers (create, etc.) |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/views/main_view.rs` | Add [+] or "Create Shard" button |
+| `src/ui/views/shard_list.rs` | Refresh after creation |
+
+**Create dialog fields**:
+- Branch name (required)
+- Agent type (dropdown: claude, kiro, codex, custom)
+- Base branch (optional, defaults to main)
+
+**Key behavior**:
+- Click "Create Shard" → dialog opens
+- Fill in fields → click "Create"
+- Calls existing `shards create` logic (shards-core)
+- External terminal opens (iTerm/Ghostty/Terminal.app)
+- Dialog closes, list refreshes, new shard appears
+
+**Validation**:
+```bash
+cargo run --features ui -- ui
+# Click "Create Shard" button
+# Dialog opens
+# Enter branch name: "test-from-ui"
+# Select agent: claude
+# Click "Create"
+# External terminal opens with claude in new worktree
+# Shard list shows "test-from-ui" as Running
+
+# Verify via CLI
 shards list
-# → Shows UI-created shards
+# Shows: test-from-ui
 ```
 
-**Risks**:
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| State management complexity | Medium | Medium | Use GPUI's Model pattern for shared state |
-| Session format changes | Low | Medium | Version the session JSON format |
+**What NOT to do**:
+- Don't implement embedded terminal - use external
+- Don't add destroy/restart yet
+- Don't over-engineer the dialog (simple form is fine)
 
 ---
 
-### Phase 4: Cross-Shard Orchestration
+### Phase 5: Destroy & Restart
 
-**Goal**: Main session can control child shards - the value proposition
+**Goal**: Buttons to destroy and restart shards.
 
-**Why Fourth**: Needs multiple shards to exist (Phase 3) before we can orchestrate them.
+**Why this phase exists**: Complete the management loop - not just create, but also destroy and restart.
 
-**Deliverables**:
-| Deliverable | Description | Validation |
-|-------------|-------------|------------|
-| `src/ui/commands.rs` | Parse `@shard:name "command"` syntax | Unit tests |
-| `send_to_shard()` | Write to specific shard's PTY | Command appears in shard |
-| `read_shard_output()` | Get last N lines from shard | Output readable |
-| `get_shard_status()` | Detect running/idle/stopped | Status accurate |
-| Main session feedback | "Sent to shard: X" confirmation | User knows it worked |
-| Output streaming | Optional: stream shard output to main | Real-time monitoring |
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/views/shard_list.rs` | Add destroy [x] and restart [↻] buttons per shard |
+| `src/ui/actions.rs` | Add destroy and restart handlers |
 
-**Success Criteria**:
+**Destroy behavior**:
+- Click [x] on shard
+- Confirmation: "Destroy shard 'name'? This removes the worktree."
+- Calls existing `shards destroy` logic
+- Shard removed from list
+
+**Restart behavior**:
+- Click [↻] on shard
+- Calls existing `shards restart` logic
+- Terminal window reactivated or new one opened
+- Status updates to "Running"
+
+**Validation**:
 ```bash
-# 1. Send command to shard
-# In main session, type:
-@shard:auth-fix "echo hello from main"
-# → See "hello from main" in auth-fix shard
+cargo run --features ui -- ui
+# Create a shard (from Phase 4)
 
-# 2. Read shard output
-@shard:auth-fix status
-# → See recent output from auth-fix
+# Test destroy:
+# Click [x] on shard
+# Confirm dialog
+# Shard disappears from list
+shards list  # Confirms shard is gone
 
-# 3. Multiple shards
-@shard:feature-x "npm test"
-@shard:auth-fix "cargo build"
-# → Both shards execute commands
+# Create another shard
+# Close its terminal window manually
+# Status shows "Stopped"
+
+# Test restart:
+# Click [↻]
+# Terminal reopens
+# Status shows "Running"
 ```
 
-**Risks**:
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Idle detection inaccuracy | Medium | Medium | Start with simple timeout, iterate |
-| Command syntax confusion | Low | Low | Clear documentation, error messages |
+**What NOT to do**:
+- Don't add bulk operations yet
+- Don't add keyboard shortcuts yet
 
 ---
 
-### Phase Validation Summary
+### Phase 6: Status Dashboard
 
-| Phase | Entry Criteria | Exit Criteria |
-|-------|---------------|---------------|
-| 1 | - | PTY spawn/read/write works, all unit tests pass |
-| 2 | Phase 1 complete | Window opens, can type and see output with colors |
-| 3 | Phase 2 complete | 3+ shards in tabs, persistence works, CLI interop works |
-| 4 | Phase 3 complete | Main session can send/read from child shards |
+**Goal**: Live status indicators and auto-refresh.
 
-### Parallelism Notes
+**Why this phase exists**: Polish - keep the dashboard current without manual refresh.
 
-Phases must be **sequential** at the phase level - each depends on the previous.
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/refresh.rs` | Background refresh logic |
 
-**Within-phase parallelism** (for worktree-based development):
-| Phase | Can Parallelize |
-|-------|-----------------|
-| 1 | `src/pty/` and `src/shard_manager/` can be developed in parallel after types.rs |
-| 2 | After app.rs works: terminal_view.rs and input handling can parallel |
-| 3 | Tab UI and session persistence can parallel |
-| 4 | Command parsing and output streaming can parallel |
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/views/shard_list.rs` | Add status indicators, timestamps |
+| `src/ui/app.rs` | Add refresh timer |
+
+**Status indicators**:
+- 🟢 Running (process alive)
+- 🔴 Stopped (process dead)
+- ⚪ Unknown (can't determine)
+
+**Additional info to show**:
+- Last activity time (from session JSON or process)
+- Created time
+- Worktree path (on hover or expandable)
+
+**Auto-refresh**:
+- Poll every 5 seconds for process status
+- Update indicators without full reload
+
+**Validation**:
+```bash
+cargo run --features ui -- ui
+# Create a shard
+# See: 🟢 Running
+
+# Close the terminal window
+# Wait 5 seconds
+# See: 🔴 Stopped (auto-updated)
+
+# Restart the shard
+# See: 🟢 Running (auto-updated)
+```
+
+**What NOT to do**:
+- Don't add complex real-time streaming
+- Don't add notifications
+- Keep polling simple (5 second interval is fine)
+
+---
+
+### Phase 7: Favorites
+
+**Goal**: Store favorite repositories for quick shard creation.
+
+**Why this phase exists**: Convenience - users work across multiple repos.
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/favorites.rs` | Load/save favorites list |
+| `src/ui/views/favorites_panel.rs` | Favorites sidebar or section |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/views/main_view.rs` | Add favorites panel |
+| `src/ui/views/create_dialog.rs` | Pre-fill from favorite selection |
+
+**Storage**: `~/.shards/favorites.json`
+```json
+{
+  "favorites": [
+    {"path": "/Users/x/projects/shards", "name": "shards"},
+    {"path": "/Users/x/projects/other", "name": "other-project"}
+  ]
+}
+```
+
+**Key work**:
+- Favorites panel showing saved repos
+- "Add current directory to favorites" (if UI knows current dir)
+- "Add from path" manual entry
+- Click favorite → opens create dialog with path pre-filled
+- Remove favorite button
+
+**Validation**:
+```bash
+cargo run --features ui -- ui
+# Add a favorite (manual path entry)
+# See: favorite appears in list
+
+# Click favorite
+# Create dialog opens with path pre-filled
+
+# Create shard from favorite
+# Shard is created in that repo
+
+# Close/reopen UI
+# Favorites persist
+```
+
+---
+
+## Future Phases (Post-MVP)
+
+These come after the core dashboard is working and validated.
+
+---
+
+### Phase 8+: Embedded Terminals
+
+**Goal**: Replace external terminals with embedded PTY terminals in the UI.
+
+**Why this matters**: Embedded terminals give us **control**. With external terminals (iTerm, Ghostty), we can only:
+- Launch them (fire-and-forget)
+- Check if the process is running
+- Kill the process
+
+With embedded terminals, we gain:
+- Full read access to terminal output
+- Full write access to send commands
+- Knowledge of terminal state (cursor position, screen content)
+- Cross-platform support (no AppleScript dependency)
+
+**Why deferred to post-MVP**:
+1. It's the hardest technical challenge (GPUI + alacritty_terminal + PTY threading)
+2. The dashboard delivers core value without it
+3. We want to validate the product concept before investing in the hard work
+4. External terminals work fine for macOS users
+
+**What it enables**:
+
+| Capability | Why It Matters |
+|------------|----------------|
+| Cross-platform | Linux and Windows users can use Shards |
+| Terminal tabs in UI | No window switching, all shards visible |
+| Output reading | See what agents are doing without switching windows |
+| Foundation for orchestration | Required for future @shard commands |
+
+**Technical approach** (research needed):
+- Use `alacritty_terminal` crate for terminal emulation (ANSI parsing, grid state)
+- Use platform PTY APIs (or `portable_pty` crate) for process spawning
+- Background thread for PTY I/O, channel-based communication to UI thread
+- Reference: Zed editor uses this exact stack (GPUI + alacritty_terminal)
+
+**Rough phase breakdown** (to be detailed in separate PRD):
+
+| Sub-phase | Focus |
+|-----------|-------|
+| 8a | PTY infrastructure (spawn, read, write) - no UI |
+| 8b | Basic terminal view (raw output in window) |
+| 8c | Full terminal rendering (colors, cursor, input) |
+| 8d | Replace external launch with embedded option |
+| 8e | User preference: embedded vs external |
+
+**Open questions for Phase 8**:
+- Should embedded be the default, or opt-in?
+- Should we support both embedded AND external (user choice)?
+- What's the minimum viable terminal rendering? (Do we need full xterm compatibility?)
+
+---
+
+### Phase 9+: Cross-Shard Orchestration (Future Vision)
+
+**Goal**: Enable a main session to coordinate child shards.
+
+**Why this is the long-term vision**: The ultimate value of Shards is coordinating multiple AI agents working on different parts of a codebase. Today, humans manually switch between terminals and copy/paste context. With orchestration, a main agent could:
+- Spawn worker shards for subtasks
+- Monitor their progress by reading output
+- Send them additional instructions
+- Collect their results
+
+**Prerequisites**:
+- Embedded terminals (Phase 8) - required to read/write to shards
+- Output buffering - store terminal history for querying
+- Command protocol - how main session addresses child shards
+
+**Possible features** (research needed):
+- `@shard:name status` - get recent output from a shard
+- `@shard:name "do something"` - send command to a shard
+- `@shard:all status` - overview of all shards
+- Idle detection - know when an agent is waiting for input
+
+**Why deferred far into the future**:
+1. Requires embedded terminals first
+2. Needs research into feasibility and UX
+3. Core dashboard value doesn't depend on it
+4. May require agent SDK integration, not just terminal tricks
+
+**This is speculative**. We note it here to preserve the vision, but it's not committed scope. The right time to design this is after embedded terminals are working and we understand the possibilities.
 
 ---
 
@@ -534,172 +591,95 @@ Phases must be **sequential** at the phase level - each depends on the previous.
 ```toml
 [features]
 default = []
-ui = [
-  "dep:gpui",
-  "dep:alacritty_terminal",
-  "dep:parking_lot",
-  "dep:tokio"
-]
+ui = ["dep:gpui"]
 
 [dependencies]
-# Existing deps unchanged...
-
-# UI-only dependencies (optional)
 gpui = { version = "0.2", optional = true }
-alacritty_terminal = { version = "0.25", optional = true }
-parking_lot = { version = "0.12", optional = true }
-tokio = { version = "1.49", features = ["full", "sync"], optional = true }
-
-# Optional: Pre-built UI components
-gpui-component = { version = "0.5", optional = true }
 ```
+
+Note: We don't need `alacritty_terminal` or PTY crates for MVP. Those come with embedded terminals (Phase 8+).
 
 ### Platform Requirements
 
-| Platform | Graphics Backend | PTY Implementation | Status |
-|----------|-----------------|-------------------|--------|
-| macOS | Metal | native PTY | Supported |
-| Linux | Vulkan (Blade) | native PTY | Supported |
-| Windows | DirectX 11 | conpty | Supported (GPUI 0.2+) |
-
-### Build Commands
-
-```bash
-# CLI only (default, minimal)
-cargo build
-
-# With UI (adds ~50MB, requires platform GPU libs)
-cargo build --features ui
-
-# Run UI
-cargo run --features ui -- ui
-```
+| Platform | Status |
+|----------|--------|
+| macOS | Supported (MVP) |
+| Linux | Future (requires embedded terminals) |
+| Windows | Future (requires embedded terminals) |
 
 ---
 
-## Files to Create/Modify
+## Scope Boundary
 
-**New Files (all feature-gated behind `#[cfg(feature = "ui")]`):**
+**This PRD covers Phases 1-7 only** (the MVP dashboard with external terminals).
 
-| File | Purpose |
-|------|---------|
-| `src/pty/mod.rs` | PTY module root |
-| `src/pty/types.rs` | PtyHandle, OutputBuffer, PtySize, PtyStatus |
-| `src/pty/handler.rs` | spawn_pty, write_to_pty, read_from_pty, resize_pty |
-| `src/pty/errors.rs` | PtyError enum |
-| `src/pty/event_loop.rs` | Background PTY event loop with batching |
-| `src/shard_manager/mod.rs` | Shard manager module root |
-| `src/shard_manager/types.rs` | ManagedShard, ShardStatus |
-| `src/shard_manager/handler.rs` | ShardManager struct with CRUD + orchestration |
-| `src/shard_manager/errors.rs` | ShardError enum |
-| `src/ui/mod.rs` | UI module root |
-| `src/ui/app.rs` | GPUI Application setup |
-| `src/ui/views/mod.rs` | Views module root |
-| `src/ui/views/main_view.rs` | Main application layout |
-| `src/ui/views/terminal_view.rs` | Single terminal rendering |
-| `src/ui/views/shard_tabs.rs` | Tab bar component |
-| `src/ui/views/status_bar.rs` | Bottom status bar |
-| `src/ui/commands.rs` | @shard command parsing |
-
-**Modified Files:**
-
-| File | Change |
-|------|--------|
-| `Cargo.toml` | Add optional dependencies and `ui` feature |
-| `src/lib.rs` | Conditionally export ui, pty, shard_manager modules |
-| `src/cli/app.rs` | Add `ui` subcommand (feature-gated) |
-| `src/main.rs` | Handle `ui` command when feature enabled |
-| `src/core/config.rs` | Add UiConfig struct (feature-gated) |
+Phases 8+ (embedded terminals, orchestration) are documented above for vision context, but are **separate PRDs** to be written after MVP validation. Don't let future vision creep into MVP implementation.
 
 ---
 
-## Validation Commands
+## Open Questions
 
-### Level 1: Static Analysis
-```bash
-cargo check && cargo check --features ui && cargo clippy --features ui
-```
-
-### Level 2: Unit Tests
-```bash
-cargo test --lib --features ui
-```
-
-### Level 3: Build
-```bash
-cargo build --features ui
-```
-
-### Level 4: Smoke Test
-```bash
-cargo run --features ui -- ui
-# Window should open with terminal
-```
-
-### Level 5: PTY Validation
-```bash
-# In UI terminal:
-echo "hello world"
-# Should see "hello world" output
-```
-
-### Level 6: Multi-Shard Validation
-```bash
-# Create 3 shards via UI
-# Switch between them
-# Restart app
-# Shards should persist
-```
-
-### Level 7: Orchestration Validation
-```bash
-# In main session:
-@shard:test "echo orchestrated"
-# Should see command sent to test shard
-@shard:test status
-# Should see recent output from test shard
-```
+- [ ] Should we use gpui-component library for pre-built UI widgets?
+- [ ] How should the create dialog look? (modal vs inline)
+- [ ] Should favorites be global or per-project?
+- [ ] Should we show a "current directory" indicator for context?
 
 ---
 
-## Research Summary
+## Guidance for Implementing Agent
 
-**Market Context**
-- Zed editor proves GPUI + alacritty_terminal is production-ready
-- No existing tools combine AI agent orchestration with embedded terminals
-- Current AI coding tools (Cursor, Continue) don't support multi-agent workflows
+### Before Starting Any Phase
 
-**Technical Context**
-- GPUI 0.2.2 released October 2025 with Windows support (DirectX 11)
-- alacritty_terminal 0.25.1 is current stable, requires Rust 1.85+
-- Zed's terminal implementation provides proven architecture patterns
-- Codebase already has strong session/process tracking infrastructure
+1. Read the phase description completely
+2. Read "What NOT to do" - these are common mistakes
+3. Check the validation criteria - this is your definition of done
+4. Don't look ahead to future phases
 
-**Key Sources**
-- [GPUI Official Site](https://www.gpui.rs/)
-- [GPUI crates.io](https://crates.io/crates/gpui) - v0.2.2
-- [alacritty_terminal crates.io](https://crates.io/crates/alacritty_terminal) - v0.25.1
-- [Zed Terminal Core Architecture](https://deepwiki.com/zed-industries/zed/9.1-terminal-core)
-- [Zed Windows Release](https://www.neowin.net/news/windows-1011-users-have-a-reason-to-rejoice-as-microsofts-rival-gains-platform-support/)
-- [gpui-component Library](https://longbridge.github.io/gpui-component/)
+### The Core Pattern
+
+Every phase follows this pattern:
+1. Call existing shards-core functions (don't duplicate logic)
+2. Update UI state
+3. Re-render
+
+Example for "Create Shard":
+```
+User clicks button → Show dialog → User fills form →
+Call shards::create() → Update state.shards → Re-render list
+```
+
+### When You're Stuck
+
+1. Check if you're over-engineering (YAGNI)
+2. Check if you're building for a future phase
+3. Look at how the CLI does it - then call that same code
+4. Ask for clarification rather than guessing
+
+### Code Quality
+
+- All code must be feature-gated under `#[cfg(feature = "ui")]`
+- All types must have proper type annotations
+- Run `cargo check` and `cargo check --features ui` before committing
+- Reuse shards-core logic - never duplicate
+
+### Phase Boundaries
+
+Each phase is a PR. Don't bleed work across phases. If Phase 3 validation passes, stop and submit. Don't "just add" the create button because it seems easy - that's Phase 4.
 
 ---
 
 ## Decisions Log
 
-| Decision | Choice | Alternatives | Rationale |
-|----------|--------|--------------|-----------|
-| CLI/UI relationship | Two frontends, shared core | Replace CLI with UI | CLI serves different use cases (scripting, CI, quick shards) |
-| CLI terminal support | Keep external terminals | Remove in favor of UI | Users want iTerm/Ghostty for one-off work |
-| UI Framework | GPUI | egui, iced, tauri | Proven with Zed, native perf, cross-platform |
-| Terminal lib | alacritty_terminal | vte, termwiz | Battle-tested, Zed uses same |
-| Architecture | Feature-gated single binary | Separate crates | Simpler, CLI stays lightweight |
-| Threading | tokio + channels | std::thread | Async ecosystem integration |
-| Shard manager location | src/shard_manager/ (ui feature-gated) | src/ui/shard_manager/ | Can be tested independently |
-| Windows backend | DirectX 11 (via GPUI) | Vulkan | GPUI's choice, better compatibility |
-| Session interop | Both frontends read/write same JSON | Separate session stores | Users can mix CLI and UI workflows |
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Terminal approach | External terminals for MVP | Faster to value, reuses working code |
+| Platform | macOS first | CLI terminal launching already works |
+| Embedded terminals | Deferred to Phase 8+ | Hardest part, not needed for core value |
+| UI framework | GPUI | Native performance, Rust ecosystem |
+| State management | Simple struct | YAGNI - no complex state libraries |
 
 ---
 
-*Generated: 2026-01-21*
-*Status: DRAFT - ready for review*
+*Status: DRAFT - aligned with ideas.md vision*
+*Philosophy: Shards-first, KISS, YAGNI*
+*Platform: macOS first*
