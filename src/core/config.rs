@@ -148,13 +148,45 @@ impl ShardsConfig {
         let mut config = ShardsConfig::default();
 
         // Load user config
-        if let Ok(user_config) = Self::load_user_config() {
-            config = Self::merge_configs(config, user_config);
+        match Self::load_user_config() {
+            Ok(user_config) => {
+                config = Self::merge_configs(config, user_config);
+            }
+            Err(e) => {
+                // Check if this is a "file not found" error (expected) vs other errors (should warn)
+                let is_not_found = e
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
+
+                if !is_not_found {
+                    tracing::warn!(
+                        event = "config.user_config_load_failed",
+                        error = %e,
+                        "User config file exists but could not be loaded - using defaults"
+                    );
+                }
+            }
         }
 
         // Load project config
-        if let Ok(project_config) = Self::load_project_config() {
-            config = Self::merge_configs(config, project_config);
+        match Self::load_project_config() {
+            Ok(project_config) => {
+                config = Self::merge_configs(config, project_config);
+            }
+            Err(e) => {
+                // Check if this is a "file not found" error (expected) vs other errors (should warn)
+                let is_not_found = e
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
+
+                if !is_not_found {
+                    tracing::warn!(
+                        event = "config.project_config_load_failed",
+                        error = %e,
+                        "Project config file exists but could not be loaded - using defaults"
+                    );
+                }
+            }
         }
 
         // Validate the final configuration

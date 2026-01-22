@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthSnapshot {
@@ -72,7 +73,18 @@ pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
     // Append to daily file
     let mut snapshots: Vec<HealthSnapshot> = if filepath.exists() {
         let content = fs::read_to_string(&filepath)?;
-        serde_json::from_str(&content).unwrap_or_default()
+        match serde_json::from_str(&content) {
+            Ok(existing) => existing,
+            Err(e) => {
+                warn!(
+                    event = "health.history_parse_failed",
+                    file_path = %filepath.display(),
+                    error = %e,
+                    "Existing health history file is corrupted - starting fresh (previous data will be lost)"
+                );
+                Vec::new()
+            }
+        }
     } else {
         Vec::new()
     };
@@ -89,13 +101,57 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
 
     let cutoff = Utc::now() - chrono::Duration::days(days as i64);
 
-    if let Ok(entries) = fs::read_dir(&history_dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            if let Ok(content) = fs::read_to_string(entry.path())
-                && let Ok(snapshots) = serde_json::from_str::<Vec<HealthSnapshot>>(&content)
-            {
-                all_snapshots.extend(snapshots.into_iter().filter(|s| s.timestamp > cutoff));
+    match fs::read_dir(&history_dir) {
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let path = entry.path();
+                        match fs::read_to_string(&path) {
+                            Ok(content) => {
+                                match serde_json::from_str::<Vec<HealthSnapshot>>(&content) {
+                                    Ok(snapshots) => {
+                                        all_snapshots.extend(
+                                            snapshots.into_iter().filter(|s| s.timestamp > cutoff),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            event = "health.history_file_parse_failed",
+                                            file_path = %path.display(),
+                                            error = %e,
+                                            "Could not parse health history file - skipping"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event = "health.history_file_read_failed",
+                                    file_path = %path.display(),
+                                    error = %e,
+                                    "Could not read health history file - skipping"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            event = "health.history_dir_entry_failed",
+                            error = %e,
+                            "Could not read directory entry in health history"
+                        );
+                    }
+                }
             }
+        }
+        Err(e) => {
+            warn!(
+                event = "health.history_dir_read_failed",
+                history_dir = %history_dir.display(),
+                error = %e,
+                "Could not read health history directory"
+            );
         }
     }
 
@@ -103,24 +159,72 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
     Ok(all_snapshots)
 }
 
-pub fn cleanup_old_history(retention_days: u64) -> Result<usize, std::io::Error> {
+/// Result of history cleanup operation
+#[derive(Debug)]
+pub struct CleanupResult {
+    pub removed: usize,
+    pub failed: usize,
+}
+
+pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io::Error> {
     let history_dir = get_history_dir()?;
     let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
     let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
 
     let mut removed = 0;
+    let mut failed = 0;
 
-    if let Ok(entries) = fs::read_dir(&history_dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let filename = entry.file_name().to_string_lossy().to_string();
-            if filename < cutoff_date
-                && filename.ends_with(".json")
-                && fs::remove_file(entry.path()).is_ok()
-            {
-                removed += 1;
+    match fs::read_dir(&history_dir) {
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let filename = entry.file_name().to_string_lossy().to_string();
+                        if filename < cutoff_date && filename.ends_with(".json") {
+                            match fs::remove_file(entry.path()) {
+                                Ok(()) => {
+                                    removed += 1;
+                                }
+                                Err(e) => {
+                                    failed += 1;
+                                    warn!(
+                                        event = "health.history_cleanup_delete_failed",
+                                        file_path = %entry.path().display(),
+                                        error = %e,
+                                        "Could not delete old health history file"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            event = "health.history_cleanup_entry_failed",
+                            error = %e,
+                            "Could not read directory entry during cleanup"
+                        );
+                    }
+                }
             }
+        }
+        Err(e) => {
+            warn!(
+                event = "health.history_cleanup_dir_read_failed",
+                history_dir = %history_dir.display(),
+                error = %e,
+                "Could not read health history directory for cleanup"
+            );
         }
     }
 
-    Ok(removed)
+    if failed > 0 {
+        warn!(
+            event = "health.history_cleanup_partial",
+            removed = removed,
+            failed = failed,
+            "Health history cleanup completed with some failures"
+        );
+    }
+
+    Ok(CleanupResult { removed, failed })
 }

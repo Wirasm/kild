@@ -281,7 +281,7 @@ fn read_pid_from_file_with_validation(
             warn!(
                 event = "terminal.pid_file_not_found",
                 path = %pid_file.display(),
-                message = "PID file not created after spawn - process tracking unavailable"
+                message = "PID file not created after spawn - process tracking unavailable. Session will be created but 'restart' and 'destroy' commands may not be able to manage the agent process automatically."
             );
             Ok((None, None, None))
         }
@@ -289,7 +289,8 @@ fn read_pid_from_file_with_validation(
             warn!(
                 event = "terminal.pid_file_read_error",
                 path = %pid_file.display(),
-                error = %e
+                error = %e,
+                message = "Failed to read PID file - process tracking unavailable. Session will be created but 'restart' and 'destroy' commands may not be able to manage the agent process automatically."
             );
             Ok((None, None, None))
         }
@@ -343,12 +344,12 @@ pub fn close_terminal(
             terminal_type = %terminal_type,
             window_id = ?window_id,
             error = %e,
-            message = "Continuing with destroy despite terminal close failure"
+            message = "Terminal window close failed - it may need to be closed manually"
         ),
     }
 
-    // Always return Ok - terminal close failure should not block destroy
-    Ok(())
+    // Return actual result so callers can decide how to handle failures
+    result
 }
 
 #[cfg(test)]

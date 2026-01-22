@@ -154,29 +154,57 @@ pub fn detect_untracked_worktrees(
 
     // Check each worktree
     for worktree_name in worktrees.iter().flatten() {
-        if let Ok(worktree) = repo.find_worktree(worktree_name) {
-            let worktree_path = worktree.path();
+        let worktree = match repo.find_worktree(worktree_name) {
+            Ok(wt) => wt,
+            Err(e) => {
+                warn!(
+                    event = "cleanup.worktree_find_failed",
+                    worktree_name = %worktree_name,
+                    error = %e,
+                    "Could not access registered worktree - it may be corrupted or inaccessible"
+                );
+                continue;
+            }
+        };
+        let worktree_path = worktree.path();
 
-            // Only consider worktrees under our project's worktrees directory
-            let canonical_worktree = worktree_path.canonicalize().ok();
-            let canonical_project_dir = project_worktrees_dir.canonicalize().ok();
+        // Only consider worktrees under our project's worktrees directory
+        let canonical_worktree = worktree_path.canonicalize();
+        let canonical_project_dir = project_worktrees_dir.canonicalize();
 
-            let is_in_shards_dir = match (&canonical_worktree, &canonical_project_dir) {
-                (Some(wt), Some(pd)) => wt.starts_with(pd),
-                // Fall back to non-canonical comparison if canonicalize fails
-                _ => worktree_path.starts_with(&project_worktrees_dir),
-            };
+        // Log when canonicalization fails - path comparison may be inaccurate
+        if let Err(ref e) = canonical_worktree {
+            warn!(
+                event = "cleanup.worktree_canonicalize_failed",
+                worktree_path = %worktree_path.display(),
+                error = %e,
+                "Could not resolve canonical path for worktree - using non-canonical comparison"
+            );
+        }
+        if let Err(ref e) = canonical_project_dir {
+            warn!(
+                event = "cleanup.project_dir_canonicalize_failed",
+                project_dir = %project_worktrees_dir.display(),
+                error = %e,
+                "Could not resolve canonical path for project directory - using non-canonical comparison"
+            );
+        }
 
-            if is_in_shards_dir {
-                // Check if this worktree has a corresponding session
-                let worktree_path_str = canonical_worktree
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|| worktree_path.to_string_lossy().to_string());
+        let is_in_shards_dir = match (&canonical_worktree, &canonical_project_dir) {
+            (Ok(wt), Ok(pd)) => wt.starts_with(pd),
+            // Fall back to non-canonical comparison if canonicalize fails
+            _ => worktree_path.starts_with(&project_worktrees_dir),
+        };
 
-                if !session_worktree_paths.contains(&worktree_path_str) {
-                    untracked_worktrees.push(worktree_path.to_path_buf());
-                }
+        if is_in_shards_dir {
+            // Check if this worktree has a corresponding session
+            let worktree_path_str = canonical_worktree
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| worktree_path.to_string_lossy().to_string());
+
+            if !session_worktree_paths.contains(&worktree_path_str) {
+                untracked_worktrees.push(worktree_path.to_path_buf());
             }
         }
     }
@@ -202,16 +230,43 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
         if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
             match std::fs::read_to_string(&path) {
                 Ok(content) => {
-                    if let Ok(session) = serde_json::from_str::<serde_json::Value>(&content)
-                        && let Some(worktree_path) =
-                            session.get("worktree_path").and_then(|v| v.as_str())
-                    {
-                        // Try to canonicalize for consistent comparison
-                        let canonical = PathBuf::from(worktree_path)
-                            .canonicalize()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|_| worktree_path.to_string());
-                        paths.insert(canonical);
+                    match serde_json::from_str::<serde_json::Value>(&content) {
+                        Ok(session) => {
+                            match session.get("worktree_path") {
+                                Some(worktree_value) => {
+                                    if let Some(worktree_path) = worktree_value.as_str() {
+                                        // Try to canonicalize for consistent comparison
+                                        let canonical = PathBuf::from(worktree_path)
+                                            .canonicalize()
+                                            .map(|p| p.to_string_lossy().to_string())
+                                            .unwrap_or_else(|_| worktree_path.to_string());
+                                        paths.insert(canonical);
+                                    } else {
+                                        warn!(
+                                            event = "cleanup.session_invalid_worktree_path_type",
+                                            file_path = %path.display(),
+                                            worktree_path_value = ?worktree_value,
+                                            "Session file has worktree_path but it is not a string"
+                                        );
+                                    }
+                                }
+                                None => {
+                                    warn!(
+                                        event = "cleanup.session_missing_worktree_path",
+                                        file_path = %path.display(),
+                                        "Session file is missing worktree_path field"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                event = "cleanup.session_json_parse_failed",
+                                file_path = %path.display(),
+                                error = %e,
+                                "Session file contains invalid JSON"
+                            );
+                        }
                     }
                 }
                 Err(e) => {
