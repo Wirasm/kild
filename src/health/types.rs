@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HealthStatus {
-    Working,    // Process running, recent activity
-    Idle,       // Process running, no activity >10min, last message from agent
-    Stuck,      // Process running, no activity >10min, last message from user
-    Crashed,    // Process not running but session exists
-    Unknown,    // Cannot determine status
+    Working, // Process running, recent activity
+    Idle,    // Process running, no activity >10min, last message from agent
+    Stuck,   // Process running, no activity >10min, last message from user
+    Crashed, // Process not running but session exists
+    Unknown, // Cannot determine status
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

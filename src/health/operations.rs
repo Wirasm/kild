@@ -1,8 +1,8 @@
+use crate::health::types::{HealthMetrics, HealthOutput, HealthStatus, ShardHealth};
+use crate::process::types::ProcessMetrics;
+use crate::sessions::types::Session;
 use chrono::{DateTime, Utc};
 use std::sync::atomic::{AtomicI64, Ordering};
-use crate::health::types::{HealthStatus, HealthMetrics, ShardHealth, HealthOutput};
-use crate::sessions::types::Session;
-use crate::process::types::ProcessMetrics;
 
 static IDLE_THRESHOLD_MINUTES: AtomicI64 = AtomicI64::new(10);
 
@@ -25,19 +25,19 @@ pub fn calculate_health_status(
     if !process_running {
         return HealthStatus::Crashed;
     }
-    
+
     let Some(activity_str) = last_activity else {
         return HealthStatus::Unknown;
     };
-    
+
     let Ok(activity_time) = DateTime::parse_from_rfc3339(activity_str) else {
         return HealthStatus::Unknown;
     };
-    
+
     let now = Utc::now();
     let minutes_since_activity = (now.signed_duration_since(activity_time)).num_minutes();
     let threshold = IDLE_THRESHOLD_MINUTES.load(Ordering::Relaxed);
-    
+
     if minutes_since_activity < threshold {
         HealthStatus::Working
     } else if last_message_from_user {
@@ -58,7 +58,7 @@ pub fn enrich_session_with_health(
         session.last_activity.as_deref(),
         false, // TODO: Track last message sender in future
     );
-    
+
     let status_icon = match status {
         HealthStatus::Working => "✅",
         HealthStatus::Idle => "⏸️ ",
@@ -66,16 +66,20 @@ pub fn enrich_session_with_health(
         HealthStatus::Crashed => "❌",
         HealthStatus::Unknown => "❓",
     };
-    
+
     let metrics = HealthMetrics {
         cpu_usage_percent: process_metrics.as_ref().map(|m| m.cpu_usage_percent),
         memory_usage_mb: process_metrics.as_ref().map(|m| m.memory_usage_mb()),
-        process_status: if process_running { "Running".to_string() } else { "Stopped".to_string() },
+        process_status: if process_running {
+            "Running".to_string()
+        } else {
+            "Stopped".to_string()
+        },
         last_activity: session.last_activity.clone(),
         status,
         status_icon: status_icon.to_string(),
     };
-    
+
     ShardHealth {
         session_id: session.id.clone(),
         project_id: session.project_id.clone(),
@@ -93,7 +97,7 @@ pub fn aggregate_health_stats(shards: &[ShardHealth]) -> HealthOutput {
     let mut idle = 0;
     let mut stuck = 0;
     let mut crashed = 0;
-    
+
     for shard in shards {
         match shard.metrics.status {
             HealthStatus::Working => working += 1,
@@ -103,7 +107,7 @@ pub fn aggregate_health_stats(shards: &[ShardHealth]) -> HealthOutput {
             HealthStatus::Unknown => {}
         }
     }
-    
+
     HealthOutput {
         shards: shards.to_vec(),
         total_count: shards.len(),

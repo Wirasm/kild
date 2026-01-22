@@ -123,7 +123,7 @@ mod tests {
             PathBuf::from("/tmp/test"),
             "kiro-cli chat".to_string(),
         );
-        
+
         assert_eq!(config.terminal_type, TerminalType::Ghostty);
         assert_eq!(config.working_directory, PathBuf::from("/tmp/test"));
         assert_eq!(config.command, "kiro-cli chat");
@@ -136,7 +136,7 @@ mod tests {
             PathBuf::from("/tmp/test"),
             "echo hello".to_string(),
         );
-        
+
         assert_eq!(config.terminal_type, TerminalType::Native);
         assert_eq!(config.working_directory, PathBuf::from("/tmp/test"));
         assert_eq!(config.command, "echo hello");

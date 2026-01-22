@@ -21,7 +21,9 @@ const PID_DIR_NAME: &str = "pids";
 pub fn get_pid_file_path(shards_dir: &Path, session_id: &str) -> PathBuf {
     // Sanitize session_id to be safe for filenames (replace / with -)
     let safe_id = session_id.replace('/', "-");
-    shards_dir.join(PID_DIR_NAME).join(format!("{}.pid", safe_id))
+    shards_dir
+        .join(PID_DIR_NAME)
+        .join(format!("{}.pid", safe_id))
 }
 
 /// Ensure the PID directory exists
@@ -113,20 +115,23 @@ fn read_pid_file(pid_file: &Path) -> Result<Option<u32>, ProcessError> {
     })?;
 
     let mut contents = String::new();
-    file.read_to_string(&mut contents).map_err(|e| ProcessError::PidFileError {
-        path: pid_file.to_path_buf(),
-        message: format!("Failed to read PID file: {}", e),
-    })?;
+    file.read_to_string(&mut contents)
+        .map_err(|e| ProcessError::PidFileError {
+            path: pid_file.to_path_buf(),
+            message: format!("Failed to read PID file: {}", e),
+        })?;
 
     let pid_str = contents.trim();
     if pid_str.is_empty() {
         return Ok(None);
     }
 
-    let pid = pid_str.parse::<u32>().map_err(|e| ProcessError::PidFileError {
-        path: pid_file.to_path_buf(),
-        message: format!("Invalid PID '{}': {}", pid_str, e),
-    })?;
+    let pid = pid_str
+        .parse::<u32>()
+        .map_err(|e| ProcessError::PidFileError {
+            path: pid_file.to_path_buf(),
+            message: format!("Invalid PID '{}': {}", pid_str, e),
+        })?;
 
     Ok(Some(pid))
 }
@@ -179,7 +184,10 @@ mod tests {
 
         // Session ID with slash (project/branch format)
         let path = get_pid_file_path(shards_dir, "project-id/feature-branch");
-        assert_eq!(path, PathBuf::from("/home/user/.shards/pids/project-id-feature-branch.pid"));
+        assert_eq!(
+            path,
+            PathBuf::from("/home/user/.shards/pids/project-id-feature-branch.pid")
+        );
     }
 
     #[test]

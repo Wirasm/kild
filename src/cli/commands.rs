@@ -3,8 +3,8 @@ use tracing::{error, info};
 
 use crate::cleanup;
 use crate::cli::table::truncate;
-use crate::core::events;
 use crate::core::config::ShardsConfig;
+use crate::core::events;
 use crate::health;
 use crate::process;
 use crate::sessions::{handler as session_handler, types::CreateSessionRequest};
@@ -13,11 +13,13 @@ use crate::sessions::{handler as session_handler, types::CreateSessionRequest};
 fn is_valid_branch_name(name: &str) -> bool {
     // Allow alphanumeric, hyphens, underscores, and forward slashes
     // Prevent path traversal and special characters
-    !name.is_empty() 
+    !name.is_empty()
         && !name.contains("..")
         && !name.starts_with('/')
         && !name.ends_with('/')
-        && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/')
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/')
         && name.len() <= 255
 }
 
@@ -40,12 +42,13 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
 }
 
 fn handle_create_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let branch = matches.get_one::<String>("branch")
+    let branch = matches
+        .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
-    
+
     // Load config hierarchy
     let mut config = ShardsConfig::load_hierarchy().unwrap_or_default();
-    
+
     // Apply CLI overrides only if provided
     let agent_override = matches.get_one::<String>("agent").cloned();
     if let Some(agent) = &agent_override {
@@ -75,7 +78,10 @@ fn handle_create_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             println!("   Branch: {}", session.branch);
             println!("   Agent: {}", session.agent);
             println!("   Worktree: {}", session.worktree_path.display());
-            println!("   Port Range: {}-{}", session.port_range_start, session.port_range_end);
+            println!(
+                "   Port Range: {}-{}",
+                session.port_range_start, session.port_range_end
+            );
             println!("   Status: {:?}", session.status);
 
             info!(
@@ -133,7 +139,8 @@ fn handle_list_command() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn handle_destroy_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let branch = matches.get_one::<String>("branch")
+    let branch = matches
+        .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
 
     info!(event = "cli.destroy_started", branch = branch);
@@ -173,7 +180,11 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
             println!("   Agent: {}", session.agent);
             println!("   Process ID: {:?}", session.process_id);
             println!("   Worktree: {}", session.worktree_path.display());
-            info!(event = "cli.restart_completed", branch = branch, process_id = session.process_id);
+            info!(
+                event = "cli.restart_completed",
+                branch = branch,
+                process_id = session.process_id
+            );
             Ok(())
         }
         Err(e) => {
@@ -186,7 +197,8 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
 }
 
 fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let branch = matches.get_one::<String>("branch")
+    let branch = matches
+        .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
 
     info!(event = "cli.status_started", branch = branch);
@@ -197,16 +209,19 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             println!("┌─────────────────────────────────────────────────────────────┐");
             println!("│ Branch:      {:<47} │", session.branch);
             println!("│ Agent:       {:<47} │", session.agent);
-            println!("│ Status:      {:<47} │", format!("{:?}", session.status).to_lowercase());
+            println!(
+                "│ Status:      {:<47} │",
+                format!("{:?}", session.status).to_lowercase()
+            );
             println!("│ Created:     {:<47} │", session.created_at);
             println!("│ Worktree:    {:<47} │", session.worktree_path.display());
-            
+
             // Check process status if PID is available
             if let Some(pid) = session.process_id {
                 match process::is_process_running(pid) {
                     Ok(true) => {
                         println!("│ Process:     {:<47} │", format!("Running (PID: {})", pid));
-                        
+
                         // Try to get process info
                         if let Ok(info) = process::get_process_info(pid) {
                             println!("│ Process Name: {:<46} │", info.name);
@@ -217,13 +232,16 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                         println!("│ Process:     {:<47} │", format!("Stopped (PID: {})", pid));
                     }
                     Err(e) => {
-                        println!("│ Process:     {:<47} │", format!("Error checking PID {}: {}", pid, e));
+                        println!(
+                            "│ Process:     {:<47} │",
+                            format!("Error checking PID {}: {}", pid, e)
+                        );
                     }
                 }
             } else {
                 println!("│ Process:     {:<47} │", "No PID tracked");
             }
-            
+
             println!("└─────────────────────────────────────────────────────────────┘");
 
             info!(
@@ -251,13 +269,15 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
 
 fn handle_cleanup_command(sub_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.cleanup_started");
-    
+
     let strategy = if sub_matches.get_flag("no-pid") {
         cleanup::CleanupStrategy::NoPid
     } else if sub_matches.get_flag("stopped") {
         cleanup::CleanupStrategy::Stopped
     } else if let Some(days) = sub_matches.get_one::<u64>("older-than") {
         cleanup::CleanupStrategy::OlderThan(*days)
+    } else if sub_matches.get_flag("orphans") {
+        cleanup::CleanupStrategy::Orphans
     } else {
         cleanup::CleanupStrategy::All
     };
@@ -265,31 +285,37 @@ fn handle_cleanup_command(sub_matches: &ArgMatches) -> Result<(), Box<dyn std::e
     match cleanup::cleanup_all_with_strategy(strategy) {
         Ok(summary) => {
             println!("✅ Cleanup completed successfully!");
-            
+
             if summary.total_cleaned > 0 {
                 println!("   Resources cleaned:");
-                
+
                 if !summary.orphaned_branches.is_empty() {
-                    println!("   📦 Branches removed: {}", summary.orphaned_branches.len());
+                    println!(
+                        "   📦 Branches removed: {}",
+                        summary.orphaned_branches.len()
+                    );
                     for branch in &summary.orphaned_branches {
                         println!("      - {}", branch);
                     }
                 }
-                
+
                 if !summary.orphaned_worktrees.is_empty() {
-                    println!("   📁 Worktrees removed: {}", summary.orphaned_worktrees.len());
+                    println!(
+                        "   📁 Worktrees removed: {}",
+                        summary.orphaned_worktrees.len()
+                    );
                     for worktree in &summary.orphaned_worktrees {
                         println!("      - {}", worktree.display());
                     }
                 }
-                
+
                 if !summary.stale_sessions.is_empty() {
                     println!("   📄 Sessions removed: {}", summary.stale_sessions.len());
                     for session in &summary.stale_sessions {
                         println!("      - {}", session);
                     }
                 }
-                
+
                 println!("   Total: {} resources cleaned", summary.total_cleaned);
             } else {
                 println!("   No orphaned resources found.");
@@ -304,9 +330,9 @@ fn handle_cleanup_command(sub_matches: &ArgMatches) -> Result<(), Box<dyn std::e
         }
         Err(cleanup::CleanupError::NoOrphanedResources) => {
             println!("✅ No orphaned resources found - repository is clean!");
-            
+
             info!(event = "cli.cleanup_completed_no_resources");
-            
+
             Ok(())
         }
         Err(e) => {
@@ -371,7 +397,10 @@ fn run_health_watch_loop(
             }
         }
 
-        println!("\nRefreshing every {}s. Press Ctrl+C to exit.", interval_secs);
+        println!(
+            "\nRefreshing every {}s. Press Ctrl+C to exit.",
+            interval_secs
+        );
 
         std::thread::sleep(std::time::Duration::from_secs(interval_secs));
     }
@@ -442,12 +471,18 @@ fn print_health_table(output: &health::HealthOutput) {
         println!("No active shards found.");
         return;
     }
-    
+
     println!("🏥 Shard Health Dashboard");
-    println!("┌────┬──────────────────┬─────────┬──────────┬──────────┬──────────┬─────────────────────┐");
-    println!("│ St │ Branch           │ Agent   │ CPU %    │ Memory   │ Status   │ Last Activity       │");
-    println!("├────┼──────────────────┼─────────┼──────────┼──────────┼──────────┼─────────────────────┤");
-    
+    println!(
+        "┌────┬──────────────────┬─────────┬──────────┬──────────┬──────────┬─────────────────────┐"
+    );
+    println!(
+        "│ St │ Branch           │ Agent   │ CPU %    │ Memory   │ Status   │ Last Activity       │"
+    );
+    println!(
+        "├────┼──────────────────┼─────────┼──────────┼──────────┼──────────┼─────────────────────┤"
+    );
+
     for shard in &output.shards {
         let status_icon = match shard.metrics.status {
             health::HealthStatus::Working => "✅",
@@ -456,20 +491,26 @@ fn print_health_table(output: &health::HealthOutput) {
             health::HealthStatus::Crashed => "❌",
             health::HealthStatus::Unknown => "❓",
         };
-        
-        let cpu_str = shard.metrics.cpu_usage_percent
+
+        let cpu_str = shard
+            .metrics
+            .cpu_usage_percent
             .map(|c| format!("{:.1}%", c))
             .unwrap_or_else(|| "N/A".to_string());
-        
-        let mem_str = shard.metrics.memory_usage_mb
+
+        let mem_str = shard
+            .metrics
+            .memory_usage_mb
             .map(|m| format!("{}MB", m))
             .unwrap_or_else(|| "N/A".to_string());
-        
-        let activity_str = shard.metrics.last_activity
+
+        let activity_str = shard
+            .metrics
+            .last_activity
             .as_ref()
             .map(|a| truncate(a, 19))
             .unwrap_or_else(|| "Never".to_string());
-        
+
         println!(
             "│ {} │ {:<16} │ {:<7} │ {:<8} │ {:<8} │ {:<8} │ {:<19} │",
             status_icon,
@@ -481,10 +522,13 @@ fn print_health_table(output: &health::HealthOutput) {
             activity_str
         );
     }
-    
-    println!("└────┴──────────────────┴─────────┴──────────┴──────────┴──────────┴─────────────────────┘");
+
+    println!(
+        "└────┴──────────────────┴─────────┴──────────┴──────────┴──────────┴─────────────────────┘"
+    );
     println!();
-    println!("Summary: {} total | {} working | {} idle | {} stuck | {} crashed",
+    println!(
+        "Summary: {} total | {} working | {} idle | {} stuck | {} crashed",
         output.total_count,
         output.working_count,
         output.idle_count,
@@ -501,33 +545,40 @@ fn print_single_shard_health(shard: &health::ShardHealth) {
         health::HealthStatus::Crashed => "❌",
         health::HealthStatus::Unknown => "❓",
     };
-    
+
     println!("🏥 Shard Health: {}", shard.branch);
     println!("┌─────────────────────────────────────────────────────────────┐");
     println!("│ Branch:      {:<47} │", shard.branch);
     println!("│ Agent:       {:<47} │", shard.agent);
-    println!("│ Status:      {} {:<44} │", status_icon, format!("{:?}", shard.metrics.status));
+    println!(
+        "│ Status:      {} {:<44} │",
+        status_icon,
+        format!("{:?}", shard.metrics.status)
+    );
     println!("│ Created:     {:<47} │", shard.created_at);
-    println!("│ Worktree:    {:<47} │", truncate(&shard.worktree_path, 47));
-    
+    println!(
+        "│ Worktree:    {:<47} │",
+        truncate(&shard.worktree_path, 47)
+    );
+
     if let Some(cpu) = shard.metrics.cpu_usage_percent {
         println!("│ CPU Usage:   {:<47} │", format!("{:.1}%", cpu));
     } else {
         println!("│ CPU Usage:   {:<47} │", "N/A");
     }
-    
+
     if let Some(mem) = shard.metrics.memory_usage_mb {
         println!("│ Memory:      {:<47} │", format!("{} MB", mem));
     } else {
         println!("│ Memory:      {:<47} │", "N/A");
     }
-    
+
     if let Some(activity) = &shard.metrics.last_activity {
         println!("│ Last Active: {:<47} │", truncate(activity, 47));
     } else {
         println!("│ Last Active: {:<47} │", "Never");
     }
-    
+
     println!("└─────────────────────────────────────────────────────────────┘");
 }
 

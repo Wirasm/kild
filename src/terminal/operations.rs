@@ -18,7 +18,6 @@ const TERMINAL_SCRIPT: &str = r#"tell application "Terminal"
         return id of newWindow
     end tell"#;
 
-
 // AppleScript templates for terminal closing (with window ID support)
 const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
         try
@@ -43,7 +42,7 @@ const TERMINAL_CLOSE_SCRIPT: &str = r#"tell application "Terminal"
 #[cfg(target_os = "macos")]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     debug!(event = "terminal.detection_started");
-    
+
     // Check for Ghostty first (user preference)
     if app_exists_macos("Ghostty") {
         debug!(event = "terminal.detected", terminal = "ghostty");
@@ -55,14 +54,20 @@ pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
         debug!(event = "terminal.detected", terminal = "terminal");
         Ok(TerminalType::TerminalApp)
     } else {
-        warn!(event = "terminal.none_found", checked = "Ghostty,iTerm,Terminal");
+        warn!(
+            event = "terminal.none_found",
+            checked = "Ghostty,iTerm,Terminal"
+        );
         Err(TerminalError::NoTerminalFound)
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
-    warn!(event = "terminal.platform_not_supported", platform = std::env::consts::OS);
+    warn!(
+        event = "terminal.platform_not_supported",
+        platform = std::env::consts::OS
+    );
     Err(TerminalError::NoTerminalFound)
 }
 
@@ -128,7 +133,11 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
             if detected == TerminalType::Native {
                 return Err(TerminalError::NoTerminalFound);
             }
-            let native_config = SpawnConfig::new(detected, config.working_directory.clone(), config.command.clone());
+            let native_config = SpawnConfig::new(
+                detected,
+                config.working_directory.clone(),
+                config.command.clone(),
+            );
             build_spawn_command(&native_config)
         }
     }
@@ -182,7 +191,11 @@ fn applescript_escape(s: &str) -> String {
 
 /// Extract the executable name from a command string
 pub fn extract_command_name(command: &str) -> String {
-    command.split_whitespace().next().unwrap_or(command).to_string()
+    command
+        .split_whitespace()
+        .next()
+        .unwrap_or(command)
+        .to_string()
 }
 
 /// Build and execute the spawn AppleScript, capturing the returned window ID
@@ -270,9 +283,7 @@ pub fn execute_spawn_script(
     }
 
     let script = match config.terminal_type {
-        TerminalType::ITerm => {
-            ITERM_SCRIPT.replace("{command}", &applescript_escape(&cd_command))
-        }
+        TerminalType::ITerm => ITERM_SCRIPT.replace("{command}", &applescript_escape(&cd_command)),
         TerminalType::TerminalApp => {
             TERMINAL_SCRIPT.replace("{command}", &applescript_escape(&cd_command))
         }
@@ -312,9 +323,7 @@ pub fn execute_spawn_script(
         });
     }
 
-    let window_id = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     debug!(
         event = "terminal.spawn_script_completed",
@@ -335,7 +344,10 @@ pub fn execute_spawn_script(
     _window_title: Option<&str>,
 ) -> Result<Option<String>, TerminalError> {
     // Terminal spawning with window ID capture not yet implemented for non-macOS platforms
-    debug!(event = "terminal.spawn_script_not_supported", platform = std::env::consts::OS);
+    debug!(
+        event = "terminal.spawn_script_not_supported",
+        platform = std::env::consts::OS
+    );
     Ok(None)
 }
 
@@ -468,7 +480,10 @@ pub fn close_terminal_window(
     _window_id: Option<&str>,
 ) -> Result<(), TerminalError> {
     // Terminal closing not yet implemented for non-macOS platforms
-    debug!(event = "terminal.close_not_supported", platform = std::env::consts::OS);
+    debug!(
+        event = "terminal.close_not_supported",
+        platform = std::env::consts::OS
+    );
     Ok(())
 }
 

@@ -1,6 +1,6 @@
-use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
-use std::sync::Mutex;
 use std::sync::LazyLock;
+use std::sync::Mutex;
+use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 use tracing::debug;
 
 use crate::process::errors::ProcessError;
@@ -88,13 +88,14 @@ pub fn kill_process(
             }
 
             if let Some(start_time) = expected_start_time
-                && process.start_time() != start_time {
-                    return Err(ProcessError::PidReused {
-                        pid,
-                        expected: format!("start_time={}", start_time),
-                        actual: format!("start_time={}", process.start_time()),
-                    });
-                }
+                && process.start_time() != start_time
+            {
+                return Err(ProcessError::PidReused {
+                    pid,
+                    expected: format!("start_time={}", start_time),
+                    actual: format!("start_time={}", process.start_time()),
+                });
+            }
 
             if process.kill() {
                 Ok(())
@@ -129,15 +130,15 @@ pub fn get_process_info(pid: u32) -> Result<ProcessInfo, ProcessError> {
 /// Get CPU and memory usage metrics for a process
 pub fn get_process_metrics(pid: u32) -> Result<ProcessMetrics, ProcessError> {
     let pid_obj = SysinfoPid::from_u32(pid);
-    
+
     // Use shared system instance to prevent memory leaks
     let mut system = SYSTEM.lock().unwrap();
     system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
-    
+
     match system.process(pid_obj) {
         Some(process) => {
             let memory_bytes = process.memory();
-            
+
             Ok(ProcessMetrics {
                 cpu_usage_percent: process.cpu_usage(),
                 memory_usage_bytes: memory_bytes,
@@ -167,14 +168,26 @@ fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
 
     // Add partial matches
     if name_pattern.contains('-') {
-        patterns.insert(name_pattern.split('-').next().unwrap_or(name_pattern).to_string());
+        patterns.insert(
+            name_pattern
+                .split('-')
+                .next()
+                .unwrap_or(name_pattern)
+                .to_string(),
+        );
     }
 
     // Add common variations
     match name_pattern {
-        "kiro-cli" => { patterns.insert("kiro".to_string()); },
-        "claude-code" => { patterns.insert("claude".to_string()); },
-        "gemini-cli" => { patterns.insert("gemini".to_string()); },
+        "kiro-cli" => {
+            patterns.insert("kiro".to_string());
+        }
+        "claude-code" => {
+            patterns.insert("claude".to_string());
+        }
+        "gemini-cli" => {
+            patterns.insert("gemini".to_string());
+        }
         _ => {}
     }
 
@@ -229,15 +242,17 @@ pub fn find_process_by_name(
 
     for (pid, process) in system.processes() {
         let process_name = process.name().to_string_lossy();
-        let cmd_line = process.cmd().iter()
+        let cmd_line = process
+            .cmd()
+            .iter()
             .map(|s| s.to_string_lossy())
             .collect::<Vec<_>>()
             .join(" ");
 
         // Try each search pattern
-        let name_matches = search_patterns.iter().any(|pattern| {
-            process_name.contains(pattern) || cmd_line.contains(pattern)
-        });
+        let name_matches = search_patterns
+            .iter()
+            .any(|pattern| process_name.contains(pattern) || cmd_line.contains(pattern));
 
         if !name_matches {
             continue;
@@ -363,24 +378,24 @@ mod tests {
         assert!(patterns.contains(&"kiro-cli".to_string()));
         assert!(patterns.contains(&"kiro".to_string()));
         assert_eq!(patterns.len(), 2); // No duplicates
-        
+
         let patterns = generate_search_patterns("claude-code");
         assert!(patterns.contains(&"claude-code".to_string()));
         assert!(patterns.contains(&"claude".to_string()));
         assert_eq!(patterns.len(), 2); // No duplicates
-        
+
         let patterns = generate_search_patterns("simple");
         assert_eq!(patterns, vec!["simple".to_string()]);
-        
+
         // Edge cases
         let patterns = generate_search_patterns("");
         assert_eq!(patterns, vec!["".to_string()]);
-        
+
         let patterns = generate_search_patterns("no-match-agent");
         assert!(patterns.contains(&"no-match-agent".to_string()));
         assert!(patterns.contains(&"no".to_string()));
         assert_eq!(patterns.len(), 2);
-        
+
         let patterns = generate_search_patterns("very-long-agent-name-with-many-dashes");
         assert!(patterns.contains(&"very-long-agent-name-with-many-dashes".to_string()));
         assert!(patterns.contains(&"very".to_string()));
@@ -401,8 +416,14 @@ mod tests {
         assert!(command_matches("kiro-cli chat", "kiro-cli chat"));
 
         // Match with full path
-        assert!(command_matches("/Users/rasmus/.local/bin/kiro-cli-chat chat", "kiro-cli chat"));
-        assert!(command_matches("/usr/bin/kiro-cli-chat chat --flag", "kiro-cli chat"));
+        assert!(command_matches(
+            "/Users/rasmus/.local/bin/kiro-cli-chat chat",
+            "kiro-cli chat"
+        ));
+        assert!(command_matches(
+            "/usr/bin/kiro-cli-chat chat --flag",
+            "kiro-cli chat"
+        ));
 
         // Match with different binary name containing the pattern
         assert!(command_matches("kiro-cli-chat chat", "kiro chat"));
@@ -471,8 +492,14 @@ mod tests {
     #[test]
     fn test_process_name_matches_windows_paths() {
         // Windows-style paths should also work
-        assert!(process_name_matches("C:\\Program Files\\app\\sleep.exe", "sleep.exe"));
-        assert!(process_name_matches("sleep.exe", "C:\\Windows\\System32\\sleep.exe"));
+        assert!(process_name_matches(
+            "C:\\Program Files\\app\\sleep.exe",
+            "sleep.exe"
+        ));
+        assert!(process_name_matches(
+            "sleep.exe",
+            "C:\\Windows\\System32\\sleep.exe"
+        ));
 
         // Mixed path separators
         assert!(process_name_matches("C:\\bin/sleep", "sleep"));
@@ -482,10 +509,16 @@ mod tests {
     fn test_extract_base_name() {
         // Unix paths
         assert_eq!(extract_base_name("/usr/bin/sleep"), "sleep");
-        assert_eq!(extract_base_name("/home/user/.local/bin/kiro-cli"), "kiro-cli");
+        assert_eq!(
+            extract_base_name("/home/user/.local/bin/kiro-cli"),
+            "kiro-cli"
+        );
 
         // Windows paths
-        assert_eq!(extract_base_name("C:\\Program Files\\app\\test.exe"), "test.exe");
+        assert_eq!(
+            extract_base_name("C:\\Program Files\\app\\test.exe"),
+            "test.exe"
+        );
         assert_eq!(extract_base_name("D:\\bin\\tool.exe"), "tool.exe");
 
         // No path
@@ -511,7 +544,11 @@ mod tests {
         let result = kill_process(pid, Some("definitely-not-sleep"), None);
         assert!(matches!(
             result,
-            Err(ProcessError::PidReused { pid: _, expected: _, actual: _ })
+            Err(ProcessError::PidReused {
+                pid: _,
+                expected: _,
+                actual: _
+            })
         ));
 
         // Clean up

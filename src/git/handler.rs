@@ -168,7 +168,11 @@ pub fn create_worktree(
         current_branch = current_branch.as_deref().unwrap_or("none"),
         used_current = use_current,
         worktree_name = worktree_name,
-        reason = if use_current { "current_branch_matches" } else { "current_branch_different" }
+        reason = if use_current {
+            "current_branch_matches"
+        } else {
+            "current_branch_different"
+        }
     );
 
     // Copy include pattern files if configured

@@ -10,7 +10,7 @@ pub fn init_logging() {
         )
         .with(
             EnvFilter::from_default_env()
-                .add_directive("shards=info".parse().expect("Invalid log directive"))
+                .add_directive("shards=info".parse().expect("Invalid log directive")),
         )
         .init();
 }

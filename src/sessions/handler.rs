@@ -83,9 +83,14 @@ pub fn create_session(
     );
 
     // 5. Launch terminal (I/O) - pass session_id for unique Ghostty window titles and PID tracking
-    let spawn_result =
-        terminal::handler::spawn_terminal(&worktree.path, &validated.command, shards_config, Some(&session_id), Some(&base_config.shards_dir))
-            .map_err(|e| SessionError::TerminalError { source: e })?;
+    let spawn_result = terminal::handler::spawn_terminal(
+        &worktree.path,
+        &validated.command,
+        shards_config,
+        Some(&session_id),
+        Some(&base_config.shards_dir),
+    )
+    .map_err(|e| SessionError::TerminalError { source: e })?;
 
     // 6. Create session record
     let now = chrono::Utc::now().to_rfc3339();
@@ -192,10 +197,18 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
             window_id = ?session.terminal_window_id
         );
         // Best-effort - don't fail destroy if terminal close fails
-        let _ = terminal::handler::close_terminal(
-            terminal_type,
-            session.terminal_window_id.as_deref(),
-        );
+        if let Err(e) =
+            terminal::handler::close_terminal(terminal_type, session.terminal_window_id.as_deref())
+        {
+            warn!(
+                event = "session.destroy_terminal_close_failed",
+                session_id = session.id,
+                terminal_type = %terminal_type,
+                window_id = ?session.terminal_window_id,
+                error = %e,
+                "Terminal window may need to be closed manually"
+            );
+        }
     }
 
     // 3. Kill process if PID is tracked
@@ -276,15 +289,22 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Session, SessionError> {
+pub fn restart_session(
+    name: &str,
+    agent_override: Option<String>,
+) -> Result<Session, SessionError> {
     let start_time = std::time::Instant::now();
     info!(event = "session.restart_started", name = name, agent_override = ?agent_override);
 
     let config = Config::new();
-    
+
     // 1. Find session by name (branch name)
-    let mut session = operations::find_session_by_name(&config.sessions_dir(), name)?
-        .ok_or_else(|| SessionError::NotFound { name: name.to_string() })?;
+    let mut session =
+        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+            SessionError::NotFound {
+                name: name.to_string(),
+            }
+        })?;
 
     info!(
         event = "session.restart_found",
@@ -351,8 +371,14 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     // 5. Relaunch terminal in existing worktree
     info!(event = "session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
-    let spawn_result = terminal::handler::spawn_terminal(&session.worktree_path, &agent_command, &shards_config, Some(&session.id), Some(&base_config.shards_dir))
-        .map_err(|e| SessionError::TerminalError { source: e })?;
+    let spawn_result = terminal::handler::spawn_terminal(
+        &session.worktree_path,
+        &agent_command,
+        &shards_config,
+        Some(&session.id),
+        Some(&base_config.shards_dir),
+    )
+    .map_err(|e| SessionError::TerminalError { source: e })?;
 
     info!(
         event = "session.restart_spawn_completed",
@@ -362,10 +388,14 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     );
 
     // Capture process metadata immediately for PID reuse protection
-    let (process_name, process_start_time) = spawn_result.process_id
+    let (process_name, process_start_time) = spawn_result
+        .process_id
         .and_then(|pid| crate::process::get_process_info(pid).ok())
         .map(|info| (Some(info.name), Some(info.start_time)))
-        .unwrap_or((spawn_result.process_name.clone(), spawn_result.process_start_time));
+        .unwrap_or((
+            spawn_result.process_name.clone(),
+            spawn_result.process_start_time,
+        ));
 
     // 6. Update session with new process info
     session.agent = agent;
@@ -500,10 +530,10 @@ mod tests {
 
     #[test]
     fn test_session_with_terminal_type_persistence() {
-        use std::fs;
         use crate::sessions::operations;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
+        use std::fs;
 
         // This test verifies the terminal_type field flows correctly through
         // the session persistence layer - critical for destroy_session to work.
@@ -514,12 +544,16 @@ mod tests {
         // 3. The field being passed to close_terminal()
 
         // Use unique temp dir per test run to avoid conflicts
-        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
-        let temp_dir = std::env::temp_dir()
-            .join(format!("shards_test_terminal_type_{}", unique_id));
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("shards_test_terminal_type_{}", unique_id));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         let worktree_dir = temp_dir.join("worktree");
@@ -577,10 +611,10 @@ mod tests {
 
     #[test]
     fn test_destroy_session_with_terminal_type_calls_close() {
-        use std::fs;
         use crate::sessions::operations;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
+        use std::fs;
 
         // This test verifies that destroy_session correctly handles sessions
         // with terminal_type set. The actual close_terminal call happens in
@@ -592,12 +626,16 @@ mod tests {
         // Note: The close_terminal function is designed to always return Ok(),
         // so even if the terminal window doesn't exist, destroy_session continues.
 
-        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
-        let temp_dir = std::env::temp_dir()
-            .join(format!("shards_test_destroy_terminal_{}", unique_id));
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("shards_test_destroy_terminal_{}", unique_id));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         let worktree_dir = temp_dir.join("worktree");
@@ -625,8 +663,7 @@ mod tests {
             last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        operations::save_session_to_file(&session, &sessions_dir)
-            .expect("Failed to save session");
+        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Verify session exists
         let found = operations::find_session_by_name(&sessions_dir, "destroy-test")
@@ -649,21 +686,25 @@ mod tests {
 
     #[test]
     fn test_destroy_session_without_terminal_type_backward_compat() {
-        use std::fs;
         use crate::sessions::operations;
         use crate::sessions::types::{Session, SessionStatus};
+        use std::fs;
 
         // This test verifies backward compatibility: sessions created before
         // terminal_type was added (terminal_type = None) can still be destroyed.
         // The destroy_session function handles this case at lines 184-189:
         // if let Some(ref terminal_type) = session.terminal_type { ... }
 
-        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
-        let temp_dir = std::env::temp_dir()
-            .join(format!("shards_test_destroy_compat_{}", unique_id));
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("shards_test_destroy_compat_{}", unique_id));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         let worktree_dir = temp_dir.join("worktree");
@@ -691,14 +732,16 @@ mod tests {
             last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        operations::save_session_to_file(&session, &sessions_dir)
-            .expect("Failed to save session");
+        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Verify session can be loaded with terminal_type = None
         let found = operations::find_session_by_name(&sessions_dir, "compat-test")
             .expect("Failed to find session")
             .expect("Session should exist");
-        assert_eq!(found.terminal_type, None, "Old sessions should have terminal_type = None");
+        assert_eq!(
+            found.terminal_type, None,
+            "Old sessions should have terminal_type = None"
+        );
 
         // Remove session (simulating destroy flow)
         operations::remove_session_file(&sessions_dir, &session.id)
@@ -715,21 +758,25 @@ mod tests {
 
     #[test]
     fn test_session_terminal_type_updated_on_restart() {
-        use std::fs;
         use crate::sessions::operations;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
+        use std::fs;
 
         // This test verifies that when a session is saved after restart_session,
         // the terminal_type field is properly updated and persisted.
         // restart_session updates terminal_type at line 346.
 
-        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos());
-        let temp_dir = std::env::temp_dir()
-            .join(format!("shards_test_restart_terminal_{}", unique_id));
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("shards_test_restart_terminal_{}", unique_id));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         let worktree_dir = temp_dir.join("worktree");
@@ -757,8 +804,7 @@ mod tests {
             last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        operations::save_session_to_file(&session, &sessions_dir)
-            .expect("Failed to save session");
+        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Simulate what restart_session does: update terminal_type and save
         session.terminal_type = Some(TerminalType::Ghostty);

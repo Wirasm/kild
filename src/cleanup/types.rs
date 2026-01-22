@@ -14,6 +14,7 @@ pub enum CleanupStrategy {
     NoPid,          // Only sessions with process_id: None
     Stopped,        // Only sessions with stopped processes
     OlderThan(u64), // Only sessions older than N days
+    Orphans,        // Worktrees in shards dir without sessions
 }
 
 #[derive(Debug, Clone, PartialEq)]
