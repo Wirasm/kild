@@ -309,11 +309,20 @@ impl ShardsConfig {
         }
 
         // Fall back to global agent config
-        let base_command = self
-            .agent
-            .startup_command
-            .as_deref()
-            .unwrap_or_else(|| agents::get_default_command(agent_name).unwrap_or(agent_name));
+        let base_command = self.agent.startup_command.as_deref().unwrap_or_else(|| {
+            match agents::get_default_command(agent_name) {
+                Some(cmd) => cmd,
+                None => {
+                    tracing::warn!(
+                        event = "config.agent_command_fallback",
+                        agent = agent_name,
+                        "No default command found for agent '{}', using raw name as command",
+                        agent_name
+                    );
+                    agent_name
+                }
+            }
+        });
 
         let mut full_command = base_command.to_string();
         if let Some(flags) = &self.agent.flags {

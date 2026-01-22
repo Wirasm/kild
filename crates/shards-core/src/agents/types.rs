@@ -58,12 +58,22 @@ impl std::fmt::Display for AgentType {
     }
 }
 
-/// Runtime information about an agent instance.
-#[derive(Debug, Clone)]
-pub struct AgentInfo {
-    pub agent_type: AgentType,
-    pub is_available: bool,
-    pub command: String,
+impl std::str::FromStr for AgentType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| {
+            format!(
+                "Unknown agent '{}'. Supported: {}",
+                s,
+                AgentType::all()
+                    .iter()
+                    .map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +140,18 @@ mod tests {
         set.insert(AgentType::Kiro);
         set.insert(AgentType::Claude); // Duplicate
         assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_agent_type_from_str() {
+        use std::str::FromStr;
+        assert_eq!(AgentType::from_str("claude").unwrap(), AgentType::Claude);
+        assert_eq!(AgentType::from_str("KIRO").unwrap(), AgentType::Kiro);
+        assert_eq!(AgentType::from_str("Gemini").unwrap(), AgentType::Gemini);
+
+        let err = AgentType::from_str("unknown").unwrap_err();
+        assert!(err.contains("Unknown agent 'unknown'"));
+        assert!(err.contains("claude"));
+        assert!(err.contains("kiro"));
     }
 }

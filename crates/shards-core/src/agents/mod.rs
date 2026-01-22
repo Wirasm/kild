@@ -37,8 +37,8 @@ pub mod types;
 // Re-export public API
 pub use errors::AgentError;
 pub use registry::{
-    default_agent_name, get_agent, get_default_command, get_process_patterns, is_valid_agent,
-    valid_agent_names,
+    default_agent_name, default_agent_type, get_agent, get_agent_by_type, get_default_command,
+    get_process_patterns, is_agent_available, is_valid_agent, valid_agent_names,
 };
 pub use traits::AgentBackend;
 pub use types::AgentType;
