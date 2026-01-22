@@ -184,22 +184,25 @@ pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
 }
 
 /// Cleanup all orphaned resources using the specified strategy.
-/// 
+///
 /// # Arguments
 /// * `strategy` - The cleanup strategy to use (All, NoPid, Stopped, OlderThan)
-/// 
+///
 /// # Returns
 /// * `Ok(CleanupSummary)` - Summary of cleaned resources
 /// * `Err(CleanupError)` - If cleanup fails or no resources found
-pub fn cleanup_all_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
+pub fn cleanup_all_with_strategy(
+    strategy: CleanupStrategy,
+) -> Result<CleanupSummary, CleanupError> {
     info!(event = "cleanup.cleanup_all_with_strategy_started", strategy = ?strategy);
 
     // First scan for orphaned resources with strategy
     let scan_summary = scan_for_orphans_with_strategy(strategy)?;
 
-    if scan_summary.stale_sessions.is_empty() 
-        && scan_summary.orphaned_branches.is_empty() 
-        && scan_summary.orphaned_worktrees.is_empty() {
+    if scan_summary.stale_sessions.is_empty()
+        && scan_summary.orphaned_branches.is_empty()
+        && scan_summary.orphaned_worktrees.is_empty()
+    {
         info!(event = "cleanup.cleanup_all_with_strategy_no_resources");
         return Err(CleanupError::NoOrphanedResources);
     }
@@ -216,14 +219,16 @@ pub fn cleanup_all_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSum
 }
 
 /// Scan for orphaned resources using the specified cleanup strategy.
-/// 
+///
 /// # Arguments
 /// * `strategy` - The cleanup strategy to determine which resources to scan for
-/// 
+///
 /// # Returns
 /// * `Ok(CleanupSummary)` - Summary of found orphaned resources
 /// * `Err(CleanupError)` - If scanning fails
-pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<CleanupSummary, CleanupError> {
+pub fn scan_for_orphans_with_strategy(
+    strategy: CleanupStrategy,
+) -> Result<CleanupSummary, CleanupError> {
     info!(event = "cleanup.scan_with_strategy_started", strategy = ?strategy);
 
     operations::validate_cleanup_request()?;
@@ -231,7 +236,9 @@ pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<Clean
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
     let _repo = Repository::discover(&current_dir).map_err(|e| {
         error!(event = "cleanup.git_discovery_failed", error = %e);
-        CleanupError::GitError { source: crate::git::errors::GitError::Git2Error { source: e } }
+        CleanupError::GitError {
+            source: crate::git::errors::GitError::Git2Error { source: e },
+        }
     })?;
     let config = Config::new();
 
@@ -247,12 +254,12 @@ pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<Clean
             });
         }
         CleanupStrategy::NoPid => {
-            let sessions = operations::detect_stale_sessions(&config.sessions_dir())
-                .map_err(|e| {
+            let sessions =
+                operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
                     error!(event = "cleanup.strategy_failed", strategy = "NoPid", error = %e);
-                    CleanupError::StrategyFailed { 
-                        strategy: "NoPid".to_string(), 
-                        source: Box::new(e) 
+                    CleanupError::StrategyFailed {
+                        strategy: "NoPid".to_string(),
+                        source: Box::new(e),
                     }
                 })?;
             for session_id in sessions {
@@ -260,12 +267,12 @@ pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<Clean
             }
         }
         CleanupStrategy::Stopped => {
-            let sessions = operations::detect_stale_sessions(&config.sessions_dir())
-                .map_err(|e| {
+            let sessions =
+                operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
                     error!(event = "cleanup.strategy_failed", strategy = "Stopped", error = %e);
-                    CleanupError::StrategyFailed { 
-                        strategy: "Stopped".to_string(), 
-                        source: Box::new(e) 
+                    CleanupError::StrategyFailed {
+                        strategy: "Stopped".to_string(),
+                        source: Box::new(e),
                     }
                 })?;
             for session_id in sessions {
@@ -273,16 +280,69 @@ pub fn scan_for_orphans_with_strategy(strategy: CleanupStrategy) -> Result<Clean
             }
         }
         CleanupStrategy::OlderThan(days) => {
-            let sessions = operations::detect_stale_sessions(&config.sessions_dir())
-                .map_err(|e| {
+            let sessions =
+                operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
                     error!(event = "cleanup.strategy_failed", strategy = "OlderThan", error = %e);
-                    CleanupError::StrategyFailed { 
-                        strategy: format!("OlderThan({})", days), 
-                        source: Box::new(e) 
+                    CleanupError::StrategyFailed {
+                        strategy: format!("OlderThan({})", days),
+                        source: Box::new(e),
                     }
                 })?;
             for session_id in sessions {
                 summary.add_session(session_id);
+            }
+        }
+        CleanupStrategy::Orphans => {
+            // Get current project info for scoping
+            let project = git::handler::detect_project().map_err(|e| {
+                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                CleanupError::GitError { source: e }
+            })?;
+
+            // Get repo for worktree operations
+            let repo = Repository::discover(&project.path).map_err(|e| {
+                error!(event = "cleanup.git_discovery_failed", error = %e);
+                CleanupError::GitError {
+                    source: git::errors::GitError::Git2Error { source: e },
+                }
+            })?;
+
+            // Detect untracked worktrees (in shards dir but no session)
+            let untracked = operations::detect_untracked_worktrees(
+                &repo,
+                &config.worktrees_dir(),
+                &config.sessions_dir(),
+                &project.name,
+            )
+            .map_err(|e| {
+                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                CleanupError::StrategyFailed {
+                    strategy: "Orphans".to_string(),
+                    source: Box::new(e),
+                }
+            })?;
+
+            info!(
+                event = "cleanup.orphans_scan_completed",
+                untracked_count = untracked.len(),
+                project = project.name
+            );
+
+            for worktree_path in untracked {
+                summary.add_worktree(worktree_path);
+            }
+
+            // Also detect orphaned branches (worktree-* not checked out)
+            let orphaned_branches = operations::detect_orphaned_branches(&repo).map_err(|e| {
+                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                CleanupError::StrategyFailed {
+                    strategy: "Orphans".to_string(),
+                    source: Box::new(e),
+                }
+            })?;
+
+            for branch in orphaned_branches {
+                summary.add_branch(branch);
             }
         }
     }

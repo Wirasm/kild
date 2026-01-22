@@ -111,6 +111,12 @@ pub fn build_cli() -> Command {
                         .help("Clean all orphaned resources (default)")
                         .action(ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("orphans")
+                        .long("orphans")
+                        .help("Clean worktrees in shards directory that have no session")
+                        .action(ArgAction::SetTrue)
+                )
         )
         .subcommand(
             Command::new("health")
@@ -248,9 +254,8 @@ mod tests {
     #[test]
     fn test_cli_health_watch_mode() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec![
-            "shards", "health", "--watch", "--interval", "10"
-        ]);
+        let matches =
+            app.try_get_matches_from(vec!["shards", "health", "--watch", "--interval", "10"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
@@ -262,9 +267,7 @@ mod tests {
     #[test]
     fn test_cli_health_default_interval() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec![
-            "shards", "health", "--watch"
-        ]);
+        let matches = app.try_get_matches_from(vec!["shards", "health", "--watch"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();

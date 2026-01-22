@@ -10,6 +10,7 @@
 
 use crate::cleanup::errors::CleanupError;
 use git2::{BranchType, Repository};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -118,6 +119,116 @@ pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, Clea
     Ok(orphaned_worktrees)
 }
 
+/// Detect worktrees in the shards directory that have no corresponding session.
+///
+/// This finds worktrees that:
+/// 1. Are registered in git
+/// 2. Have paths under `~/.shards/worktrees/<project>/`
+/// 3. Have no session file with matching `worktree_path`
+///
+/// # Arguments
+/// * `repo` - The git repository
+/// * `worktrees_dir` - Base worktrees directory (~/.shards/worktrees)
+/// * `sessions_dir` - Sessions directory (~/.shards/sessions)
+/// * `project_name` - Current project name for scoping
+pub fn detect_untracked_worktrees(
+    repo: &Repository,
+    worktrees_dir: &Path,
+    sessions_dir: &Path,
+    project_name: &str,
+) -> Result<Vec<PathBuf>, CleanupError> {
+    let mut untracked_worktrees = Vec::new();
+
+    // Build the expected project worktrees directory
+    let project_worktrees_dir = worktrees_dir.join(project_name);
+
+    // Get all worktrees from git
+    let worktrees = repo
+        .worktrees()
+        .map_err(|e| CleanupError::WorktreeScanFailed {
+            message: format!("Failed to list worktrees: {}", e),
+        })?;
+
+    // Collect all worktree paths from session files
+    let session_worktree_paths = collect_session_worktree_paths(sessions_dir)?;
+
+    // Check each worktree
+    for worktree_name in worktrees.iter().flatten() {
+        if let Ok(worktree) = repo.find_worktree(worktree_name) {
+            let worktree_path = worktree.path();
+
+            // Only consider worktrees under our project's worktrees directory
+            let canonical_worktree = worktree_path.canonicalize().ok();
+            let canonical_project_dir = project_worktrees_dir.canonicalize().ok();
+
+            let is_in_shards_dir = match (&canonical_worktree, &canonical_project_dir) {
+                (Some(wt), Some(pd)) => wt.starts_with(pd),
+                // Fall back to non-canonical comparison if canonicalize fails
+                _ => worktree_path.starts_with(&project_worktrees_dir),
+            };
+
+            if is_in_shards_dir {
+                // Check if this worktree has a corresponding session
+                let worktree_path_str = canonical_worktree
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| worktree_path.to_string_lossy().to_string());
+
+                if !session_worktree_paths.contains(&worktree_path_str) {
+                    untracked_worktrees.push(worktree_path.to_path_buf());
+                }
+            }
+        }
+    }
+
+    Ok(untracked_worktrees)
+}
+
+/// Collect all worktree_path values from session files
+fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>, CleanupError> {
+    let mut paths = HashSet::new();
+
+    if !sessions_dir.exists() {
+        return Ok(paths);
+    }
+
+    let entries =
+        std::fs::read_dir(sessions_dir).map_err(|e| CleanupError::IoError { source: e })?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| CleanupError::IoError { source: e })?;
+        let path = entry.path();
+
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    if let Ok(session) = serde_json::from_str::<serde_json::Value>(&content)
+                        && let Some(worktree_path) =
+                            session.get("worktree_path").and_then(|v| v.as_str())
+                    {
+                        // Try to canonicalize for consistent comparison
+                        let canonical = PathBuf::from(worktree_path)
+                            .canonicalize()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| worktree_path.to_string());
+                        paths.insert(canonical);
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        event = "cleanup.session_read_failed",
+                        file_path = %path.display(),
+                        error = %e,
+                        "Could not read session file while collecting worktree paths"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(paths)
+}
+
 pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, CleanupError> {
     let mut stale_sessions = Vec::new();
 
@@ -186,12 +297,6 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
 
     Ok(stale_sessions)
 }
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -439,8 +544,4 @@ mod tests {
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
     }
-
-
-
-
 }
