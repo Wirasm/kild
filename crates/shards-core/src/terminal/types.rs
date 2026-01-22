@@ -2,7 +2,7 @@ use crate::terminal::errors::TerminalError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TerminalType {
     ITerm,
     TerminalApp,

@@ -1,0 +1,9 @@
+//! Terminal backend implementations.
+
+mod ghostty;
+mod iterm;
+mod terminal_app;
+
+pub use ghostty::GhosttyBackend;
+pub use iterm::ITermBackend;
+pub use terminal_app::TerminalAppBackend;
