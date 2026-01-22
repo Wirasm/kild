@@ -17,6 +17,16 @@ use crate::config::validation::validate_config;
 use std::fs;
 use std::path::PathBuf;
 
+/// Check if an error is a "file not found" error.
+fn is_file_not_found(e: &(dyn std::error::Error + 'static)) -> bool {
+    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+        return io_err.kind() == std::io::ErrorKind::NotFound;
+    }
+
+    let err_str = e.to_string();
+    err_str.contains("No such file or directory") || err_str.contains("cannot find the path")
+}
+
 /// Load configuration from the hierarchy of config files.
 ///
 /// Loads and merges configuration from:
@@ -30,46 +40,18 @@ use std::path::PathBuf;
 pub fn load_hierarchy() -> Result<ShardsConfig, Box<dyn std::error::Error>> {
     let mut config = ShardsConfig::default();
 
-    // Load user config
+    // Load user config (file not found is expected, parse errors fail)
     match load_user_config() {
-        Ok(user_config) => {
-            config = merge_configs(config, user_config);
-        }
-        Err(e) => {
-            // Check if this is a "file not found" error (expected) vs other errors (should warn)
-            let is_not_found = e
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
-
-            if !is_not_found {
-                tracing::warn!(
-                    event = "config.user_config_load_failed",
-                    error = %e,
-                    "User config file exists but could not be loaded - using defaults"
-                );
-            }
-        }
+        Ok(user_config) => config = merge_configs(config, user_config),
+        Err(e) if !is_file_not_found(e.as_ref()) => return Err(e),
+        Err(_) => {} // File not found - continue with defaults
     }
 
-    // Load project config
+    // Load project config (file not found is expected, parse errors fail)
     match load_project_config() {
-        Ok(project_config) => {
-            config = merge_configs(config, project_config);
-        }
-        Err(e) => {
-            // Check if this is a "file not found" error (expected) vs other errors (should warn)
-            let is_not_found = e
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
-
-            if !is_not_found {
-                tracing::warn!(
-                    event = "config.project_config_load_failed",
-                    error = %e,
-                    "Project config file exists but could not be loaded - using defaults"
-                );
-            }
-        }
+        Ok(project_config) => config = merge_configs(config, project_config),
+        Err(e) if !is_file_not_found(e.as_ref()) => return Err(e),
+        Err(_) => {} // File not found - continue with merged config
     }
 
     // Validate the final configuration
@@ -93,8 +75,10 @@ fn load_project_config() -> Result<ShardsConfig, Box<dyn std::error::Error>> {
 
 /// Load a configuration file from the given path.
 fn load_config_file(path: &PathBuf) -> Result<ShardsConfig, Box<dyn std::error::Error>> {
-    let content = fs::read_to_string(path)?;
-    let config: ShardsConfig = toml::from_str(&content)?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read config file '{}': {}", path.display(), e))?;
+    let config: ShardsConfig = toml::from_str(&content)
+        .map_err(|e| format!("Failed to parse config file '{}': {}", path.display(), e))?;
     Ok(config)
 }
 
@@ -155,8 +139,15 @@ pub fn merge_configs(base: ShardsConfig, override_config: ShardsConfig) -> Shard
 /// 1. Agent-specific settings from `[agents.<name>]` section
 /// 2. Global agent config from `[agent]` section
 /// 3. Built-in default command for the agent
-/// 4. Raw agent name as fallback
-pub fn get_agent_command(config: &ShardsConfig, agent_name: &str) -> String {
+///
+/// # Errors
+///
+/// Returns an error if no command can be determined for the agent (unknown agent
+/// with no configured startup_command).
+pub fn get_agent_command(
+    config: &ShardsConfig,
+    agent_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     // Check agent-specific settings first
     if let Some(agent_settings) = config.agents.get(agent_name)
         && let Some(command) = &agent_settings.startup_command
@@ -166,24 +157,21 @@ pub fn get_agent_command(config: &ShardsConfig, agent_name: &str) -> String {
             full_command.push(' ');
             full_command.push_str(flags);
         }
-        return full_command;
+        return Ok(full_command);
     }
 
-    // Fall back to global agent config
-    let base_command = config.agent.startup_command.as_deref().unwrap_or_else(|| {
-        match agents::get_default_command(agent_name) {
-            Some(cmd) => cmd,
-            None => {
-                tracing::warn!(
-                    event = "config.agent_command_fallback",
-                    agent = agent_name,
-                    "No default command found for agent '{}', using raw name as command",
-                    agent_name
-                );
+    // Fall back to global agent config or built-in default
+    let base_command = if let Some(cmd) = &config.agent.startup_command {
+        cmd.as_str()
+    } else {
+        agents::get_default_command(agent_name).ok_or_else(|| {
+            format!(
+                "No command found for agent '{}'. Configure a startup_command in your config file \
+                or use a known agent (claude, kiro, gemini, codex, aether).",
                 agent_name
-            }
-        }
-    });
+            )
+        })?
+    };
 
     let mut full_command = base_command.to_string();
     if let Some(flags) = &config.agent.flags {
@@ -191,7 +179,7 @@ pub fn get_agent_command(config: &ShardsConfig, agent_name: &str) -> String {
         full_command.push_str(flags);
     }
 
-    full_command
+    Ok(full_command)
 }
 
 #[cfg(test)]
@@ -205,10 +193,18 @@ mod tests {
     fn test_get_agent_command_defaults() {
         let config = ShardsConfig::default();
 
-        assert_eq!(get_agent_command(&config, "claude"), "claude");
-        assert_eq!(get_agent_command(&config, "kiro"), "kiro-cli chat");
-        assert_eq!(get_agent_command(&config, "gemini"), "gemini");
-        assert_eq!(get_agent_command(&config, "unknown"), "unknown");
+        assert_eq!(get_agent_command(&config, "claude").unwrap(), "claude");
+        assert_eq!(get_agent_command(&config, "kiro").unwrap(), "kiro-cli chat");
+        assert_eq!(get_agent_command(&config, "gemini").unwrap(), "gemini");
+    }
+
+    #[test]
+    fn test_get_agent_command_unknown_agent_fails() {
+        let config = ShardsConfig::default();
+
+        let result = get_agent_command(&config, "unknown");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No command found"));
     }
 
     #[test]
@@ -216,7 +212,7 @@ mod tests {
         let mut config = ShardsConfig::default();
         config.agent.flags = Some("--yolo".to_string());
 
-        assert_eq!(get_agent_command(&config, "claude"), "claude --yolo");
+        assert_eq!(get_agent_command(&config, "claude").unwrap(), "claude --yolo");
     }
 
     #[test]
@@ -228,8 +224,21 @@ mod tests {
         };
         config.agents.insert("claude".to_string(), agent_settings);
 
-        assert_eq!(get_agent_command(&config, "claude"), "cc --dangerous");
-        assert_eq!(get_agent_command(&config, "kiro"), "kiro-cli chat");
+        assert_eq!(get_agent_command(&config, "claude").unwrap(), "cc --dangerous");
+        assert_eq!(get_agent_command(&config, "kiro").unwrap(), "kiro-cli chat");
+    }
+
+    #[test]
+    fn test_get_agent_command_unknown_with_custom_command() {
+        let mut config = ShardsConfig::default();
+        let agent_settings = AgentSettings {
+            startup_command: Some("my-custom-agent".to_string()),
+            flags: None,
+        };
+        config.agents.insert("custom".to_string(), agent_settings);
+
+        // Unknown agent with configured command should succeed
+        assert_eq!(get_agent_command(&config, "custom").unwrap(), "my-custom-agent");
     }
 
     #[test]

@@ -31,24 +31,25 @@ pub fn validate_config(config: &ShardsConfig) -> Result<(), ConfigError> {
     }
 
     // Validate terminal preference if set
-    if let Some(ref terminal) = config.terminal.preferred
-        && !VALID_TERMINALS.contains(&terminal.as_str())
-    {
-        // Don't error on invalid terminal, just warn via logging
-        tracing::warn!(
-            event = "config.invalid_terminal_preference",
-            terminal = terminal,
-            valid_terminals = ?VALID_TERMINALS
-        );
+    if let Some(ref terminal) = config.terminal.preferred {
+        if !VALID_TERMINALS.contains(&terminal.as_str()) {
+            return Err(ConfigError::InvalidConfiguration {
+                message: format!(
+                    "Invalid terminal '{}'. Valid options: {}",
+                    terminal,
+                    VALID_TERMINALS.join(", ")
+                ),
+            });
+        }
     }
 
     // Validate include patterns if configured
-    if let Some(ref include_config) = config.include_patterns
-        && let Err(e) = include_config.validate()
-    {
-        return Err(ConfigError::InvalidConfiguration {
-            message: format!("Invalid include patterns: {}", e),
-        });
+    if let Some(ref include_config) = config.include_patterns {
+        if let Err(e) = include_config.validate() {
+            return Err(ConfigError::InvalidConfiguration {
+                message: format!("Invalid include patterns: {}", e),
+            });
+        }
     }
 
     Ok(())
@@ -104,5 +105,26 @@ mod tests {
         assert!(VALID_TERMINALS.contains(&"ghostty"));
         assert!(VALID_TERMINALS.contains(&"native"));
         assert!(!VALID_TERMINALS.contains(&"invalid"));
+    }
+
+    #[test]
+    fn test_config_validation_invalid_terminal() {
+        let mut config = ShardsConfig::default();
+        config.terminal.preferred = Some("unknown-terminal".to_string());
+
+        let result = validate_config(&config);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ConfigError::InvalidConfiguration { .. }
+        ));
+    }
+
+    #[test]
+    fn test_config_validation_valid_terminal() {
+        let mut config = ShardsConfig::default();
+        config.terminal.preferred = Some("ghostty".to_string());
+
+        assert!(validate_config(&config).is_ok());
     }
 }
