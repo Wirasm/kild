@@ -17,8 +17,7 @@ impl TableFormatter {
             .map(|s| s.branch.len())
             .max()
             .unwrap_or(16)
-            .max(6) // "Branch" header
-            .min(50); // Cap at reasonable terminal width
+            .clamp(6, 50); // Between "Branch" header min and reasonable terminal width max
 
         Self {
             branch_width,

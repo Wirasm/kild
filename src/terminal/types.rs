@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TerminalType {
     ITerm,
     TerminalApp,
@@ -23,6 +24,12 @@ pub struct SpawnResult {
     pub process_id: Option<u32>,
     pub process_name: Option<String>,
     pub process_start_time: Option<u64>,
+    /// Terminal window ID for closing the correct window on destroy.
+    ///
+    /// For iTerm2/Terminal.app: The AppleScript window ID (e.g., "1596")
+    /// For Ghostty: The unique title set via ANSI escape sequence
+    /// None if: spawn failed to capture ID or terminal doesn't support it
+    pub terminal_window_id: Option<String>,
 }
 
 impl SpawnConfig {
@@ -43,6 +50,7 @@ impl SpawnResult {
         process_id: Option<u32>,
         process_name: Option<String>,
         process_start_time: Option<u64>,
+        terminal_window_id: Option<String>,
     ) -> Self {
         Self {
             terminal_type,
@@ -51,6 +59,7 @@ impl SpawnResult {
             process_id,
             process_name,
             process_start_time,
+            terminal_window_id,
         }
     }
 }
@@ -133,10 +142,28 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(result.terminal_type, TerminalType::ITerm);
         assert_eq!(result.command_executed, "cc");
         assert_eq!(result.working_directory, PathBuf::from("/path/to/worktree"));
+        assert_eq!(result.terminal_window_id, None);
+    }
+
+    #[test]
+    fn test_spawn_result_with_window_id() {
+        let result = SpawnResult::new(
+            TerminalType::ITerm,
+            "cc".to_string(),
+            PathBuf::from("/path/to/worktree"),
+            Some(12345),
+            Some("cc".to_string()),
+            Some(1234567890),
+            Some("1596".to_string()),
+        );
+
+        assert_eq!(result.terminal_type, TerminalType::ITerm);
+        assert_eq!(result.terminal_window_id, Some("1596".to_string()));
     }
 }

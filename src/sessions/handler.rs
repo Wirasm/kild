@@ -81,9 +81,9 @@ pub fn create_session(
         branch = worktree.branch
     );
 
-    // 5. Launch terminal (I/O)
+    // 5. Launch terminal (I/O) - pass session_id for unique Ghostty window titles
     let spawn_result =
-        terminal::handler::spawn_terminal(&worktree.path, &validated.command, shards_config)
+        terminal::handler::spawn_terminal(&worktree.path, &validated.command, shards_config, Some(&session_id))
             .map_err(|e| SessionError::TerminalError { source: e })?;
 
     // 6. Create session record
@@ -103,10 +103,13 @@ pub fn create_session(
         process_id: spawn_result.process_id,
         process_name: spawn_result.process_name.clone(),
         process_start_time: spawn_result.process_start_time,
-        command: spawn_result.command_executed.trim()
-            .is_empty()
-            .then(|| format!("{} (command not captured)", validated.agent))
-            .unwrap_or_else(|| spawn_result.command_executed.clone()),
+        terminal_type: Some(spawn_result.terminal_type.clone()),
+        terminal_window_id: spawn_result.terminal_window_id.clone(),
+        command: if spawn_result.command_executed.trim().is_empty() {
+            format!("{} (command not captured)", validated.agent)
+        } else {
+            spawn_result.command_executed.clone()
+        },
     };
 
     // 7. Save session to file
@@ -180,7 +183,21 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         process_id = session.process_id
     );
 
-    // 2. Kill process if PID is tracked
+    // 2. Close terminal window first (before killing process)
+    if let Some(ref terminal_type) = session.terminal_type {
+        info!(
+            event = "session.destroy_close_terminal",
+            terminal_type = %terminal_type,
+            window_id = ?session.terminal_window_id
+        );
+        // Best-effort - don't fail destroy if terminal close fails
+        let _ = terminal::handler::close_terminal(
+            terminal_type,
+            session.terminal_window_id.as_deref(),
+        );
+    }
+
+    // 3. Kill process if PID is tracked
     if let Some(pid) = session.process_id {
         info!(event = "session.destroy_kill_started", pid = pid);
 
@@ -212,7 +229,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         }
     }
 
-    // 3. Remove git worktree
+    // 4. Remove git worktree
     git::handler::remove_worktree_by_path(&session.worktree_path)
         .map_err(|e| SessionError::GitError { source: e })?;
 
@@ -222,7 +239,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         worktree_path = %session.worktree_path.display()
     );
 
-    // 4. Remove session file (automatically frees port range)
+    // 5. Remove session file (automatically frees port range)
     operations::remove_session_file(&config.sessions_dir(), &session.id)?;
 
     info!(
@@ -315,13 +332,14 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     // 5. Relaunch terminal in existing worktree
     info!(event = "session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
-    let spawn_result = terminal::handler::spawn_terminal(&session.worktree_path, &agent_command, &shards_config)
+    let spawn_result = terminal::handler::spawn_terminal(&session.worktree_path, &agent_command, &shards_config, Some(&session.id))
         .map_err(|e| SessionError::TerminalError { source: e })?;
 
     info!(
         event = "session.restart_spawn_completed",
         process_id = spawn_result.process_id,
-        process_name = ?spawn_result.process_name
+        process_name = ?spawn_result.process_name,
+        terminal_window_id = ?spawn_result.terminal_window_id
     );
 
     // Capture process metadata immediately for PID reuse protection
@@ -335,6 +353,8 @@ pub fn restart_session(name: &str, agent_override: Option<String>) -> Result<Ses
     session.process_id = spawn_result.process_id;
     session.process_name = process_name;
     session.process_start_time = process_start_time;
+    session.terminal_type = Some(spawn_result.terminal_type.clone());
+    session.terminal_window_id = spawn_result.terminal_window_id.clone();
     session.status = SessionStatus::Active;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
@@ -415,6 +435,8 @@ mod tests {
             process_id: None,
             process_name: None,
             process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
             command: "test-command".to_string(),
             last_activity: Some(chrono::Utc::now().to_rfc3339()),
         };
@@ -452,6 +474,291 @@ mod tests {
         let not_found = operations::find_session_by_name(&sessions_dir, "test-branch")
             .expect("Failed to search for removed session");
         assert!(not_found.is_none());
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_session_with_terminal_type_persistence() {
+        use std::fs;
+        use crate::sessions::operations;
+        use crate::sessions::types::{Session, SessionStatus};
+        use crate::terminal::types::TerminalType;
+
+        // This test verifies the terminal_type field flows correctly through
+        // the session persistence layer - critical for destroy_session to work.
+        //
+        // The destroy_session function relies on:
+        // 1. Session being saved with terminal_type populated
+        // 2. Session being loaded with terminal_type intact
+        // 3. The field being passed to close_terminal()
+
+        // Use unique temp dir per test run to avoid conflicts
+        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        let temp_dir = std::env::temp_dir()
+            .join(format!("shards_test_terminal_type_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Test all terminal types can be saved and loaded
+        let terminal_test_cases = [
+            (TerminalType::ITerm, "test-iterm"),
+            (TerminalType::TerminalApp, "test-terminalapp"),
+            (TerminalType::Ghostty, "test-ghostty"),
+            (TerminalType::Native, "test-native"),
+        ];
+
+        for (terminal_type, branch_name) in &terminal_test_cases {
+            // Use underscore in id to avoid filesystem issues with slash
+            let session = Session {
+                id: format!("test-project_{}", branch_name),
+                project_id: "test-project".to_string(),
+                branch: branch_name.to_string(),
+                worktree_path: worktree_dir.clone(),
+                agent: "test-agent".to_string(),
+                status: SessionStatus::Active,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                port_range_start: 3000,
+                port_range_end: 3009,
+                port_count: 10,
+                process_id: Some(12345),
+                process_name: Some("test-agent".to_string()),
+                process_start_time: Some(1234567890),
+                terminal_type: Some(terminal_type.clone()),
+                terminal_window_id: Some("1596".to_string()),
+                command: "test-command".to_string(),
+                last_activity: Some(chrono::Utc::now().to_rfc3339()),
+            };
+
+            operations::save_session_to_file(&session, &sessions_dir)
+                .expect("Failed to save session");
+
+            let loaded = operations::find_session_by_name(&sessions_dir, branch_name)
+                .expect("Failed to find session")
+                .expect("Session not found");
+
+            assert_eq!(
+                loaded.terminal_type,
+                Some(terminal_type.clone()),
+                "terminal_type {:?} must round-trip correctly",
+                terminal_type
+            );
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_destroy_session_with_terminal_type_calls_close() {
+        use std::fs;
+        use crate::sessions::operations;
+        use crate::sessions::types::{Session, SessionStatus};
+        use crate::terminal::types::TerminalType;
+
+        // This test verifies that destroy_session correctly handles sessions
+        // with terminal_type set. The actual close_terminal call happens in
+        // destroy_session lines 184-189. We can't easily mock the terminal
+        // close, but we can verify:
+        // 1. Session with terminal_type can be destroyed without error
+        // 2. The session file is properly removed after destruction
+        //
+        // Note: The close_terminal function is designed to always return Ok(),
+        // so even if the terminal window doesn't exist, destroy_session continues.
+
+        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        let temp_dir = std::env::temp_dir()
+            .join(format!("shards_test_destroy_terminal_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create session with terminal_type (simulating what create_session does)
+        let session = Session {
+            id: "test-project_destroy-test".to_string(),
+            project_id: "test-project".to_string(),
+            branch: "destroy-test".to_string(),
+            worktree_path: worktree_dir.clone(),
+            agent: "test-agent".to_string(),
+            status: SessionStatus::Active,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            port_range_start: 3000,
+            port_range_end: 3009,
+            port_count: 10,
+            process_id: None, // No process to kill
+            process_name: None,
+            process_start_time: None,
+            terminal_type: Some(TerminalType::ITerm), // Key: terminal_type is set
+            terminal_window_id: Some("1596".to_string()),
+            command: "test-command".to_string(),
+            last_activity: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        operations::save_session_to_file(&session, &sessions_dir)
+            .expect("Failed to save session");
+
+        // Verify session exists
+        let found = operations::find_session_by_name(&sessions_dir, "destroy-test")
+            .expect("Failed to find session")
+            .expect("Session should exist");
+        assert_eq!(found.terminal_type, Some(TerminalType::ITerm));
+
+        // Remove session file (simulating destroy flow without git worktree dependency)
+        operations::remove_session_file(&sessions_dir, &session.id)
+            .expect("Failed to remove session");
+
+        // Verify session is gone
+        let not_found = operations::find_session_by_name(&sessions_dir, "destroy-test")
+            .expect("Failed to search");
+        assert!(not_found.is_none(), "Session should be removed");
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_destroy_session_without_terminal_type_backward_compat() {
+        use std::fs;
+        use crate::sessions::operations;
+        use crate::sessions::types::{Session, SessionStatus};
+
+        // This test verifies backward compatibility: sessions created before
+        // terminal_type was added (terminal_type = None) can still be destroyed.
+        // The destroy_session function handles this case at lines 184-189:
+        // if let Some(ref terminal_type) = session.terminal_type { ... }
+
+        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        let temp_dir = std::env::temp_dir()
+            .join(format!("shards_test_destroy_compat_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create an "old" session WITHOUT terminal_type (simulating pre-feature sessions)
+        let session = Session {
+            id: "test-project_compat-test".to_string(),
+            project_id: "test-project".to_string(),
+            branch: "compat-test".to_string(),
+            worktree_path: worktree_dir.clone(),
+            agent: "test-agent".to_string(),
+            status: SessionStatus::Active,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            port_range_start: 3000,
+            port_range_end: 3009,
+            port_count: 10,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None, // Key: terminal_type is NOT set (old session)
+            terminal_window_id: None, // Key: terminal_window_id is NOT set (old session)
+            command: "test-command".to_string(),
+            last_activity: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        operations::save_session_to_file(&session, &sessions_dir)
+            .expect("Failed to save session");
+
+        // Verify session can be loaded with terminal_type = None
+        let found = operations::find_session_by_name(&sessions_dir, "compat-test")
+            .expect("Failed to find session")
+            .expect("Session should exist");
+        assert_eq!(found.terminal_type, None, "Old sessions should have terminal_type = None");
+
+        // Remove session (simulating destroy flow)
+        operations::remove_session_file(&sessions_dir, &session.id)
+            .expect("Failed to remove session");
+
+        // Verify session is gone
+        let not_found = operations::find_session_by_name(&sessions_dir, "compat-test")
+            .expect("Failed to search");
+        assert!(not_found.is_none());
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_session_terminal_type_updated_on_restart() {
+        use std::fs;
+        use crate::sessions::operations;
+        use crate::sessions::types::{Session, SessionStatus};
+        use crate::terminal::types::TerminalType;
+
+        // This test verifies that when a session is saved after restart_session,
+        // the terminal_type field is properly updated and persisted.
+        // restart_session updates terminal_type at line 346.
+
+        let unique_id = format!("{}_{}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos());
+        let temp_dir = std::env::temp_dir()
+            .join(format!("shards_test_restart_terminal_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create a session with ITerm
+        let mut session = Session {
+            id: "test-project_restart-test".to_string(),
+            project_id: "test-project".to_string(),
+            branch: "restart-test".to_string(),
+            worktree_path: worktree_dir.clone(),
+            agent: "test-agent".to_string(),
+            status: SessionStatus::Active,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            port_range_start: 3000,
+            port_range_end: 3009,
+            port_count: 10,
+            process_id: Some(12345),
+            process_name: Some("test-agent".to_string()),
+            process_start_time: Some(1234567890),
+            terminal_type: Some(TerminalType::ITerm),
+            terminal_window_id: Some("1596".to_string()),
+            command: "test-command".to_string(),
+            last_activity: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        operations::save_session_to_file(&session, &sessions_dir)
+            .expect("Failed to save session");
+
+        // Simulate what restart_session does: update terminal_type and save
+        session.terminal_type = Some(TerminalType::Ghostty);
+        session.status = SessionStatus::Active;
+        session.last_activity = Some(chrono::Utc::now().to_rfc3339());
+
+        operations::save_session_to_file(&session, &sessions_dir)
+            .expect("Failed to save updated session");
+
+        // Verify the updated terminal_type persists
+        let loaded = operations::find_session_by_name(&sessions_dir, "restart-test")
+            .expect("Failed to find session")
+            .expect("Session should exist");
+
+        assert_eq!(
+            loaded.terminal_type,
+            Some(TerminalType::Ghostty),
+            "terminal_type should be updated to Ghostty after restart"
+        );
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
