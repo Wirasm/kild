@@ -1,3 +1,4 @@
+use crate::terminal::errors::TerminalError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -39,6 +40,21 @@ impl SpawnConfig {
             working_directory,
             command,
         }
+    }
+
+    /// Validate the spawn configuration
+    pub fn validate(&self) -> Result<(), TerminalError> {
+        if self.command.trim().is_empty() {
+            return Err(TerminalError::InvalidCommand);
+        }
+
+        if !self.working_directory.exists() {
+            return Err(TerminalError::WorkingDirectoryNotFound {
+                path: self.working_directory.display().to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -165,5 +181,42 @@ mod tests {
 
         assert_eq!(result.terminal_type, TerminalType::ITerm);
         assert_eq!(result.terminal_window_id, Some("1596".to_string()));
+    }
+
+    #[test]
+    fn test_spawn_config_validate_empty_command() {
+        let config = SpawnConfig::new(
+            TerminalType::ITerm,
+            std::env::current_dir().unwrap(),
+            "".to_string(),
+        );
+        assert!(config.validate().is_err());
+
+        let config_whitespace = SpawnConfig::new(
+            TerminalType::ITerm,
+            std::env::current_dir().unwrap(),
+            "   ".to_string(),
+        );
+        assert!(config_whitespace.validate().is_err());
+    }
+
+    #[test]
+    fn test_spawn_config_validate_nonexistent_directory() {
+        let config = SpawnConfig::new(
+            TerminalType::ITerm,
+            PathBuf::from("/nonexistent/directory/path"),
+            "echo hello".to_string(),
+        );
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_spawn_config_validate_success() {
+        let config = SpawnConfig::new(
+            TerminalType::ITerm,
+            std::env::current_dir().unwrap(),
+            "echo hello".to_string(),
+        );
+        assert!(config.validate().is_ok());
     }
 }

@@ -18,22 +18,6 @@ const TERMINAL_SCRIPT: &str = r#"tell application "Terminal"
         return id of newWindow
     end tell"#;
 
-// Ghostty doesn't support window IDs, so we set a unique title
-// The title will be used to find the window when closing
-const GHOSTTY_SCRIPT: &str = r#"try
-        tell application "Ghostty"
-            activate
-            delay 0.5
-        end tell
-        tell application "System Events"
-            -- Set unique window title via ANSI escape sequence, then execute command
-            keystroke "printf '\\033]2;{window_title}\\007' && {command}"
-            keystroke return
-        end tell
-        return "{window_title}"
-    on error errMsg
-        error "Failed to launch Ghostty: " & errMsg
-    end try"#;
 
 // AppleScript templates for terminal closing (with window ID support)
 const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
@@ -52,19 +36,9 @@ const TERMINAL_CLOSE_SCRIPT: &str = r#"tell application "Terminal"
         end try
     end tell"#;
 
-// Ghostty doesn't support window IDs, so we close by title match
-const GHOSTTY_CLOSE_SCRIPT: &str = r#"tell application "System Events"
-        tell process "Ghostty"
-            try
-                set targetWindows to (windows whose title contains "{window_title}")
-                repeat with targetWindow in targetWindows
-                    click button 1 of targetWindow
-                end repeat
-            on error
-                -- Window may already be closed or not found
-            end try
-        end tell
-    end tell"#;
+// Note: Ghostty window closing uses 'pkill -f' to match process command line
+// arguments (including the session title) because AppleScript window title
+// matching via System Events doesn't work reliably for Ghostty windows.
 
 #[cfg(target_os = "macos")]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
@@ -92,22 +66,34 @@ pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     Err(TerminalError::NoTerminalFound)
 }
 
-pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, TerminalError> {
-    if config.command.trim().is_empty() {
-        return Err(TerminalError::InvalidCommand);
-    }
-
-    if !config.working_directory.exists() {
-        return Err(TerminalError::WorkingDirectoryNotFound {
-            path: config.working_directory.display().to_string(),
-        });
-    }
-
-    let cd_command = format!(
+/// Build a shell command that changes to the working directory and executes the command
+fn build_cd_command(working_directory: &std::path::Path, command: &str) -> String {
+    format!(
         "cd {} && {}",
-        shell_escape(&config.working_directory.display().to_string()),
-        config.command
-    );
+        shell_escape(&working_directory.display().to_string()),
+        command
+    )
+}
+
+/// Escape special regex characters for use in pkill -f pattern
+fn escape_regex(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        match c {
+            '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '^' | '$' | '\\' => {
+                result.push('\\');
+                result.push(c);
+            }
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
+pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, TerminalError> {
+    config.validate()?;
+
+    let cd_command = build_cd_command(&config.working_directory, &config.command);
 
     match config.terminal_type {
         TerminalType::ITerm => Ok(vec![
@@ -120,15 +106,22 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
             "-e".to_string(),
             TERMINAL_SCRIPT.replace("{command}", &applescript_escape(&cd_command)),
         ]),
-        TerminalType::Ghostty => Ok(vec![
-            "osascript".to_string(),
-            "-e".to_string(),
-            // For Ghostty, we don't have a session ID yet in build_spawn_command
-            // The window_title will be set when we have the session context
-            GHOSTTY_SCRIPT
-                .replace("{command}", &applescript_escape(&cd_command))
-                .replace("{window_title}", "shards-session"),
-        ]),
+        TerminalType::Ghostty => {
+            // On macOS, the ghostty CLI spawns headless processes, not GUI windows.
+            // Must use 'open -na Ghostty.app --args' where:
+            //   -n opens a new instance, -a specifies the application
+            // Arguments after --args are passed to Ghostty's -e flag for command execution.
+            Ok(vec![
+                "open".to_string(),
+                "-na".to_string(),
+                "Ghostty.app".to_string(),
+                "--args".to_string(),
+                "-e".to_string(),
+                "sh".to_string(),
+                "-c".to_string(),
+                cd_command,
+            ])
+        }
         TerminalType::Native => {
             // Use system default (detect and delegate)
             let detected = detect_terminal()?;
@@ -210,21 +203,71 @@ pub fn execute_spawn_script(
     config: &SpawnConfig,
     window_title: Option<&str>,
 ) -> Result<Option<String>, TerminalError> {
-    if config.command.trim().is_empty() {
-        return Err(TerminalError::InvalidCommand);
-    }
+    config.validate()?;
 
-    if !config.working_directory.exists() {
-        return Err(TerminalError::WorkingDirectoryNotFound {
-            path: config.working_directory.display().to_string(),
-        });
-    }
+    let cd_command = build_cd_command(&config.working_directory, &config.command);
 
-    let cd_command = format!(
-        "cd {} && {}",
-        shell_escape(&config.working_directory.display().to_string()),
-        config.command
-    );
+    // Ghostty on macOS requires 'open -na Ghostty.app --args' to spawn new windows
+    if config.terminal_type == TerminalType::Ghostty {
+        let title = window_title.unwrap_or("shards-session");
+        // Shell-escape the title to prevent injection if it contains special characters
+        let escaped_title = shell_escape(title);
+        // Set window title via ANSI escape sequence (OSC 2) for later process identification.
+        // Format: \033]2;title\007 - ESC ] 2 ; title BEL
+        // This title is embedded in the command line, allowing pkill -f to match it.
+        let ghostty_command = format!(
+            "printf '\\033]2;'{}'\\007' && {}",
+            escaped_title, cd_command
+        );
+
+        debug!(
+            event = "terminal.spawn_ghostty_starting",
+            terminal_type = %config.terminal_type,
+            working_directory = %config.working_directory.display(),
+            window_title = %title
+        );
+
+        let status = std::process::Command::new("open")
+            .arg("-na")
+            .arg("Ghostty.app")
+            .arg("--args")
+            .arg("-e")
+            .arg("sh")
+            .arg("-c")
+            .arg(&ghostty_command)
+            .status()
+            .map_err(|e| TerminalError::SpawnFailed {
+                message: format!(
+                    "Failed to spawn Ghostty (title='{}', cwd='{}', cmd='{}'): {}",
+                    title,
+                    config.working_directory.display(),
+                    config.command,
+                    e
+                ),
+            })?;
+
+        if !status.success() {
+            return Err(TerminalError::SpawnFailed {
+                message: format!(
+                    "Ghostty launch failed with exit code: {:?} (title='{}', cwd='{}', cmd='{}')",
+                    status.code(),
+                    title,
+                    config.working_directory.display(),
+                    config.command
+                ),
+            });
+        }
+
+        debug!(
+            event = "terminal.spawn_ghostty_launched",
+            terminal_type = %config.terminal_type,
+            window_title = %title,
+            message = "open command completed successfully, Ghostty window should be visible"
+        );
+
+        // Return window_title as identifier for close_terminal_window
+        return Ok(Some(title.to_string()));
+    }
 
     let script = match config.terminal_type {
         TerminalType::ITerm => {
@@ -233,12 +276,7 @@ pub fn execute_spawn_script(
         TerminalType::TerminalApp => {
             TERMINAL_SCRIPT.replace("{command}", &applescript_escape(&cd_command))
         }
-        TerminalType::Ghostty => {
-            let title = window_title.unwrap_or("shards-session");
-            GHOSTTY_SCRIPT
-                .replace("{command}", &applescript_escape(&cd_command))
-                .replace("{window_title}", title)
-        }
+        TerminalType::Ghostty => unreachable!("Handled above"),
         TerminalType::Native => {
             let detected = detect_terminal()?;
             if detected == TerminalType::Native {
@@ -330,10 +368,56 @@ pub fn close_terminal_window(
         return Ok(());
     };
 
+    // Ghostty: AppleScript window title matching doesn't work reliably.
+    // Instead, find and kill the Ghostty process by matching command line args.
+    if *terminal_type == TerminalType::Ghostty {
+        debug!(
+            event = "terminal.close_ghostty_pkill",
+            window_title = %id
+        );
+
+        // Escape regex metacharacters in the window title to avoid matching wrong processes
+        let escaped_id = escape_regex(id);
+        // Use pkill to kill Ghostty processes that contain our session identifier
+        let result = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg(format!("Ghostty.*{}", escaped_id))
+            .output();
+
+        match result {
+            Ok(output) => {
+                if output.status.success() {
+                    debug!(
+                        event = "terminal.close_ghostty_completed",
+                        window_title = %id
+                    );
+                } else {
+                    // Log at warn level so this appears in production logs
+                    // This is expected if the terminal was manually closed by the user
+                    warn!(
+                        event = "terminal.close_ghostty_no_match",
+                        window_title = %id,
+                        message = "No matching Ghostty process found - terminal may have been closed manually"
+                    );
+                }
+            }
+            Err(e) => {
+                // Log at warn level so this appears in production logs
+                warn!(
+                    event = "terminal.close_ghostty_failed",
+                    window_title = %id,
+                    error = %e,
+                    message = "pkill command failed - terminal window may remain open"
+                );
+            }
+        }
+        return Ok(());
+    }
+
     let script = match terminal_type {
         TerminalType::ITerm => ITERM_CLOSE_SCRIPT.replace("{window_id}", id),
         TerminalType::TerminalApp => TERMINAL_CLOSE_SCRIPT.replace("{window_id}", id),
-        TerminalType::Ghostty => GHOSTTY_CLOSE_SCRIPT.replace("{window_title}", id),
+        TerminalType::Ghostty => unreachable!("Handled above"),
         TerminalType::Native => {
             // For Native, try to detect what terminal is running
             let detected = detect_terminal()?;
@@ -359,7 +443,8 @@ pub fn close_terminal_window(
         let stderr = String::from_utf8_lossy(&output.stderr);
         // All AppleScript failures are non-fatal - terminal close should never block destroy.
         // Common cases: window already closed, app not running, permission issues.
-        debug!(
+        // Log at warn level so this appears in production logs for debugging.
+        warn!(
             event = "terminal.close_failed_non_fatal",
             terminal_type = %terminal_type,
             window_id = %id,
@@ -433,6 +518,67 @@ mod tests {
     }
 
     #[test]
+    fn test_build_spawn_command_ghostty() {
+        let config = SpawnConfig::new(
+            TerminalType::Ghostty,
+            std::env::current_dir().unwrap(),
+            "claude".to_string(),
+        );
+
+        let result = build_spawn_command(&config);
+        assert!(result.is_ok());
+
+        let command = result.unwrap();
+        // On macOS, Ghostty requires: open -na Ghostty.app --args -e sh -c "..."
+        assert_eq!(command[0], "open");
+        assert_eq!(command[1], "-na");
+        assert_eq!(command[2], "Ghostty.app");
+        assert_eq!(command[3], "--args");
+        assert_eq!(command[4], "-e");
+        assert_eq!(command[5], "sh");
+        assert_eq!(command[6], "-c");
+        assert!(command[7].contains("claude"));
+    }
+
+    #[test]
+    fn test_build_spawn_command_ghostty_with_spaces() {
+        let config = SpawnConfig::new(
+            TerminalType::Ghostty,
+            std::env::current_dir().unwrap(),
+            "kiro-cli chat --verbose".to_string(),
+        );
+
+        let result = build_spawn_command(&config);
+        assert!(result.is_ok());
+
+        let command = result.unwrap();
+        // Command should be in the shell command argument (index 7)
+        assert!(command[7].contains("kiro-cli chat --verbose"));
+    }
+
+    #[test]
+    fn test_build_spawn_command_ghostty_path_with_single_quote() {
+        // Test that paths with single quotes are properly escaped
+        // We can't create a real directory with quotes, so just verify the escaping logic
+        let escaped = shell_escape("/Users/foo's dir/project");
+        // The escaping should handle the single quote correctly
+        assert!(escaped.contains("foo"));
+        assert!(escaped.contains("dir"));
+        // Should use the shell escaping pattern for single quotes
+        assert!(escaped.contains("'\"'\"'"));
+    }
+
+    #[test]
+    fn test_shell_escape_handles_metacharacters() {
+        // Verify shell escaping handles various special characters
+        assert_eq!(shell_escape("path with spaces"), "'path with spaces'");
+        assert_eq!(shell_escape("$HOME/dir"), "'$HOME/dir'");
+        assert_eq!(shell_escape("dir;rm -rf /"), "'dir;rm -rf /'");
+        assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
+        assert_eq!(shell_escape("`id`"), "'`id`'");
+    }
+
+    #[test]
     fn test_build_spawn_command_empty_command() {
         let config = SpawnConfig::new(
             TerminalType::ITerm,
@@ -494,9 +640,9 @@ mod tests {
     #[test]
     fn test_close_terminal_scripts_defined() {
         // Verify close scripts are non-empty
+        // Note: Ghostty uses pkill instead of AppleScript, so no script to check
         assert!(!ITERM_CLOSE_SCRIPT.is_empty());
         assert!(!TERMINAL_CLOSE_SCRIPT.is_empty());
-        assert!(!GHOSTTY_CLOSE_SCRIPT.is_empty());
     }
 
     #[cfg(target_os = "macos")]
@@ -528,16 +674,88 @@ mod tests {
     #[test]
     fn test_spawn_scripts_have_window_id_return() {
         // Verify spawn scripts have the expected return statements
+        // Note: Ghostty uses direct execution (not AppleScript), so no script to check
         assert!(ITERM_SCRIPT.contains("return windowId"));
         assert!(TERMINAL_SCRIPT.contains("return id of newWindow"));
-        assert!(GHOSTTY_SCRIPT.contains("return \"{window_title}\""));
     }
 
     #[test]
     fn test_close_scripts_have_window_id_placeholders() {
         // Verify close scripts have the expected placeholders
+        // Note: Ghostty uses pkill instead of AppleScript, so no script to check
         assert!(ITERM_CLOSE_SCRIPT.contains("{window_id}"));
         assert!(TERMINAL_CLOSE_SCRIPT.contains("{window_id}"));
-        assert!(GHOSTTY_CLOSE_SCRIPT.contains("{window_title}"));
+    }
+
+    #[test]
+    fn test_build_cd_command() {
+        let path = PathBuf::from("/tmp/test");
+        let command = "echo hello";
+        let result = build_cd_command(&path, command);
+        assert!(result.contains("cd '/tmp/test'"));
+        assert!(result.contains("&& echo hello"));
+    }
+
+    #[test]
+    fn test_build_cd_command_with_spaces() {
+        let path = PathBuf::from("/tmp/test with spaces");
+        let command = "claude code";
+        let result = build_cd_command(&path, command);
+        assert!(result.contains("cd '/tmp/test with spaces'"));
+        assert!(result.contains("&& claude code"));
+    }
+
+    #[test]
+    fn test_escape_regex_simple() {
+        assert_eq!(escape_regex("hello"), "hello");
+        assert_eq!(escape_regex("hello-world"), "hello-world");
+        assert_eq!(escape_regex("hello_world_123"), "hello_world_123");
+    }
+
+    #[test]
+    fn test_escape_regex_metacharacters() {
+        // Test all regex metacharacters are escaped
+        assert_eq!(escape_regex("."), "\\.");
+        assert_eq!(escape_regex("*"), "\\*");
+        assert_eq!(escape_regex("+"), "\\+");
+        assert_eq!(escape_regex("?"), "\\?");
+        assert_eq!(escape_regex("("), "\\(");
+        assert_eq!(escape_regex(")"), "\\)");
+        assert_eq!(escape_regex("["), "\\[");
+        assert_eq!(escape_regex("]"), "\\]");
+        assert_eq!(escape_regex("{"), "\\{");
+        assert_eq!(escape_regex("}"), "\\}");
+        assert_eq!(escape_regex("|"), "\\|");
+        assert_eq!(escape_regex("^"), "\\^");
+        assert_eq!(escape_regex("$"), "\\$");
+        assert_eq!(escape_regex("\\"), "\\\\");
+    }
+
+    #[test]
+    fn test_escape_regex_mixed() {
+        // Test realistic session identifiers with potential metacharacters
+        assert_eq!(escape_regex("shards-session"), "shards-session");
+        assert_eq!(escape_regex("session.1"), "session\\.1");
+        assert_eq!(escape_regex("test[0]"), "test\\[0\\]");
+        assert_eq!(escape_regex("foo*bar"), "foo\\*bar");
+    }
+
+    #[test]
+    fn test_ghostty_pkill_pattern_escaping() {
+        // Verify the pattern format used in close_terminal_window
+        let session_id = "my-shard.test";
+        let escaped = escape_regex(session_id);
+        let pattern = format!("Ghostty.*{}", escaped);
+        // The pattern should escape the dot to avoid matching any character
+        assert_eq!(pattern, "Ghostty.*my-shard\\.test");
+    }
+
+    #[test]
+    fn test_ghostty_ansi_title_escaping() {
+        // Verify shell_escape works for ANSI title injection prevention
+        let title_with_quotes = "my'shard";
+        let escaped = shell_escape(title_with_quotes);
+        // Single quotes should be properly escaped
+        assert!(escaped.contains("'\"'\"'"));
     }
 }

@@ -147,7 +147,7 @@ impl ShardsConfig {
         
         // Validate terminal preference if set
         if let Some(ref terminal) = self.terminal.preferred {
-            let valid_terminals = ["iterm2", "iterm", "terminal"];
+            let valid_terminals = ["iterm2", "iterm", "terminal", "ghostty", "native"];
             if !valid_terminals.contains(&terminal.as_str()) {
                 // Don't error on invalid terminal, just warn via logging
                 tracing::warn!(
