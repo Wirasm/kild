@@ -1,13 +1,13 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
+use shards_core::CreateSessionRequest;
 use shards_core::cleanup;
 use shards_core::config::ShardsConfig;
 use shards_core::events;
 use shards_core::health;
 use shards_core::process;
 use shards_core::session_ops as session_handler;
-use shards_core::CreateSessionRequest;
 
 use crate::table::truncate;
 

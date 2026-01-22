@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 use tracing::debug;
 
+use crate::agents;
 use crate::process::errors::ProcessError;
 use crate::process::types::{Pid, ProcessInfo, ProcessMetrics, ProcessStatus};
 
@@ -177,18 +178,36 @@ fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
         );
     }
 
-    // Add common variations
-    match name_pattern {
-        "kiro-cli" => {
-            patterns.insert("kiro".to_string());
+    // Add agent-specific patterns if this is a known agent name or pattern
+    if let Some(agent_patterns) = agents::get_process_patterns(name_pattern) {
+        debug!(
+            event = "process.agent_patterns_found",
+            name_pattern = name_pattern,
+            pattern_count = agent_patterns.len(),
+            "Found agent-specific process patterns"
+        );
+        for pattern in agent_patterns {
+            patterns.insert(pattern);
         }
-        "claude-code" => {
-            patterns.insert("claude".to_string());
+    } else {
+        debug!(
+            event = "process.agent_patterns_not_found",
+            name_pattern = name_pattern,
+            "No agent-specific patterns found, using generic matching"
+        );
+    }
+
+    // Also check if this pattern matches known agent process patterns and add the agent name
+    for agent_name in agents::valid_agent_names() {
+        if let Some(agent_patterns) = agents::get_process_patterns(agent_name)
+            && agent_patterns.iter().any(|p| p == name_pattern)
+        {
+            // The name_pattern is a known process pattern for this agent,
+            // so add all patterns for this agent
+            for pattern in agent_patterns {
+                patterns.insert(pattern);
+            }
         }
-        "gemini-cli" => {
-            patterns.insert("gemini".to_string());
-        }
-        _ => {}
     }
 
     patterns.into_iter().collect()
@@ -374,22 +393,33 @@ mod tests {
 
     #[test]
     fn test_generate_search_patterns() {
+        // kiro-cli is a known agent process pattern, so it should include kiro patterns
         let patterns = generate_search_patterns("kiro-cli");
         assert!(patterns.contains(&"kiro-cli".to_string()));
         assert!(patterns.contains(&"kiro".to_string()));
-        assert_eq!(patterns.len(), 2); // No duplicates
 
+        // claude-code is a known agent process pattern
         let patterns = generate_search_patterns("claude-code");
         assert!(patterns.contains(&"claude-code".to_string()));
         assert!(patterns.contains(&"claude".to_string()));
-        assert_eq!(patterns.len(), 2); // No duplicates
+
+        // "claude" is a known agent, so it should include all claude patterns
+        let patterns = generate_search_patterns("claude");
+        assert!(patterns.contains(&"claude".to_string()));
+        assert!(patterns.contains(&"claude-code".to_string()));
+
+        // "kiro" is a known agent
+        let patterns = generate_search_patterns("kiro");
+        assert!(patterns.contains(&"kiro".to_string()));
+        assert!(patterns.contains(&"kiro-cli".to_string()));
 
         let patterns = generate_search_patterns("simple");
-        assert_eq!(patterns, vec!["simple".to_string()]);
+        assert_eq!(patterns.len(), 1);
+        assert!(patterns.contains(&"simple".to_string()));
 
         // Edge cases
         let patterns = generate_search_patterns("");
-        assert_eq!(patterns, vec!["".to_string()]);
+        assert!(patterns.contains(&"".to_string()));
 
         let patterns = generate_search_patterns("no-match-agent");
         assert!(patterns.contains(&"no-match-agent".to_string()));

@@ -1,5 +1,6 @@
 use tracing::{error, info, warn};
 
+use crate::agents;
 use crate::config::{Config, ShardsConfig};
 use crate::git;
 use crate::process::{delete_pid_file, get_pid_file_path};
@@ -12,6 +13,16 @@ pub fn create_session(
 ) -> Result<Session, SessionError> {
     let agent = request.agent_or_default(&shards_config.agent.default);
     let agent_command = shards_config.get_agent_command(&agent);
+
+    // Warn if agent CLI is not available in PATH
+    if let Some(false) = agents::is_agent_available(&agent) {
+        warn!(
+            event = "session.agent_not_available",
+            agent = %agent,
+            "Agent CLI '{}' not found in PATH - session may fail to start",
+            agent
+        );
+    }
 
     info!(
         event = "session.create_started",
@@ -360,6 +371,17 @@ pub fn restart_session(
     let shards_config = ShardsConfig::load_hierarchy().unwrap_or_default();
     let agent = agent_override.unwrap_or(session.agent.clone());
     let agent_command = shards_config.get_agent_command(&agent);
+
+    // Warn if agent CLI is not available in PATH
+    if let Some(false) = agents::is_agent_available(&agent) {
+        warn!(
+            event = "session.agent_not_available",
+            agent = %agent,
+            session_id = %session.id,
+            "Agent CLI '{}' not found in PATH - session may fail to start",
+            agent
+        );
+    }
 
     info!(
         event = "session.restart_agent_selected",

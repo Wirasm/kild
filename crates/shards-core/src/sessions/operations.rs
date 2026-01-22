@@ -122,16 +122,6 @@ pub fn generate_port_env_vars(session: &Session) -> Vec<(String, String)> {
     ]
 }
 
-pub fn get_agent_command(agent: &str) -> String {
-    match agent {
-        "claude" => "cc".to_string(),
-        "kiro" => "kiro-cli".to_string(),
-        "gemini" => "gemini --yolo".to_string(),
-        "codex" => "codex --dangerously-bypass-approvals-and-sandbox".to_string(),
-        _ => agent.to_string(), // Use as-is for custom agents
-    }
-}
-
 pub fn validate_branch_name(branch: &str) -> Result<String, SessionError> {
     let trimmed = branch.trim();
 
@@ -365,19 +355,6 @@ mod tests {
         assert_eq!(calculate_port_range(1), (3100, 3199));
         assert_eq!(calculate_port_range(5), (3500, 3599));
     }
-
-    #[test]
-    fn test_get_agent_command() {
-        assert_eq!(get_agent_command("claude"), "cc");
-        assert_eq!(get_agent_command("kiro"), "kiro-cli");
-        assert_eq!(get_agent_command("gemini"), "gemini --yolo");
-        assert_eq!(
-            get_agent_command("codex"),
-            "codex --dangerously-bypass-approvals-and-sandbox"
-        );
-        assert_eq!(get_agent_command("custom"), "custom");
-    }
-
     #[test]
     fn test_validate_branch_name() {
         assert!(validate_branch_name("feature-branch").is_ok());

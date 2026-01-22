@@ -9,7 +9,9 @@
 //! - [`health`] - Monitor shard health and metrics
 //! - [`cleanup`] - Clean up orphaned resources
 //! - [`config`] - Configuration management
+//! - [`agents`] - Agent backend management
 
+pub mod agents;
 pub mod cleanup;
 pub mod config;
 pub mod errors;
