@@ -39,32 +39,37 @@ pub fn validate_branch_name(branch: &str) -> Result<String, SessionError> {
     Ok(trimmed.to_string())
 }
 
-pub(crate) fn validate_session_structure(session: &Session) -> Result<(), String> {
-    // Validate required fields are not empty
-    if session.id.trim().is_empty() {
-        return Err("session ID is empty".to_string());
+fn validate_field_not_empty(field_value: &str, field_name: &str) -> Result<(), SessionError> {
+    if field_value.trim().is_empty() {
+        return Err(SessionError::InvalidStructure {
+            field: format!("{} is empty", field_name),
+        });
     }
-    if session.project_id.trim().is_empty() {
-        return Err("project ID is empty".to_string());
-    }
-    if session.branch.trim().is_empty() {
-        return Err("branch name is empty".to_string());
-    }
-    if session.agent.trim().is_empty() {
-        return Err("agent name is empty".to_string());
-    }
-    if session.created_at.trim().is_empty() {
-        return Err("created_at timestamp is empty".to_string());
-    }
+    Ok(())
+}
+
+pub(crate) fn validate_session_structure(session: &Session) -> Result<(), SessionError> {
+    validate_field_not_empty(&session.id, "session ID")?;
+    validate_field_not_empty(&session.project_id, "project ID")?;
+    validate_field_not_empty(&session.branch, "branch name")?;
+    validate_field_not_empty(&session.agent, "agent name")?;
+    validate_field_not_empty(&session.created_at, "created_at timestamp")?;
+
     if session.worktree_path.as_os_str().is_empty() {
-        return Err("worktree path is empty".to_string());
+        return Err(SessionError::InvalidStructure {
+            field: "worktree path is empty".to_string(),
+        });
     }
+
     if !session.worktree_path.exists() {
-        return Err(format!(
-            "worktree path does not exist: {}",
-            session.worktree_path.display()
-        ));
+        return Err(SessionError::InvalidStructure {
+            field: format!(
+                "worktree path does not exist: {}",
+                session.worktree_path.display()
+            ),
+        });
     }
+
     Ok(())
 }
 
@@ -171,7 +176,10 @@ mod tests {
         };
         let result = validate_session_structure(&invalid_session);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "session ID is empty");
+        assert!(matches!(
+            result.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "session ID is empty"
+        ));
 
         // Invalid session - empty worktree path
         let invalid_session2 = Session {
@@ -195,7 +203,10 @@ mod tests {
         };
         let result2 = validate_session_structure(&invalid_session2);
         assert!(result2.is_err());
-        assert_eq!(result2.unwrap_err(), "worktree path is empty");
+        assert!(matches!(
+            result2.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "worktree path is empty"
+        ));
 
         // Invalid session - non-existing worktree path
         let nonexistent_path = temp_dir.join("nonexistent");
@@ -220,11 +231,126 @@ mod tests {
         };
         let result3 = validate_session_structure(&invalid_session3);
         assert!(result3.is_err());
-        assert!(
-            result3
-                .unwrap_err()
-                .contains("worktree path does not exist")
-        );
+        assert!(matches!(
+            result3.unwrap_err(),
+            SessionError::InvalidStructure { field } if field.contains("worktree path does not exist")
+        ));
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_validate_session_structure_all_fields() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("shards_test_validation_fields");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Test empty project_id
+        let session_empty_project = Session {
+            id: "test/branch".to_string(),
+            project_id: "".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: temp_dir.clone(),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "test-command".to_string(),
+            last_activity: None,
+        };
+        let result = validate_session_structure(&session_empty_project);
+        assert!(matches!(
+            result.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "project ID is empty"
+        ));
+
+        // Test empty branch
+        let session_empty_branch = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "".to_string(),
+            worktree_path: temp_dir.clone(),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "test-command".to_string(),
+            last_activity: None,
+        };
+        let result = validate_session_structure(&session_empty_branch);
+        assert!(matches!(
+            result.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "branch name is empty"
+        ));
+
+        // Test empty agent
+        let session_empty_agent = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: temp_dir.clone(),
+            agent: "".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "test-command".to_string(),
+            last_activity: None,
+        };
+        let result = validate_session_structure(&session_empty_agent);
+        assert!(matches!(
+            result.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "agent name is empty"
+        ));
+
+        // Test empty created_at
+        let session_empty_created_at = Session {
+            id: "test/branch".to_string(),
+            project_id: "test".to_string(),
+            branch: "branch".to_string(),
+            worktree_path: temp_dir.clone(),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "test-command".to_string(),
+            last_activity: None,
+        };
+        let result = validate_session_structure(&session_empty_created_at);
+        assert!(matches!(
+            result.unwrap_err(),
+            SessionError::InvalidStructure { field } if field == "created_at timestamp is empty"
+        ));
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

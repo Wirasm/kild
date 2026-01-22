@@ -5,34 +5,49 @@
 use crate::sessions::{errors::SessionError, types::*};
 use std::fs;
 use std::path::Path;
-use tracing::warn;
 
 pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError> {
     fs::create_dir_all(sessions_dir).map_err(|e| SessionError::IoError { source: e })?;
     Ok(())
 }
 
+fn cleanup_temp_file(temp_file: &Path, original_error: &std::io::Error) {
+    if let Err(cleanup_err) = fs::remove_file(temp_file) {
+        tracing::warn!(
+            event = "session.temp_file_cleanup_failed",
+            temp_file = %temp_file.display(),
+            original_error = %original_error,
+            cleanup_error = %cleanup_err,
+            message = "Failed to clean up temp file after operation error"
+        );
+    }
+}
+
 pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<(), SessionError> {
     let session_file = sessions_dir.join(format!("{}.json", session.id.replace('/', "_")));
-    let session_json =
-        serde_json::to_string_pretty(session).map_err(|e| SessionError::IoError {
+    let session_json = serde_json::to_string_pretty(session).map_err(|e| {
+        tracing::error!(
+            event = "session.serialization_failed",
+            session_id = %session.id,
+            error = %e,
+            message = "Failed to serialize session to JSON"
+        );
+        SessionError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-        })?;
+        }
+    })?;
 
-    // Write atomically by writing to temp file first, then renaming
     let temp_file = session_file.with_extension("json.tmp");
 
     // Write to temp file
-    if let Err(e) = fs::write(&temp_file, session_json) {
-        // Clean up temp file if write failed
-        let _ = fs::remove_file(&temp_file);
+    if let Err(e) = fs::write(&temp_file, &session_json) {
+        cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
 
     // Rename temp file to final location
     if let Err(e) = fs::rename(&temp_file, &session_file) {
-        // Clean up temp file if rename failed
-        let _ = fs::remove_file(&temp_file);
+        cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
 
@@ -57,50 +72,51 @@ pub fn load_sessions_from_files(
         let path = entry.path();
 
         // Only process .json files
-        if path.extension().and_then(|s| s.to_str()) == Some("json") {
-            match fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str::<Session>(&content) {
-                        Ok(session) => {
-                            // Validate session structure
-                            match super::validation::validate_session_structure(&session) {
-                                Ok(()) => {
-                                    sessions.push(session);
-                                }
-                                Err(validation_error) => {
-                                    skipped_count += 1;
-                                    tracing::warn!(
-                                        event = "session.load_invalid_structure",
-                                        file = %path.display(),
-                                        worktree_path = %session.worktree_path.display(),
-                                        validation_error = validation_error,
-                                        message = "Session file has invalid structure, skipping"
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            skipped_count += 1;
-                            tracing::warn!(
-                                event = "session.load_invalid_json",
-                                file = %path.display(),
-                                error = %e,
-                                message = "Failed to parse session JSON, skipping"
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    skipped_count += 1;
-                    tracing::warn!(
-                        event = "session.load_read_error",
-                        file = %path.display(),
-                        error = %e,
-                        message = "Failed to read session file, skipping"
-                    );
-                }
-            }
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
         }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) => {
+                skipped_count += 1;
+                tracing::warn!(
+                    event = "session.load_read_error",
+                    file = %path.display(),
+                    error = %e,
+                    message = "Failed to read session file, skipping"
+                );
+                continue;
+            }
+        };
+
+        let session = match serde_json::from_str::<Session>(&content) {
+            Ok(session) => session,
+            Err(e) => {
+                skipped_count += 1;
+                tracing::warn!(
+                    event = "session.load_invalid_json",
+                    file = %path.display(),
+                    error = %e,
+                    message = "Failed to parse session JSON, skipping"
+                );
+                continue;
+            }
+        };
+
+        if let Err(validation_error) = super::validation::validate_session_structure(&session) {
+            skipped_count += 1;
+            tracing::warn!(
+                event = "session.load_invalid_structure",
+                file = %path.display(),
+                worktree_path = %session.worktree_path.display(),
+                validation_error = %validation_error,
+                message = "Session file has invalid structure, skipping"
+            );
+            continue;
+        }
+
+        sessions.push(session);
     }
 
     Ok((sessions, skipped_count))
@@ -138,9 +154,11 @@ pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), 
     if session_file.exists() {
         fs::remove_file(&session_file).map_err(|e| SessionError::IoError { source: e })?;
     } else {
-        warn!(
-            "Attempted to remove session file that doesn't exist: {} - possible state inconsistency",
-            session_file.display()
+        tracing::warn!(
+            event = "session.remove_nonexistent_file",
+            session_id = %session_id,
+            file = %session_file.display(),
+            message = "Attempted to remove session file that doesn't exist - possible state inconsistency"
         );
     }
 

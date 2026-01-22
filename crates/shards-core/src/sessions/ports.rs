@@ -28,6 +28,13 @@ pub fn allocate_port_range(
     Ok((start_port, end_port))
 }
 
+fn calculate_proposed_end(start_port: u16, port_count: u16) -> Result<u16, SessionError> {
+    start_port
+        .checked_add(port_count)
+        .and_then(|sum| sum.checked_sub(1))
+        .ok_or(SessionError::PortRangeExhausted)
+}
+
 pub fn find_next_available_range(
     existing_sessions: &[Session],
     port_count: u16,
@@ -37,39 +44,28 @@ pub fn find_next_available_range(
         return Err(SessionError::InvalidPortCount);
     }
 
-    // Collect all allocated port ranges
+    // Collect and sort all allocated port ranges by start port
     let mut allocated_ranges: Vec<(u16, u16)> = existing_sessions
         .iter()
         .map(|s| (s.port_range_start, s.port_range_end))
         .collect();
-
-    // Sort by start port
     allocated_ranges.sort_by_key(|&(start, _)| start);
 
-    // Try to find a gap starting from base_port
     let mut current_port = base_port;
 
+    // Try to find a gap in the allocated ranges
     for &(allocated_start, allocated_end) in &allocated_ranges {
-        let proposed_end = current_port
-            .checked_add(port_count)
-            .and_then(|sum| sum.checked_sub(1))
-            .ok_or(SessionError::PortRangeExhausted)?;
+        let proposed_end = calculate_proposed_end(current_port, port_count)?;
 
-        // Check if proposed range fits before this allocated range
         if proposed_end < allocated_start {
             return Ok((current_port, proposed_end));
         }
 
-        // Move past this allocated range
         current_port = allocated_end + 1;
     }
 
-    // Check if we can allocate after all existing ranges
-    let proposed_end = current_port
-        .checked_add(port_count)
-        .and_then(|sum| sum.checked_sub(1))
-        .ok_or(SessionError::PortRangeExhausted)?;
-
+    // Allocate after all existing ranges
+    let proposed_end = calculate_proposed_end(current_port, port_count)?;
     Ok((current_port, proposed_end))
 }
 
@@ -107,6 +103,29 @@ pub fn generate_port_env_vars(session: &Session) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn create_session_with_ports(start: u16, end: u16) -> Session {
+        Session {
+            id: format!("test/{}-{}", start, end),
+            project_id: "test".to_string(),
+            branch: format!("branch-{}-{}", start, end),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: start,
+            port_range_end: end,
+            port_count: end - start + 1,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "test-command".to_string(),
+            last_activity: None,
+        }
+    }
 
     #[test]
     fn test_generate_session_id() {
@@ -119,5 +138,116 @@ mod tests {
         assert_eq!(calculate_port_range(0), (3000, 3099));
         assert_eq!(calculate_port_range(1), (3100, 3199));
         assert_eq!(calculate_port_range(5), (3500, 3599));
+    }
+
+    #[test]
+    fn test_find_next_available_range_empty_sessions() {
+        let sessions: Vec<Session> = vec![];
+        let result = find_next_available_range(&sessions, 10, 3000);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (3000, 3009));
+    }
+
+    #[test]
+    fn test_find_next_available_range_with_gap() {
+        let sessions = vec![
+            create_session_with_ports(3000, 3009),
+            create_session_with_ports(3020, 3029), // Gap: 3010-3019
+        ];
+        let result = find_next_available_range(&sessions, 10, 3000);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (3010, 3019)); // Should find the gap
+    }
+
+    #[test]
+    fn test_find_next_available_range_no_gap_allocate_after() {
+        let sessions = vec![
+            create_session_with_ports(3000, 3009),
+            create_session_with_ports(3010, 3019), // Contiguous, no gap
+        ];
+        let result = find_next_available_range(&sessions, 10, 3000);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (3020, 3029)); // Allocate after existing ranges
+    }
+
+    #[test]
+    fn test_find_next_available_range_zero_port_count() {
+        let sessions: Vec<Session> = vec![];
+        let result = find_next_available_range(&sessions, 0, 3000);
+        assert!(matches!(result, Err(SessionError::InvalidPortCount)));
+    }
+
+    #[test]
+    fn test_find_next_available_range_overflow_protection() {
+        let sessions = vec![create_session_with_ports(65530, 65535)];
+        let result = find_next_available_range(&sessions, 10, 65530);
+        assert!(matches!(result, Err(SessionError::PortRangeExhausted)));
+    }
+
+    #[test]
+    fn test_find_next_available_range_near_max_port() {
+        let sessions: Vec<Session> = vec![];
+        // Request a range that would overflow u16
+        let result = find_next_available_range(&sessions, 10, 65530);
+        assert!(matches!(result, Err(SessionError::PortRangeExhausted)));
+    }
+
+    #[test]
+    fn test_is_port_range_available_no_overlap() {
+        let sessions = vec![create_session_with_ports(3000, 3009)];
+        // Range completely after existing
+        assert!(is_port_range_available(&sessions, 3010, 3019));
+        // Range completely before existing
+        assert!(is_port_range_available(&sessions, 2990, 2999));
+    }
+
+    #[test]
+    fn test_is_port_range_available_with_overlap() {
+        let sessions = vec![create_session_with_ports(3000, 3009)];
+        // Partial overlap at end
+        assert!(!is_port_range_available(&sessions, 3005, 3015));
+        // Partial overlap at start
+        assert!(!is_port_range_available(&sessions, 2995, 3005));
+        // Complete overlap (proposed contains existing)
+        assert!(!is_port_range_available(&sessions, 2990, 3020));
+        // Complete overlap (existing contains proposed)
+        assert!(!is_port_range_available(&sessions, 3002, 3007));
+    }
+
+    #[test]
+    fn test_is_port_range_available_edge_overlap() {
+        let sessions = vec![create_session_with_ports(3000, 3009)];
+        // Edge case: ranges touch at boundary (should overlap)
+        assert!(!is_port_range_available(&sessions, 3009, 3015));
+        assert!(!is_port_range_available(&sessions, 2995, 3000));
+    }
+
+    #[test]
+    fn test_is_port_range_available_empty_sessions() {
+        let sessions: Vec<Session> = vec![];
+        assert!(is_port_range_available(&sessions, 3000, 3009));
+    }
+
+    #[test]
+    fn test_generate_port_env_vars() {
+        let session = create_session_with_ports(3000, 3009);
+        let env_vars = generate_port_env_vars(&session);
+
+        assert_eq!(env_vars.len(), 3);
+        assert!(env_vars.contains(&("SHARD_PORT_RANGE_START".to_string(), "3000".to_string())));
+        assert!(env_vars.contains(&("SHARD_PORT_RANGE_END".to_string(), "3009".to_string())));
+        assert!(env_vars.contains(&("SHARD_PORT_COUNT".to_string(), "10".to_string())));
+    }
+
+    #[test]
+    fn test_generate_port_env_vars_names_are_correct() {
+        let session = create_session_with_ports(8000, 8099);
+        let env_vars = generate_port_env_vars(&session);
+
+        // Verify exact env var names to catch typos
+        let names: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"SHARD_PORT_RANGE_START"));
+        assert!(names.contains(&"SHARD_PORT_RANGE_END"));
+        assert!(names.contains(&"SHARD_PORT_COUNT"));
     }
 }

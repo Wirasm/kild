@@ -17,6 +17,9 @@ pub enum SessionError {
     #[error("Invalid command: cannot be empty")]
     InvalidCommand,
 
+    #[error("Invalid session structure: {field}")]
+    InvalidStructure { field: String },
+
     #[error("Invalid port count: must be greater than 0")]
     InvalidPortCount,
 
@@ -62,6 +65,7 @@ impl ShardsError for SessionError {
             SessionError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
             SessionError::InvalidName => "INVALID_SESSION_NAME",
             SessionError::InvalidCommand => "INVALID_COMMAND",
+            SessionError::InvalidStructure { .. } => "INVALID_SESSION_STRUCTURE",
             SessionError::InvalidPortCount => "INVALID_PORT_COUNT",
             SessionError::PortRangeExhausted => "PORT_RANGE_EXHAUSTED",
             SessionError::PortAllocationFailed { .. } => "PORT_ALLOCATION_FAILED",
@@ -82,6 +86,7 @@ impl ShardsError for SessionError {
                 | SessionError::WorktreeNotFound { .. }
                 | SessionError::InvalidName
                 | SessionError::InvalidCommand
+                | SessionError::InvalidStructure { .. }
                 | SessionError::InvalidPortCount
                 | SessionError::PortRangeExhausted
                 | SessionError::PortAllocationFailed { .. }
