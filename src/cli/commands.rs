@@ -325,7 +325,6 @@ fn handle_cleanup_command(sub_matches: &ArgMatches) -> Result<(), Box<dyn std::e
 
 fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches.get_one::<String>("branch");
-    let show_all = matches.get_flag("all");
     let json_output = matches.get_flag("json");
     let watch_mode = matches.get_flag("watch");
     let interval = matches.get_one::<u64>("interval").copied().unwrap_or(5);
@@ -333,22 +332,20 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     info!(
         event = "cli.health_started",
         branch = ?branch,
-        show_all = show_all,
         json_output = json_output,
         watch_mode = watch_mode,
         interval = interval
     );
 
     if watch_mode {
-        run_health_watch_loop(branch, show_all, json_output, interval)
+        run_health_watch_loop(branch, json_output, interval)
     } else {
-        run_health_once(branch, show_all, json_output)
+        run_health_once(branch, json_output).map(|_| ())
     }
 }
 
 fn run_health_watch_loop(
     branch: Option<&String>,
-    _show_all: bool,
     json_output: bool,
     interval_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -361,15 +358,16 @@ fn run_health_watch_loop(
         print!("\x1B[2J\x1B[1;1H");
         io::stdout().flush()?;
 
-        run_health_once(branch, _show_all, json_output)?;
+        // Get health output and display it
+        let health_output = run_health_once(branch, json_output)?;
 
-        // Save snapshot if history is enabled
-        if config.health.history_enabled {
-            if let Ok(output) = health::get_health_all_sessions() {
-                let snapshot = health::HealthSnapshot::from(&output);
-                if let Err(e) = health::save_snapshot(&snapshot) {
-                    info!(event = "cli.health_history_save_failed", error = %e);
-                }
+        // Save snapshot if history is enabled and we got all-sessions output
+        if config.health.history_enabled
+            && let Some(output) = health_output
+        {
+            let snapshot = health::HealthSnapshot::from(&output);
+            if let Err(e) = health::save_snapshot(&snapshot) {
+                info!(event = "cli.health_history_save_failed", error = %e);
             }
         }
 
@@ -379,11 +377,12 @@ fn run_health_watch_loop(
     }
 }
 
+/// Run health check once. Returns Some(HealthOutput) when checking all sessions,
+/// None when checking a single branch.
 fn run_health_once(
     branch: Option<&String>,
-    _show_all: bool,
     json_output: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Option<health::HealthOutput>, Box<dyn std::error::Error>> {
     if let Some(branch_name) = branch {
         // Validate branch name
         if !is_valid_branch_name(branch_name) {
@@ -402,7 +401,7 @@ fn run_health_once(
                 }
 
                 info!(event = "cli.health_completed", branch = branch_name);
-                Ok(())
+                Ok(None) // Single branch doesn't return HealthOutput
             }
             Err(e) => {
                 eprintln!("❌ Failed to get health for shard '{}': {}", branch_name, e);
@@ -426,7 +425,7 @@ fn run_health_once(
                     total = health_output.total_count,
                     working = health_output.working_count
                 );
-                Ok(())
+                Ok(Some(health_output)) // Return for potential snapshot
             }
             Err(e) => {
                 eprintln!("❌ Failed to get health status: {}", e);

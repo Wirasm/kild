@@ -43,15 +43,14 @@ impl From<&HealthOutput> for HealthSnapshot {
     }
 }
 
-pub fn get_history_dir() -> PathBuf {
+pub fn get_history_dir() -> Result<PathBuf, std::io::Error> {
     dirs::home_dir()
-        .expect("Could not find home directory")
-        .join(".shards")
-        .join("health_history")
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find home directory"))
+        .map(|p| p.join(".shards").join("health_history"))
 }
 
 pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
-    let history_dir = get_history_dir();
+    let history_dir = get_history_dir()?;
     fs::create_dir_all(&history_dir)?;
 
     let filename = format!("{}.json", snapshot.timestamp.format("%Y-%m-%d"));
@@ -72,20 +71,20 @@ pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
 }
 
 pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
-    let history_dir = get_history_dir();
+    let history_dir = get_history_dir()?;
     let mut all_snapshots = Vec::new();
 
     let cutoff = Utc::now() - chrono::Duration::days(days as i64);
 
     if let Ok(entries) = fs::read_dir(&history_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let Ok(snapshots) = serde_json::from_str::<Vec<HealthSnapshot>>(&content) {
-                    all_snapshots.extend(
-                        snapshots.into_iter()
-                            .filter(|s| s.timestamp > cutoff)
-                    );
-                }
+            if let Ok(content) = fs::read_to_string(entry.path())
+                && let Ok(snapshots) = serde_json::from_str::<Vec<HealthSnapshot>>(&content)
+            {
+                all_snapshots.extend(
+                    snapshots.into_iter()
+                        .filter(|s| s.timestamp > cutoff)
+                );
             }
         }
     }
@@ -95,7 +94,7 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
 }
 
 pub fn cleanup_old_history(retention_days: u64) -> Result<usize, std::io::Error> {
-    let history_dir = get_history_dir();
+    let history_dir = get_history_dir()?;
     let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
     let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
 

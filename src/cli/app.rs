@@ -121,12 +121,6 @@ pub fn build_cli() -> Command {
                         .index(1)
                 )
                 .arg(
-                    Arg::new("all")
-                        .long("all")
-                        .help("Show health for all projects, not just current")
-                        .action(clap::ArgAction::SetTrue)
-                )
-                .arg(
                     Arg::new("json")
                         .long("json")
                         .help("Output in JSON format")

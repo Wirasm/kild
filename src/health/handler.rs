@@ -7,7 +7,7 @@ use crate::process;
 pub fn get_health_all_sessions() -> Result<HealthOutput, HealthError> {
     // Load config and apply thresholds
     if let Ok(config) = crate::core::config::ShardsConfig::load_hierarchy() {
-        operations::set_idle_threshold_minutes(config.health.idle_threshold_minutes);
+        operations::set_idle_threshold_minutes(config.health.idle_threshold_minutes());
     }
 
     info!(event = "health.get_all_started");
