@@ -1,0 +1,154 @@
+use shards_core::Session;
+
+pub struct TableFormatter {
+    branch_width: usize,
+    agent_width: usize,
+    status_width: usize,
+    created_width: usize,
+    port_width: usize,
+    process_width: usize,
+    command_width: usize,
+}
+
+impl TableFormatter {
+    pub fn new(sessions: &[Session]) -> Self {
+        let branch_width = sessions
+            .iter()
+            .map(|s| s.branch.len())
+            .max()
+            .unwrap_or(16)
+            .clamp(6, 50); // Between "Branch" header min and reasonable terminal width max
+
+        Self {
+            branch_width,
+            agent_width: 7,
+            status_width: 7,
+            created_width: 19,
+            port_width: 11,
+            process_width: 11,
+            command_width: 20,
+        }
+    }
+
+    pub fn print_table(&self, sessions: &[Session]) {
+        self.print_header();
+        for session in sessions {
+            self.print_row(session);
+        }
+        self.print_footer();
+    }
+
+    fn print_header(&self) {
+        println!("{}", self.top_border());
+        println!("{}", self.header_row());
+        println!("{}", self.separator());
+    }
+
+    fn print_footer(&self) {
+        println!("{}", self.bottom_border());
+    }
+
+    fn print_row(&self, session: &Session) {
+        let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
+        let process_status = session.process_id.map_or("No PID".to_string(), |pid| {
+            match shards_core::process::is_process_running(pid) {
+                Ok(true) => format!("Run({})", pid),
+                Ok(false) => format!("Stop({})", pid),
+                Err(e) => {
+                    tracing::warn!(
+                        event = "cli.list_process_check_failed",
+                        pid = pid,
+                        session_branch = &session.branch,
+                        error = %e
+                    );
+                    format!("Err({})", pid)
+                }
+            }
+        });
+
+        println!(
+            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │",
+            truncate(&session.branch, self.branch_width),
+            truncate(&session.agent, self.agent_width),
+            format!("{:?}", session.status).to_lowercase(),
+            truncate(&session.created_at, self.created_width),
+            truncate(&port_range, self.port_width),
+            truncate(&process_status, self.process_width),
+            truncate(&session.command, self.command_width),
+            width_branch = self.branch_width,
+            width_agent = self.agent_width,
+            width_status = self.status_width,
+            width_created = self.created_width,
+            width_port = self.port_width,
+            width_process = self.process_width,
+            width_command = self.command_width,
+        );
+    }
+
+    fn top_border(&self) -> String {
+        format!(
+            "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
+            "─".repeat(self.branch_width + 2),
+            "─".repeat(self.agent_width + 2),
+            "─".repeat(self.status_width + 2),
+            "─".repeat(self.created_width + 2),
+            "─".repeat(self.port_width + 2),
+            "─".repeat(self.process_width + 2),
+            "─".repeat(self.command_width + 2),
+        )
+    }
+
+    fn header_row(&self) -> String {
+        format!(
+            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │",
+            "Branch",
+            "Agent",
+            "Status",
+            "Created",
+            "Port Range",
+            "Process",
+            "Command",
+            width_branch = self.branch_width,
+            width_agent = self.agent_width,
+            width_status = self.status_width,
+            width_created = self.created_width,
+            width_port = self.port_width,
+            width_process = self.process_width,
+            width_command = self.command_width,
+        )
+    }
+
+    fn separator(&self) -> String {
+        format!(
+            "├{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
+            "─".repeat(self.branch_width + 2),
+            "─".repeat(self.agent_width + 2),
+            "─".repeat(self.status_width + 2),
+            "─".repeat(self.created_width + 2),
+            "─".repeat(self.port_width + 2),
+            "─".repeat(self.process_width + 2),
+            "─".repeat(self.command_width + 2),
+        )
+    }
+
+    fn bottom_border(&self) -> String {
+        format!(
+            "└{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
+            "─".repeat(self.branch_width + 2),
+            "─".repeat(self.agent_width + 2),
+            "─".repeat(self.status_width + 2),
+            "─".repeat(self.created_width + 2),
+            "─".repeat(self.port_width + 2),
+            "─".repeat(self.process_width + 2),
+            "─".repeat(self.command_width + 2),
+        )
+    }
+}
+
+pub fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        format!("{:<width$}", s, width = max_len)
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}

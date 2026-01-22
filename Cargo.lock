@@ -878,8 +878,17 @@ dependencies = [
 name = "shards"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
+ "serde_json",
+ "shards-core",
+ "tracing",
+]
+
+[[package]]
+name = "shards-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
  "dirs",
  "git2",
  "glob",
@@ -894,6 +903,13 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "shards-ui"
+version = "0.1.0"
+dependencies = [
+ "shards-core",
 ]
 
 [[package]]

@@ -1,0 +1,16 @@
+[package]
+name = "shards-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GUI for Shards - visual shard management dashboard"
+
+[[bin]]
+name = "shards-ui"
+path = "src/main.rs"
+
+[dependencies]
+shards-core.workspace = true
+
+# UI dependencies will be added in Phase 1 of UI PRD
+# gpui = { version = "0.2", optional = true }
