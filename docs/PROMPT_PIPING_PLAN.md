@@ -95,7 +95,7 @@ This enables clean completion tracking and session handoff.
 Even though we're implementing Claude Code first, we'll design the trait system upfront to ensure clean architecture.
 
 ```rust
-// src/agents/traits.rs
+// crates/shards-core/src/agents/traits.rs
 
 use std::path::Path;
 use async_trait::async_trait;
@@ -209,7 +209,7 @@ pub enum AgentError {
 ### Agent Registry
 
 ```rust
-// src/agents/registry.rs
+// crates/shards-core/src/agents/registry.rs
 
 use std::collections::HashMap;
 use super::traits::AgentRunner;
@@ -274,7 +274,7 @@ impl Default for AgentRegistry {
 ### ClaudeAgent Structure
 
 ```rust
-// src/agents/claude.rs
+// crates/shards-core/src/agents/claude.rs
 
 use std::path::Path;
 use std::process::Stdio;
@@ -461,7 +461,7 @@ impl AgentRunner for ClaudeAgent {
 ### Integration with Session Handler
 
 ```rust
-// src/sessions/handler.rs (modifications)
+// crates/shards-core/src/sessions/handler.rs (modifications)
 
 use crate::agents::{AgentRegistry, traits::{HeadlessOptions, AgentError}};
 
@@ -653,7 +653,7 @@ async fn resolve_prompt(options: &CreateSessionOptions) -> Result<Option<String>
 ### Updated Create Command
 
 ```rust
-// src/cli/app.rs
+// crates/shards/src/app.rs
 
 #[derive(Parser)]
 pub struct CreateCommand {
@@ -699,7 +699,7 @@ pub struct CreateCommand {
 ### New Commands
 
 ```rust
-// src/cli/app.rs
+// crates/shards/src/app.rs
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -802,7 +802,7 @@ shards agents --verbose
 ### Updated Session Struct
 
 ```rust
-// src/sessions/types.rs
+// crates/shards-core/src/sessions/types.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -933,7 +933,7 @@ pub enum SessionStatus {
 ### Error Types
 
 ```rust
-// src/sessions/errors.rs (additions)
+// crates/shards-core/src/sessions/errors.rs (additions)
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -1009,7 +1009,7 @@ pub enum SessionError {
 ### Unit Tests
 
 ```rust
-// src/agents/claude_test.rs
+// crates/shards-core/src/agents/claude_test.rs
 
 #[cfg(test)]
 mod tests {
@@ -1304,7 +1304,7 @@ async fn test_send_prompt_to_existing_shard() {
 ### Mock Tests (No Claude Required)
 
 ```rust
-// src/agents/mock.rs
+// crates/shards-core/src/agents/mock.rs
 
 #[cfg(test)]
 pub struct MockClaudeAgent {
@@ -1494,7 +1494,7 @@ fn test_prompt_priority() {
 ### Phase 2: OpenAI Codex CLI
 
 ```rust
-// src/agents/codex.rs (future)
+// crates/shards-core/src/agents/codex.rs (future)
 
 pub struct CodexAgent { /* ... */ }
 
@@ -1527,7 +1527,7 @@ impl AgentRunner for CodexAgent {
 ### Phase 3: Gemini CLI
 
 ```rust
-// src/agents/gemini.rs (future)
+// crates/shards-core/src/agents/gemini.rs (future)
 
 pub struct GeminiAgent { /* ... */ }
 
@@ -1549,7 +1549,7 @@ impl AgentRunner for GeminiAgent {
 ### Phase 4: Aider (Stateless)
 
 ```rust
-// src/agents/aider.rs (future)
+// crates/shards-core/src/agents/aider.rs (future)
 
 pub struct AiderAgent { /* ... */ }
 
@@ -1575,7 +1575,7 @@ impl AgentRunner for AiderAgent {
 ### Phase 5: Kiro CLI
 
 ```rust
-// src/agents/kiro.rs (future)
+// crates/shards-core/src/agents/kiro.rs (future)
 
 pub struct KiroAgent { /* ... */ }
 

@@ -4,20 +4,37 @@
 
 **Core Principle**: Organize by features, not layers. Each slice is self-contained with everything needed to understand and modify that feature.
 
+**Note**: Project uses Cargo workspace structure with core library and CLI binary separated.
+
 ```
-src/
-├── core/              # Foundation infrastructure
-├── shared/            # Cross-feature utilities (3+ features only)
-├── sessions/          # Feature slice: session lifecycle
-├── git/               # Feature slice: worktree management
-└── terminal/          # Feature slice: terminal launching (Ghostty, iTerm, Terminal.app, Native)
+crates/
+├── shards-core/       # Core library with all business logic
+│   └── src/
+│       ├── config/    # Foundation: configuration
+│       ├── logging/   # Foundation: structured logging
+│       ├── errors/    # Foundation: base error traits
+│       ├── events/    # Foundation: application lifecycle
+│       ├── sessions/  # Feature slice: session lifecycle
+│       ├── git/       # Feature slice: worktree management
+│       ├── terminal/  # Feature slice: terminal launching
+│       ├── health/    # Feature slice: health monitoring
+│       ├── cleanup/   # Feature slice: cleanup operations
+│       ├── process/   # Feature slice: process management
+│       └── files/     # Feature slice: file operations
+├── shards/            # CLI binary
+│   └── src/
+│       ├── main.rs    # CLI entry point
+│       ├── app.rs     # Clap application definition
+│       ├── commands.rs # CLI command handlers
+│       └── table.rs   # Table formatting utilities
+└── shards-ui/         # Future: GPUI-based UI
 ```
 
 ### Feature Slice Structure
 Each feature contains its complete implementation:
 
 ```
-src/sessions/
+crates/shards-core/src/sessions/
 ├── mod.rs             # Public API exports
 ├── handler.rs         # Orchestration (uses infrastructure)
 ├── operations.rs      # Pure business logic (no I/O)
@@ -32,14 +49,14 @@ src/sessions/
 Universal foundation that exists before features:
 
 ```
-src/core/
-├── config.rs          # Application configuration
-├── logging.rs         # Structured logging setup
-├── errors.rs          # Base error traits
-└── events.rs          # Application lifecycle
+crates/shards-core/src/
+├── config/            # Application configuration
+├── logging/           # Structured logging setup
+├── errors/            # Base error traits
+└── events/            # Application lifecycle
 ```
 
-**Rule**: If removing any feature slice would still require this code, it belongs in `core/`.
+**Rule**: If removing any feature slice would still require this code, it belongs in core infrastructure.
 
 ### Three-Feature Rule
 Code moves to `shared/` only when three features need it. Until then, duplicate it. Prefer coupling to feature over premature abstraction.
@@ -112,7 +129,7 @@ pub fn create_session(name: &str, command: &str) -> Result<Session, SessionError
 ### Structured Logging Setup
 
 ```rust
-// src/core/logging.rs
+// crates/shards-core/src/logging/mod.rs
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn init_logging() {
@@ -138,7 +155,7 @@ pub fn init_logging() {
 
 ### Handler Layer (I/O Orchestration)
 ```rust
-// src/sessions/handler.rs
+// crates/shards-core/src/sessions/handler.rs
 pub fn create_session(name: &str, command: &str) -> Result<Session, SessionError> {
     info!(event = "session.create_started", name = name);
     
@@ -166,7 +183,7 @@ pub fn create_session(name: &str, command: &str) -> Result<Session, SessionError
 
 ### Operations Layer (Pure Logic)
 ```rust
-// src/sessions/operations.rs
+// crates/shards-core/src/sessions/operations.rs
 pub fn validate_session_request(name: &str, command: &str) -> Result<ValidatedRequest, SessionError> {
     if name.is_empty() {
         return Err(SessionError::InvalidName);
