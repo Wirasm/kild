@@ -150,6 +150,7 @@ pub fn build_cli() -> Command {
         )
 }
 
+#[allow(dead_code)]
 pub fn get_matches() -> ArgMatches {
     build_cli().get_matches()
 }

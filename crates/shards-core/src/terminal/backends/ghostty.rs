@@ -48,7 +48,7 @@ impl TerminalBackend for GhosttyBackend {
         );
 
         debug!(
-            event = "terminal.spawn_ghostty_starting",
+            event = "core.terminal.spawn_ghostty_starting",
             terminal_type = %config.terminal_type(),
             working_directory = %config.working_directory().display(),
             window_title = %title
@@ -90,7 +90,7 @@ impl TerminalBackend for GhosttyBackend {
         }
 
         debug!(
-            event = "terminal.spawn_ghostty_launched",
+            event = "core.terminal.spawn_ghostty_launched",
             terminal_type = %config.terminal_type(),
             window_title = %title,
             message = "open command completed successfully, Ghostty window should be visible"
@@ -107,7 +107,7 @@ impl TerminalBackend for GhosttyBackend {
         _window_title: Option<&str>,
     ) -> Result<Option<String>, TerminalError> {
         debug!(
-            event = "terminal.spawn_ghostty_not_supported",
+            event = "core.terminal.spawn_ghostty_not_supported",
             platform = std::env::consts::OS
         );
         Ok(None)
@@ -117,7 +117,7 @@ impl TerminalBackend for GhosttyBackend {
     fn close_window(&self, window_id: Option<&str>) {
         let Some(id) = window_id else {
             debug!(
-                event = "terminal.close_skipped_no_id",
+                event = "core.terminal.close_skipped_no_id",
                 terminal = "ghostty",
                 message = "No window ID available, skipping close to avoid closing wrong window"
             );
@@ -125,7 +125,7 @@ impl TerminalBackend for GhosttyBackend {
         };
 
         debug!(
-            event = "terminal.close_ghostty_pkill",
+            event = "core.terminal.close_ghostty_pkill",
             window_title = %id
         );
 
@@ -141,14 +141,14 @@ impl TerminalBackend for GhosttyBackend {
             Ok(output) => {
                 if output.status.success() {
                     debug!(
-                        event = "terminal.close_ghostty_completed",
+                        event = "core.terminal.close_ghostty_completed",
                         window_title = %id
                     );
                 } else {
                     // Log at warn level so this appears in production logs
                     // This is expected if the terminal was manually closed by the user
                     warn!(
-                        event = "terminal.close_ghostty_no_match",
+                        event = "core.terminal.close_ghostty_no_match",
                         window_title = %id,
                         message = "No matching Ghostty process found - terminal may have been closed manually"
                     );
@@ -157,7 +157,7 @@ impl TerminalBackend for GhosttyBackend {
             Err(e) => {
                 // Log at warn level so this appears in production logs
                 warn!(
-                    event = "terminal.close_ghostty_failed",
+                    event = "core.terminal.close_ghostty_failed",
                     window_title = %id,
                     error = %e,
                     message = "pkill command failed - terminal window may remain open"
@@ -169,7 +169,7 @@ impl TerminalBackend for GhosttyBackend {
     #[cfg(not(target_os = "macos"))]
     fn close_window(&self, _window_id: Option<&str>) {
         debug!(
-            event = "terminal.close_not_supported",
+            event = "core.terminal.close_not_supported",
             platform = std::env::consts::OS
         );
     }

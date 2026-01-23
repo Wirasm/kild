@@ -31,7 +31,7 @@ pub fn validate_patterns(config: &IncludeConfig) -> Result<Vec<PatternRule>, Fil
     }
 
     debug!(
-        event = "files.patterns.validated",
+        event = "core.files.patterns.validated",
         pattern_count = rules.len(),
         patterns = ?config.patterns
     );
@@ -109,7 +109,7 @@ pub fn find_matching_files(
                     if rule.compiled.matches(&path_str) {
                         matching_files.push(path.to_path_buf());
                         debug!(
-                            event = "files.pattern.matched",
+                            event = "core.files.pattern.matched",
                             pattern = rule.pattern,
                             file = %path.display()
                         );
@@ -119,7 +119,7 @@ pub fn find_matching_files(
             }
             Err(e) => {
                 warn!(
-                    event = "files.walk.error",
+                    event = "core.files.walk.error",
                     error = %e,
                     message = "Error walking directory, skipping entry"
                 );
@@ -128,7 +128,7 @@ pub fn find_matching_files(
     }
 
     debug!(
-        event = "files.matching.completed",
+        event = "core.files.matching.completed",
         source_root = %source_root.display(),
         matched_count = matching_files.len()
     );
@@ -187,7 +187,7 @@ pub fn copy_file_safely(
         .map_err(|e| FileError::IoError { source: e.error })?;
 
     debug!(
-        event = "files.copy.completed",
+        event = "core.files.copy.completed",
         source = %source.display(),
         destination = %destination.display()
     );

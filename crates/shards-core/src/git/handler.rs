@@ -16,7 +16,7 @@ fn git2_error(e: git2::Error) -> GitError {
 }
 
 pub fn detect_project() -> Result<ProjectInfo, GitError> {
-    info!(event = "git.project.detect_started");
+    info!(event = "core.git.project.detect_started");
 
     let current_dir = std::env::current_dir().map_err(io_error)?;
 
@@ -47,7 +47,7 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
     );
 
     info!(
-        event = "git.project.detect_completed",
+        event = "core.git.project.detect_completed",
         project_id = project_id,
         project_name = project_name,
         repo_path = %repo_path.display(),
@@ -66,7 +66,7 @@ pub fn create_worktree(
     let validated_branch = operations::validate_branch_name(branch)?;
 
     info!(
-        event = "git.worktree.create_started",
+        event = "core.git.worktree.create_started",
         project_id = project.id,
         branch = validated_branch,
         repo_path = %project.path.display()
@@ -87,7 +87,7 @@ pub fn create_worktree(
     // Check if worktree already exists
     if worktree_path.exists() {
         error!(
-            event = "git.worktree.create_failed",
+            event = "core.git.worktree.create_failed",
             project_id = project.id,
             branch = validated_branch,
             worktree_path = %worktree_path.display(),
@@ -109,7 +109,7 @@ pub fn create_worktree(
         .is_ok();
 
     debug!(
-        event = "git.branch.check_completed",
+        event = "core.git.branch.check_completed",
         project_id = project.id,
         branch = validated_branch,
         exists = branch_exists
@@ -118,7 +118,7 @@ pub fn create_worktree(
     // Only create branch if it doesn't exist
     if !branch_exists {
         debug!(
-            event = "git.branch.create_started",
+            event = "core.git.branch.create_started",
             project_id = project.id,
             branch = validated_branch
         );
@@ -133,7 +133,7 @@ pub fn create_worktree(
             .map_err(|e| GitError::Git2Error { source: e })?;
 
         debug!(
-            event = "git.branch.create_completed",
+            event = "core.git.branch.create_completed",
             project_id = project.id,
             branch = validated_branch
         );
@@ -155,14 +155,14 @@ pub fn create_worktree(
     );
 
     info!(
-        event = "git.worktree.create_completed",
+        event = "core.git.worktree.create_completed",
         project_id = project.id,
         branch = validated_branch,
         worktree_path = %worktree_path.display()
     );
 
     info!(
-        event = "git.worktree.branch_decision",
+        event = "core.git.worktree.branch_decision",
         project_id = project.id,
         requested_branch = validated_branch,
         current_branch = current_branch.as_deref().unwrap_or("none"),
@@ -180,7 +180,7 @@ pub fn create_worktree(
         && let Some(include_config) = &config.include_patterns
     {
         info!(
-            event = "git.worktree.file_copy_started",
+            event = "core.git.worktree.file_copy_started",
             project_id = project.id,
             branch = validated_branch,
             patterns = ?include_config.patterns
@@ -190,7 +190,7 @@ pub fn create_worktree(
             Ok((copied_count, failed_count)) => {
                 if failed_count > 0 {
                     warn!(
-                        event = "git.worktree.file_copy_completed_with_errors",
+                        event = "core.git.worktree.file_copy_completed_with_errors",
                         project_id = project.id,
                         branch = validated_branch,
                         files_copied = copied_count,
@@ -198,7 +198,7 @@ pub fn create_worktree(
                     );
                 } else {
                     info!(
-                        event = "git.worktree.file_copy_completed",
+                        event = "core.git.worktree.file_copy_completed",
                         project_id = project.id,
                         branch = validated_branch,
                         files_copied = copied_count
@@ -207,7 +207,7 @@ pub fn create_worktree(
             }
             Err(e) => {
                 warn!(
-                    event = "git.worktree.file_copy_failed",
+                    event = "core.git.worktree.file_copy_failed",
                     project_id = project.id,
                     branch = validated_branch,
                     error = %e,
@@ -222,7 +222,7 @@ pub fn create_worktree(
 
 pub fn remove_worktree(project: &ProjectInfo, worktree_path: &Path) -> Result<(), GitError> {
     info!(
-        event = "git.worktree.remove_started",
+        event = "core.git.worktree.remove_started",
         project_id = project.id,
         worktree_path = %worktree_path.display()
     );
@@ -258,13 +258,13 @@ pub fn remove_worktree(project: &ProjectInfo, worktree_path: &Path) -> Result<()
         }
 
         info!(
-            event = "git.worktree.remove_completed",
+            event = "core.git.worktree.remove_completed",
             project_id = project.id,
             worktree_path = %worktree_path.display()
         );
     } else {
         error!(
-            event = "git.worktree.remove_failed",
+            event = "core.git.worktree.remove_failed",
             project_id = project.id,
             worktree_path = %worktree_path.display(),
             error = "worktree not found"
@@ -279,7 +279,7 @@ pub fn remove_worktree(project: &ProjectInfo, worktree_path: &Path) -> Result<()
 
 pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     info!(
-        event = "git.worktree.remove_by_path_started",
+        event = "core.git.worktree.remove_by_path_started",
         worktree_path = %worktree_path.display()
     );
 
@@ -376,7 +376,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
                     match branch.delete() {
                         Ok(()) => {
                             info!(
-                                event = "git.branch.delete_completed",
+                                event = "core.git.branch.delete_completed",
                                 branch = branch_name,
                                 worktree_path = %worktree_path.display()
                             );
@@ -388,14 +388,14 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
                                 || error_msg.contains("does not exist")
                             {
                                 debug!(
-                                    event = "git.branch.delete_race_condition",
+                                    event = "core.git.branch.delete_race_condition",
                                     branch = branch_name,
                                     worktree_path = %worktree_path.display(),
                                     message = "Branch was deleted by another process"
                                 );
                             } else {
                                 warn!(
-                                    event = "git.branch.delete_failed",
+                                    event = "core.git.branch.delete_failed",
                                     branch = branch_name,
                                     worktree_path = %worktree_path.display(),
                                     error = %e,
@@ -408,7 +408,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
                 }
                 Err(e) => {
                     debug!(
-                        event = "git.branch.not_found_for_cleanup",
+                        event = "core.git.branch.not_found_for_cleanup",
                         branch = branch_name,
                         worktree_path = %worktree_path.display(),
                         error = %e,
@@ -420,13 +420,13 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         }
 
         info!(
-            event = "git.worktree.remove_by_path_completed",
+            event = "core.git.worktree.remove_by_path_completed",
             worktree_path = %worktree_path.display()
         );
     } else {
         // Worktree not found in git registry - state inconsistency detected
         warn!(
-            event = "git.worktree.state_inconsistency",
+            event = "core.git.worktree.state_inconsistency",
             worktree_path = %worktree_path.display(),
             message = "Worktree directory exists but not registered in git - cleaning up orphaned directory"
         );
@@ -435,7 +435,7 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
         if worktree_path.exists() {
             std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;
             info!(
-                event = "git.worktree.remove_by_path_directory_only",
+                event = "core.git.worktree.remove_by_path_directory_only",
                 worktree_path = %worktree_path.display()
             );
         }

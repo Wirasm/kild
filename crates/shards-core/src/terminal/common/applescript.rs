@@ -9,7 +9,10 @@ pub fn execute_spawn_script(
     script: &str,
     terminal_name: &str,
 ) -> Result<Option<String>, TerminalError> {
-    debug!(event = "terminal.applescript_executing", terminal = terminal_name);
+    debug!(
+        event = "core.terminal.applescript_executing",
+        terminal = terminal_name
+    );
 
     let output = std::process::Command::new("osascript")
         .arg("-e")
@@ -29,7 +32,7 @@ pub fn execute_spawn_script(
     let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     debug!(
-        event = "terminal.applescript_completed",
+        event = "core.terminal.applescript_completed",
         terminal = terminal_name,
         window_id = %window_id
     );
@@ -45,7 +48,7 @@ pub fn execute_spawn_script(
 #[cfg(target_os = "macos")]
 pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &str) {
     debug!(
-        event = "terminal.close_started",
+        event = "core.terminal.close_started",
         terminal = terminal_name,
         window_id = %window_id
     );
@@ -57,7 +60,7 @@ pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &s
     {
         Ok(output) if output.status.success() => {
             debug!(
-                event = "terminal.close_completed",
+                event = "core.terminal.close_completed",
                 terminal = terminal_name,
                 window_id = %window_id
             );
@@ -65,7 +68,7 @@ pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &s
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             warn!(
-                event = "terminal.close_failed",
+                event = "core.terminal.close_failed",
                 terminal = terminal_name,
                 window_id = %window_id,
                 stderr = %stderr.trim(),
@@ -74,7 +77,7 @@ pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &s
         }
         Err(e) => {
             warn!(
-                event = "terminal.close_failed",
+                event = "core.terminal.close_failed",
                 terminal = terminal_name,
                 window_id = %window_id,
                 error = %e,

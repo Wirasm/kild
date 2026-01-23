@@ -43,7 +43,7 @@ pub mod validation;
 
 // Public API exports
 pub use types::{AgentConfig, AgentSettings, Config, HealthConfig, ShardsConfig, TerminalConfig};
-pub use validation::{validate_config, VALID_TERMINALS};
+pub use validation::{VALID_TERMINALS, validate_config};
 
 // Backward-compatible delegation for ShardsConfig methods
 impl ShardsConfig {

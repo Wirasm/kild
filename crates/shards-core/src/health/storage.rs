@@ -77,7 +77,7 @@ pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
             Ok(existing) => existing,
             Err(e) => {
                 warn!(
-                    event = "health.history_parse_failed",
+                    event = "core.health.history_parse_failed",
                     file_path = %filepath.display(),
                     error = %e,
                     "Existing health history file is corrupted - starting fresh (previous data will be lost)"
@@ -117,7 +117,7 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
                                     }
                                     Err(e) => {
                                         warn!(
-                                            event = "health.history_file_parse_failed",
+                                            event = "core.health.history_file_parse_failed",
                                             file_path = %path.display(),
                                             error = %e,
                                             "Could not parse health history file - skipping"
@@ -127,7 +127,7 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
                             }
                             Err(e) => {
                                 warn!(
-                                    event = "health.history_file_read_failed",
+                                    event = "core.health.history_file_read_failed",
                                     file_path = %path.display(),
                                     error = %e,
                                     "Could not read health history file - skipping"
@@ -137,7 +137,7 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
                     }
                     Err(e) => {
                         warn!(
-                            event = "health.history_dir_entry_failed",
+                            event = "core.health.history_dir_entry_failed",
                             error = %e,
                             "Could not read directory entry in health history"
                         );
@@ -147,7 +147,7 @@ pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
         }
         Err(e) => {
             warn!(
-                event = "health.history_dir_read_failed",
+                event = "core.health.history_dir_read_failed",
                 history_dir = %history_dir.display(),
                 error = %e,
                 "Could not read health history directory"
@@ -188,7 +188,7 @@ pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io
                                 Err(e) => {
                                     failed += 1;
                                     warn!(
-                                        event = "health.history_cleanup_delete_failed",
+                                        event = "core.health.history_cleanup_delete_failed",
                                         file_path = %entry.path().display(),
                                         error = %e,
                                         "Could not delete old health history file"
@@ -199,7 +199,7 @@ pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io
                     }
                     Err(e) => {
                         warn!(
-                            event = "health.history_cleanup_entry_failed",
+                            event = "core.health.history_cleanup_entry_failed",
                             error = %e,
                             "Could not read directory entry during cleanup"
                         );
@@ -209,7 +209,7 @@ pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io
         }
         Err(e) => {
             warn!(
-                event = "health.history_cleanup_dir_read_failed",
+                event = "core.health.history_cleanup_dir_read_failed",
                 history_dir = %history_dir.display(),
                 error = %e,
                 "Could not read health history directory for cleanup"
@@ -219,7 +219,7 @@ pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io
 
     if failed > 0 {
         warn!(
-            event = "health.history_cleanup_partial",
+            event = "core.health.history_cleanup_partial",
             removed = removed,
             failed = failed,
             "Health history cleanup completed with some failures"

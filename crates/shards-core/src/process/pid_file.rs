@@ -34,7 +34,7 @@ pub fn ensure_pid_dir(shards_dir: &Path) -> Result<PathBuf, ProcessError> {
             path: pid_dir.clone(),
             message: format!("Failed to create PID directory: {}", e),
         })?;
-        debug!(event = "pid_file.dir_created", path = %pid_dir.display());
+        debug!(event = "core.pid_file.dir_created", path = %pid_dir.display());
     }
     Ok(pid_dir)
 }
@@ -52,7 +52,7 @@ pub fn read_pid_file_with_retry(
 
     for attempt in 1..=max_attempts {
         debug!(
-            event = "pid_file.read_attempt",
+            event = "core.pid_file.read_attempt",
             attempt,
             max_attempts,
             path = %pid_file.display()
@@ -61,7 +61,7 @@ pub fn read_pid_file_with_retry(
         match read_pid_file(pid_file) {
             Ok(Some(pid)) => {
                 debug!(
-                    event = "pid_file.read_success",
+                    event = "core.pid_file.read_success",
                     attempt,
                     pid,
                     path = %pid_file.display()
@@ -72,7 +72,7 @@ pub fn read_pid_file_with_retry(
                 // File doesn't exist yet, wait and retry
                 if attempt < max_attempts {
                     debug!(
-                        event = "pid_file.not_found_retry",
+                        event = "core.pid_file.not_found_retry",
                         attempt,
                         next_delay_ms = delay.as_millis()
                     );
@@ -82,7 +82,7 @@ pub fn read_pid_file_with_retry(
             }
             Err(e) => {
                 debug!(
-                    event = "pid_file.read_error",
+                    event = "core.pid_file.read_error",
                     attempt,
                     error = %e
                 );
@@ -96,7 +96,7 @@ pub fn read_pid_file_with_retry(
     }
 
     debug!(
-        event = "pid_file.not_found_final",
+        event = "core.pid_file.not_found_final",
         max_attempts,
         path = %pid_file.display()
     );
@@ -143,7 +143,7 @@ pub fn delete_pid_file(pid_file: &Path) -> Result<(), ProcessError> {
             path: pid_file.to_path_buf(),
             message: format!("Failed to delete PID file: {}", e),
         })?;
-        debug!(event = "pid_file.deleted", path = %pid_file.display());
+        debug!(event = "core.pid_file.deleted", path = %pid_file.display());
     }
     Ok(())
 }

@@ -64,7 +64,7 @@ impl TerminalBackend for ITermBackend {
         _window_title: Option<&str>,
     ) -> Result<Option<String>, TerminalError> {
         debug!(
-            event = "terminal.spawn_iterm_not_supported",
+            event = "core.terminal.spawn_iterm_not_supported",
             platform = std::env::consts::OS
         );
         Ok(None)
@@ -74,7 +74,7 @@ impl TerminalBackend for ITermBackend {
     fn close_window(&self, window_id: Option<&str>) {
         let Some(id) = window_id else {
             debug!(
-                event = "terminal.close_skipped_no_id",
+                event = "core.terminal.close_skipped_no_id",
                 terminal = "iterm",
                 message = "No window ID available, skipping close to avoid closing wrong window"
             );
@@ -88,7 +88,7 @@ impl TerminalBackend for ITermBackend {
     #[cfg(not(target_os = "macos"))]
     fn close_window(&self, _window_id: Option<&str>) {
         debug!(
-            event = "terminal.close_not_supported",
+            event = "core.terminal.close_not_supported",
             platform = std::env::consts::OS
         );
     }

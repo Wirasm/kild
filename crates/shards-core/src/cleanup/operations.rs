@@ -158,7 +158,7 @@ pub fn detect_untracked_worktrees(
             Ok(wt) => wt,
             Err(e) => {
                 warn!(
-                    event = "cleanup.worktree_find_failed",
+                    event = "core.cleanup.worktree_find_failed",
                     worktree_name = %worktree_name,
                     error = %e,
                     "Could not access registered worktree - it may be corrupted or inaccessible"
@@ -175,7 +175,7 @@ pub fn detect_untracked_worktrees(
         // Log when canonicalization fails - path comparison may be inaccurate
         if let Err(ref e) = canonical_worktree {
             warn!(
-                event = "cleanup.worktree_canonicalize_failed",
+                event = "core.cleanup.worktree_canonicalize_failed",
                 worktree_path = %worktree_path.display(),
                 error = %e,
                 "Could not resolve canonical path for worktree - using non-canonical comparison"
@@ -183,7 +183,7 @@ pub fn detect_untracked_worktrees(
         }
         if let Err(ref e) = canonical_project_dir {
             warn!(
-                event = "cleanup.project_dir_canonicalize_failed",
+                event = "core.cleanup.project_dir_canonicalize_failed",
                 project_dir = %project_worktrees_dir.display(),
                 error = %e,
                 "Could not resolve canonical path for project directory - using non-canonical comparison"
@@ -243,7 +243,7 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
                                         paths.insert(canonical);
                                     } else {
                                         warn!(
-                                            event = "cleanup.session_invalid_worktree_path_type",
+                                            event = "core.cleanup.session_invalid_worktree_path_type",
                                             file_path = %path.display(),
                                             worktree_path_value = ?worktree_value,
                                             "Session file has worktree_path but it is not a string"
@@ -252,7 +252,7 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
                                 }
                                 None => {
                                     warn!(
-                                        event = "cleanup.session_missing_worktree_path",
+                                        event = "core.cleanup.session_missing_worktree_path",
                                         file_path = %path.display(),
                                         "Session file is missing worktree_path field"
                                     );
@@ -261,7 +261,7 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
                         }
                         Err(e) => {
                             warn!(
-                                event = "cleanup.session_json_parse_failed",
+                                event = "core.cleanup.session_json_parse_failed",
                                 file_path = %path.display(),
                                 error = %e,
                                 "Session file contains invalid JSON"
@@ -271,7 +271,7 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
                 }
                 Err(e) => {
                     warn!(
-                        event = "cleanup.session_read_failed",
+                        event = "core.cleanup.session_read_failed",
                         file_path = %path.display(),
                         error = %e,
                         "Could not read session file while collecting worktree paths"
@@ -323,7 +323,7 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
                         Err(e) => {
                             // Invalid JSON - consider it stale and log for debugging
                             warn!(
-                                event = "cleanup.malformed_session_file",
+                                event = "core.cleanup.malformed_session_file",
                                 file_path = %path.display(),
                                 error = %e,
                                 "Found malformed session file during cleanup scan"
@@ -337,7 +337,7 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
                 Err(e) => {
                     // Can't read session file - consider it stale and log for debugging
                     warn!(
-                        event = "cleanup.unreadable_session_file",
+                        event = "core.cleanup.unreadable_session_file",
                         file_path = %path.display(),
                         error = %e,
                         "Found unreadable session file during cleanup scan"

@@ -150,8 +150,7 @@ pub fn execute_spawn_script(
         t => t.clone(),
     };
 
-    let backend =
-        registry::get_backend(&terminal_type).ok_or(TerminalError::NoTerminalFound)?;
+    let backend = registry::get_backend(&terminal_type).ok_or(TerminalError::NoTerminalFound)?;
 
     // Create config with resolved terminal type
     let resolved_config = SpawnConfig::new(
@@ -170,7 +169,7 @@ pub fn execute_spawn_script(
 ) -> Result<Option<String>, TerminalError> {
     // Terminal spawning with window ID capture not yet implemented for non-macOS platforms
     debug!(
-        event = "terminal.spawn_script_not_supported",
+        event = "core.terminal.spawn_script_not_supported",
         platform = std::env::consts::OS
     );
     Ok(None)
@@ -211,7 +210,7 @@ pub fn close_terminal_window(terminal_type: &TerminalType, window_id: Option<&st
 pub fn close_terminal_window(_terminal_type: &TerminalType, _window_id: Option<&str>) {
     // Terminal closing not yet implemented for non-macOS platforms
     debug!(
-        event = "terminal.close_not_supported",
+        event = "core.terminal.close_not_supported",
         platform = std::env::consts::OS
     );
 }

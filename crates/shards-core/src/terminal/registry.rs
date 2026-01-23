@@ -48,7 +48,7 @@ pub fn get_backend(terminal_type: &TerminalType) -> Option<&'static dyn Terminal
 /// This function will never return `TerminalType::Native`.
 #[cfg(target_os = "macos")]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
-    debug!(event = "terminal.detection_started");
+    debug!(event = "core.terminal.detection_started");
 
     // Check in preference order: Ghostty > iTerm > Terminal.app
     let terminals = [
@@ -61,13 +61,13 @@ pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
         if let Some(backend) = get_backend(&terminal_type)
             && backend.is_available()
         {
-            debug!(event = "terminal.detected", terminal = backend.name());
+            debug!(event = "core.terminal.detected", terminal = backend.name());
             return Ok(terminal_type);
         }
     }
 
     warn!(
-        event = "terminal.none_found",
+        event = "core.terminal.none_found",
         checked = "Ghostty,iTerm,Terminal"
     );
     Err(TerminalError::NoTerminalFound)
@@ -76,7 +76,7 @@ pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
 #[cfg(not(target_os = "macos"))]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     warn!(
-        event = "terminal.platform_not_supported",
+        event = "core.terminal.platform_not_supported",
         platform = std::env::consts::OS
     );
     Err(TerminalError::NoTerminalFound)

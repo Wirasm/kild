@@ -2,18 +2,18 @@ use tracing::{error, info};
 
 pub fn log_app_startup() {
     info!(
-        event = "app.startup_completed",
+        event = "core.app.startup_completed",
         version = env!("CARGO_PKG_VERSION")
     );
 }
 
 pub fn log_app_shutdown() {
-    info!(event = "app.shutdown_started");
+    info!(event = "core.app.shutdown_started");
 }
 
 pub fn log_app_error(error: &dyn std::error::Error) {
     error!(
-        event = "app.error_occurred",
+        event = "core.app.error_occurred",
         error = %error,
         error_type = std::any::type_name_of_val(error)
     );

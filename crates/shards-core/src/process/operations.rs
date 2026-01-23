@@ -181,7 +181,7 @@ fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
     // Add agent-specific patterns if this is a known agent name or pattern
     if let Some(agent_patterns) = agents::get_process_patterns(name_pattern) {
         debug!(
-            event = "process.agent_patterns_found",
+            event = "core.process.agent_patterns_found",
             name_pattern = name_pattern,
             pattern_count = agent_patterns.len(),
             "Found agent-specific process patterns"
@@ -191,7 +191,7 @@ fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
         }
     } else {
         debug!(
-            event = "process.agent_patterns_not_found",
+            event = "core.process.agent_patterns_not_found",
             name_pattern = name_pattern,
             "No agent-specific patterns found, using generic matching"
         );

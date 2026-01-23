@@ -61,7 +61,7 @@ impl TerminalBackend for TerminalAppBackend {
         _window_title: Option<&str>,
     ) -> Result<Option<String>, TerminalError> {
         debug!(
-            event = "terminal.spawn_terminal_app_not_supported",
+            event = "core.terminal.spawn_terminal_app_not_supported",
             platform = std::env::consts::OS
         );
         Ok(None)
@@ -71,7 +71,7 @@ impl TerminalBackend for TerminalAppBackend {
     fn close_window(&self, window_id: Option<&str>) {
         let Some(id) = window_id else {
             debug!(
-                event = "terminal.close_skipped_no_id",
+                event = "core.terminal.close_skipped_no_id",
                 terminal = "terminal_app",
                 message = "No window ID available, skipping close to avoid closing wrong window"
             );
@@ -85,7 +85,7 @@ impl TerminalBackend for TerminalAppBackend {
     #[cfg(not(target_os = "macos"))]
     fn close_window(&self, _window_id: Option<&str>) {
         debug!(
-            event = "terminal.close_not_supported",
+            event = "core.terminal.close_not_supported",
             platform = std::env::consts::OS
         );
     }

@@ -14,7 +14,7 @@ pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError
 fn cleanup_temp_file(temp_file: &Path, original_error: &std::io::Error) {
     if let Err(cleanup_err) = fs::remove_file(temp_file) {
         tracing::warn!(
-            event = "session.temp_file_cleanup_failed",
+            event = "core.session.temp_file_cleanup_failed",
             temp_file = %temp_file.display(),
             original_error = %original_error,
             cleanup_error = %cleanup_err,
@@ -27,7 +27,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
     let session_file = sessions_dir.join(format!("{}.json", session.id.replace('/', "_")));
     let session_json = serde_json::to_string_pretty(session).map_err(|e| {
         tracing::error!(
-            event = "session.serialization_failed",
+            event = "core.session.serialization_failed",
             session_id = %session.id,
             error = %e,
             message = "Failed to serialize session to JSON"
@@ -81,7 +81,7 @@ pub fn load_sessions_from_files(
             Err(e) => {
                 skipped_count += 1;
                 tracing::warn!(
-                    event = "session.load_read_error",
+                    event = "core.session.load_read_error",
                     file = %path.display(),
                     error = %e,
                     message = "Failed to read session file, skipping"
@@ -95,7 +95,7 @@ pub fn load_sessions_from_files(
             Err(e) => {
                 skipped_count += 1;
                 tracing::warn!(
-                    event = "session.load_invalid_json",
+                    event = "core.session.load_invalid_json",
                     file = %path.display(),
                     error = %e,
                     message = "Failed to parse session JSON, skipping"
@@ -107,7 +107,7 @@ pub fn load_sessions_from_files(
         if let Err(validation_error) = super::validation::validate_session_structure(&session) {
             skipped_count += 1;
             tracing::warn!(
-                event = "session.load_invalid_structure",
+                event = "core.session.load_invalid_structure",
                 file = %path.display(),
                 worktree_path = %session.worktree_path.display(),
                 validation_error = %validation_error,
@@ -155,7 +155,7 @@ pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), 
         fs::remove_file(&session_file).map_err(|e| SessionError::IoError { source: e })?;
     } else {
         tracing::warn!(
-            event = "session.remove_nonexistent_file",
+            event = "core.session.remove_nonexistent_file",
             session_id = %session_id,
             file = %session_file.display(),
             message = "Attempted to remove session file that doesn't exist - possible state inconsistency"

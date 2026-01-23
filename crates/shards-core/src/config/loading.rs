@@ -212,7 +212,10 @@ mod tests {
         let mut config = ShardsConfig::default();
         config.agent.flags = Some("--yolo".to_string());
 
-        assert_eq!(get_agent_command(&config, "claude").unwrap(), "claude --yolo");
+        assert_eq!(
+            get_agent_command(&config, "claude").unwrap(),
+            "claude --yolo"
+        );
     }
 
     #[test]
@@ -224,7 +227,10 @@ mod tests {
         };
         config.agents.insert("claude".to_string(), agent_settings);
 
-        assert_eq!(get_agent_command(&config, "claude").unwrap(), "cc --dangerous");
+        assert_eq!(
+            get_agent_command(&config, "claude").unwrap(),
+            "cc --dangerous"
+        );
         assert_eq!(get_agent_command(&config, "kiro").unwrap(), "kiro-cli chat");
     }
 
@@ -238,7 +244,10 @@ mod tests {
         config.agents.insert("custom".to_string(), agent_settings);
 
         // Unknown agent with configured command should succeed
-        assert_eq!(get_agent_command(&config, "custom").unwrap(), "my-custom-agent");
+        assert_eq!(
+            get_agent_command(&config, "custom").unwrap(),
+            "my-custom-agent"
+        );
     }
 
     #[test]

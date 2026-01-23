@@ -138,10 +138,12 @@ mod tests {
     #[test]
     fn test_config_paths() {
         let config = Config::new();
-        assert!(config
-            .worktrees_dir()
-            .to_string_lossy()
-            .contains("worktrees"));
+        assert!(
+            config
+                .worktrees_dir()
+                .to_string_lossy()
+                .contains("worktrees")
+        );
         assert!(config.sessions_dir().to_string_lossy().contains("sessions"));
     }
 

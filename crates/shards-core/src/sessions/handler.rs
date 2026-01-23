@@ -12,16 +12,17 @@ pub fn create_session(
     shards_config: &ShardsConfig,
 ) -> Result<Session, SessionError> {
     let agent = request.agent_or_default(&shards_config.agent.default);
-    let agent_command = shards_config
-        .get_agent_command(&agent)
-        .map_err(|e| SessionError::ConfigError {
-            message: e.to_string(),
-        })?;
+    let agent_command =
+        shards_config
+            .get_agent_command(&agent)
+            .map_err(|e| SessionError::ConfigError {
+                message: e.to_string(),
+            })?;
 
     // Warn if agent CLI is not available in PATH
     if let Some(false) = agents::is_agent_available(&agent) {
         warn!(
-            event = "session.agent_not_available",
+            event = "core.session.agent_not_available",
             agent = %agent,
             "Agent CLI '{}' not found in PATH - session may fail to start",
             agent
@@ -29,7 +30,7 @@ pub fn create_session(
     }
 
     info!(
-        event = "session.create_started",
+        event = "core.session.create_started",
         branch = request.branch,
         agent = agent,
         command = agent_command
@@ -43,7 +44,7 @@ pub fn create_session(
         git::handler::detect_project().map_err(|e| SessionError::GitError { source: e })?;
 
     info!(
-        event = "session.project_detected",
+        event = "core.session.project_detected",
         project_id = project.id,
         project_name = project.name,
         branch = validated.name
@@ -64,7 +65,7 @@ pub fn create_session(
     )
     .map_err(|e| {
         error!(
-            event = "session.port_allocation_failed",
+            event = "core.session.port_allocation_failed",
             session_id = %session_id,
             requested_count = config.default_port_count,
             base_port = config.base_port_range,
@@ -74,7 +75,7 @@ pub fn create_session(
     })?;
 
     info!(
-        event = "session.port_allocated",
+        event = "core.session.port_allocated",
         session_id = session_id,
         port_range_start = port_start,
         port_range_end = port_end,
@@ -91,7 +92,7 @@ pub fn create_session(
     .map_err(|e| SessionError::GitError { source: e })?;
 
     info!(
-        event = "session.worktree_created",
+        event = "core.session.worktree_created",
         session_id = session_id,
         worktree_path = %worktree.path.display(),
         branch = worktree.branch
@@ -137,7 +138,7 @@ pub fn create_session(
     operations::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
-        event = "session.create_completed",
+        event = "core.session.create_completed",
         session_id = session_id,
         branch = validated.name,
         agent = session.agent,
@@ -149,32 +150,35 @@ pub fn create_session(
 }
 
 pub fn list_sessions() -> Result<Vec<Session>, SessionError> {
-    info!(event = "session.list_started");
+    info!(event = "core.session.list_started");
 
     let config = Config::new();
     let (sessions, skipped_count) = operations::load_sessions_from_files(&config.sessions_dir())?;
 
     if skipped_count > 0 {
         tracing::warn!(
-            event = "session.list_skipped_sessions",
+            event = "core.session.list_skipped_sessions",
             skipped_count = skipped_count,
             message = "Some session files were skipped due to errors"
         );
     }
 
-    info!(event = "session.list_completed", count = sessions.len());
+    info!(
+        event = "core.session.list_completed",
+        count = sessions.len()
+    );
 
     Ok(sessions)
 }
 
 pub fn get_session(name: &str) -> Result<Session, SessionError> {
-    info!(event = "session.get_started", name = name);
+    info!(event = "core.session.get_started", name = name);
 
     let config = Config::new();
     let session = operations::load_session_from_file(name, &config.sessions_dir())?;
 
     info!(
-        event = "session.get_completed",
+        event = "core.session.get_completed",
         name = name,
         session_id = session.id
     );
@@ -183,7 +187,7 @@ pub fn get_session(name: &str) -> Result<Session, SessionError> {
 }
 
 pub fn destroy_session(name: &str) -> Result<(), SessionError> {
-    info!(event = "session.destroy_started", name = name);
+    info!(event = "core.session.destroy_started", name = name);
 
     let config = Config::new();
 
@@ -196,7 +200,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         })?;
 
     info!(
-        event = "session.destroy_found",
+        event = "core.session.destroy_found",
         session_id = session.id,
         worktree_path = %session.worktree_path.display(),
         port_range_start = session.port_range_start,
@@ -208,7 +212,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     // This is fire-and-forget - errors are logged but never block destruction
     if let Some(ref terminal_type) = session.terminal_type {
         info!(
-            event = "session.destroy_close_terminal",
+            event = "core.session.destroy_close_terminal",
             terminal_type = %terminal_type,
             window_id = ?session.terminal_window_id
         );
@@ -217,7 +221,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
 
     // 3. Kill process if PID is tracked
     if let Some(pid) = session.process_id {
-        info!(event = "session.destroy_kill_started", pid = pid);
+        info!(event = "core.session.destroy_kill_started", pid = pid);
 
         match crate::process::kill_process(
             pid,
@@ -225,14 +229,14 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
             session.process_start_time,
         ) {
             Ok(()) => {
-                info!(event = "session.destroy_kill_completed", pid = pid);
+                info!(event = "core.session.destroy_kill_completed", pid = pid);
             }
             Err(crate::process::ProcessError::NotFound { .. }) => {
-                info!(event = "session.destroy_kill_already_dead", pid = pid);
+                info!(event = "core.session.destroy_kill_already_dead", pid = pid);
             }
             Err(e) => {
                 error!(
-                    event = "session.destroy_kill_failed",
+                    event = "core.session.destroy_kill_failed",
                     pid = pid,
                     error = %e
                 );
@@ -252,7 +256,7 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
         .map_err(|e| SessionError::GitError { source: e })?;
 
     info!(
-        event = "session.destroy_worktree_removed",
+        event = "core.session.destroy_worktree_removed",
         session_id = session.id,
         worktree_path = %session.worktree_path.display()
     );
@@ -261,14 +265,14 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     let pid_file = get_pid_file_path(&config.shards_dir, &session.id);
     if let Err(e) = delete_pid_file(&pid_file) {
         warn!(
-            event = "session.destroy_pid_file_cleanup_failed",
+            event = "core.session.destroy_pid_file_cleanup_failed",
             session_id = session.id,
             pid_file = %pid_file.display(),
             error = %e
         );
     } else {
         info!(
-            event = "session.destroy_pid_file_cleaned",
+            event = "core.session.destroy_pid_file_cleaned",
             session_id = session.id,
             pid_file = %pid_file.display()
         );
@@ -278,14 +282,14 @@ pub fn destroy_session(name: &str) -> Result<(), SessionError> {
     operations::remove_session_file(&config.sessions_dir(), &session.id)?;
 
     info!(
-        event = "session.port_deallocated",
+        event = "core.session.port_deallocated",
         session_id = session.id,
         port_range_start = session.port_range_start,
         port_range_end = session.port_range_end
     );
 
     info!(
-        event = "session.destroy_completed",
+        event = "core.session.destroy_completed",
         session_id = session.id,
         name = name
     );
@@ -298,7 +302,7 @@ pub fn restart_session(
     agent_override: Option<String>,
 ) -> Result<Session, SessionError> {
     let start_time = std::time::Instant::now();
-    info!(event = "session.restart_started", name = name, agent_override = ?agent_override);
+    info!(event = "core.session.restart_started", name = name, agent_override = ?agent_override);
 
     let config = Config::new();
 
@@ -311,7 +315,7 @@ pub fn restart_session(
         })?;
 
     info!(
-        event = "session.restart_found",
+        event = "core.session.restart_found",
         session_id = session.id,
         current_agent = session.agent,
         process_id = session.process_id
@@ -319,26 +323,29 @@ pub fn restart_session(
 
     // 2. Kill process if PID is tracked
     if let Some(pid) = session.process_id {
-        info!(event = "session.restart_kill_started", pid = pid);
+        info!(event = "core.session.restart_kill_started", pid = pid);
 
         match crate::process::kill_process(
             pid,
             session.process_name.as_deref(),
             session.process_start_time,
         ) {
-            Ok(()) => info!(event = "session.restart_kill_completed", pid = pid),
+            Ok(()) => info!(event = "core.session.restart_kill_completed", pid = pid),
             Err(crate::process::ProcessError::NotFound { .. }) => {
-                info!(event = "session.restart_kill_process_not_found", pid = pid)
+                info!(
+                    event = "core.session.restart_kill_process_not_found",
+                    pid = pid
+                )
             }
             Err(crate::process::ProcessError::AccessDenied { .. }) => {
-                error!(event = "session.restart_kill_access_denied", pid = pid);
+                error!(event = "core.session.restart_kill_access_denied", pid = pid);
                 return Err(SessionError::ProcessKillFailed {
                     pid,
                     message: "Access denied - insufficient permissions to kill process".to_string(),
                 });
             }
             Err(e) => {
-                error!(event = "session.restart_kill_failed", pid = pid, error = %e);
+                error!(event = "core.session.restart_kill_failed", pid = pid, error = %e);
                 return Err(SessionError::ProcessKillFailed {
                     pid,
                     message: format!("Process still running: {}", e),
@@ -350,7 +357,7 @@ pub fn restart_session(
     // 3. Validate worktree still exists
     if !session.worktree_path.exists() {
         error!(
-            event = "session.restart_worktree_missing",
+            event = "core.session.restart_worktree_missing",
             session_id = session.id,
             worktree_path = %session.worktree_path.display()
         );
@@ -363,16 +370,17 @@ pub fn restart_session(
     let base_config = Config::new();
     let shards_config = ShardsConfig::load_hierarchy().unwrap_or_default();
     let agent = agent_override.unwrap_or(session.agent.clone());
-    let agent_command = shards_config
-        .get_agent_command(&agent)
-        .map_err(|e| SessionError::ConfigError {
-            message: e.to_string(),
-        })?;
+    let agent_command =
+        shards_config
+            .get_agent_command(&agent)
+            .map_err(|e| SessionError::ConfigError {
+                message: e.to_string(),
+            })?;
 
     // Warn if agent CLI is not available in PATH
     if let Some(false) = agents::is_agent_available(&agent) {
         warn!(
-            event = "session.agent_not_available",
+            event = "core.session.agent_not_available",
             agent = %agent,
             session_id = %session.id,
             "Agent CLI '{}' not found in PATH - session may fail to start",
@@ -381,14 +389,14 @@ pub fn restart_session(
     }
 
     info!(
-        event = "session.restart_agent_selected",
+        event = "core.session.restart_agent_selected",
         session_id = session.id,
         agent = agent,
         command = agent_command
     );
 
     // 5. Relaunch terminal in existing worktree
-    info!(event = "session.restart_spawn_started", worktree_path = %session.worktree_path.display());
+    info!(event = "core.session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
     let spawn_result = terminal::handler::spawn_terminal(
         &session.worktree_path,
@@ -400,7 +408,7 @@ pub fn restart_session(
     .map_err(|e| SessionError::TerminalError { source: e })?;
 
     info!(
-        event = "session.restart_spawn_completed",
+        event = "core.session.restart_spawn_completed",
         process_id = spawn_result.process_id,
         process_name = ?spawn_result.process_name,
         terminal_window_id = ?spawn_result.terminal_window_id
@@ -430,7 +438,7 @@ pub fn restart_session(
     operations::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
-        event = "session.restart_completed",
+        event = "core.session.restart_completed",
         session_id = session.id,
         branch = name,
         agent = session.agent,

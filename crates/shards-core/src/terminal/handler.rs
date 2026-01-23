@@ -22,7 +22,7 @@ fn find_agent_process_with_retry(
 
     for attempt in 1..=max_attempts {
         info!(
-            event = "terminal.searching_for_agent_process",
+            event = "core.terminal.searching_for_agent_process",
             attempt, max_attempts, delay_ms, agent_name, command
         );
 
@@ -32,7 +32,7 @@ fn find_agent_process_with_retry(
             Ok(Some(info)) => {
                 let total_delay_ms = config.terminal.spawn_delay_ms * (2_u64.pow(attempt) - 1);
                 info!(
-                    event = "terminal.agent_process_found",
+                    event = "core.terminal.agent_process_found",
                     attempt,
                     total_delay_ms,
                     pid = info.pid.as_u32(),
@@ -48,7 +48,7 @@ fn find_agent_process_with_retry(
             Ok(None) => {
                 if attempt == max_attempts {
                     warn!(
-                        event = "terminal.agent_process_not_found_final",
+                        event = "core.terminal.agent_process_not_found_final",
                         agent_name,
                         command,
                         attempts = max_attempts,
@@ -56,7 +56,7 @@ fn find_agent_process_with_retry(
                     );
                 } else {
                     info!(
-                        event = "terminal.agent_process_not_found_retry",
+                        event = "core.terminal.agent_process_not_found_retry",
                         attempt,
                         max_attempts,
                         agent_name,
@@ -66,7 +66,7 @@ fn find_agent_process_with_retry(
             }
             Err(e) => {
                 warn!(
-                    event = "terminal.agent_process_search_error",
+                    event = "core.terminal.agent_process_search_error",
                     attempt,
                     agent_name,
                     error = %e
@@ -99,7 +99,7 @@ pub fn spawn_terminal(
     shards_dir: Option<&Path>,
 ) -> Result<SpawnResult, TerminalError> {
     info!(
-        event = "terminal.spawn_started",
+        event = "core.terminal.spawn_started",
         working_directory = %working_directory.display(),
         command = command,
         session_id = ?session_id
@@ -114,7 +114,7 @@ pub fn spawn_terminal(
             "native" => TerminalType::Native,
             _ => {
                 warn!(
-                    event = "terminal.unknown_preference",
+                    event = "core.terminal.unknown_preference",
                     preferred = preferred,
                     message = "Unknown terminal preference, falling back to detection"
                 );
@@ -126,7 +126,7 @@ pub fn spawn_terminal(
     };
 
     debug!(
-        event = "terminal.detect_completed",
+        event = "core.terminal.detect_completed",
         terminal_type = %terminal_type,
         working_directory = %working_directory.display()
     );
@@ -141,7 +141,7 @@ pub fn spawn_terminal(
 
             let path = get_pid_file_path(sdir, sid);
             debug!(
-                event = "terminal.pid_file_configured",
+                event = "core.terminal.pid_file_configured",
                 session_id = sid,
                 pid_file = %path.display()
             );
@@ -155,7 +155,7 @@ pub fn spawn_terminal(
         Some(path) => {
             let wrapped = wrap_command_with_pid_capture(command, path);
             debug!(
-                event = "terminal.command_wrapped",
+                event = "core.terminal.command_wrapped",
                 original = command,
                 wrapped = %wrapped
             );
@@ -180,7 +180,7 @@ pub fn spawn_terminal(
         operations::execute_spawn_script(&spawn_config, Some(&ghostty_window_title))?;
 
     debug!(
-        event = "terminal.spawn_script_executed",
+        event = "core.terminal.spawn_script_executed",
         terminal_type = %terminal_type,
         terminal_window_id = ?terminal_window_id
     );
@@ -206,7 +206,7 @@ pub fn spawn_terminal(
     );
 
     info!(
-        event = "terminal.spawn_completed",
+        event = "core.terminal.spawn_completed",
         terminal_type = %terminal_type,
         working_directory = %working_directory.display(),
         command = command,
@@ -224,7 +224,7 @@ fn read_pid_from_file_with_validation(
     config: &ShardsConfig,
 ) -> ProcessSearchResult {
     info!(
-        event = "terminal.reading_pid_file",
+        event = "core.terminal.reading_pid_file",
         path = %pid_file.display()
     );
 
@@ -241,7 +241,7 @@ fn read_pid_from_file_with_validation(
                     match get_process_info(pid) {
                         Ok(info) => {
                             info!(
-                                event = "terminal.pid_file_process_found",
+                                event = "core.terminal.pid_file_process_found",
                                 pid,
                                 process_name = %info.name,
                                 start_time = info.start_time
@@ -250,7 +250,7 @@ fn read_pid_from_file_with_validation(
                         }
                         Err(e) => {
                             warn!(
-                                event = "terminal.pid_file_process_info_failed",
+                                event = "core.terminal.pid_file_process_info_failed",
                                 pid,
                                 error = %e
                             );
@@ -261,7 +261,7 @@ fn read_pid_from_file_with_validation(
                 }
                 Ok(false) => {
                     warn!(
-                        event = "terminal.pid_file_process_not_running",
+                        event = "core.terminal.pid_file_process_not_running",
                         pid,
                         message = "PID from file exists but process is not running"
                     );
@@ -269,7 +269,7 @@ fn read_pid_from_file_with_validation(
                 }
                 Err(e) => {
                     warn!(
-                        event = "terminal.pid_file_process_check_failed",
+                        event = "core.terminal.pid_file_process_check_failed",
                         pid,
                         error = %e
                     );
@@ -279,7 +279,7 @@ fn read_pid_from_file_with_validation(
         }
         Ok(None) => {
             warn!(
-                event = "terminal.pid_file_not_found",
+                event = "core.terminal.pid_file_not_found",
                 path = %pid_file.display(),
                 message = "PID file not created after spawn - process tracking unavailable. Session will be created but 'restart' and 'destroy' commands may not be able to manage the agent process automatically."
             );
@@ -287,7 +287,7 @@ fn read_pid_from_file_with_validation(
         }
         Err(e) => {
             warn!(
-                event = "terminal.pid_file_read_error",
+                event = "core.terminal.pid_file_read_error",
                 path = %pid_file.display(),
                 error = %e,
                 message = "Failed to read PID file - process tracking unavailable. Session will be created but 'restart' and 'destroy' commands may not be able to manage the agent process automatically."
@@ -298,12 +298,12 @@ fn read_pid_from_file_with_validation(
 }
 
 pub fn detect_available_terminal() -> Result<TerminalType, TerminalError> {
-    info!(event = "terminal.detect_started");
+    info!(event = "core.terminal.detect_started");
 
     let terminal_type = operations::detect_terminal()?;
 
     info!(
-        event = "terminal.detect_completed",
+        event = "core.terminal.detect_completed",
         terminal_type = %terminal_type
     );
 
@@ -324,7 +324,7 @@ pub fn detect_available_terminal() -> Result<TerminalType, TerminalError> {
 /// Errors are logged but never returned - terminal close should never block session destruction.
 pub fn close_terminal(terminal_type: &TerminalType, window_id: Option<&str>) {
     info!(
-        event = "terminal.close_started",
+        event = "core.terminal.close_started",
         terminal_type = %terminal_type,
         window_id = ?window_id
     );
@@ -332,7 +332,7 @@ pub fn close_terminal(terminal_type: &TerminalType, window_id: Option<&str>) {
     operations::close_terminal_window(terminal_type, window_id);
 
     info!(
-        event = "terminal.close_completed",
+        event = "core.terminal.close_completed",
         terminal_type = %terminal_type,
         window_id = ?window_id
     );

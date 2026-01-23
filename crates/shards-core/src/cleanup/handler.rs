@@ -7,7 +7,7 @@ use crate::git;
 use crate::sessions;
 
 pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
-    info!(event = "cleanup.scan_started");
+    info!(event = "core.cleanup.scan_started");
 
     // Validate we're in a git repository
     operations::validate_cleanup_request()?;
@@ -21,7 +21,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     match operations::detect_orphaned_branches(&repo) {
         Ok(orphaned_branches) => {
             info!(
-                event = "cleanup.scan_branches_completed",
+                event = "core.cleanup.scan_branches_completed",
                 count = orphaned_branches.len()
             );
             for branch in orphaned_branches {
@@ -30,7 +30,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
         }
         Err(e) => {
             error!(
-                event = "cleanup.scan_branches_failed",
+                event = "core.cleanup.scan_branches_failed",
                 error = %e
             );
             return Err(e);
@@ -41,7 +41,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     match operations::detect_orphaned_worktrees(&repo) {
         Ok(orphaned_worktrees) => {
             info!(
-                event = "cleanup.scan_worktrees_completed",
+                event = "core.cleanup.scan_worktrees_completed",
                 count = orphaned_worktrees.len()
             );
             for worktree_path in orphaned_worktrees {
@@ -50,7 +50,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
         }
         Err(e) => {
             error!(
-                event = "cleanup.scan_worktrees_failed",
+                event = "core.cleanup.scan_worktrees_failed",
                 error = %e
             );
             return Err(e);
@@ -62,7 +62,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     match operations::detect_stale_sessions(&config.sessions_dir()) {
         Ok(stale_sessions) => {
             info!(
-                event = "cleanup.scan_sessions_completed",
+                event = "core.cleanup.scan_sessions_completed",
                 count = stale_sessions.len()
             );
             for session_id in stale_sessions {
@@ -71,7 +71,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
         }
         Err(e) => {
             error!(
-                event = "cleanup.scan_sessions_failed",
+                event = "core.cleanup.scan_sessions_failed",
                 error = %e
             );
             return Err(e);
@@ -79,7 +79,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     }
 
     info!(
-        event = "cleanup.scan_completed",
+        event = "core.cleanup.scan_completed",
         total_orphaned = summary.total_cleaned,
         branches = summary.orphaned_branches.len(),
         worktrees = summary.orphaned_worktrees.len(),
@@ -93,7 +93,7 @@ pub fn cleanup_orphaned_resources(
     summary: &CleanupSummary,
 ) -> Result<CleanupSummary, CleanupError> {
     info!(
-        event = "cleanup.cleanup_started",
+        event = "core.cleanup.cleanup_started",
         total_resources = summary.total_cleaned
     );
 
@@ -109,7 +109,7 @@ pub fn cleanup_orphaned_resources(
             }
             Err(e) => {
                 error!(
-                    event = "cleanup.cleanup_branches_failed",
+                    event = "core.cleanup.cleanup_branches_failed",
                     error = %e
                 );
                 return Err(e);
@@ -127,7 +127,7 @@ pub fn cleanup_orphaned_resources(
             }
             Err(e) => {
                 error!(
-                    event = "cleanup.cleanup_worktrees_failed",
+                    event = "core.cleanup.cleanup_worktrees_failed",
                     error = %e
                 );
                 return Err(e);
@@ -145,7 +145,7 @@ pub fn cleanup_orphaned_resources(
             }
             Err(e) => {
                 error!(
-                    event = "cleanup.cleanup_sessions_failed",
+                    event = "core.cleanup.cleanup_sessions_failed",
                     error = %e
                 );
                 return Err(e);
@@ -154,7 +154,7 @@ pub fn cleanup_orphaned_resources(
     }
 
     info!(
-        event = "cleanup.cleanup_completed",
+        event = "core.cleanup.cleanup_completed",
         total_cleaned = cleaned_summary.total_cleaned
     );
 
@@ -162,13 +162,13 @@ pub fn cleanup_orphaned_resources(
 }
 
 pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
-    info!(event = "cleanup.cleanup_all_started");
+    info!(event = "core.cleanup.cleanup_all_started");
 
     // First scan for orphaned resources
     let scan_summary = scan_for_orphans()?;
 
     if scan_summary.total_cleaned == 0 {
-        info!(event = "cleanup.cleanup_all_no_resources");
+        info!(event = "core.cleanup.cleanup_all_no_resources");
         return Err(CleanupError::NoOrphanedResources);
     }
 
@@ -176,7 +176,7 @@ pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
     let cleanup_summary = cleanup_orphaned_resources(&scan_summary)?;
 
     info!(
-        event = "cleanup.cleanup_all_completed",
+        event = "core.cleanup.cleanup_all_completed",
         total_cleaned = cleanup_summary.total_cleaned
     );
 
@@ -194,7 +194,7 @@ pub fn cleanup_all() -> Result<CleanupSummary, CleanupError> {
 pub fn cleanup_all_with_strategy(
     strategy: CleanupStrategy,
 ) -> Result<CleanupSummary, CleanupError> {
-    info!(event = "cleanup.cleanup_all_with_strategy_started", strategy = ?strategy);
+    info!(event = "core.cleanup.cleanup_all_with_strategy_started", strategy = ?strategy);
 
     // First scan for orphaned resources with strategy
     let scan_summary = scan_for_orphans_with_strategy(strategy)?;
@@ -203,7 +203,7 @@ pub fn cleanup_all_with_strategy(
         && scan_summary.orphaned_branches.is_empty()
         && scan_summary.orphaned_worktrees.is_empty()
     {
-        info!(event = "cleanup.cleanup_all_with_strategy_no_resources");
+        info!(event = "core.cleanup.cleanup_all_with_strategy_no_resources");
         return Err(CleanupError::NoOrphanedResources);
     }
 
@@ -211,7 +211,7 @@ pub fn cleanup_all_with_strategy(
     let cleanup_summary = cleanup_orphaned_resources(&scan_summary)?;
 
     info!(
-        event = "cleanup.cleanup_all_with_strategy_completed",
+        event = "core.cleanup.cleanup_all_with_strategy_completed",
         total_cleaned = cleanup_summary.total_cleaned
     );
 
@@ -229,13 +229,13 @@ pub fn cleanup_all_with_strategy(
 pub fn scan_for_orphans_with_strategy(
     strategy: CleanupStrategy,
 ) -> Result<CleanupSummary, CleanupError> {
-    info!(event = "cleanup.scan_with_strategy_started", strategy = ?strategy);
+    info!(event = "core.cleanup.scan_with_strategy_started", strategy = ?strategy);
 
     operations::validate_cleanup_request()?;
 
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
     let _repo = Repository::discover(&current_dir).map_err(|e| {
-        error!(event = "cleanup.git_discovery_failed", error = %e);
+        error!(event = "core.cleanup.git_discovery_failed", error = %e);
         CleanupError::GitError {
             source: crate::git::errors::GitError::Git2Error { source: e },
         }
@@ -247,16 +247,16 @@ pub fn scan_for_orphans_with_strategy(
     match strategy {
         CleanupStrategy::All => {
             // All strategy delegates to legacy scan_for_orphans()
-            info!(event = "cleanup.strategy_all_delegating");
+            info!(event = "core.cleanup.strategy_all_delegating");
             return scan_for_orphans().map_err(|e| {
-                error!(event = "cleanup.strategy_all_failed", error = %e);
+                error!(event = "core.cleanup.strategy_all_failed", error = %e);
                 e
             });
         }
         CleanupStrategy::NoPid => {
             let sessions =
                 operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
-                    error!(event = "cleanup.strategy_failed", strategy = "NoPid", error = %e);
+                    error!(event = "core.cleanup.strategy_failed", strategy = "NoPid", error = %e);
                     CleanupError::StrategyFailed {
                         strategy: "NoPid".to_string(),
                         source: Box::new(e),
@@ -269,7 +269,7 @@ pub fn scan_for_orphans_with_strategy(
         CleanupStrategy::Stopped => {
             let sessions =
                 operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
-                    error!(event = "cleanup.strategy_failed", strategy = "Stopped", error = %e);
+                    error!(event = "core.cleanup.strategy_failed", strategy = "Stopped", error = %e);
                     CleanupError::StrategyFailed {
                         strategy: "Stopped".to_string(),
                         source: Box::new(e),
@@ -282,7 +282,7 @@ pub fn scan_for_orphans_with_strategy(
         CleanupStrategy::OlderThan(days) => {
             let sessions =
                 operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
-                    error!(event = "cleanup.strategy_failed", strategy = "OlderThan", error = %e);
+                    error!(event = "core.cleanup.strategy_failed", strategy = "OlderThan", error = %e);
                     CleanupError::StrategyFailed {
                         strategy: format!("OlderThan({})", days),
                         source: Box::new(e),
@@ -295,13 +295,13 @@ pub fn scan_for_orphans_with_strategy(
         CleanupStrategy::Orphans => {
             // Get current project info for scoping
             let project = git::handler::detect_project().map_err(|e| {
-                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
                 CleanupError::GitError { source: e }
             })?;
 
             // Get repo for worktree operations
             let repo = Repository::discover(&project.path).map_err(|e| {
-                error!(event = "cleanup.git_discovery_failed", error = %e);
+                error!(event = "core.cleanup.git_discovery_failed", error = %e);
                 CleanupError::GitError {
                     source: git::errors::GitError::Git2Error { source: e },
                 }
@@ -315,7 +315,7 @@ pub fn scan_for_orphans_with_strategy(
                 &project.name,
             )
             .map_err(|e| {
-                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
                 CleanupError::StrategyFailed {
                     strategy: "Orphans".to_string(),
                     source: Box::new(e),
@@ -323,7 +323,7 @@ pub fn scan_for_orphans_with_strategy(
             })?;
 
             info!(
-                event = "cleanup.orphans_scan_completed",
+                event = "core.cleanup.orphans_scan_completed",
                 untracked_count = untracked.len(),
                 project = project.name
             );
@@ -334,7 +334,7 @@ pub fn scan_for_orphans_with_strategy(
 
             // Also detect orphaned branches (worktree-* not checked out)
             let orphaned_branches = operations::detect_orphaned_branches(&repo).map_err(|e| {
-                error!(event = "cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
                 CleanupError::StrategyFailed {
                     strategy: "Orphans".to_string(),
                     source: Box::new(e),
@@ -348,7 +348,7 @@ pub fn scan_for_orphans_with_strategy(
     }
 
     info!(
-        event = "cleanup.scan_with_strategy_completed",
+        event = "core.cleanup.scan_with_strategy_completed",
         total_sessions = summary.stale_sessions.len()
     );
 
@@ -368,7 +368,7 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
 
     for branch_name in branches {
         info!(
-            event = "cleanup.branch_delete_started",
+            event = "core.cleanup.branch_delete_started",
             branch = branch_name
         );
 
@@ -377,7 +377,7 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
                 match branch.delete() {
                     Ok(()) => {
                         info!(
-                            event = "cleanup.branch_delete_completed",
+                            event = "core.cleanup.branch_delete_completed",
                             branch = branch_name
                         );
                         cleaned_branches.push(branch_name.clone());
@@ -387,14 +387,14 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
                         let error_msg = e.to_string();
                         if error_msg.contains("not found") || error_msg.contains("does not exist") {
                             info!(
-                                event = "cleanup.branch_delete_race_condition",
+                                event = "core.cleanup.branch_delete_race_condition",
                                 branch = branch_name,
                                 message = "Branch was deleted by another process - considering as cleaned"
                             );
                             cleaned_branches.push(branch_name.clone());
                         } else {
                             error!(
-                                event = "cleanup.branch_delete_failed",
+                                event = "core.cleanup.branch_delete_failed",
                                 branch = branch_name,
                                 error = %e,
                                 error_type = "permission_or_lock_error"
@@ -412,7 +412,7 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
             }
             Err(e) => {
                 warn!(
-                    event = "cleanup.branch_not_found",
+                    event = "core.cleanup.branch_not_found",
                     branch = branch_name,
                     error = %e
                 );
@@ -437,21 +437,21 @@ fn cleanup_orphaned_worktrees(
 
     for worktree_path in worktree_paths {
         info!(
-            event = "cleanup.worktree_delete_started",
+            event = "core.cleanup.worktree_delete_started",
             worktree_path = %worktree_path.display()
         );
 
         match git::handler::remove_worktree_by_path(worktree_path) {
             Ok(()) => {
                 info!(
-                    event = "cleanup.worktree_delete_completed",
+                    event = "core.cleanup.worktree_delete_completed",
                     worktree_path = %worktree_path.display()
                 );
                 cleaned_worktrees.push(worktree_path.clone());
             }
             Err(e) => {
                 error!(
-                    event = "cleanup.worktree_delete_failed",
+                    event = "core.cleanup.worktree_delete_failed",
                     worktree_path = %worktree_path.display(),
                     error = %e
                 );
@@ -477,21 +477,21 @@ fn cleanup_stale_sessions(session_ids: &[String]) -> Result<Vec<String>, Cleanup
 
     for session_id in session_ids {
         info!(
-            event = "cleanup.session_delete_started",
+            event = "core.cleanup.session_delete_started",
             session_id = session_id
         );
 
         match sessions::operations::remove_session_file(&config.sessions_dir(), session_id) {
             Ok(()) => {
                 info!(
-                    event = "cleanup.session_delete_completed",
+                    event = "core.cleanup.session_delete_completed",
                     session_id = session_id
                 );
                 cleaned_sessions.push(session_id.clone());
             }
             Err(e) => {
                 error!(
-                    event = "cleanup.session_delete_failed",
+                    event = "core.cleanup.session_delete_failed",
                     session_id = session_id,
                     error = %e
                 );

@@ -10,7 +10,7 @@ pub fn get_health_all_sessions() -> Result<HealthOutput, HealthError> {
         operations::set_idle_threshold_minutes(config.health.idle_threshold_minutes());
     }
 
-    info!(event = "health.get_all_started");
+    info!(event = "core.health.get_all_started");
 
     let sessions = sessions::handler::list_sessions()?;
     let mut shard_healths = Vec::new();
@@ -23,7 +23,7 @@ pub fn get_health_all_sessions() -> Result<HealthOutput, HealthError> {
     let output = operations::aggregate_health_stats(&shard_healths);
 
     info!(
-        event = "health.get_all_completed",
+        event = "core.health.get_all_completed",
         total = output.total_count,
         working = output.working_count,
         idle = output.idle_count,
@@ -36,13 +36,13 @@ pub fn get_health_all_sessions() -> Result<HealthOutput, HealthError> {
 
 /// Get health status for a specific session
 pub fn get_health_single_session(branch: &str) -> Result<ShardHealth, HealthError> {
-    info!(event = "health.get_single_started", branch = branch);
+    info!(event = "core.health.get_single_started", branch = branch);
 
     let session = sessions::handler::get_session(branch)?;
     let shard_health = enrich_session_with_metrics(&session);
 
     info!(
-        event = "health.get_single_completed",
+        event = "core.health.get_single_completed",
         branch = branch,
         status = ?shard_health.metrics.status
     );
@@ -59,7 +59,7 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> ShardHealt
                     Ok(metrics) => Some(metrics),
                     Err(e) => {
                         warn!(
-                            event = "health.process_metrics_failed",
+                            event = "core.health.process_metrics_failed",
                             pid = pid,
                             session_branch = &session.branch,
                             error = %e
@@ -72,7 +72,7 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> ShardHealt
             Ok(false) => (None, false),
             Err(e) => {
                 warn!(
-                    event = "health.process_check_failed",
+                    event = "core.health.process_check_failed",
                     pid = pid,
                     session_branch = &session.branch,
                     error = %e
