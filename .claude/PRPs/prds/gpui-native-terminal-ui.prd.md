@@ -117,7 +117,7 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | Cross-platform (Linux/Windows) | macOS first, cross-platform comes with embedded terminals |
 | Cross-shard orchestration | Future vision |
 | Terminal multiplexing | Out of scope |
-| Custom themes | Use defaults |
+| User-selectable themes | Single polished default theme first |
 
 ## Success Metrics
 
@@ -144,12 +144,14 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 5 | Destroy & Restart | Management buttons | Can destroy and restart shards |
 | 6 | Status Dashboard | Health indicators, refresh | Live status updates |
 | 7 | Favorites | Quick-spawn repos | Favorites work |
+| 8 | Theme & Components | Color palette + reusable UI components | Polished design, extracted TextInput/Button/Modal |
 
 ### Dependency Graph
 
 ```
-Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
-   │         │         │          │          │          │         │
+Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7 → Phase 8
+   │         │         │          │          │          │         │         │
+   │         │         │          │          │          │         │         └─ Polish (theme + components)
    │         │         │          │          │          │         └─ Convenience
    │         │         │          │          │          └─ Polish (live updates)
    │         │         │          │          └─ Full management (destroy, restart)
@@ -494,13 +496,89 @@ cargo run --features ui -- ui
 
 ---
 
+### Phase 8: Theme & Components
+
+**Goal**: Apply a polished color palette and extract reusable UI components.
+
+**Why this phase exists**: After all functionality is complete, we polish the visual design and refactor the UI into reusable components. This phase transforms working-but-rough UI into a cohesive, maintainable design system.
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `src/ui/theme.rs` | Color constants, theme struct |
+| `src/ui/components/mod.rs` | Reusable component module |
+| `src/ui/components/text_input.rs` | Extracted, polished text input |
+| `src/ui/components/button.rs` | Styled button component |
+| `src/ui/components/modal.rs` | Reusable modal/dialog wrapper |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `src/ui/views/*.rs` | Replace hardcoded colors with theme constants |
+| `src/ui/views/create_dialog.rs` | Use extracted components |
+| `src/ui/views/main_view.rs` | Use theme and components |
+
+**Color Palette**:
+
+```
+Primary Accent (Olive)
+├── Olive Dark:   #5d6b50
+├── Gray Olive:   #8a9a7a
+└── Olive Bright: #a3b392
+
+Secondary Accent (Peach)
+├── Peach:        #fab387
+└── Peach Dim:    #daa070
+
+Functional
+├── Success:      #8a9a7a (Gray Olive)
+├── Warning:      #fab387 (Peach)
+├── Error:        #f38ba8
+└── Info:         #89b4fa
+
+Dark Theme (Mocha)
+├── Base:         #1e1e2e
+├── Mantle:       #181825
+├── Crust:        #11111b
+├── Surface0:     #313244
+├── Surface1:     #45475a
+├── Text:         #cdd6f4
+└── Subtext:      #bac2de
+
+Terminal Chrome Dots
+├── Red:          #f38ba8
+├── Yellow:       #f9e2af
+└── Green:        #8a9a7a
+```
+
+**Components to extract**:
+- `TextInput` - Keyboard-captured text field with cursor, placeholder, validation state
+- `Button` - Primary (olive), secondary (surface), danger (error) variants
+- `Modal` - Overlay + centered dialog box with title, content, actions
+
+**Validation**:
+```bash
+cargo run -p shards-ui
+# Verify: All colors match the palette above
+# Verify: Consistent styling across all views
+# Verify: Components work in create dialog
+# Verify: Theme applies to header, list, dialog, buttons
+```
+
+**What NOT to do**:
+- Don't add light theme yet (dark only for MVP)
+- Don't add theme switching UI
+- Don't over-abstract (simple constants are fine)
+
+---
+
 ## Future Phases (Post-MVP)
 
 These come after the core dashboard is working and validated.
 
 ---
 
-### Phase 8+: Embedded Terminals
+### Phase 9+: Embedded Terminals
 
 **Goal**: Replace external terminals with embedded PTY terminals in the UI.
 
@@ -540,20 +618,20 @@ With embedded terminals, we gain:
 
 | Sub-phase | Focus |
 |-----------|-------|
-| 8a | PTY infrastructure (spawn, read, write) - no UI |
-| 8b | Basic terminal view (raw output in window) |
-| 8c | Full terminal rendering (colors, cursor, input) |
-| 8d | Replace external launch with embedded option |
-| 8e | User preference: embedded vs external |
+| 9a | PTY infrastructure (spawn, read, write) - no UI |
+| 9b | Basic terminal view (raw output in window) |
+| 9c | Full terminal rendering (colors, cursor, input) |
+| 9d | Replace external launch with embedded option |
+| 9e | User preference: embedded vs external |
 
-**Open questions for Phase 8**:
+**Open questions for Phase 9**:
 - Should embedded be the default, or opt-in?
 - Should we support both embedded AND external (user choice)?
 - What's the minimum viable terminal rendering? (Do we need full xterm compatibility?)
 
 ---
 
-### Phase 9+: Cross-Shard Orchestration (Future Vision)
+### Phase 10+: Cross-Shard Orchestration (Future Vision)
 
 **Goal**: Enable a main session to coordinate child shards.
 
@@ -564,7 +642,7 @@ With embedded terminals, we gain:
 - Collect their results
 
 **Prerequisites**:
-- Embedded terminals (Phase 8) - required to read/write to shards
+- Embedded terminals (Phase 9) - required to read/write to shards
 - Output buffering - store terminal history for querying
 - Command protocol - how main session addresses child shards
 
@@ -597,7 +675,7 @@ ui = ["dep:gpui"]
 gpui = { version = "0.2", optional = true }
 ```
 
-Note: We don't need `alacritty_terminal` or PTY crates for MVP. Those come with embedded terminals (Phase 8+).
+Note: We don't need `alacritty_terminal` or PTY crates for MVP. Those come with embedded terminals (Phase 9+).
 
 ### Platform Requirements
 
@@ -611,9 +689,9 @@ Note: We don't need `alacritty_terminal` or PTY crates for MVP. Those come with 
 
 ## Scope Boundary
 
-**This PRD covers Phases 1-7 only** (the MVP dashboard with external terminals).
+**This PRD covers Phases 1-8** (the MVP dashboard with external terminals, plus polish).
 
-Phases 8+ (embedded terminals, orchestration) are documented above for vision context, but are **separate PRDs** to be written after MVP validation. Don't let future vision creep into MVP implementation.
+Phases 9+ (embedded terminals, orchestration) are documented above for vision context, but are **separate PRDs** to be written after MVP validation. Don't let future vision creep into MVP implementation.
 
 ---
 
@@ -674,7 +752,7 @@ Each phase is a PR. Don't bleed work across phases. If Phase 3 validation passes
 |----------|--------|-----------|
 | Terminal approach | External terminals for MVP | Faster to value, reuses working code |
 | Platform | macOS first | CLI terminal launching already works |
-| Embedded terminals | Deferred to Phase 8+ | Hardest part, not needed for core value |
+| Embedded terminals | Deferred to Phase 9+ | Hardest part, not needed for core value |
 | UI framework | GPUI | Native performance, Rust ecosystem |
 | State management | Simple struct | YAGNI - no complex state libraries |
 
