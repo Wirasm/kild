@@ -32,3 +32,6 @@ clap = { version = "4.0", features = ["derive"] }
 
 # Internal workspace dependencies
 shards-core = { path = "crates/shards-core" }
+
+# UI dependencies
+gpui = "0.2"
