@@ -14,6 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Type Safety (CRITICAL):** Rust's type system is a feature, not an obstacle. Use it fully.
 
+**No Silent Failures:** This is a developer tool. Developers need to know when something fails. Never swallow errors, never hide failures behind fallbacks without logging, never leave things "behind the curtain". If config is wrong, say so. If an operation fails, surface it. Explicit failure is better than silent misbehavior.
+
 ## Git as First-Class Citizen
 
 Shards is built around git worktrees. Let git handle what git does best:
