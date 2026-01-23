@@ -55,10 +55,17 @@ pub struct CreateFormState {
 
 impl Default for CreateFormState {
     fn default() -> Self {
+        let agents = shards_core::agents::valid_agent_names();
+        let default_agent = "claude";
+        let index = agents.iter().position(|&a| a == default_agent).unwrap_or(0);
+
         Self {
             branch_name: String::new(),
-            selected_agent: "claude".to_string(),
-            selected_agent_index: 1, // "claude" is at index 1 in sorted list ["aether", "claude", ...]
+            selected_agent: agents
+                .get(index)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| default_agent.to_string()),
+            selected_agent_index: index,
         }
     }
 }

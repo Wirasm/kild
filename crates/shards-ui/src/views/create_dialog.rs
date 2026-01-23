@@ -8,7 +8,7 @@ use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
 use crate::state::AppState;
 use crate::views::MainView;
 
-/// Available agent names for selection.
+/// Available agent names for selection, sorted alphabetically.
 pub fn agent_options() -> Vec<&'static str> {
     shards_core::agents::valid_agent_names()
 }
@@ -28,8 +28,9 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
     let branch_name = state.create_form.branch_name.clone();
     let create_error = state.create_error.clone();
 
-    // Overlay background
+    // Overlay background (click Escape or Cancel to dismiss)
     div()
+        .id("dialog-overlay")
         .absolute()
         .inset_0()
         .bg(gpui::rgba(0x000000aa))
@@ -39,6 +40,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
         // Dialog box
         .child(
             div()
+                .id("dialog-box")
                 .w(px(400.0))
                 .bg(rgb(0x2d2d2d))
                 .rounded_lg()
@@ -117,6 +119,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                         .px_3()
                                         .py_2()
                                         .bg(rgb(0x1e1e1e))
+                                        .hover(|style| style.bg(rgb(0x2a2a2a)))
                                         .rounded_md()
                                         .border_1()
                                         .border_color(rgb(0x555555))
@@ -152,7 +155,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                 ),
                         )
                         // Error message (if any)
-                        .when(create_error.is_some(), |this| {
+                        .when_some(create_error, |this, error| {
                             this.child(
                                 div()
                                     .px_3()
@@ -161,12 +164,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                     .rounded_md()
                                     .border_1()
                                     .border_color(rgb(0x662222))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(0xff6b6b))
-                                            .child(create_error.unwrap_or_default()),
-                                    ),
+                                    .child(div().text_sm().text_color(rgb(0xff6b6b)).child(error)),
                             )
                         }),
                 )
@@ -187,6 +185,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                 .px_4()
                                 .py_2()
                                 .bg(rgb(0x444444))
+                                .hover(|style| style.bg(rgb(0x555555)))
                                 .rounded_md()
                                 .cursor_pointer()
                                 .on_mouse_up(
@@ -204,6 +203,7 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                 .px_4()
                                 .py_2()
                                 .bg(rgb(0x4a9eff))
+                                .hover(|style| style.bg(rgb(0x5aafff)))
                                 .rounded_md()
                                 .cursor_pointer()
                                 .on_mouse_up(

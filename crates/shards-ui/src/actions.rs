@@ -17,7 +17,6 @@ pub fn create_shard(branch: &str, agent: &str) -> Result<Session, String> {
         agent = agent
     );
 
-    // Validate branch name
     if branch.trim().is_empty() {
         tracing::warn!(
             event = "ui.create_dialog.validation_failed",
@@ -26,13 +25,20 @@ pub fn create_shard(branch: &str, agent: &str) -> Result<Session, String> {
         return Err("Branch name cannot be empty".to_string());
     }
 
-    // Load config hierarchy
-    let config = ShardsConfig::load_hierarchy().unwrap_or_default();
+    let config = match ShardsConfig::load_hierarchy() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                event = "ui.create_shard.config_load_failed",
+                error = %e,
+                "Falling back to default config"
+            );
+            ShardsConfig::default()
+        }
+    };
 
-    // Create session request
     let request = CreateSessionRequest::new(branch.to_string(), Some(agent.to_string()));
 
-    // Call shards-core to create the session
     match session_ops::create_session(request, &config) {
         Ok(session) => {
             tracing::info!(
@@ -56,7 +62,7 @@ pub fn create_shard(branch: &str, agent: &str) -> Result<Session, String> {
 
 /// Refresh the list of sessions from disk.
 ///
-/// Returns a tuple of (displays, error_message).
+/// Returns `(displays, error)` where `error` is `Some` if session loading failed.
 pub fn refresh_sessions() -> (Vec<ShardDisplay>, Option<String>) {
     tracing::info!(event = "ui.refresh_sessions.started");
 

@@ -12,7 +12,9 @@ use crate::actions;
 use crate::state::AppState;
 use crate::views::{create_dialog, shard_list};
 
-/// Main application view.
+/// Main application view that composes the shard list, header, and create dialog.
+///
+/// Owns application state and handles keyboard input for the create dialog.
 pub struct MainView {
     state: AppState,
     focus_handle: FocusHandle,
@@ -74,13 +76,15 @@ impl MainView {
         cx.notify();
     }
 
-    /// Handle keyboard input for branch name.
+    /// Handle keyboard input when the create dialog is open.
+    ///
+    /// Handles branch name input (alphanumeric, -, _, /), form submission (Enter),
+    /// dialog dismissal (Escape), and agent cycling (Tab).
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.state.show_create_dialog {
             return;
         }
 
-        // Get the key as a string representation
         let key_str = event.keystroke.key.to_string();
 
         match key_str.as_str() {
@@ -154,6 +158,7 @@ impl Render for MainView {
                             .px_3()
                             .py_1()
                             .bg(rgb(0x4a9eff))
+                            .hover(|style| style.bg(rgb(0x5aafff)))
                             .rounded_md()
                             .cursor_pointer()
                             .on_mouse_up(
