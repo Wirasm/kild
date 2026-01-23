@@ -82,10 +82,10 @@ info!(event = "core.git.worktree.create_started", branch = branch);
 
 ```bash
 # Show only CLI events
-grep 'event="cli\.' logs.txt
+grep '"event":"cli\.' logs.txt
 
 # Show only core library events
-grep 'event="core\.' logs.txt
+grep '"event":"core\.' logs.txt
 
 # Show all failures
 grep '_failed"' logs.txt

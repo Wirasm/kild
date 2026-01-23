@@ -106,7 +106,7 @@ tracing_subscriber::registry()
         .with_current_span(false)
         .with_span_list(false))
     .with(EnvFilter::from_default_env()
-        .add_directive("shards=info".parse().unwrap()))
+        .add_directive("shards=info".parse().expect("Invalid log directive")))
     .init();
 ```
 
