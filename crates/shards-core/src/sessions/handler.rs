@@ -368,7 +368,18 @@ pub fn restart_session(
 
     // 4. Determine agent and command
     let base_config = Config::new();
-    let shards_config = ShardsConfig::load_hierarchy().unwrap_or_default();
+    let shards_config = match ShardsConfig::load_hierarchy() {
+        Ok(config) => config,
+        Err(e) => {
+            warn!(
+                event = "core.session.config_load_failed",
+                error = %e,
+                session_id = %session.id,
+                "Config load failed during restart, using defaults"
+            );
+            ShardsConfig::default()
+        }
+    };
     let agent = agent_override.unwrap_or(session.agent.clone());
     let agent_command =
         shards_config

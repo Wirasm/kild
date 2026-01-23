@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use shards_core::CreateSessionRequest;
 use shards_core::cleanup;
@@ -10,6 +10,23 @@ use shards_core::process;
 use shards_core::session_ops as session_handler;
 
 use crate::table::truncate;
+
+/// Load configuration with warning on errors.
+/// Falls back to defaults if config loading fails, but warns the user.
+fn load_config_with_warning() -> ShardsConfig {
+    match ShardsConfig::load_hierarchy() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Warning: Could not load config: {}. Using defaults.", e);
+            warn!(
+                event = "cli.config_load_failed",
+                error = %e,
+                "Config load failed, using defaults"
+            );
+            ShardsConfig::default()
+        }
+    }
+}
 
 /// Validate branch name to prevent injection attacks
 fn is_valid_branch_name(name: &str) -> bool {
@@ -48,8 +65,8 @@ fn handle_create_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
 
-    // Load config hierarchy
-    let mut config = ShardsConfig::load_hierarchy().unwrap_or_default();
+    // Load config hierarchy (warns user on errors)
+    let mut config = load_config_with_warning();
 
     // Apply CLI overrides only if provided
     let agent_override = matches.get_one::<String>("agent").cloned();
@@ -379,7 +396,7 @@ fn run_health_watch_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{self, Write};
 
-    let config = ShardsConfig::load_hierarchy().unwrap_or_default();
+    let config = load_config_with_warning();
 
     loop {
         // Clear screen (ANSI escape)
@@ -600,5 +617,13 @@ mod tests {
         assert_eq!(truncate("", 5), "     ");
         assert_eq!(truncate("abc", 3), "abc");
         assert_eq!(truncate("abcd", 3), "...");
+    }
+
+    #[test]
+    fn test_load_config_with_warning_returns_valid_config() {
+        // When config loads (successfully or with fallback), should return a valid config
+        let config = load_config_with_warning();
+        // Should not panic and return a config with non-empty default agent
+        assert!(!config.agent.default.is_empty());
     }
 }

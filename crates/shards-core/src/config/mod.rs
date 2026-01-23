@@ -32,7 +32,9 @@
 //! ```rust
 //! use shards_core::config::ShardsConfig;
 //!
-//! let config = ShardsConfig::load_hierarchy().unwrap_or_default();
+//! // Handle config errors explicitly - don't silently fall back to defaults
+//! let config = ShardsConfig::load_hierarchy()
+//!     .expect("Failed to load config");
 //! let agent_command = config.get_agent_command("claude");
 //! ```
 
