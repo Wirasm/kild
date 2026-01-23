@@ -70,7 +70,7 @@ cargo run -- destroy my-branch
 **Workspace structure:**
 - `crates/shards-core` - Core library with all business logic, no CLI dependencies
 - `crates/shards` - Thin CLI that consumes shards-core (clap for arg parsing)
-- `crates/shards-ui` - Future TUI (minimal)
+- `crates/shards-ui` - GPUI-based native GUI (in development)
 
 **Key modules in shards-core:**
 - `sessions/` - Session lifecycle (create, destroy, restart, list)
