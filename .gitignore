@@ -2,6 +2,7 @@
 .vscode
 .shards/
 !.shards/config.toml
+!.shards/config.example.toml
 
 # macOS
 .DS_Store

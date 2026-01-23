@@ -1,0 +1,109 @@
+# Shards Configuration - All Options
+#
+# Config files are loaded in order (later overrides earlier):
+#   1. Hardcoded defaults
+#   2. User config:    ~/.shards/config.toml
+#   3. Project config: ./.shards/config.toml
+#   4. CLI flags
+#
+# Copy this file to ~/.shards/config.toml for user-wide settings
+# or to .shards/config.toml in your project for project-specific settings.
+
+# =============================================================================
+# AGENT CONFIGURATION
+# =============================================================================
+
+[agent]
+# Default agent when --agent is not specified
+# Options: claude, kiro, gemini, codex, aether
+default = "claude"
+
+# Global startup command (used if agent has no specific command)
+# startup_command = "claude"
+
+# Global flags appended to all agent commands
+# flags = "--trust-all-tools"
+
+# =============================================================================
+# TERMINAL CONFIGURATION
+# =============================================================================
+
+[terminal]
+# Preferred terminal emulator
+# Options: ghostty, iterm2, iterm, terminal, native, auto
+# "auto" detects Ghostty if available, otherwise uses Terminal.app
+preferred = "ghostty"
+
+# Delay in milliseconds after spawning terminal (for process detection)
+# Default: 1000
+spawn_delay_ms = 1000
+
+# Maximum retry attempts for terminal spawn
+# Default: 5
+max_retry_attempts = 5
+
+# =============================================================================
+# PER-AGENT SETTINGS
+# Override global agent settings for specific agents
+# =============================================================================
+
+[agents.claude]
+# Command to launch Claude
+startup_command = "claude"
+# Flags specific to Claude
+# flags = "--dangerously-skip-permissions"
+
+[agents.kiro]
+startup_command = "kiro-cli chat"
+# flags = "--trust-all-tools"
+
+[agents.gemini]
+startup_command = "gemini-cli"
+
+[agents.codex]
+startup_command = "codex"
+
+[agents.aider]
+startup_command = "aider"
+
+# =============================================================================
+# HEALTH MONITORING
+# =============================================================================
+
+[health]
+# Minutes of inactivity before a shard is considered idle
+# Default: 10
+idle_threshold_minutes = 10
+
+# Seconds between health check refreshes in watch mode
+# Default: 5
+refresh_interval_secs = 5
+
+# Enable/disable session history tracking
+# Default: false
+history_enabled = true
+
+# Days to retain session history
+# Default: 7
+history_retention_days = 7
+
+# =============================================================================
+# FILE INCLUSION PATTERNS
+# Files matching these patterns are copied to new worktrees even if gitignored
+# =============================================================================
+
+[include_patterns]
+# Enable/disable pattern-based file copying
+# Default: true
+enabled = true
+
+# Glob patterns for files to copy (relative to repo root)
+patterns = [
+    ".env*",           # Environment files
+    "*.local.json",    # Local config files
+    "build/artifacts/**"  # Build artifacts
+]
+
+# Maximum file size to copy (skip larger files with warning)
+# Supports: "10MB", "1GB", etc.
+# max_file_size = "10MB"

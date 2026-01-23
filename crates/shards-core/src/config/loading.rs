@@ -8,7 +8,7 @@
 //! Configuration is loaded in the following order (later sources override earlier ones):
 //! 1. **Hardcoded defaults** - Built-in fallback values
 //! 2. **User config** - `~/.shards/config.toml` (global user preferences)
-//! 3. **Project config** - `./shards/config.toml` (project-specific overrides)
+//! 3. **Project config** - `./.shards/config.toml` (project-specific overrides)
 //! 4. **CLI arguments** - Command-line flags (highest priority)
 
 use crate::agents;
@@ -32,7 +32,7 @@ fn is_file_not_found(e: &(dyn std::error::Error + 'static)) -> bool {
 /// Loads and merges configuration from:
 /// 1. Default values
 /// 2. User config (`~/.shards/config.toml`)
-/// 3. Project config (`./shards/config.toml`)
+/// 3. Project config (`./.shards/config.toml`)
 ///
 /// # Errors
 ///
@@ -67,9 +67,9 @@ fn load_user_config() -> Result<ShardsConfig, Box<dyn std::error::Error>> {
     load_config_file(&config_path)
 }
 
-/// Load the project configuration from ./shards/config.toml.
+/// Load the project configuration from ./.shards/config.toml.
 fn load_project_config() -> Result<ShardsConfig, Box<dyn std::error::Error>> {
-    let config_path = std::env::current_dir()?.join("shards").join("config.toml");
+    let config_path = std::env::current_dir()?.join(".shards").join("config.toml");
     load_config_file(&config_path)
 }
 
@@ -262,7 +262,7 @@ mod tests {
 
         // Create test directories
         fs::create_dir_all(&user_config_dir).unwrap();
-        fs::create_dir_all(&project_config_dir.join("shards")).unwrap();
+        fs::create_dir_all(&project_config_dir.join(".shards")).unwrap();
 
         // Create user config
         let user_config_content = r#"
@@ -282,7 +282,7 @@ default = "claude"
 flags = "--yolo"
 "#;
         fs::write(
-            project_config_dir.join("shards").join("config.toml"),
+            project_config_dir.join(".shards").join("config.toml"),
             project_config_content,
         )
         .unwrap();
@@ -298,7 +298,7 @@ flags = "--yolo"
 
         // Test loading project config
         let project_config =
-            load_config_file(&project_config_dir.join("shards").join("config.toml")).unwrap();
+            load_config_file(&project_config_dir.join(".shards").join("config.toml")).unwrap();
         assert_eq!(project_config.agent.default, "claude");
         assert_eq!(project_config.agent.flags, Some("--yolo".to_string()));
 

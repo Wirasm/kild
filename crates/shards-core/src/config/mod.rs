@@ -7,7 +7,7 @@
 //! Configuration is loaded in the following order (later sources override earlier ones):
 //! 1. **Hardcoded defaults** - Built-in fallback values
 //! 2. **User config** - `~/.shards/config.toml` (global user preferences)
-//! 3. **Project config** - `./shards/config.toml` (project-specific overrides)
+//! 3. **Project config** - `./.shards/config.toml` (project-specific overrides)
 //! 4. **CLI arguments** - Command-line flags (highest priority)
 //!
 //! ## Usage Example

@@ -114,7 +114,7 @@ Cleans up resources that got out of sync (crashes, manual deletions, etc.).
 Hierarchical TOML config (later overrides earlier):
 1. Hardcoded defaults
 2. User config - `~/.shards/config.toml`
-3. Project config - `./shards/config.toml`
+3. Project config - `./.shards/config.toml`
 4. CLI flags
 
 ## Key Features
