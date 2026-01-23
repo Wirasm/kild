@@ -74,13 +74,22 @@ shards create feature-x --agent claude --flags '--dangerously-skip-permissions'
 shards create feature-x --agent kiro --flags '--trust-all-tools'
 ```
 
-**Codex CLI** - `--full-auto` (sandboxed) or `--dangerously-bypass-approvals-and-sandbox` (unrestricted)
-```bash
-# Sandboxed autonomous mode (recommended)
-shards create feature-x --agent codex --flags '--full-auto'
+**Codex CLI** - `--yolo` / `--dangerously-bypass-approvals-and-sandbox`
 
-# Fully unrestricted (dangerous)
+**IMPORTANT**: `--full-auto` is NOT fully autonomous. It still prompts for:
+- File writes outside the workspace
+- Commands requiring network access
+
+For true autonomous mode, use `--yolo` (alias for `--dangerously-bypass-approvals-and-sandbox`):
+```bash
+# TRUE autonomous mode (no approval prompts)
+shards create feature-x --agent codex --flags '--yolo'
+
+# Equivalent long form
 shards create feature-x --agent codex --flags '--dangerously-bypass-approvals-and-sandbox'
+
+# Semi-autonomous (still prompts for some operations)
+shards create feature-x --agent codex --flags '--full-auto'
 ```
 
 Or set in config for persistent use:
@@ -93,8 +102,11 @@ flags = "--dangerously-skip-permissions"
 flags = "--trust-all-tools"
 
 [agents.codex]
-flags = "--full-auto"
+flags = "--yolo"  # or "--dangerously-bypass-approvals-and-sandbox"
 ```
+
+**Codex v0.20+ Note**: If `--yolo` still prompts, you may need to mark the workspace as trusted.
+See: https://github.com/openai/codex/discussions/2138
 
 ### List All Shards
 ```bash
