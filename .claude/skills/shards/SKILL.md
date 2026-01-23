@@ -1,7 +1,36 @@
 ---
 name: shards
-description: Manage parallel AI development sessions in isolated Git worktrees. Use when creating isolated workspaces, managing multiple AI agents, checking session status, or cleaning up development environments.
-allowed-tools: Bash(shards:*)
+description: |
+  Create and manage parallel AI development sessions in isolated Git worktrees.
+
+  TRIGGERS - Use this skill when user says "create a shard", "spin up shards",
+  "use shards for this", "create worktrees for features", "run multiple agents",
+  "isolated workspace", "shards create", "shards list", "shards health",
+  "destroy the shard", "clean up shards", "check shard status".
+
+  Shards creates isolated Git worktrees where AI agents work independently without
+  affecting your main branch. Each shard gets its own terminal window, port range,
+  and process tracking.
+
+  EXAMPLES
+
+  User says "Create a shard for the auth feature"
+  Command - shards create feature-auth --agent claude
+  Result - Creates worktree at ~/.shards/worktrees/<project>/feature-auth/ and opens Claude in new terminal
+
+  User says "Show me all active shards"
+  Command - shards list
+  Result - Table showing branch, agent, status, ports, and process info
+
+  User says "Create 3 shards for feature-a, feature-b, and bug-fix"
+  Commands - Run shards create for each branch
+  Result - Three isolated worktrees, each with its own agent in separate terminals
+
+  User says "Check health of my shards"
+  Command - shards health
+  Result - Dashboard with CPU, memory, and status for all shards
+
+allowed-tools: Bash, Read, Glob, Grep
 ---
 
 # Shards CLI - Parallel AI Development Manager
@@ -12,7 +41,7 @@ Shards creates isolated Git worktrees for parallel AI development sessions. Each
 
 ### Create a Shard
 ```bash
-shards create <branch> [--agent <agent>] [--flags <flags>] [--terminal <terminal>] [--startup-command <command>]
+shards create <branch> [--agent <agent>] [--flags <flags>] [--terminal <terminal>]
 ```
 
 Creates an isolated workspace with:
@@ -22,12 +51,10 @@ Creates an isolated workspace with:
 - Process tracking (PID, name, start time)
 - Session metadata saved to `~/.shards/sessions/`
 
-**Supported agents**: claude, kiro, gemini, codex, aether
-**Supported terminal types**: ghostty, iterm, terminal, native
+**Supported agents** - claude, kiro, gemini, codex, aether
+**Supported terminals** - ghostty, iterm, terminal, native
 
-**Note**: `--flags` accepts space-separated syntax: `--flags '--trust-all-tools'`
-
-**Example**:
+**Examples**
 ```bash
 shards create feature-auth --agent kiro --terminal ghostty
 shards create bug-fix-123 --agent claude --flags '--trust-all-tools'
@@ -66,7 +93,7 @@ Shows health dashboard with process status, CPU/memory metrics, and summary stat
 shards destroy <branch>
 ```
 
-Completely removes a shard: closes terminal, kills process, removes worktree and branch, deletes session.
+Completely removes a shard - closes terminal, kills process, removes worktree and branch, deletes session.
 
 ### Cleanup Orphaned Resources
 ```bash
@@ -75,34 +102,35 @@ shards cleanup [--all] [--orphans] [--no-pid] [--stopped] [--older-than <days>]
 
 Cleans up resources that got out of sync (crashes, manual deletions, etc.).
 
-**Flags**:
-- `--all`: Clean all orphaned resources (default)
-- `--orphans`: Clean worktrees with no matching session
-- `--no-pid`: Clean sessions without PID tracking
-- `--stopped`: Clean sessions with dead processes
-- `--older-than <days>`: Clean sessions older than N days
+**Flags**
+- `--all` - Clean all orphaned resources (default)
+- `--orphans` - Clean worktrees with no matching session
+- `--no-pid` - Clean sessions without PID tracking
+- `--stopped` - Clean sessions with dead processes
+- `--older-than <days>` - Clean sessions older than N days
 
 ## Configuration
 
 Hierarchical TOML config (later overrides earlier):
 1. Hardcoded defaults
-2. User config: `~/.shards/config.toml`
-3. Project config: `./shards/config.toml`
+2. User config - `~/.shards/config.toml`
+3. Project config - `./shards/config.toml`
 4. CLI flags
 
 ## Key Features
 
-- **Process Tracking**: Captures PID, process name, start time. Validates identity before killing.
-- **Port Allocation**: Unique port range per shard (default: 10 ports from base 3000).
-- **Session Persistence**: File-based storage in `~/.shards/sessions/`
-- **Cross-Platform**: macOS, Linux, Windows with native terminal integration.
+- **Process Tracking** - Captures PID, process name, start time. Validates identity before killing.
+- **Port Allocation** - Unique port range per shard (default 10 ports from base 3000).
+- **Session Persistence** - File-based storage in `~/.shards/sessions/`
+- **Cross-Platform** - macOS, Linux, Windows with native terminal integration.
 
 ## Best Practices
 
-- Use descriptive branch names: `feature-auth`, `bug-fix-123`, `issue-456`
+- Use descriptive branch names like `feature-auth`, `bug-fix-123`, `issue-456`
 - Always destroy shards when done to clean up resources
 - Use `shards cleanup` after crashes or manual deletions
 
 ## Additional Resources
 
-- For E2E testing after merges, see [cookbook/e2e-testing.md](cookbook/e2e-testing.md)
+- For installation and updating, see [cookbook/installation.md](cookbook/installation.md)
+- For E2E testing, see [cookbook/e2e-testing.md](cookbook/e2e-testing.md)
