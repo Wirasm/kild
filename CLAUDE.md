@@ -62,7 +62,10 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 # Run
 cargo run -- create my-branch --agent claude
 cargo run -- list
-cargo run -- destroy my-branch
+cargo run -- open my-branch              # Open new agent in existing shard (additive)
+cargo run -- stop my-branch              # Stop agent, preserve shard
+cargo run -- destroy my-branch           # Destroy shard
+cargo run -- destroy my-branch --force   # Force destroy (bypass git checks)
 ```
 
 ## Architecture
@@ -73,7 +76,7 @@ cargo run -- destroy my-branch
 - `crates/shards-ui` - GPUI-based native GUI (in development)
 
 **Key modules in shards-core:**
-- `sessions/` - Session lifecycle (create, destroy, restart, list)
+- `sessions/` - Session lifecycle (create, open, stop, destroy, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app)
 - `agents/` - Agent backend system (claude, kiro, gemini, etc.)
 - `git/` - Git worktree operations via git2

@@ -30,7 +30,8 @@ cargo run -p shards-ui
 The GUI currently supports:
 - Shard listing with status indicators
 - Creating new shards with agent selection
-- Relaunching stopped agents
+- Opening new agents in existing shards
+- Stopping agents without destroying shards
 - Destroying shards with confirmation dialog
 
 See the [PRD](.claude/PRPs/prds/gpui-native-terminal-ui.prd.md) for the development roadmap.
@@ -58,13 +59,19 @@ shards create gemini-task --agent gemini
 shards list
 ```
 
-### Restart a shard
+### Open a new agent in an existing shard
 ```bash
-# Restart with same agent
-shards restart <branch>
+# Open with same agent (additive - doesn't close existing terminals)
+shards open <branch>
 
-# Restart with different agent  
-shards restart <branch> --agent <agent>
+# Open with different agent
+shards open <branch> --agent <agent>
+```
+
+### Stop a shard
+```bash
+# Stop agent, preserve worktree
+shards stop <branch>
 ```
 
 ### Get shard information
@@ -75,6 +82,20 @@ shards status <branch>
 ### Destroy a shard
 ```bash
 shards destroy <branch>
+
+# Force destroy (bypass git uncommitted changes check)
+shards destroy <branch> --force
+```
+
+### Note on deprecated commands
+
+The `restart` command is deprecated. Use `open` instead:
+```bash
+# Old (deprecated, still works with warning)
+shards restart <branch>
+
+# New (preferred)
+shards open <branch>
 ```
 
 ### Clean up orphaned shards

@@ -16,6 +16,13 @@ pub enum ProcessStatus {
     Unknown,
 }
 
+/// Error from a shard operation, with the branch name for context.
+#[derive(Clone, Debug)]
+pub struct OperationError {
+    pub branch: String,
+    pub message: String,
+}
+
 /// Display data for a shard, combining Session with computed process status.
 #[derive(Clone)]
 pub struct ShardDisplay {
@@ -25,21 +32,22 @@ pub struct ShardDisplay {
 
 impl ShardDisplay {
     pub fn from_session(session: Session) -> Self {
-        let status = session.process_id.map_or(ProcessStatus::Stopped, |pid| {
-            match shards_core::process::is_process_running(pid) {
+        let status = match session.process_id {
+            None => ProcessStatus::Stopped,
+            Some(pid) => match shards_core::process::is_process_running(pid) {
                 Ok(true) => ProcessStatus::Running,
                 Ok(false) => ProcessStatus::Stopped,
                 Err(e) => {
                     tracing::warn!(
                         event = "ui.shard_list.process_check_failed",
                         pid = pid,
-                        branch = &session.branch,
+                        branch = session.branch,
                         error = %e
                     );
                     ProcessStatus::Unknown
                 }
-            }
-        });
+            },
+        };
 
         Self { session, status }
     }
@@ -104,8 +112,11 @@ pub struct AppState {
     pub confirm_target_branch: Option<String>,
     pub confirm_error: Option<String>,
 
-    // Relaunch error state (shown inline per-row)
-    pub relaunch_error: Option<(String, String)>, // (branch, error_message)
+    // Open error state (shown inline per-row)
+    pub open_error: Option<OperationError>,
+
+    // Stop error state (shown inline per-row)
+    pub stop_error: Option<OperationError>,
 }
 
 impl AppState {
@@ -122,7 +133,8 @@ impl AppState {
             show_confirm_dialog: false,
             confirm_target_branch: None,
             confirm_error: None,
-            relaunch_error: None,
+            open_error: None,
+            stop_error: None,
         }
     }
 
@@ -146,9 +158,14 @@ impl AppState {
         self.confirm_error = None;
     }
 
-    /// Clear any relaunch error.
-    pub fn clear_relaunch_error(&mut self) {
-        self.relaunch_error = None;
+    /// Clear any open error.
+    pub fn clear_open_error(&mut self) {
+        self.open_error = None;
+    }
+
+    /// Clear any stop error.
+    pub fn clear_stop_error(&mut self) {
+        self.stop_error = None;
     }
 }
 
@@ -174,7 +191,8 @@ mod tests {
             show_confirm_dialog: true,
             confirm_target_branch: Some("feature-branch".to_string()),
             confirm_error: Some("Some error".to_string()),
-            relaunch_error: None,
+            open_error: None,
+            stop_error: None,
         };
 
         state.reset_confirm_dialog();
@@ -185,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_relaunch_error() {
+    fn test_clear_open_error() {
         let mut state = AppState {
             displays: Vec::new(),
             load_error: None,
@@ -195,12 +213,39 @@ mod tests {
             show_confirm_dialog: false,
             confirm_target_branch: None,
             confirm_error: None,
-            relaunch_error: Some(("branch".to_string(), "error".to_string())),
+            open_error: Some(OperationError {
+                branch: "branch".to_string(),
+                message: "error".to_string(),
+            }),
+            stop_error: None,
         };
 
-        state.clear_relaunch_error();
+        state.clear_open_error();
 
-        assert!(state.relaunch_error.is_none());
+        assert!(state.open_error.is_none());
+    }
+
+    #[test]
+    fn test_clear_stop_error() {
+        let mut state = AppState {
+            displays: Vec::new(),
+            load_error: None,
+            show_create_dialog: false,
+            create_form: CreateFormState::default(),
+            create_error: None,
+            show_confirm_dialog: false,
+            confirm_target_branch: None,
+            confirm_error: None,
+            open_error: None,
+            stop_error: Some(OperationError {
+                branch: "branch".to_string(),
+                message: "error".to_string(),
+            }),
+        };
+
+        state.clear_stop_error();
+
+        assert!(state.stop_error.is_none());
     }
 
     #[test]

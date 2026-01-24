@@ -372,40 +372,34 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
             && branch_name.starts_with("worktree-")
         {
             match repo.find_branch(branch_name, BranchType::Local) {
-                Ok(mut branch) => {
-                    match branch.delete() {
-                        Ok(()) => {
-                            info!(
-                                event = "core.git.branch.delete_completed",
+                Ok(mut branch) => match branch.delete() {
+                    Ok(()) => {
+                        info!(
+                            event = "core.git.branch.delete_completed",
+                            branch = branch_name,
+                            worktree_path = %worktree_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("not found") || error_msg.contains("does not exist") {
+                            debug!(
+                                event = "core.git.branch.delete_race_condition",
                                 branch = branch_name,
-                                worktree_path = %worktree_path.display()
+                                worktree_path = %worktree_path.display(),
+                                message = "Branch was deleted by another process"
+                            );
+                        } else {
+                            warn!(
+                                event = "core.git.branch.delete_failed",
+                                branch = branch_name,
+                                worktree_path = %worktree_path.display(),
+                                error = %e,
+                                error_type = "concurrent_operation_or_permission"
                             );
                         }
-                        Err(e) => {
-                            // Handle potential race conditions where branch might be deleted concurrently
-                            let error_msg = e.to_string();
-                            if error_msg.contains("not found")
-                                || error_msg.contains("does not exist")
-                            {
-                                debug!(
-                                    event = "core.git.branch.delete_race_condition",
-                                    branch = branch_name,
-                                    worktree_path = %worktree_path.display(),
-                                    message = "Branch was deleted by another process"
-                                );
-                            } else {
-                                warn!(
-                                    event = "core.git.branch.delete_failed",
-                                    branch = branch_name,
-                                    worktree_path = %worktree_path.display(),
-                                    error = %e,
-                                    error_type = "concurrent_operation_or_permission"
-                                );
-                            }
-                            // Don't fail the whole operation if branch deletion fails
-                        }
                     }
-                }
+                },
                 Err(e) => {
                     debug!(
                         event = "core.git.branch.not_found_for_cleanup",
@@ -414,7 +408,6 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
                         error = %e,
                         message = "Branch already deleted or never existed"
                     );
-                    // Branch already gone or not found - that's fine
                 }
             }
         }
@@ -444,6 +437,101 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Force removes a git worktree, bypassing uncommitted changes check.
+///
+/// Use with caution - uncommitted work will be lost.
+/// This first tries to prune from git, then force-deletes the directory.
+pub fn remove_worktree_force(worktree_path: &Path) -> Result<(), GitError> {
+    info!(
+        event = "core.git.worktree.remove_force_started",
+        path = %worktree_path.display()
+    );
+
+    // Try to open the worktree directly first to get the main repo
+    let repo =
+        Repository::open(worktree_path)
+            .ok()
+            .and_then(|repo| {
+                repo.path()
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf())
+                    .and_then(|main_repo_path| {
+                        Repository::open(&main_repo_path)
+                            .map_err(|e| {
+                                warn!(
+                                    event = "core.git.worktree.remove_force_main_repo_open_failed",
+                                    path = %main_repo_path.display(),
+                                    error = %e,
+                                );
+                            })
+                            .ok()
+                    })
+                    .or(Some(repo))
+            })
+            .or_else(|| {
+                // Fallback: find main repository by searching parent directories for .git
+                let mut current_path = worktree_path;
+                while let Some(parent) = current_path.parent() {
+                    if parent.join(".git").exists() && parent.join(".git").is_dir() {
+                        return Repository::open(parent).map_err(|e| {
+                        warn!(
+                            event = "core.git.worktree.remove_force_fallback_repo_open_failed",
+                            path = %parent.display(),
+                            error = %e,
+                        );
+                    }).ok();
+                    }
+                    current_path = parent;
+                }
+                None
+            });
+
+    // Try to prune from git if we found the repo
+    if let Some(repo) = repo {
+        if let Ok(worktrees) = repo.worktrees() {
+            for worktree_name in worktrees.iter().flatten() {
+                if let Ok(worktree) = repo.find_worktree(worktree_name)
+                    && worktree.path() == worktree_path
+                {
+                    let mut prune_options = git2::WorktreePruneOptions::new();
+                    prune_options.valid(true);
+                    prune_options.working_tree(true);
+
+                    if let Err(e) = worktree.prune(Some(&mut prune_options)) {
+                        warn!(
+                            event = "core.git.worktree.prune_failed_force_continue",
+                            path = %worktree_path.display(),
+                            error = %e
+                        );
+                    }
+                    break;
+                }
+            }
+        } else {
+            warn!(
+                event = "core.git.worktree.remove_force_list_worktrees_failed",
+                path = %worktree_path.display(),
+            );
+        }
+    }
+
+    // Force delete the directory regardless of git status
+    if worktree_path.exists() {
+        std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::WorktreeRemovalFailed {
+            path: worktree_path.display().to_string(),
+            message: e.to_string(),
+        })?;
+    }
+
+    info!(
+        event = "core.git.worktree.remove_force_completed",
+        path = %worktree_path.display()
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,6 +552,17 @@ mod tests {
             // Restore original directory
             let _ = std::env::set_current_dir(original_dir);
         }
+    }
+
+    #[test]
+    fn test_remove_worktree_force_nonexistent_is_ok() {
+        // Force removal should not error if directory doesn't exist (idempotent)
+        let nonexistent = std::path::Path::new("/tmp/shards-test-nonexistent-worktree-12345");
+        // Make sure it doesn't exist
+        let _ = std::fs::remove_dir_all(nonexistent);
+
+        let result = remove_worktree_force(nonexistent);
+        assert!(result.is_ok());
     }
 
     // Note: Other tests would require setting up actual git repositories

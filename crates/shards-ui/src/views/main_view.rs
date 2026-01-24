@@ -91,7 +91,6 @@ impl MainView {
     /// Handle click on the Refresh button in header.
     fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.refresh_clicked");
-        self.state.clear_relaunch_error();
         self.state.refresh_sessions();
         cx.notify();
     }
@@ -135,23 +134,49 @@ impl MainView {
         cx.notify();
     }
 
-    /// Handle click on the relaunch button [▶] in a shard row.
-    pub fn on_relaunch_click(&mut self, branch: &str, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.relaunch_clicked", branch = branch);
-        self.state.clear_relaunch_error();
+    /// Handle click on the Open button [▶] in a shard row.
+    pub fn on_open_click(&mut self, branch: &str, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.open_clicked", branch = branch);
+        self.state.clear_open_error();
 
-        match actions::relaunch_shard(branch) {
+        match actions::open_shard(branch, None) {
             Ok(_session) => {
                 self.state.refresh_sessions();
             }
             Err(e) => {
                 tracing::warn!(
-                    event = "ui.relaunch_click.error_displayed",
+                    event = "ui.open_click.error_displayed",
                     branch = branch,
                     error = %e
                 );
-                // NO SILENT FAILURES - show error inline
-                self.state.relaunch_error = Some((branch.to_string(), e));
+                self.state.open_error = Some(crate::state::OperationError {
+                    branch: branch.to_string(),
+                    message: e,
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// Handle click on the Stop button [⏹] in a shard row.
+    pub fn on_stop_click(&mut self, branch: &str, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.stop_clicked", branch = branch);
+        self.state.clear_stop_error();
+
+        match actions::stop_shard(branch) {
+            Ok(()) => {
+                self.state.refresh_sessions();
+            }
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.stop_click.error_displayed",
+                    branch = branch,
+                    error = %e
+                );
+                self.state.stop_error = Some(crate::state::OperationError {
+                    branch: branch.to_string(),
+                    message: e,
+                });
             }
         }
         cx.notify();

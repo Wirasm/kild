@@ -115,12 +115,26 @@ shards list
 
 Shows table with branch, agent, status, timestamps, port range, process status, and command.
 
-### Restart a Shard
+### Open a New Agent in a Shard
+```bash
+shards open <branch> [--agent <agent>]
+```
+
+Opens a new agent terminal in an existing shard. This is **additive** - it doesn't close existing terminals, allowing multiple agents to work in the same shard.
+
+### Stop a Shard
+```bash
+shards stop <branch>
+```
+
+Stops the agent process and closes the terminal, but preserves the shard (worktree and uncommitted changes remain). Can be reopened later with `shards open`.
+
+### Restart a Shard (Deprecated)
 ```bash
 shards restart <branch> [--agent <agent>]
 ```
 
-Restarts agent process without destroying worktree. Preserves uncommitted changes.
+**DEPRECATED**: Use `shards open` instead. This command is kept for backward compatibility but will show a deprecation warning.
 
 ### Status (Detailed View)
 ```bash
@@ -138,10 +152,13 @@ Shows health dashboard with process status, CPU/memory metrics, and summary stat
 
 ### Destroy a Shard
 ```bash
-shards destroy <branch>
+shards destroy <branch> [--force]
 ```
 
 Completely removes a shard - closes terminal, kills process, removes worktree and branch, deletes session.
+
+**Flags**
+- `--force` / `-f` - Force destroy even with uncommitted changes (bypasses git safety checks)
 
 ### Cleanup Orphaned Resources
 ```bash

@@ -20,6 +20,12 @@ pub enum GitError {
     #[error("Worktree not found at path: {path}")]
     WorktreeNotFound { path: String },
 
+    #[error("Failed to remove worktree at {path}: {message}")]
+    WorktreeRemovalFailed { path: String, message: String },
+
+    #[error("Invalid path: {path}: {message}")]
+    InvalidPath { path: String, message: String },
+
     #[error("Git operation failed: {message}")]
     OperationFailed { message: String },
 
@@ -45,6 +51,8 @@ impl ShardsError for GitError {
             GitError::BranchNotFound { .. } => "BRANCH_NOT_FOUND",
             GitError::WorktreeAlreadyExists { .. } => "WORKTREE_ALREADY_EXISTS",
             GitError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
+            GitError::WorktreeRemovalFailed { .. } => "WORKTREE_REMOVAL_FAILED",
+            GitError::InvalidPath { .. } => "INVALID_PATH",
             GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",

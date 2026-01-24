@@ -5,6 +5,8 @@ use std::path::Path;
 
 #[cfg(not(target_os = "macos"))]
 use tracing::debug;
+#[cfg(target_os = "macos")]
+use tracing::warn;
 
 // Re-export common utilities for backward compatibility and external use
 pub use crate::terminal::common::escape::{
@@ -194,13 +196,25 @@ pub fn close_terminal_window(terminal_type: &TerminalType, window_id: Option<&st
     let resolved_type = match terminal_type {
         TerminalType::Native => match registry::detect_terminal() {
             Ok(t) => t,
-            Err(_) => return, // No terminal to close
+            Err(e) => {
+                warn!(
+                    event = "core.terminal.close_detect_failed",
+                    error = %e,
+                    "Could not detect terminal type during close - window may remain open"
+                );
+                return;
+            }
         },
         t => t.clone(),
     };
 
     let Some(backend) = registry::get_backend(&resolved_type) else {
-        return; // No backend found, nothing to close
+        warn!(
+            event = "core.terminal.close_no_backend",
+            terminal_type = %resolved_type,
+            "No backend found for terminal type - window may remain open"
+        );
+        return;
     };
 
     backend.close_window(window_id);

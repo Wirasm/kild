@@ -57,6 +57,8 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("list", _)) => handle_list_command(),
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
         Some(("restart", sub_matches)) => handle_restart_command(sub_matches),
+        Some(("open", sub_matches)) => handle_open_command(sub_matches),
+        Some(("stop", sub_matches)) => handle_stop_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("cleanup", sub_matches)) => handle_cleanup_command(sub_matches),
         Some(("health", sub_matches)) => handle_health_command(sub_matches),
@@ -167,10 +169,15 @@ fn handle_destroy_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
+    let force = matches.get_flag("force");
 
-    info!(event = "cli.destroy_started", branch = branch);
+    info!(
+        event = "cli.destroy_started",
+        branch = branch,
+        force = force
+    );
 
-    match session_handler::destroy_session(branch) {
+    match session_handler::destroy_session(branch, force) {
         Ok(()) => {
             println!("✅ Shard '{}' destroyed successfully!", branch);
 
@@ -197,6 +204,14 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
     let branch = matches.get_one::<String>("branch").unwrap();
     let agent_override = matches.get_one::<String>("agent").cloned();
 
+    eprintln!(
+        "⚠️  'restart' is deprecated. Use 'shards stop {}' then 'shards open {}' for similar behavior.",
+        branch, branch
+    );
+    eprintln!(
+        "   Note: 'restart' kills the existing process. 'open' is additive (keeps existing terminals)."
+    );
+    warn!(event = "cli.restart_deprecated", branch = branch);
     info!(event = "cli.restart_started", branch = branch, agent_override = ?agent_override);
 
     match session_handler::restart_session(branch, agent_override) {
@@ -215,6 +230,63 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         Err(e) => {
             eprintln!("❌ Failed to restart shard '{}': {}", branch, e);
             error!(event = "cli.restart_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required")?;
+    let agent_override = matches.get_one::<String>("agent").cloned();
+
+    info!(event = "cli.open_started", branch = branch, agent_override = ?agent_override);
+
+    match session_handler::open_session(branch, agent_override) {
+        Ok(session) => {
+            println!("✅ Opened new agent in shard '{}'", branch);
+            println!("   Agent: {}", session.agent);
+            if let Some(pid) = session.process_id {
+                println!("   PID: {}", pid);
+            }
+            info!(
+                event = "cli.open_completed",
+                branch = branch,
+                session_id = session.id
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to open shard '{}': {}", branch, e);
+            error!(event = "cli.open_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required")?;
+
+    info!(event = "cli.stop_started", branch = branch);
+
+    match session_handler::stop_session(branch) {
+        Ok(()) => {
+            println!("✅ Stopped shard '{}'", branch);
+            println!(
+                "   Shard preserved. Use 'shards open {}' to restart.",
+                branch
+            );
+            info!(event = "cli.stop_completed", branch = branch);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to stop shard '{}': {}", branch, e);
+            error!(event = "cli.stop_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -378,7 +450,7 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     let branch = matches.get_one::<String>("branch");
     let json_output = matches.get_flag("json");
     let watch_mode = matches.get_flag("watch");
-    let interval = matches.get_one::<u64>("interval").copied().unwrap_or(5);
+    let interval = *matches.get_one::<u64>("interval").unwrap_or(&5);
 
     info!(
         event = "cli.health_started",
@@ -405,14 +477,11 @@ fn run_health_watch_loop(
     let config = load_config_with_warning();
 
     loop {
-        // Clear screen (ANSI escape)
         print!("\x1B[2J\x1B[1;1H");
         io::stdout().flush()?;
 
-        // Get health output and display it
         let health_output = run_health_once(branch, json_output)?;
 
-        // Save snapshot if history is enabled and we got all-sessions output
         if config.health.history_enabled
             && let Some(output) = health_output
         {

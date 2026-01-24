@@ -55,6 +55,40 @@ pub fn build_cli() -> Command {
                         .required(true)
                         .index(1)
                 )
+                .arg(
+                    Arg::new("force")
+                        .long("force")
+                        .short('f')
+                        .help("Force destroy, bypassing git uncommitted changes check")
+                        .action(ArgAction::SetTrue)
+                )
+        )
+        .subcommand(
+            Command::new("open")
+                .about("Open a new agent terminal in an existing shard (additive)")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name or shard identifier")
+                        .required(true)
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("agent")
+                        .long("agent")
+                        .short('a')
+                        .help("Agent to launch (default: shard's original agent)")
+                        .value_parser(["claude", "kiro", "gemini", "codex", "aether"])
+                )
+        )
+        .subcommand(
+            Command::new("stop")
+                .about("Stop agent(s) in a shard without destroying the worktree")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name or shard identifier")
+                        .required(true)
+                        .index(1)
+                )
         )
         .subcommand(
             Command::new("restart")

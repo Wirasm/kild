@@ -47,7 +47,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
         // List state - show shards with action buttons
         let item_count = state.displays.len();
         let displays = state.displays.clone();
-        let relaunch_error = state.relaunch_error.clone();
+        let open_error = state.open_error.clone();
+        let stop_error = state.stop_error.clone();
 
         div().flex_1().child(
             uniform_list(
@@ -64,17 +65,19 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                 ProcessStatus::Unknown => rgb(0xffa500), // Orange
                             };
 
-                            // Check if this row has a relaunch error
-                            let row_error = relaunch_error
+                            // Check if this row has an open or stop error
+                            let row_error = open_error
                                 .as_ref()
-                                .filter(|(b, _)| b == &branch)
-                                .map(|(_, e)| e.clone());
+                                .filter(|e| e.branch == branch)
+                                .or_else(|| stop_error.as_ref().filter(|e| e.branch == branch))
+                                .map(|e| e.message.clone());
 
-                            // Only show relaunch button when not running
-                            let show_relaunch = display.status != ProcessStatus::Running;
+                            // Show Open button when stopped, Stop button when running
+                            let is_running = display.status == ProcessStatus::Running;
 
                             // Clone branch for button closures
-                            let branch_for_relaunch = branch.clone();
+                            let branch_for_open = branch.clone();
+                            let branch_for_stop = branch.clone();
                             let branch_for_destroy = branch.clone();
 
                             div()
@@ -107,11 +110,11 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                 .text_color(rgb(0x666666))
                                                 .child(display.session.project_id.clone()),
                                         )
-                                        // Relaunch button [▶] - only shown when not running
-                                        .when(show_relaunch, |row| {
+                                        // Open button [▶] - shown when NOT running
+                                        .when(!is_running, |row| {
                                             row.child(
                                                 div()
-                                                    .id(("relaunch-btn", ix))
+                                                    .id(("open-btn", ix))
                                                     .px_2()
                                                     .py_1()
                                                     .bg(rgb(0x444444))
@@ -121,14 +124,39 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                     .on_mouse_up(
                                                         gpui::MouseButton::Left,
                                                         cx.listener(move |view, _, _, cx| {
-                                                            view.on_relaunch_click(
-                                                                &branch_for_relaunch,
+                                                            view.on_open_click(
+                                                                &branch_for_open,
                                                                 cx,
                                                             );
                                                         }),
                                                     )
                                                     .child(
                                                         div().text_color(rgb(0xffffff)).child("▶"),
+                                                    ),
+                                            )
+                                        })
+                                        // Stop button [⏹] - shown when running
+                                        .when(is_running, |row| {
+                                            row.child(
+                                                div()
+                                                    .id(("stop-btn", ix))
+                                                    .px_2()
+                                                    .py_1()
+                                                    .bg(rgb(0x444488))
+                                                    .hover(|style| style.bg(rgb(0x555599)))
+                                                    .rounded_md()
+                                                    .cursor_pointer()
+                                                    .on_mouse_up(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(move |view, _, _, cx| {
+                                                            view.on_stop_click(
+                                                                &branch_for_stop,
+                                                                cx,
+                                                            );
+                                                        }),
+                                                    )
+                                                    .child(
+                                                        div().text_color(rgb(0xffffff)).child("⏹"),
                                                     ),
                                             )
                                         })
@@ -154,7 +182,7 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                 .child(div().text_color(rgb(0xffffff)).child("×")),
                                         ),
                                 )
-                                // Error message (if relaunch failed for this row)
+                                // Error message (if open/stop failed for this row)
                                 .when_some(row_error, |this, error| {
                                     this.child(div().px_4().pb_2().child(
                                         div().text_sm().text_color(rgb(0xff6b6b)).child(error),
