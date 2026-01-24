@@ -1,6 +1,6 @@
 //! Main view for shards-ui.
 //!
-//! Root view that composes header, shard list, and create dialog.
+//! Root view that composes header, shard list, create dialog, and confirm dialog.
 //! Handles keyboard input and dialog state management.
 
 use gpui::{
@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::actions;
 use crate::state::AppState;
-use crate::views::{create_dialog, shard_list};
+use crate::views::{confirm_dialog, create_dialog, shard_list};
 
 /// Main application view that composes the shard list, header, and create dialog.
 ///
@@ -83,6 +83,65 @@ impl MainView {
         cx.notify();
     }
 
+    /// Handle click on the Refresh button in header.
+    fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.refresh_clicked");
+        self.state.clear_relaunch_error();
+        self.state.refresh_sessions();
+        cx.notify();
+    }
+
+    /// Handle click on the destroy button [×] in a shard row.
+    pub fn on_destroy_click(&mut self, branch: &str, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.destroy_dialog.opened", branch = branch);
+        self.state.confirm_target_branch = Some(branch.to_string());
+        self.state.show_confirm_dialog = true;
+        cx.notify();
+    }
+
+    /// Handle confirm button click in destroy dialog.
+    pub fn on_confirm_destroy(&mut self, cx: &mut Context<Self>) {
+        let Some(branch) = self.state.confirm_target_branch.clone() else {
+            tracing::warn!(event = "ui.confirm_destroy.no_target");
+            return;
+        };
+
+        match actions::destroy_shard(&branch) {
+            Ok(()) => {
+                self.state.reset_confirm_dialog();
+                self.state.refresh_sessions();
+            }
+            Err(e) => {
+                self.state.confirm_error = Some(e);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Handle cancel button click in destroy dialog.
+    pub fn on_confirm_cancel(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.confirm_dialog.cancelled");
+        self.state.reset_confirm_dialog();
+        cx.notify();
+    }
+
+    /// Handle click on the relaunch button [▶] in a shard row.
+    pub fn on_relaunch_click(&mut self, branch: &str, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.relaunch_clicked", branch = branch);
+        self.state.clear_relaunch_error();
+
+        match actions::relaunch_shard(branch) {
+            Ok(_session) => {
+                self.state.refresh_sessions();
+            }
+            Err(e) => {
+                // NO SILENT FAILURES - show error inline
+                self.state.relaunch_error = Some((branch.to_string(), e));
+            }
+        }
+        cx.notify();
+    }
+
     /// Handle keyboard input when the create dialog is open.
     ///
     /// Handles branch name input (alphanumeric, -, _, /, space converts to hyphen),
@@ -145,7 +204,7 @@ impl Render for MainView {
             .flex()
             .flex_col()
             .bg(rgb(0x1e1e1e))
-            // Header with title and Create button
+            // Header with title, Refresh button, and Create button
             .child(
                 div()
                     .px_4()
@@ -162,26 +221,51 @@ impl Render for MainView {
                     )
                     .child(
                         div()
-                            .id("create-header-btn")
-                            .px_3()
-                            .py_1()
-                            .bg(rgb(0x4a9eff))
-                            .hover(|style| style.bg(rgb(0x5aafff)))
-                            .rounded_md()
-                            .cursor_pointer()
-                            .on_mouse_up(
-                                gpui::MouseButton::Left,
-                                cx.listener(|view, _, _, cx| {
-                                    view.on_create_button_click(cx);
-                                }),
-                            )
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            // Refresh button - TEXT label, gray background (secondary action)
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .child(div().text_color(rgb(0xffffff)).child("+"))
-                                    .child(div().text_color(rgb(0xffffff)).child("Create")),
+                                    .id("refresh-btn")
+                                    .px_3()
+                                    .py_1()
+                                    .bg(rgb(0x444444))
+                                    .hover(|style| style.bg(rgb(0x555555)))
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .on_mouse_up(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|view, _, _, cx| {
+                                            view.on_refresh_click(cx);
+                                        }),
+                                    )
+                                    .child(div().text_color(rgb(0xffffff)).child("Refresh")),
+                            )
+                            // Create button - blue/accent background (primary action)
+                            .child(
+                                div()
+                                    .id("create-header-btn")
+                                    .px_3()
+                                    .py_1()
+                                    .bg(rgb(0x4a9eff))
+                                    .hover(|style| style.bg(rgb(0x5aafff)))
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .on_mouse_up(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|view, _, _, cx| {
+                                            view.on_create_button_click(cx);
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(div().text_color(rgb(0xffffff)).child("+"))
+                                            .child(div().text_color(rgb(0xffffff)).child("Create")),
+                                    ),
                             ),
                     ),
             )
@@ -190,6 +274,10 @@ impl Render for MainView {
             // Create dialog (conditional)
             .when(self.state.show_create_dialog, |this| {
                 this.child(create_dialog::render_create_dialog(&self.state, cx))
+            })
+            // Confirm dialog (conditional)
+            .when(self.state.show_confirm_dialog, |this| {
+                this.child(confirm_dialog::render_confirm_dialog(&self.state, cx))
             })
     }
 }

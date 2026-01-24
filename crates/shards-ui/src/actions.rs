@@ -1,7 +1,7 @@
 //! Business logic handlers for shards-ui.
 //!
 //! This module contains functions that interact with shards-core
-//! to perform operations like creating and listing shards.
+//! to perform operations like creating, destroying, relaunching, and listing shards.
 
 use shards_core::{CreateSessionRequest, Session, ShardsConfig, session_ops};
 
@@ -77,6 +77,46 @@ pub fn refresh_sessions() -> (Vec<ShardDisplay>, Option<String>) {
         Err(e) => {
             tracing::error!(event = "ui.refresh_sessions.failed", error = %e);
             (Vec::new(), Some(e.to_string()))
+        }
+    }
+}
+
+/// Destroy a shard by branch name.
+///
+/// Removes the session, worktree, and kills any running process.
+pub fn destroy_shard(branch: &str) -> Result<(), String> {
+    tracing::info!(event = "ui.destroy_shard.started", branch = branch);
+
+    match session_ops::destroy_session(branch) {
+        Ok(()) => {
+            tracing::info!(event = "ui.destroy_shard.completed", branch = branch);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(event = "ui.destroy_shard.failed", branch = branch, error = %e);
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Relaunch agent terminal in existing worktree.
+///
+/// Kills the old process (if any) and spawns a new terminal.
+pub fn relaunch_shard(branch: &str) -> Result<Session, String> {
+    tracing::info!(event = "ui.relaunch_shard.started", branch = branch);
+
+    match session_ops::restart_session(branch, None) {
+        Ok(session) => {
+            tracing::info!(
+                event = "ui.relaunch_shard.completed",
+                branch = branch,
+                process_id = session.process_id
+            );
+            Ok(session)
+        }
+        Err(e) => {
+            tracing::error!(event = "ui.relaunch_shard.failed", branch = branch, error = %e);
+            Err(e.to_string())
         }
     }
 }

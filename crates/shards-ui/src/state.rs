@@ -98,6 +98,14 @@ pub struct AppState {
     pub show_create_dialog: bool,
     pub create_form: CreateFormState,
     pub create_error: Option<String>,
+
+    // Confirm dialog state
+    pub show_confirm_dialog: bool,
+    pub confirm_target_branch: Option<String>,
+    pub confirm_error: Option<String>,
+
+    // Relaunch error state (shown inline per-row)
+    pub relaunch_error: Option<(String, String)>, // (branch, error_message)
 }
 
 impl AppState {
@@ -111,6 +119,10 @@ impl AppState {
             show_create_dialog: false,
             create_form: CreateFormState::default(),
             create_error: None,
+            show_confirm_dialog: false,
+            confirm_target_branch: None,
+            confirm_error: None,
+            relaunch_error: None,
         }
     }
 
@@ -125,6 +137,18 @@ impl AppState {
     pub fn reset_create_form(&mut self) {
         self.create_form = CreateFormState::default();
         self.create_error = None;
+    }
+
+    /// Reset the confirm dialog to default state.
+    pub fn reset_confirm_dialog(&mut self) {
+        self.show_confirm_dialog = false;
+        self.confirm_target_branch = None;
+        self.confirm_error = None;
+    }
+
+    /// Clear any relaunch error.
+    pub fn clear_relaunch_error(&mut self) {
+        self.relaunch_error = None;
     }
 }
 
