@@ -482,12 +482,12 @@ fn run_health_watch_loop(
 
         let health_output = run_health_once(branch, json_output)?;
 
-        if config.health.history_enabled {
-            if let Some(output) = health_output {
-                let snapshot = health::HealthSnapshot::from(&output);
-                if let Err(e) = health::save_snapshot(&snapshot) {
-                    info!(event = "cli.health_history_save_failed", error = %e);
-                }
+        if config.health.history_enabled
+            && let Some(output) = health_output
+        {
+            let snapshot = health::HealthSnapshot::from(&output);
+            if let Err(e) = health::save_snapshot(&snapshot) {
+                info!(event = "cli.health_history_save_failed", error = %e);
             }
         }
 
