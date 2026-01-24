@@ -386,4 +386,42 @@ history_enabled = true
         // Project-set values should be used
         assert!(merged.health.history_enabled);
     }
+
+    #[test]
+    fn test_terminal_config_merge_always_takes_override() {
+        // Documents current behavior: terminal spawn_delay_ms and max_retry_attempts
+        // always take the override config's value (even if it's the default).
+        // This is a known limitation - user config values can be overwritten by
+        // project config defaults when project config lacks a [terminal] section.
+        let user_config: ShardsConfig = toml::from_str(
+            r#"
+[terminal]
+spawn_delay_ms = 2000
+max_retry_attempts = 10
+"#,
+        )
+        .unwrap();
+
+        // Project config with no terminal section - will have serde defaults (1000, 5)
+        let project_config: ShardsConfig = toml::from_str(
+            r#"
+[agent]
+default = "claude"
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_configs(user_config, project_config);
+
+        // Current behavior: project config's defaults (1000, 5) override user's (2000, 10)
+        // This documents the limitation rather than testing ideal behavior
+        assert_eq!(
+            merged.terminal.spawn_delay_ms, 1000,
+            "current behavior: override config always wins, even if it's a default"
+        );
+        assert_eq!(
+            merged.terminal.max_retry_attempts, 5,
+            "current behavior: override config always wins, even if it's a default"
+        );
+    }
 }
