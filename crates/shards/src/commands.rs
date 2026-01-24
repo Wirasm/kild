@@ -204,7 +204,6 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
     let branch = matches.get_one::<String>("branch").unwrap();
     let agent_override = matches.get_one::<String>("agent").cloned();
 
-    // Deprecation warning - restart kills old process, open is additive
     eprintln!(
         "⚠️  'restart' is deprecated. Use 'shards stop {}' then 'shards open {}' for similar behavior.",
         branch, branch
@@ -213,10 +212,8 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         "   Note: 'restart' kills the existing process. 'open' is additive (keeps existing terminals)."
     );
     warn!(event = "cli.restart_deprecated", branch = branch);
-
     info!(event = "cli.restart_started", branch = branch, agent_override = ?agent_override);
 
-    // Use restart_session which kills old process (maintains original restart semantics)
     match session_handler::restart_session(branch, agent_override) {
         Ok(session) => {
             println!("✅ Shard '{}' restarted successfully!", branch);
@@ -453,7 +450,7 @@ fn handle_health_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     let branch = matches.get_one::<String>("branch");
     let json_output = matches.get_flag("json");
     let watch_mode = matches.get_flag("watch");
-    let interval = matches.get_one::<u64>("interval").copied().unwrap_or(5);
+    let interval = *matches.get_one::<u64>("interval").unwrap_or(&5);
 
     info!(
         event = "cli.health_started",
@@ -480,20 +477,17 @@ fn run_health_watch_loop(
     let config = load_config_with_warning();
 
     loop {
-        // Clear screen (ANSI escape)
         print!("\x1B[2J\x1B[1;1H");
         io::stdout().flush()?;
 
-        // Get health output and display it
         let health_output = run_health_once(branch, json_output)?;
 
-        // Save snapshot if history is enabled and we got all-sessions output
-        if config.health.history_enabled
-            && let Some(output) = health_output
-        {
-            let snapshot = health::HealthSnapshot::from(&output);
-            if let Err(e) = health::save_snapshot(&snapshot) {
-                info!(event = "cli.health_history_save_failed", error = %e);
+        if config.health.history_enabled {
+            if let Some(output) = health_output {
+                let snapshot = health::HealthSnapshot::from(&output);
+                if let Err(e) = health::save_snapshot(&snapshot) {
+                    info!(event = "cli.health_history_save_failed", error = %e);
+                }
             }
         }
 

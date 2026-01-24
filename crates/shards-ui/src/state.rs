@@ -32,21 +32,22 @@ pub struct ShardDisplay {
 
 impl ShardDisplay {
     pub fn from_session(session: Session) -> Self {
-        let status = session.process_id.map_or(ProcessStatus::Stopped, |pid| {
-            match shards_core::process::is_process_running(pid) {
+        let status = match session.process_id {
+            None => ProcessStatus::Stopped,
+            Some(pid) => match shards_core::process::is_process_running(pid) {
                 Ok(true) => ProcessStatus::Running,
                 Ok(false) => ProcessStatus::Stopped,
                 Err(e) => {
                     tracing::warn!(
                         event = "ui.shard_list.process_check_failed",
                         pid = pid,
-                        branch = &session.branch,
+                        branch = session.branch,
                         error = %e
                     );
                     ProcessStatus::Unknown
                 }
-            }
-        });
+            },
+        };
 
         Self { session, status }
     }

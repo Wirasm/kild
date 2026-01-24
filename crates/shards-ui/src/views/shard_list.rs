@@ -69,13 +69,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                             let row_error = open_error
                                 .as_ref()
                                 .filter(|e| e.branch == branch)
-                                .map(|e| e.message.clone())
-                                .or_else(|| {
-                                    stop_error
-                                        .as_ref()
-                                        .filter(|e| e.branch == branch)
-                                        .map(|e| e.message.clone())
-                                });
+                                .or_else(|| stop_error.as_ref().filter(|e| e.branch == branch))
+                                .map(|e| e.message.clone());
 
                             // Show Open button when stopped, Stop button when running
                             let is_running = display.status == ProcessStatus::Running;

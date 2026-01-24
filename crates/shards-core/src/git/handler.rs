@@ -372,40 +372,34 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
             && branch_name.starts_with("worktree-")
         {
             match repo.find_branch(branch_name, BranchType::Local) {
-                Ok(mut branch) => {
-                    match branch.delete() {
-                        Ok(()) => {
-                            info!(
-                                event = "core.git.branch.delete_completed",
+                Ok(mut branch) => match branch.delete() {
+                    Ok(()) => {
+                        info!(
+                            event = "core.git.branch.delete_completed",
+                            branch = branch_name,
+                            worktree_path = %worktree_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        if error_msg.contains("not found") || error_msg.contains("does not exist") {
+                            debug!(
+                                event = "core.git.branch.delete_race_condition",
                                 branch = branch_name,
-                                worktree_path = %worktree_path.display()
+                                worktree_path = %worktree_path.display(),
+                                message = "Branch was deleted by another process"
+                            );
+                        } else {
+                            warn!(
+                                event = "core.git.branch.delete_failed",
+                                branch = branch_name,
+                                worktree_path = %worktree_path.display(),
+                                error = %e,
+                                error_type = "concurrent_operation_or_permission"
                             );
                         }
-                        Err(e) => {
-                            // Handle potential race conditions where branch might be deleted concurrently
-                            let error_msg = e.to_string();
-                            if error_msg.contains("not found")
-                                || error_msg.contains("does not exist")
-                            {
-                                debug!(
-                                    event = "core.git.branch.delete_race_condition",
-                                    branch = branch_name,
-                                    worktree_path = %worktree_path.display(),
-                                    message = "Branch was deleted by another process"
-                                );
-                            } else {
-                                warn!(
-                                    event = "core.git.branch.delete_failed",
-                                    branch = branch_name,
-                                    worktree_path = %worktree_path.display(),
-                                    error = %e,
-                                    error_type = "concurrent_operation_or_permission"
-                                );
-                            }
-                            // Don't fail the whole operation if branch deletion fails
-                        }
                     }
-                }
+                },
                 Err(e) => {
                     debug!(
                         event = "core.git.branch.not_found_for_cleanup",
@@ -414,7 +408,6 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
                         error = %e,
                         message = "Branch already deleted or never existed"
                     );
-                    // Branch already gone or not found - that's fine
                 }
             }
         }
@@ -455,78 +448,56 @@ pub fn remove_worktree_force(worktree_path: &Path) -> Result<(), GitError> {
     );
 
     // Try to open the worktree directly first to get the main repo
-    let repo = if let Ok(repo) = Repository::open(worktree_path) {
-        // If we can open it as a repo, get the main repository
-        if let Some(main_repo_path) = repo
-            .path()
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-        {
-            match Repository::open(&main_repo_path) {
-                Ok(r) => Some(r),
-                Err(e) => {
-                    warn!(
-                        event = "core.git.worktree.remove_force_main_repo_open_failed",
-                        path = %main_repo_path.display(),
-                        error = %e,
-                    );
-                    None
+    let repo =
+        Repository::open(worktree_path)
+            .ok()
+            .and_then(|repo| {
+                repo.path()
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf())
+                    .and_then(|main_repo_path| {
+                        Repository::open(&main_repo_path)
+                            .map_err(|e| {
+                                warn!(
+                                    event = "core.git.worktree.remove_force_main_repo_open_failed",
+                                    path = %main_repo_path.display(),
+                                    error = %e,
+                                );
+                            })
+                            .ok()
+                    })
+                    .or(Some(repo))
+            })
+            .or_else(|| {
+                // Fallback: find main repository by searching parent directories for .git
+                let mut current_path = worktree_path;
+                while let Some(parent) = current_path.parent() {
+                    if parent.join(".git").exists() && parent.join(".git").is_dir() {
+                        return Repository::open(parent).map_err(|e| {
+                        warn!(
+                            event = "core.git.worktree.remove_force_fallback_repo_open_failed",
+                            path = %parent.display(),
+                            error = %e,
+                        );
+                    }).ok();
+                    }
+                    current_path = parent;
                 }
-            }
-        } else {
-            Some(repo)
-        }
-    } else {
-        // Fallback: try to find the main repository by looking for .git in parent directories
-        let mut current_path = worktree_path;
-        let mut repo_path = None;
-
-        while let Some(parent) = current_path.parent() {
-            if parent.join(".git").exists() && parent.join(".git").is_dir() {
-                repo_path = Some(parent);
-                break;
-            }
-            current_path = parent;
-        }
-
-        repo_path.and_then(|p| match Repository::open(p) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                warn!(
-                    event = "core.git.worktree.remove_force_fallback_repo_open_failed",
-                    path = %p.display(),
-                    error = %e,
-                );
                 None
-            }
-        })
-    };
+            });
 
     // Try to prune from git if we found the repo
     if let Some(repo) = repo {
-        let worktrees = match repo.worktrees() {
-            Ok(wt) => Some(wt),
-            Err(e) => {
-                warn!(
-                    event = "core.git.worktree.remove_force_list_worktrees_failed",
-                    path = %worktree_path.display(),
-                    error = %e,
-                );
-                None
-            }
-        };
-        if let Some(worktrees) = worktrees {
+        if let Ok(worktrees) = repo.worktrees() {
             for worktree_name in worktrees.iter().flatten() {
                 if let Ok(worktree) = repo.find_worktree(worktree_name)
                     && worktree.path() == worktree_path
                 {
-                    // Try to prune with force options
                     let mut prune_options = git2::WorktreePruneOptions::new();
                     prune_options.valid(true);
                     prune_options.working_tree(true);
 
-                    // Ignore prune errors - we'll force delete anyway
                     if let Err(e) = worktree.prune(Some(&mut prune_options)) {
                         warn!(
                             event = "core.git.worktree.prune_failed_force_continue",
@@ -537,6 +508,11 @@ pub fn remove_worktree_force(worktree_path: &Path) -> Result<(), GitError> {
                     break;
                 }
             }
+        } else {
+            warn!(
+                event = "core.git.worktree.remove_force_list_worktrees_failed",
+                path = %worktree_path.display(),
+            );
         }
     }
 

@@ -16,27 +16,27 @@ fn capture_process_metadata(
     spawn_result: &SpawnResult,
     event_prefix: &str,
 ) -> (Option<String>, Option<u64>) {
-    if let Some(pid) = spawn_result.process_id {
-        match crate::process::get_process_info(pid) {
-            Ok(info) => (Some(info.name), Some(info.start_time)),
-            Err(e) => {
-                warn!(
-                    event = %format!("core.session.{}_process_info_failed", event_prefix),
-                    pid = pid,
-                    error = %e,
-                    "Failed to get process metadata after spawn - using spawn result metadata"
-                );
-                (
-                    spawn_result.process_name.clone(),
-                    spawn_result.process_start_time,
-                )
-            }
-        }
-    } else {
-        (
+    let Some(pid) = spawn_result.process_id else {
+        return (
             spawn_result.process_name.clone(),
             spawn_result.process_start_time,
-        )
+        );
+    };
+
+    match crate::process::get_process_info(pid) {
+        Ok(info) => (Some(info.name), Some(info.start_time)),
+        Err(e) => {
+            warn!(
+                event = %format!("core.session.{}_process_info_failed", event_prefix),
+                pid = pid,
+                error = %e,
+                "Failed to get process metadata after spawn - using spawn result metadata"
+            );
+            (
+                spawn_result.process_name.clone(),
+                spawn_result.process_start_time,
+            )
+        }
     }
 }
 
@@ -558,8 +558,8 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
 
     info!(
         event = "core.session.open_found",
-        session_id = &session.id,
-        branch = &session.branch
+        session_id = session.id,
+        branch = session.branch
     );
 
     // 2. Verify worktree still exists
@@ -571,7 +571,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
 
     // 3. Determine agent
     let agent = agent_override.unwrap_or_else(|| session.agent.clone());
-    info!(event = "core.session.open_agent_selected", agent = &agent);
+    info!(event = "core.session.open_agent_selected", agent = agent);
 
     // Warn if agent CLI is not available in PATH
     if let Some(false) = agents::is_agent_available(&agent) {
@@ -629,8 +629,8 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
 
     info!(
         event = "core.session.open_completed",
-        session_id = &session.id,
-        process_id = ?session.process_id
+        session_id = session.id,
+        process_id = session.process_id
     );
 
     Ok(session)
@@ -654,8 +654,8 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.stop_found",
-        session_id = &session.id,
-        branch = &session.branch
+        session_id = session.id,
+        branch = session.branch
     );
 
     // 2. Close terminal (fire-and-forget, best-effort)
@@ -696,22 +696,24 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         }
     }
 
-    // 4. Delete PID file so next open() won't read stale PID
+    // 4. Delete PID file so next open() won't read stale PID (best-effort)
     let pid_file = get_pid_file_path(&config.shards_dir, &session.id);
-    if let Err(e) = delete_pid_file(&pid_file) {
-        // Best-effort - don't fail if missing
-        debug!(
-            event = "core.session.stop_pid_file_cleanup_failed",
-            session_id = &session.id,
-            pid_file = %pid_file.display(),
-            error = %e
-        );
-    } else {
-        debug!(
-            event = "core.session.stop_pid_file_cleaned",
-            session_id = &session.id,
-            pid_file = %pid_file.display()
-        );
+    match delete_pid_file(&pid_file) {
+        Ok(()) => {
+            debug!(
+                event = "core.session.stop_pid_file_cleaned",
+                session_id = session.id,
+                pid_file = %pid_file.display()
+            );
+        }
+        Err(e) => {
+            debug!(
+                event = "core.session.stop_pid_file_cleanup_failed",
+                session_id = session.id,
+                pid_file = %pid_file.display(),
+                error = %e
+            );
+        }
     }
 
     // 5. Clear process info and set status to Stopped
@@ -726,7 +728,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.stop_completed",
-        session_id = &session.id
+        session_id = session.id
     );
 
     Ok(())
