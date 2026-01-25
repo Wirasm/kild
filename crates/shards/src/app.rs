@@ -45,7 +45,7 @@ pub fn build_cli() -> Command {
                     Arg::new("note")
                         .long("note")
                         .short('n')
-                        .help("Description of what this shard is for")
+                        .help("Description of what this shard is for (shown in list/status output)")
                 )
         )
         .subcommand(
@@ -315,5 +315,61 @@ mod tests {
         let health_matches = matches.subcommand_matches("health").unwrap();
         assert!(health_matches.get_flag("watch"));
         assert_eq!(*health_matches.get_one::<u64>("interval").unwrap(), 5);
+    }
+
+    #[test]
+    fn test_cli_create_with_note() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "shards",
+            "create",
+            "feature-branch",
+            "--note",
+            "This is a test note",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert_eq!(
+            create_matches.get_one::<String>("branch").unwrap(),
+            "feature-branch"
+        );
+        assert_eq!(
+            create_matches.get_one::<String>("note").unwrap(),
+            "This is a test note"
+        );
+    }
+
+    #[test]
+    fn test_cli_create_with_note_short_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "shards",
+            "create",
+            "feature-branch",
+            "-n",
+            "Short note",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert_eq!(
+            create_matches.get_one::<String>("note").unwrap(),
+            "Short note"
+        );
+    }
+
+    #[test]
+    fn test_cli_create_without_note() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "create", "feature-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        // Note should be None when not specified
+        assert!(create_matches.get_one::<String>("note").is_none());
     }
 }

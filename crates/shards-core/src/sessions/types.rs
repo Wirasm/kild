@@ -81,8 +81,8 @@ pub struct Session {
 
     /// Optional description of what this shard is for.
     ///
-    /// Set via `--note` flag during `shards create`. Shown truncated in list,
-    /// full text in status output.
+    /// Set via `--note` flag during `shards create`. Shown truncated to 30 chars
+    /// in list output, and truncated to 47 chars in status output.
     #[serde(default)]
     pub note: Option<String>,
 }
@@ -206,6 +206,58 @@ mod tests {
         let session: Session = serde_json::from_str(json_without_note).unwrap();
         assert_eq!(session.note, None);
         assert_eq!(session.branch, "branch");
+    }
+
+    #[test]
+    fn test_session_with_note_serialization_roundtrip() {
+        // Test that sessions WITH notes serialize and deserialize correctly
+        let json_with_note = r#"{
+            "id": "test/branch",
+            "project_id": "test",
+            "branch": "branch",
+            "worktree_path": "/tmp/test",
+            "agent": "claude",
+            "status": "Active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "port_range_start": 3000,
+            "port_range_end": 3009,
+            "port_count": 10,
+            "process_id": null,
+            "process_name": null,
+            "process_start_time": null,
+            "command": "claude-code",
+            "note": "Implementing auth feature with OAuth2 support"
+        }"#;
+
+        let session: Session = serde_json::from_str(json_with_note).unwrap();
+        assert_eq!(
+            session.note,
+            Some("Implementing auth feature with OAuth2 support".to_string())
+        );
+
+        // Verify round-trip preserves note
+        let serialized = serde_json::to_string(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.note, session.note);
+    }
+
+    #[test]
+    fn test_create_session_request_with_note() {
+        // Test CreateSessionRequest properly includes note
+        let request_with_note = CreateSessionRequest::new(
+            "feature-auth".to_string(),
+            Some("claude".to_string()),
+            Some("OAuth2 implementation".to_string()),
+        );
+        assert_eq!(
+            request_with_note.note,
+            Some("OAuth2 implementation".to_string())
+        );
+
+        // Test request without note
+        let request_without_note =
+            CreateSessionRequest::new("feature-auth".to_string(), Some("claude".to_string()), None);
+        assert_eq!(request_without_note.note, None);
     }
 
     #[test]
