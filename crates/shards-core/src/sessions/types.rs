@@ -11,15 +11,6 @@ fn default_port_end() -> u16 {
 fn default_port_count() -> u16 {
     0
 }
-fn default_command() -> String {
-    String::default()
-}
-fn default_last_activity() -> Option<String> {
-    None
-}
-fn default_note() -> Option<String> {
-    None
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
@@ -75,7 +66,7 @@ pub struct Session {
     /// "kiro-cli chat --trust-all-tools" or "claude-code"
     ///
     /// Empty string for sessions created before this field was added.
-    #[serde(default = "default_command")]
+    #[serde(default)]
     pub command: String,
 
     /// Timestamp of last detected activity for health monitoring.
@@ -85,14 +76,14 @@ pub struct Session {
     /// Initially set to session creation time, updated by activity monitoring.
     ///
     /// Format: RFC3339 timestamp string (e.g., "2024-01-01T12:00:00Z")
-    #[serde(default = "default_last_activity")]
+    #[serde(default)]
     pub last_activity: Option<String>,
 
     /// Optional description of what this shard is for.
     ///
     /// Set via `--note` flag during `shards create`. Shown truncated in list,
     /// full text in status output.
-    #[serde(default = "default_note")]
+    #[serde(default)]
     pub note: Option<String>,
 }
 
