@@ -177,12 +177,19 @@ fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Err
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
 
+    // Validate branch name (no emoji - this command is for shell integration)
+    if !is_valid_branch_name(branch) {
+        eprintln!("Invalid branch name: {}", branch);
+        error!(event = "cli.cd_invalid_branch", branch = branch);
+        return Err("Invalid branch name".into());
+    }
+
     info!(event = "cli.cd_started", branch = branch);
 
     match session_handler::get_session(branch) {
         Ok(session) => {
-            // Print only the path - no formatting, no newline prefix
-            // This is critical for shell integration: cd "$(shards cd branch)"
+            // Print only the path - no formatting, no leading text
+            // This enables shell integration: cd "$(shards cd branch)"
             println!("{}", session.worktree_path.display());
 
             info!(
@@ -194,7 +201,7 @@ fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Err
             Ok(())
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Failed to get path for shard '{}': {}", branch, e);
 
             error!(
                 event = "cli.cd_failed",
@@ -202,6 +209,7 @@ fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Err
                 error = %e
             );
 
+            events::log_app_error(&e);
             Err(e.into())
         }
     }

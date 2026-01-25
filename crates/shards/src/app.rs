@@ -551,6 +551,6 @@ mod tests {
     fn test_cli_cd_requires_branch() {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["shards", "cd"]);
-        assert!(matches.is_err()); // Branch is required
+        assert!(matches.is_err());
     }
 }
