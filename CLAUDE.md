@@ -66,6 +66,7 @@ cargo run -- list
 cargo run -- list --json                 # JSON output for scripting
 cargo run -- status my-branch --json     # JSON output for single shard
 cargo run -- -q list                     # Quiet mode (suppress JSON logs)
+cargo run -- cd my-branch                # Print worktree path for shell integration
 cargo run -- open my-branch              # Open new agent in existing shard (additive)
 cargo run -- stop my-branch              # Stop agent, preserve shard
 cargo run -- destroy my-branch           # Destroy shard

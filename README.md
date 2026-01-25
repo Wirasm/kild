@@ -73,6 +73,18 @@ shards list
 shards list --json
 ```
 
+### Navigate to a shard (shell integration)
+```bash
+# Print worktree path
+shards cd <branch>
+
+# Shell function for quick navigation
+scd() { cd "$(shards cd "$1")"; }
+
+# Usage with shell function
+scd my-branch
+```
+
 ### Open a new agent in an existing shard
 ```bash
 # Open with same agent (additive - doesn't close existing terminals)
