@@ -63,6 +63,7 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 cargo run -- create my-branch --agent claude
 cargo run -- create my-branch --agent claude --note "Working on auth feature"
 cargo run -- list
+cargo run -- -q list                     # Quiet mode (suppress JSON logs)
 cargo run -- open my-branch              # Open new agent in existing shard (additive)
 cargo run -- stop my-branch              # Stop agent, preserve shard
 cargo run -- destroy my-branch           # Destroy shard
@@ -100,22 +101,13 @@ cargo run -- destroy my-branch --force   # Force destroy (bypass git checks)
 
 ### Setup
 
-Logging is initialized via `shards_core::init_logging()` in the CLI main.rs. Output is JSON format via tracing-subscriber.
+Logging is initialized via `shards_core::init_logging(quiet)` in the CLI main.rs. Output is JSON format via tracing-subscriber.
 
-```rust
-// Located in crates/shards-core/src/logging/mod.rs
-tracing_subscriber::registry()
-    .with(tracing_subscriber::fmt::layer()
-        .json()
-        .with_writer(std::io::stderr)  // Logs to stderr, stdout for user output
-        .with_current_span(false)
-        .with_span_list(false))
-    .with(EnvFilter::from_default_env()
-        .add_directive("shards=info".parse().expect("Invalid log directive")))
-    .init();
-```
+When `quiet` is true (via `-q` flag), only error-level events are emitted. When false, info-level and above events are emitted.
 
 Control log level with `RUST_LOG` env var: `RUST_LOG=debug cargo run -- list`
+
+Suppress logs entirely with the quiet flag: `cargo run -- -q list`
 
 ### Event Naming Convention
 

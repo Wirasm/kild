@@ -44,6 +44,14 @@ cargo install --path .
 
 ## Usage
 
+### Global flags
+
+```bash
+# Suppress JSON log output (show only user-facing output)
+shards -q <command>
+shards --quiet <command>
+```
+
 ### Create a new shard
 ```bash
 shards create <branch> --agent <agent>
