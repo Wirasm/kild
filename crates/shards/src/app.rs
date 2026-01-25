@@ -67,6 +67,16 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("cd")
+                .about("Print worktree path for shell integration")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the shard")
+                        .required(true)
+                        .index(1)
+                )
+        )
+        .subcommand(
             Command::new("destroy")
                 .about("Remove shard completely")
                 .arg(
@@ -521,5 +531,26 @@ mod tests {
             destroy_matches.get_one::<String>("branch").unwrap(),
             "test-branch"
         );
+    }
+
+    #[test]
+    fn test_cli_cd_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "cd", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let cd_matches = matches.subcommand_matches("cd").unwrap();
+        assert_eq!(
+            cd_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+    }
+
+    #[test]
+    fn test_cli_cd_requires_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "cd"]);
+        assert!(matches.is_err()); // Branch is required
     }
 }

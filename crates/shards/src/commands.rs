@@ -55,6 +55,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
     match matches.subcommand() {
         Some(("create", sub_matches)) => handle_create_command(sub_matches),
         Some(("list", sub_matches)) => handle_list_command(sub_matches),
+        Some(("cd", sub_matches)) => handle_cd_command(sub_matches),
         Some(("destroy", sub_matches)) => handle_destroy_command(sub_matches),
         Some(("restart", sub_matches)) => handle_restart_command(sub_matches),
         Some(("open", sub_matches)) => handle_open_command(sub_matches),
@@ -166,6 +167,41 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             );
 
             events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required")?;
+
+    info!(event = "cli.cd_started", branch = branch);
+
+    match session_handler::get_session(branch) {
+        Ok(session) => {
+            // Print only the path - no formatting, no newline prefix
+            // This is critical for shell integration: cd "$(shards cd branch)"
+            println!("{}", session.worktree_path.display());
+
+            info!(
+                event = "cli.cd_completed",
+                branch = branch,
+                path = %session.worktree_path.display()
+            );
+
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+
+            error!(
+                event = "cli.cd_failed",
+                branch = branch,
+                error = %e
+            );
+
             Err(e.into())
         }
     }
