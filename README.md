@@ -94,6 +94,15 @@ shards open <branch>
 shards open <branch> --agent <agent>
 ```
 
+### Open shard in code editor
+```bash
+# Open worktree in editor (uses $EDITOR or defaults to 'zed')
+shards code <branch>
+
+# Use specific editor
+shards code <branch> --editor vim
+```
+
 ### Stop a shard
 ```bash
 # Stop agent, preserve worktree
