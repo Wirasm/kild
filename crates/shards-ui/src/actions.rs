@@ -452,6 +452,56 @@ mod tests {
             "Unknown status should not be treated as Running"
         );
     }
+
+    // --- Editor Selection Tests ---
+
+    use std::sync::Mutex;
+
+    // Mutex to ensure editor selection tests don't interfere with each other
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Helper to restore environment variable after test
+    fn restore_env_var(key: &str, original: Option<String>) {
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn test_select_editor_uses_env_when_set() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let original = std::env::var("EDITOR").ok();
+
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            std::env::set_var("EDITOR", "nvim");
+        }
+        let editor = super::select_editor();
+        assert_eq!(editor, "nvim");
+
+        restore_env_var("EDITOR", original);
+    }
+
+    #[test]
+    fn test_select_editor_defaults_to_zed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let original = std::env::var("EDITOR").ok();
+
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            std::env::remove_var("EDITOR");
+        }
+        let editor = super::select_editor();
+        assert_eq!(editor, "zed");
+
+        restore_env_var("EDITOR", original);
+    }
 }
 
 /// Open a worktree path in the user's preferred editor.
@@ -509,58 +559,3 @@ pub fn open_in_editor(worktree_path: &std::path::Path) -> Result<(), String> {
 fn select_editor() -> String {
     std::env::var("EDITOR").unwrap_or_else(|_| "zed".to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    // Mutex to ensure editor selection tests don't interfere with each other
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn test_select_editor_uses_env_when_set() {
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        // Save and restore original value
-        let original = std::env::var("EDITOR").ok();
-
-        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
-        unsafe {
-            std::env::set_var("EDITOR", "nvim");
-        }
-        let editor = select_editor();
-        assert_eq!(editor, "nvim");
-
-        // Restore
-        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
-        unsafe {
-            match original {
-                Some(v) => std::env::set_var("EDITOR", v),
-                None => std::env::remove_var("EDITOR"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_select_editor_defaults_to_zed() {
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        // Save and restore original value
-        let original = std::env::var("EDITOR").ok();
-
-        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-        let editor = select_editor();
-        assert_eq!(editor, "zed");
-
-        // Restore
-        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
-        if let Some(v) = original {
-            unsafe {
-                std::env::set_var("EDITOR", v);
-            }
-        }
-    }

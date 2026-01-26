@@ -315,30 +315,28 @@ impl MainView {
         );
         self.state.clear_focus_error();
 
-        let result = match (terminal_type, window_id) {
-            (Some(tt), Some(wid)) => shards_core::terminal_ops::focus_terminal(tt, wid)
-                .map_err(|e| format!("Failed to focus terminal: {}", e)),
-            (None, None) => {
-                tracing::debug!(
-                    event = "ui.focus_terminal_no_window_info",
-                    branch = branch,
-                    message = "Legacy session - no terminal info recorded"
-                );
-                Err("Terminal window info not available. This session was created before window tracking was added.".to_string())
-            }
-            (Some(_), None) | (None, Some(_)) => {
-                tracing::warn!(
-                    event = "ui.focus_terminal_inconsistent_state",
-                    branch = branch,
-                    has_terminal_type = terminal_type.is_some(),
-                    has_window_id = window_id.is_some(),
-                    message = "Inconsistent terminal state - one field present, one missing"
-                );
-                Err(
-                    "Terminal window info is incomplete. Try stopping and reopening the shard."
-                        .to_string(),
-                )
-            }
+        let result = if let (Some(tt), Some(wid)) = (terminal_type, window_id) {
+            shards_core::terminal_ops::focus_terminal(tt, wid)
+                .map_err(|e| format!("Failed to focus terminal: {}", e))
+        } else if terminal_type.is_none() && window_id.is_none() {
+            tracing::debug!(
+                event = "ui.focus_terminal_no_window_info",
+                branch = branch,
+                message = "Legacy session - no terminal info recorded"
+            );
+            Err("Terminal window info not available. This session was created before window tracking was added.".to_string())
+        } else {
+            tracing::warn!(
+                event = "ui.focus_terminal_inconsistent_state",
+                branch = branch,
+                has_terminal_type = terminal_type.is_some(),
+                has_window_id = window_id.is_some(),
+                message = "Inconsistent terminal state - one field present, one missing"
+            );
+            Err(
+                "Terminal window info is incomplete. Try stopping and reopening the shard."
+                    .to_string(),
+            )
         };
 
         if let Err(e) = result {

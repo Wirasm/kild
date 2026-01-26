@@ -223,8 +223,7 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                 ),
                                         )
                                         // Open in Editor button [Edit]
-                                        .child({
-                                            let branch_for_edit = branch_for_edit.clone();
+                                        .child(
                                             div()
                                                 .id(("edit-btn", ix))
                                                 .px_2()
@@ -248,8 +247,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                         .text_color(rgb(0xaaaaaa))
                                                         .text_sm()
                                                         .child("Edit"),
-                                                )
-                                        })
+                                                ),
+                                        )
                                         // Focus Terminal button [Focus] - only show when running
                                         .when(is_running, |row| {
                                             let tt = terminal_type_for_focus.clone();

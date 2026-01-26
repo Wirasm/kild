@@ -938,6 +938,8 @@ mod tests {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 
@@ -1009,6 +1011,8 @@ mod tests {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 
