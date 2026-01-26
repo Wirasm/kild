@@ -28,6 +28,7 @@ cargo run -p shards-ui
 ```
 
 The GUI currently supports:
+- Multi-project management: Add git repositories as projects, switch between them
 - Shard listing with status indicators (running, stopped, git dirty state)
 - Creating new shards with agent selection
 - Opening new agents in existing shards

@@ -90,7 +90,7 @@ cargo run -- destroy --all --force       # Force destroy all (skip confirmation)
 **Workspace structure:**
 - `crates/shards-core` - Core library with all business logic, no CLI dependencies
 - `crates/shards` - Thin CLI that consumes shards-core (clap for arg parsing)
-- `crates/shards-ui` - GPUI-based native GUI (in development)
+- `crates/shards-ui` - GPUI-based native GUI with multi-project support
 
 **Key modules in shards-core:**
 - `sessions/` - Session lifecycle (create, open, stop, destroy, list)
@@ -103,6 +103,12 @@ cargo run -- destroy --all --force       # Force destroy all (skip confirmation)
 - `process/` - PID tracking and process info
 - `logging/` - Tracing initialization with JSON output
 - `events/` - App lifecycle event helpers
+
+**Key modules in shards-ui:**
+- `projects.rs` - Project storage, validation, persistence to ~/.shards/projects.json
+- `state.rs` - Application state with project filtering
+- `actions.rs` - User actions (create, open, stop, destroy, project management)
+- `views/` - GPUI components (main view, shard list, dialogs, project selector)
 
 **Module pattern:** Each domain follows `errors.rs`, `types.rs`, `operations.rs`, `handler.rs` structure.
 
@@ -134,7 +140,7 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 | `core` | `crates/shards-core/` | Core library logic |
 | `ui` | `crates/shards-ui/` | GPUI native GUI |
 
-**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`
+**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
@@ -192,11 +198,13 @@ events::log_app_error(&error);       // core.app.error_occurred
 # By layer
 grep 'event":"core\.'   # Core library events
 grep 'event":"cli\.'    # CLI events
+grep 'event":"ui\.'     # GUI events
 
 # By domain
 grep 'core\.session\.'  # Session events
 grep 'core\.terminal\.' # Terminal events
 grep 'core\.git\.'      # Git events
+grep 'ui\.projects\.'   # Project management events
 
 # By outcome
 grep '_failed"'         # All failures
