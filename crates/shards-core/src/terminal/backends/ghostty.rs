@@ -193,7 +193,13 @@ impl TerminalBackend for GhosttyBackend {
             .arg(activate_script)
             .output()
         {
-            Ok(output) if !output.status.success() => {
+            Ok(output) if output.status.success() => {
+                debug!(
+                    event = "core.terminal.focus_ghostty_activated",
+                    window_title = %window_id
+                );
+            }
+            Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 warn!(
                     event = "core.terminal.focus_ghostty_activate_failed",
@@ -208,12 +214,6 @@ impl TerminalBackend for GhosttyBackend {
                     window_title = %window_id,
                     error = %e,
                     message = "Failed to execute osascript for Ghostty activation"
-                );
-            }
-            Ok(_) => {
-                debug!(
-                    event = "core.terminal.focus_ghostty_activated",
-                    window_title = %window_id
                 );
             }
         }
@@ -242,8 +242,8 @@ impl TerminalBackend for GhosttyBackend {
             .output()
         {
             Ok(output) if output.status.success() => {
-                let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if result == "focused" {
+                let result = String::from_utf8_lossy(&output.stdout);
+                if result.trim() == "focused" {
                     info!(
                         event = "core.terminal.focus_completed",
                         terminal = "Ghostty",

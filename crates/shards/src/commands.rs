@@ -437,31 +437,25 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     };
 
     // 2. Get terminal type and window ID
-    let terminal_type = match session.terminal_type.as_ref() {
-        Some(t) => t,
-        None => {
-            eprintln!("❌ No terminal type recorded for shard '{}'", branch);
-            error!(
-                event = "cli.focus_failed",
-                branch = branch,
-                error = "no_terminal_type"
-            );
-            return Err("No terminal type recorded for this shard".into());
-        }
-    };
+    let terminal_type = session.terminal_type.as_ref().ok_or_else(|| {
+        eprintln!("❌ No terminal type recorded for shard '{}'", branch);
+        error!(
+            event = "cli.focus_failed",
+            branch = branch,
+            error = "no_terminal_type"
+        );
+        "No terminal type recorded for this shard"
+    })?;
 
-    let window_id = match session.terminal_window_id.as_ref() {
-        Some(id) => id,
-        None => {
-            eprintln!("❌ No window ID recorded for shard '{}'", branch);
-            error!(
-                event = "cli.focus_failed",
-                branch = branch,
-                error = "no_window_id"
-            );
-            return Err("No window ID recorded for this shard".into());
-        }
-    };
+    let window_id = session.terminal_window_id.as_ref().ok_or_else(|| {
+        eprintln!("❌ No window ID recorded for shard '{}'", branch);
+        error!(
+            event = "cli.focus_failed",
+            branch = branch,
+            error = "no_window_id"
+        );
+        "No window ID recorded for this shard"
+    })?;
 
     // 3. Focus the terminal window
     match shards_core::terminal_ops::focus_terminal(terminal_type, window_id) {
