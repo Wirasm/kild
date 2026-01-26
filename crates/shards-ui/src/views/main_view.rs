@@ -25,16 +25,28 @@ pub struct MainView {
 impl MainView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let refresh_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            tracing::debug!(event = "ui.auto_refresh.started");
+
             loop {
                 cx.background_executor()
                     .timer(crate::refresh::REFRESH_INTERVAL)
                     .await;
 
-                let _ = this.update(cx, |view, cx| {
+                match this.update(cx, |view, cx| {
                     tracing::debug!(event = "ui.auto_refresh.tick");
                     view.state.update_statuses_only();
                     cx.notify();
-                });
+                }) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::debug!(
+                            event = "ui.auto_refresh.stopped",
+                            reason = "view_dropped",
+                            error = ?e
+                        );
+                        break;
+                    }
+                }
             }
         });
 

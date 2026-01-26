@@ -11,6 +11,11 @@ use crate::views::MainView;
 /// Format RFC3339 timestamp as relative time (e.g., "5m ago", "2h ago").
 fn format_relative_time(timestamp: &str) -> String {
     let Ok(created) = DateTime::parse_from_rfc3339(timestamp) else {
+        tracing::debug!(
+            event = "ui.shard_list.timestamp_parse_failed",
+            timestamp = timestamp,
+            "Failed to parse timestamp - displaying raw value"
+        );
         return timestamp.to_string();
     };
 
@@ -37,7 +42,7 @@ fn format_relative_time(timestamp: &str) -> String {
 /// Handles three states:
 /// - Error: Display error message
 /// - Empty: Display "No active shards" message
-/// - List: Display uniform_list of shards with relaunch and destroy buttons
+/// - List: Display uniform_list of shards with Open/Stop and Destroy buttons
 pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
     if let Some(ref error_msg) = state.load_error {
         // Error state - show error message
