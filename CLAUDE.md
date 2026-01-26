@@ -68,9 +68,13 @@ cargo run -- status my-branch --json     # JSON output for single shard
 cargo run -- -q list                     # Quiet mode (suppress JSON logs)
 cargo run -- cd my-branch                # Print worktree path for shell integration
 cargo run -- open my-branch              # Open new agent in existing shard (additive)
+cargo run -- open my-branch --agent kiro # Open with different agent
+cargo run -- open --all                  # Open agents in all stopped shards
+cargo run -- open --all --agent claude   # Open all stopped shards with specific agent
 cargo run -- code my-branch              # Open worktree in editor
 cargo run -- focus my-branch             # Bring terminal window to foreground
 cargo run -- stop my-branch              # Stop agent, preserve shard
+cargo run -- stop --all                  # Stop all running shards
 cargo run -- destroy my-branch           # Destroy shard
 cargo run -- destroy my-branch --force   # Force destroy (bypass git checks)
 ```

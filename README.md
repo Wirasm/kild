@@ -92,6 +92,12 @@ shards open <branch>
 
 # Open with different agent
 shards open <branch> --agent <agent>
+
+# Open agents in all stopped shards
+shards open --all
+
+# Open all stopped shards with specific agent
+shards open --all --agent <agent>
 ```
 
 ### Open shard in code editor
@@ -113,6 +119,9 @@ shards focus <branch>
 ```bash
 # Stop agent, preserve worktree
 shards stop <branch>
+
+# Stop all running shards
+shards stop --all
 ```
 
 ### Get shard information
