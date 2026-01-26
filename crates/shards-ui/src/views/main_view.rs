@@ -33,7 +33,7 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
     let path_str = path_str.trim();
 
     // Handle tilde expansion
-    if let Some(rest) = path_str.strip_prefix("~/") {
+    if path_str.starts_with('~') {
         let Some(home) = dirs::home_dir() else {
             warn!(
                 event = "ui.normalize_path.home_dir_unavailable",
@@ -42,71 +42,44 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
             );
             return Err("Could not determine home directory. Is $HOME set?".to_string());
         };
-        return Ok(home.join(rest));
-    } else if path_str == "~" {
-        let Some(home) = dirs::home_dir() else {
-            warn!(
-                event = "ui.normalize_path.home_dir_unavailable",
-                path = path_str,
-                "dirs::home_dir() returned None for bare tilde"
-            );
-            return Err("Could not determine home directory. Is $HOME set?".to_string());
-        };
-        return Ok(home);
+
+        if let Some(rest) = path_str.strip_prefix("~/") {
+            return Ok(home.join(rest));
+        }
+        if path_str == "~" {
+            return Ok(home);
+        }
+        // Tilde in middle like "~project" - no expansion, fall through
     }
 
-    // Handle missing leading slash - if path looks like an absolute path without the /
-    // Only applies if adding "/" produces a valid directory on disk.
+    // Handle missing leading slash - only if path looks absolute without the /
     // e.g., "users/rasmus/project" -> "/users/rasmus/project" (if that directory exists)
     if !path_str.starts_with('/') && !path_str.starts_with('~') && !path_str.is_empty() {
-        let with_slash = format!("/{}", path_str);
-        let potential_path = PathBuf::from(&with_slash);
+        let with_slash = PathBuf::from(format!("/{}", path_str));
 
-        match std::fs::metadata(&potential_path) {
+        match std::fs::metadata(&with_slash) {
             Ok(meta) if meta.is_dir() => {
                 debug!(
                     event = "ui.normalize_path.slash_prefix_applied",
                     original = path_str,
-                    normalized = %potential_path.display()
+                    normalized = %with_slash.display()
                 );
-                return Ok(potential_path);
+                return Ok(with_slash);
             }
-            Ok(_) => {
-                // Path exists but is not a directory - don't apply slash fix
-                debug!(
-                    event = "ui.normalize_path.slash_prefix_not_dir",
-                    path = %potential_path.display()
-                );
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Path doesn't exist with slash - fall through to return raw path
-                debug!(
-                    event = "ui.normalize_path.slash_prefix_not_found",
-                    path = %potential_path.display()
-                );
-            }
-            Err(e) => {
-                // Permission denied or other I/O error - surface it
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 warn!(
                     event = "ui.normalize_path.slash_prefix_check_failed",
-                    path = %potential_path.display(),
-                    error = %e,
-                    "Could not check directory - permission or I/O issue"
+                    path = %with_slash.display(),
+                    error = %e
                 );
-                return Err(format!(
-                    "Cannot access '{}': {}",
-                    potential_path.display(),
-                    e
-                ));
+                return Err(format!("Cannot access '{}': {}", with_slash.display(), e));
+            }
+            _ => {
+                // Path doesn't exist or exists but isn't a directory - fall through
             }
         }
     }
 
-    debug!(
-        event = "ui.normalize_path.passthrough",
-        path = path_str,
-        "No normalization applied, returning path as-is"
-    );
     Ok(PathBuf::from(path_str))
 }
 
