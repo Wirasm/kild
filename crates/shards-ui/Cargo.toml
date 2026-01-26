@@ -15,6 +15,9 @@ gpui.workspace = true
 core-text.workspace = true  # Pin to fix gpui dependency conflict
 tracing.workspace = true
 chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

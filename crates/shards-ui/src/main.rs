@@ -8,6 +8,7 @@ use gpui::{
 };
 
 mod actions;
+mod projects;
 mod refresh;
 mod state;
 mod views;

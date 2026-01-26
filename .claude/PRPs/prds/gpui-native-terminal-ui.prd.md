@@ -47,7 +47,7 @@ Both share the same core (sessions, git, config). Don't duplicate core logic in 
 
 ### Target Users
 
-See **[Personas Document](../personas.md)** for detailed user profiles:
+See **[Personas Document](../branding/PERSONAS.md)** for detailed user profiles:
 
 1. **Power Users (Human)**: Agentic-forward engineers who want speed, control, and isolation. No hand-holding.
 2. **Agents (AI)**: AI agents running inside shards that use the CLI to orchestrate work programmatically.
@@ -157,7 +157,7 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 7.5 | Notes & Git Status | Session notes, git dirty indicator | Notes in list/create, uncommitted indicator | ✅ DONE |
 | 7.6 | Bulk Operations | Open All / Stop All buttons | Bulk lifecycle operations | ✅ DONE |
 | 7.7 | Quick Actions | Per-row action buttons | Copy Path, Open Editor, Focus Terminal | ✅ DONE |
-| 8 | Favorites | Quick-spawn repos | Favorites work | TODO |
+| 8 | Projects | Project management, active project context | Switch projects, filter shards | ✅ DONE |
 | 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted TextInput/Button/Modal | TODO |
 | 10 | Keyboard Shortcuts | Full keyboard control | Navigate and operate UI without mouse | TODO |
 
@@ -169,7 +169,7 @@ Phase 1 → 2 → 3 → 4 → 5 → 6 → 7 → 7.5 → 7.6 → 7.7 → 8 → 9 
   ✅     ✅   ✅   ✅   ✅   ✅   │     │      │      │    │    │    │
                                 │     │      │      │    │    │    └─ Keyboard control
                                 │     │      │      │    │    └─ Theme polish
-                                │     │      │      │    └─ Favorites
+                                │     │      │      │    └─ Projects (active project context)
                                 │     │      │      └─ Quick actions (copy, edit, focus)
                                 │     │      └─ Bulk ops (open/stop all)
                                 │     └─ Notes & git status
@@ -942,69 +942,159 @@ cargo run -p shards-ui
 
 ---
 
-### Phase 8: Favorites
+### Phase 8: Projects
 
-**Goal**: Store favorite repositories for quick shard creation.
+**Goal**: Store and manage projects (git repositories) for shard creation. Users can switch between projects, and the shard list filters to show only shards for the active project.
 
-**Why this phase exists**: Convenience - users work across multiple repos.
+**Why this phase exists**: The CLI works from CWD, but the UI needs explicit project context. Users work across multiple repos and need to switch between them.
+
+**Renamed from "Favorites"**: After analysis, "Projects" better describes the core concept. Auto-tracking + remove is sufficient - explicit "favorites" distinction not needed for MVP.
+
+---
+
+#### MoSCoW Analysis
+
+**Must Have (MVP)**:
+
+| Feature | Description |
+|---------|-------------|
+| Project storage | Store projects as `{path, name}` in `~/.shards/projects.json` |
+| Add project manually | Text field to input path + optional name |
+| Git validation | Error if path is not a git repository |
+| Active project | One project is "current" - shard list filters to that project |
+| Switch projects | Dropdown/selector to change active project |
+| Remove project | Delete from list (doesn't affect shards/worktrees) |
+| Auto-track on create | When user creates shard in new project, auto-add to list |
+| Persist selection | Remember last active project across app restarts |
+
+**Should Have (Next iteration)**:
+
+| Feature | Description |
+|---------|-------------|
+| Project renaming | Edit the display name after creation |
+| Recently used sorting | Most recently used projects appear first |
+| Empty state UX | Clear guidance when no projects exist ("Add your first project") |
+| Validation feedback | Show why a path is invalid (not a directory, no .git, permissions) |
+
+**Could Have (Future enhancements)**:
+
+| Feature | Description |
+|---------|-------------|
+| Path autocomplete | Typeahead as user types path, arrow keys to navigate suggestions |
+| Native folder picker | "Browse..." button opens OS file dialog |
+| Keyboard-first picker | Full keyboard navigation for path selection (like shell tab-complete) |
+| Favorites/pinning | Pin projects to top of list, separate from recents |
+| Project search | Filter project list by name/path as you type |
+| Project icons | Visual indicators (custom icons or auto-detected from repo) |
+
+**Won't Have (Out of scope)**:
+
+| Feature | Description |
+|---------|-------------|
+| Remote repositories | Clone from URL - users manage git themselves |
+| Project templates | Pre-configured project setups |
+| Project-specific UI settings | Per-project theme, layout, etc. |
+| Nested project detection | Auto-discover git repos in a directory tree |
+
+---
+
+#### Implementation Details
 
 **Files to Create**:
 | File | Purpose |
 |------|---------|
-| `src/ui/favorites.rs` | Load/save favorites list |
-| `src/ui/views/favorites_panel.rs` | Favorites sidebar or section |
+| `crates/shards-ui/src/projects.rs` | Load/save/validate projects |
+| `crates/shards-ui/src/views/project_selector.rs` | Dropdown/panel for switching projects |
+| `crates/shards-ui/src/views/add_project_dialog.rs` | Dialog for adding new project |
 
 **Files to Modify**:
 | File | Change |
 |------|--------|
-| `src/ui/views/main_view.rs` | Add favorites panel |
-| `src/ui/views/create_dialog.rs` | Pre-fill from favorite selection |
+| `crates/shards-ui/src/views/main_view.rs` | Add project selector to header |
+| `crates/shards-ui/src/views/shard_list.rs` | Filter by active project |
+| `crates/shards-ui/src/state.rs` | Track active project, project list |
+| `crates/shards-ui/src/actions.rs` | Add project CRUD actions |
 
-**Storage**: `~/.shards/favorites.json`
+**Storage**: `~/.shards/projects.json`
 ```json
 {
-  "favorites": [
+  "projects": [
     {"path": "/Users/x/projects/shards", "name": "shards"},
     {"path": "/Users/x/projects/other", "name": "other-project"}
-  ]
+  ],
+  "active": "/Users/x/projects/shards"
 }
 ```
 
-**Key work**:
-- Favorites panel showing saved repos
-- "Add current directory to favorites" (if UI knows current dir)
-- "Add from path" manual entry
-- Click favorite → opens create dialog with path pre-filled
-- Remove favorite button
+**Git validation**:
+```rust
+fn is_git_repo(path: &Path) -> bool {
+    path.join(".git").exists() ||
+    // Also check if it's inside a git repo (worktree case)
+    Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(path)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+```
 
 **Validation**:
 ```bash
-cargo run --features ui -- ui
-# Add a favorite (manual path entry)
-# See: favorite appears in list
+cargo run -p shards-ui
 
-# Click favorite
-# Create dialog opens with path pre-filled
+# First launch - no projects
+# See: Empty state with "Add Project" prompt
 
-# Create shard from favorite
-# Shard is created in that repo
+# Add a project (manual path entry)
+# Enter: /Users/x/projects/shards
+# See: Project appears in selector, becomes active
+
+# Try invalid path (not a git repo)
+# Enter: /tmp
+# See: Error "Not a git repository"
+
+# Create a shard
+# See: Shard appears in list
+
+# Add second project
+# Switch to it via dropdown
+# See: Shard list now empty (no shards in this project)
+
+# Switch back to first project
+# See: Original shard visible again
 
 # Close/reopen UI
-# Favorites persist
+# See: Same active project, same project list (persisted)
+
+# Remove a project
+# Click remove button
+# See: Project gone from list, shards unaffected
 ```
 
 ---
 
 ### Phase 9: Theme & Components
 
-**Goal**: Apply a polished color palette and extract reusable UI components.
+**Goal**: Apply the KILD brand system and extract reusable UI components.
 
-**Why this phase exists**: After all functionality is complete, we polish the visual design and refactor the UI into reusable components. This phase transforms working-but-rough UI into a cohesive, maintainable design system.
+**Why this phase exists**: After all functionality is complete, we polish the visual design and refactor the UI into reusable components. This phase transforms working-but-rough UI into a cohesive, maintainable design system aligned with the KILD brand.
+
+**Brand Reference**: See **[Brand System](../branding/brand-system.html)** for the complete visual design system including:
+- Color palette (Tallinn Night dark theme, Baltic Ice light theme)
+- Typography (Inter for UI, JetBrains Mono for code)
+- Button variants (primary, secondary, ghost, success, warning, danger)
+- Status indicators (active/stopped/crashed)
+- Form inputs with focus states
+- Keyboard shortcut styling
+
+Also see **[Dashboard Mockup](../branding/mockup-dashboard.html)** for the target UI design.
 
 **Files to Create**:
 | File | Purpose |
 |------|---------|
-| `src/ui/theme.rs` | Color constants, theme struct |
+| `src/ui/theme.rs` | Color constants from brand system, theme struct |
 | `src/ui/components/mod.rs` | Reusable component module |
 | `src/ui/components/text_input.rs` | Extracted, polished text input |
 | `src/ui/components/button.rs` | Styled button component |
@@ -1017,48 +1107,31 @@ cargo run --features ui -- ui
 | `src/ui/views/create_dialog.rs` | Use extracted components |
 | `src/ui/views/main_view.rs` | Use theme and components |
 
-**Color Palette**:
+**Color Palette** (from brand system - Tallinn Night):
 
-```
-Primary Accent (Olive)
-├── Olive Dark:   #5d6b50
-├── Gray Olive:   #8a9a7a
-└── Olive Bright: #a3b392
-
-Secondary Accent (Peach)
-├── Peach:        #fab387
-└── Peach Dim:    #daa070
-
-Functional
-├── Success:      #8a9a7a (Gray Olive)
-├── Warning:      #fab387 (Peach)
-├── Error:        #f38ba8
-└── Info:         #89b4fa
-
-Dark Theme (Mocha)
-├── Base:         #1e1e2e
-├── Mantle:       #181825
-├── Crust:        #11111b
-├── Surface0:     #313244
-├── Surface1:     #45475a
-├── Text:         #cdd6f4
-└── Subtext:      #bac2de
-
-Terminal Chrome Dots
-├── Red:          #f38ba8
-├── Yellow:       #f9e2af
-└── Green:        #8a9a7a
-```
+| Name | Hex | Usage |
+|------|-----|-------|
+| Void | `#08090A` | Deepest background |
+| Obsidian | `#0E1012` | Sidebars, panels |
+| Surface | `#151719` | Cards, rows |
+| Elevated | `#1C1F22` | Modals, dropdowns |
+| Ice | `#38BDF8` | Primary actions |
+| Aurora | `#34D399` | Active/running status |
+| Copper | `#FBBF24` | Stopped/warning status |
+| Ember | `#F87171` | Error/crashed status |
+| Kiri | `#A78BFA` | Agent activity indicator |
 
 **Components to extract**:
-- `TextInput` - Keyboard-captured text field with cursor, placeholder, validation state
-- `Button` - Primary (olive), secondary (surface), danger (error) variants
+- `TextInput` - Keyboard-captured text field with cursor, placeholder, Ice focus ring
+- `Button` - Primary (Ice), secondary (Surface), ghost, success (Aurora), warning (Copper), danger (Ember)
 - `Modal` - Overlay + centered dialog box with title, content, actions
+- `StatusIndicator` - Dot with appropriate color and glow effect
 
 **Validation**:
 ```bash
 cargo run -p shards-ui
-# Verify: All colors match the palette above
+# Verify: Colors match brand-system.html
+# Verify: UI matches mockup-dashboard.html layout
 # Verify: Consistent styling across all views
 # Verify: Components work in create dialog
 # Verify: Theme applies to header, list, dialog, buttons
@@ -1067,7 +1140,7 @@ cargo run -p shards-ui
 **What NOT to do**:
 - Don't add light theme yet (dark only for MVP)
 - Don't add theme switching UI
-- Don't over-abstract (simple constants are fine)
+- Don't deviate from the brand system colors
 
 ---
 

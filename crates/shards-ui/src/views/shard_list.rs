@@ -39,9 +39,10 @@ fn format_relative_time(timestamp: &str) -> String {
 
 /// Render the shard list based on current state.
 ///
-/// Handles three states:
+/// Handles states:
 /// - Error: Display error message
-/// - Empty: Display "No active shards" message
+/// - No projects: Display welcome message with Add Project button
+/// - Empty: Display "No active shards" message for the current project
 /// - List: Display uniform_list of shards with Open/Stop and Destroy buttons
 pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
     if let Some(ref error_msg) = state.load_error {
@@ -64,228 +65,205 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                     .text_sm()
                     .child(error_msg.clone()),
             )
-    } else if state.displays.is_empty() {
-        // Empty state - no shards exist
+    } else if state.projects.is_empty() {
+        // No projects state - show welcome message
         div()
             .flex()
             .flex_1()
             .justify_center()
             .items_center()
-            .text_color(rgb(0x888888))
-            .child("No active shards")
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .text_xl()
+                    .text_color(rgb(0xffffff))
+                    .child("Welcome to Shards!"),
+            )
+            .child(
+                div()
+                    .text_color(rgb(0x888888))
+                    .child("Add a project to start creating shards."),
+            )
+            .child(
+                div()
+                    .id("empty-state-add-project")
+                    .px_4()
+                    .py_2()
+                    .bg(rgb(0x4a9eff))
+                    .hover(|style| style.bg(rgb(0x5aafff)))
+                    .rounded_md()
+                    .cursor_pointer()
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, cx| {
+                            view.on_add_project_click(cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .text_color(rgb(0xffffff))
+                            .child("+")
+                            .child("Add Project"),
+                    ),
+            )
     } else {
-        // List state - show shards with action buttons
-        let item_count = state.displays.len();
-        let displays = state.displays.clone();
-        let open_error = state.open_error.clone();
-        let stop_error = state.stop_error.clone();
-        let editor_error = state.editor_error.clone();
-        let focus_error = state.focus_error.clone();
+        // Filter displays by active project
+        let filtered: Vec<_> = state.filtered_displays().into_iter().cloned().collect();
 
-        div().flex_1().child(
-            uniform_list(
-                "shard-list",
-                item_count,
-                cx.processor(move |_view, range: std::ops::Range<usize>, _window, cx| {
-                    range
-                        .map(|ix| {
-                            let display = &displays[ix];
-                            let branch = display.session.branch.clone();
-                            let status_color = match display.status {
-                                ProcessStatus::Running => rgb(0x00ff00), // Green
-                                ProcessStatus::Stopped => rgb(0xff0000), // Red
-                                ProcessStatus::Unknown => rgb(0x888888), // Gray
-                            };
+        if filtered.is_empty() {
+            // Empty state - no shards for the current project
+            div()
+                .flex()
+                .flex_1()
+                .justify_center()
+                .items_center()
+                .text_color(rgb(0x888888))
+                .child("No active shards for this project")
+        } else {
+            // List state - show shards with action buttons
+            let item_count = filtered.len();
+            let displays = filtered;
+            let open_error = state.open_error.clone();
+            let stop_error = state.stop_error.clone();
+            let editor_error = state.editor_error.clone();
+            let focus_error = state.focus_error.clone();
 
-                            // Check if this row has any operation error (open, stop, editor, focus)
-                            let has_matching_error =
-                                |err: &crate::state::OperationError| err.branch == branch;
-                            let row_error = open_error
-                                .as_ref()
-                                .filter(|e| has_matching_error(e))
-                                .or_else(|| stop_error.as_ref().filter(|e| has_matching_error(e)))
-                                .or_else(|| editor_error.as_ref().filter(|e| has_matching_error(e)))
-                                .or_else(|| focus_error.as_ref().filter(|e| has_matching_error(e)))
-                                .map(|e| e.message.clone());
+            div().flex_1().child(
+                uniform_list(
+                    "shard-list",
+                    item_count,
+                    cx.processor(move |_view, range: std::ops::Range<usize>, _window, cx| {
+                        range
+                            .map(|ix| {
+                                let display = &displays[ix];
+                                let branch = display.session.branch.clone();
+                                let status_color = match display.status {
+                                    ProcessStatus::Running => rgb(0x00ff00), // Green
+                                    ProcessStatus::Stopped => rgb(0xff0000), // Red
+                                    ProcessStatus::Unknown => rgb(0x888888), // Gray
+                                };
 
-                            // Show Open button when stopped, Stop button when running
-                            let is_running = display.status == ProcessStatus::Running;
+                                // Check if this row has any operation error (open, stop, editor, focus)
+                                let has_matching_error =
+                                    |err: &crate::state::OperationError| err.branch == branch;
+                                let row_error = open_error
+                                    .as_ref()
+                                    .filter(|e| has_matching_error(e))
+                                    .or_else(|| {
+                                        stop_error.as_ref().filter(|e| has_matching_error(e))
+                                    })
+                                    .or_else(|| {
+                                        editor_error.as_ref().filter(|e| has_matching_error(e))
+                                    })
+                                    .or_else(|| {
+                                        focus_error.as_ref().filter(|e| has_matching_error(e))
+                                    })
+                                    .map(|e| e.message.clone());
 
-                            // Clone data for use in closures
-                            let branch_for_open = branch.clone();
-                            let branch_for_stop = branch.clone();
-                            let branch_for_destroy = branch.clone();
-                            let git_status = display.git_status;
-                            let note = display.session.note.clone();
+                                // Show Open button when stopped, Stop button when running
+                                let is_running = display.status == ProcessStatus::Running;
 
-                            // Quick actions button clones
-                            let worktree_path_for_copy = display.session.worktree_path.clone();
-                            let worktree_path_for_edit = display.session.worktree_path.clone();
-                            let branch_for_edit = branch.clone();
-                            let terminal_type_for_focus = display.session.terminal_type.clone();
-                            let window_id_for_focus = display.session.terminal_window_id.clone();
-                            let branch_for_focus = branch.clone();
+                                // Clone data for use in closures
+                                let branch_for_open = branch.clone();
+                                let branch_for_stop = branch.clone();
+                                let branch_for_destroy = branch.clone();
+                                let git_status = display.git_status;
+                                let note = display.session.note.clone();
 
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .flex()
-                                .flex_col()
-                                // Main row
-                                .child(
-                                    div()
-                                        .px_4()
-                                        .py_2()
-                                        .flex()
-                                        .items_center()
-                                        .gap_3()
-                                        .child(div().text_color(status_color).child("●"))
-                                        // Git status indicator (orange dot when dirty, gray when unknown)
-                                        .when(git_status == GitStatus::Dirty, |row| {
-                                            row.child(div().text_color(rgb(0xffa500)).child("●"))
-                                        })
-                                        .when(git_status == GitStatus::Unknown, |row| {
-                                            row.child(div().text_color(rgb(0x666666)).child("?"))
-                                        })
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .text_color(rgb(0xffffff))
-                                                .child(branch.clone()),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(rgb(0x888888))
-                                                .child(display.session.agent.clone()),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(rgb(0x666666))
-                                                .child(display.session.project_id.clone()),
-                                        )
-                                        // Created at timestamp
-                                        .child(div().text_color(rgb(0x555555)).text_sm().child(
-                                            format_relative_time(&display.session.created_at),
-                                        ))
-                                        // Last activity timestamp (if available)
-                                        .when_some(
-                                            display.session.last_activity.clone(),
-                                            |row, activity| {
+                                // Quick actions button clones
+                                let worktree_path_for_copy = display.session.worktree_path.clone();
+                                let worktree_path_for_edit = display.session.worktree_path.clone();
+                                let branch_for_edit = branch.clone();
+                                let terminal_type_for_focus = display.session.terminal_type.clone();
+                                let window_id_for_focus =
+                                    display.session.terminal_window_id.clone();
+                                let branch_for_focus = branch.clone();
+
+                                div()
+                                    .id(ix)
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    // Main row
+                                    .child(
+                                        div()
+                                            .px_4()
+                                            .py_2()
+                                            .flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(div().text_color(status_color).child("●"))
+                                            // Git status indicator (orange dot when dirty, gray when unknown)
+                                            .when(git_status == GitStatus::Dirty, |row| {
                                                 row.child(
-                                                    div()
-                                                        .text_color(rgb(0x666666))
-                                                        .text_sm()
-                                                        .child(format_relative_time(&activity)),
+                                                    div().text_color(rgb(0xffa500)).child("●"),
                                                 )
-                                            },
-                                        )
-                                        // Note column (truncated to 25 chars)
-                                        .when_some(note, |row, note_text| {
-                                            let truncated = if note_text.chars().count() > 25 {
-                                                format!(
-                                                    "{}...",
-                                                    note_text.chars().take(25).collect::<String>()
+                                            })
+                                            .when(git_status == GitStatus::Unknown, |row| {
+                                                row.child(
+                                                    div().text_color(rgb(0x666666)).child("?"),
                                                 )
-                                            } else {
-                                                note_text
-                                            };
-                                            row.child(
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .text_color(rgb(0xffffff))
+                                                    .child(branch.clone()),
+                                            )
+                                            .child(
                                                 div()
                                                     .text_color(rgb(0x888888))
-                                                    .text_sm()
-                                                    .child(truncated),
+                                                    .child(display.session.agent.clone()),
                                             )
-                                        })
-                                        // Copy Path button [Copy]
-                                        .child(
-                                            div()
-                                                .id(("copy-btn", ix))
-                                                .px_2()
-                                                .py_1()
-                                                .bg(rgb(0x444444))
-                                                .hover(|style| style.bg(rgb(0x555555)))
-                                                .rounded_md()
-                                                .cursor_pointer()
-                                                .on_mouse_up(
-                                                    gpui::MouseButton::Left,
-                                                    cx.listener(move |view, _, _, cx| {
-                                                        view.on_copy_path_click(
-                                                            &worktree_path_for_copy,
-                                                            cx,
-                                                        );
-                                                    }),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_color(rgb(0xaaaaaa))
-                                                        .text_sm()
-                                                        .child("Copy"),
-                                                ),
-                                        )
-                                        // Open in Editor button [Edit]
-                                        .child(
-                                            div()
-                                                .id(("edit-btn", ix))
-                                                .px_2()
-                                                .py_1()
-                                                .bg(rgb(0x444444))
-                                                .hover(|style| style.bg(rgb(0x555555)))
-                                                .rounded_md()
-                                                .cursor_pointer()
-                                                .on_mouse_up(
-                                                    gpui::MouseButton::Left,
-                                                    cx.listener(move |view, _, _, cx| {
-                                                        view.on_open_editor_click(
-                                                            &worktree_path_for_edit,
-                                                            &branch_for_edit,
-                                                            cx,
-                                                        );
-                                                    }),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_color(rgb(0xaaaaaa))
-                                                        .text_sm()
-                                                        .child("Edit"),
-                                                ),
-                                        )
-                                        // Focus Terminal button [Focus] - only show when running
-                                        .when(is_running, |row| {
-                                            let tt = terminal_type_for_focus.clone();
-                                            let wid = window_id_for_focus.clone();
-                                            let br = branch_for_focus.clone();
-                                            row.child(
+                                            .child(
                                                 div()
-                                                    .id(("focus-btn", ix))
-                                                    .px_2()
-                                                    .py_1()
-                                                    .bg(rgb(0x444488))
-                                                    .hover(|style| style.bg(rgb(0x555599)))
-                                                    .rounded_md()
-                                                    .cursor_pointer()
-                                                    .on_mouse_up(
-                                                        gpui::MouseButton::Left,
-                                                        cx.listener(move |view, _, _, cx| {
-                                                            view.on_focus_terminal_click(
-                                                                tt.as_ref(),
-                                                                wid.as_deref(),
-                                                                &br,
-                                                                cx,
-                                                            );
-                                                        }),
-                                                    )
-                                                    .child(
+                                                    .text_color(rgb(0x666666))
+                                                    .child(display.session.project_id.clone()),
+                                            )
+                                            // Created at timestamp
+                                            .child(div().text_color(rgb(0x555555)).text_sm().child(
+                                                format_relative_time(&display.session.created_at),
+                                            ))
+                                            // Last activity timestamp (if available)
+                                            .when_some(
+                                                display.session.last_activity.clone(),
+                                                |row, activity| {
+                                                    row.child(
                                                         div()
-                                                            .text_color(rgb(0xffffff))
-                                                            .child("Focus"),
-                                                    ),
+                                                            .text_color(rgb(0x666666))
+                                                            .text_sm()
+                                                            .child(format_relative_time(&activity)),
+                                                    )
+                                                },
                                             )
-                                        })
-                                        // Open button [▶] - shown when NOT running
-                                        .when(!is_running, |row| {
-                                            row.child(
+                                            // Note column (truncated to 25 chars)
+                                            .when_some(note, |row, note_text| {
+                                                let truncated = if note_text.chars().count() > 25 {
+                                                    format!(
+                                                        "{}...",
+                                                        note_text
+                                                            .chars()
+                                                            .take(25)
+                                                            .collect::<String>()
+                                                    )
+                                                } else {
+                                                    note_text
+                                                };
+                                                row.child(
+                                                    div()
+                                                        .text_color(rgb(0x888888))
+                                                        .text_sm()
+                                                        .child(truncated),
+                                                )
+                                            })
+                                            // Copy Path button [Copy]
+                                            .child(
                                                 div()
-                                                    .id(("open-btn", ix))
+                                                    .id(("copy-btn", ix))
                                                     .px_2()
                                                     .py_1()
                                                     .bg(rgb(0x444444))
@@ -295,76 +273,169 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                     .on_mouse_up(
                                                         gpui::MouseButton::Left,
                                                         cx.listener(move |view, _, _, cx| {
-                                                            view.on_open_click(
-                                                                &branch_for_open,
+                                                            view.on_copy_path_click(
+                                                                &worktree_path_for_copy,
                                                                 cx,
                                                             );
                                                         }),
                                                     )
                                                     .child(
-                                                        div().text_color(rgb(0xffffff)).child("▶"),
+                                                        div()
+                                                            .text_color(rgb(0xaaaaaa))
+                                                            .text_sm()
+                                                            .child("Copy"),
                                                     ),
                                             )
-                                        })
-                                        // Stop button [⏹] - shown when running
-                                        .when(is_running, |row| {
-                                            row.child(
+                                            // Open in Editor button [Edit]
+                                            .child(
                                                 div()
-                                                    .id(("stop-btn", ix))
+                                                    .id(("edit-btn", ix))
                                                     .px_2()
                                                     .py_1()
-                                                    .bg(rgb(0x444488))
-                                                    .hover(|style| style.bg(rgb(0x555599)))
+                                                    .bg(rgb(0x444444))
+                                                    .hover(|style| style.bg(rgb(0x555555)))
                                                     .rounded_md()
                                                     .cursor_pointer()
                                                     .on_mouse_up(
                                                         gpui::MouseButton::Left,
                                                         cx.listener(move |view, _, _, cx| {
-                                                            view.on_stop_click(
-                                                                &branch_for_stop,
+                                                            view.on_open_editor_click(
+                                                                &worktree_path_for_edit,
+                                                                &branch_for_edit,
                                                                 cx,
                                                             );
                                                         }),
                                                     )
                                                     .child(
-                                                        div().text_color(rgb(0xffffff)).child("⏹"),
+                                                        div()
+                                                            .text_color(rgb(0xaaaaaa))
+                                                            .text_sm()
+                                                            .child("Edit"),
                                                     ),
                                             )
-                                        })
-                                        // Destroy button [×]
-                                        .child(
-                                            div()
-                                                .id(("destroy-btn", ix))
-                                                .px_2()
-                                                .py_1()
-                                                .bg(rgb(0x662222))
-                                                .hover(|style| style.bg(rgb(0x883333)))
-                                                .rounded_md()
-                                                .cursor_pointer()
-                                                .on_mouse_up(
-                                                    gpui::MouseButton::Left,
-                                                    cx.listener(move |view, _, _, cx| {
-                                                        view.on_destroy_click(
-                                                            &branch_for_destroy,
-                                                            cx,
-                                                        );
-                                                    }),
+                                            // Focus Terminal button [Focus] - only show when running
+                                            .when(is_running, |row| {
+                                                let tt = terminal_type_for_focus.clone();
+                                                let wid = window_id_for_focus.clone();
+                                                let br = branch_for_focus.clone();
+                                                row.child(
+                                                    div()
+                                                        .id(("focus-btn", ix))
+                                                        .px_2()
+                                                        .py_1()
+                                                        .bg(rgb(0x444488))
+                                                        .hover(|style| style.bg(rgb(0x555599)))
+                                                        .rounded_md()
+                                                        .cursor_pointer()
+                                                        .on_mouse_up(
+                                                            gpui::MouseButton::Left,
+                                                            cx.listener(move |view, _, _, cx| {
+                                                                view.on_focus_terminal_click(
+                                                                    tt.as_ref(),
+                                                                    wid.as_deref(),
+                                                                    &br,
+                                                                    cx,
+                                                                );
+                                                            }),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_color(rgb(0xffffff))
+                                                                .child("Focus"),
+                                                        ),
                                                 )
-                                                .child(div().text_color(rgb(0xffffff)).child("×")),
-                                        ),
-                                )
-                                // Error message (if open/stop failed for this row)
-                                .when_some(row_error, |this, error| {
-                                    this.child(div().px_4().pb_2().child(
-                                        div().text_sm().text_color(rgb(0xff6b6b)).child(error),
-                                    ))
-                                })
-                        })
-                        .collect()
-                }),
+                                            })
+                                            // Open button [▶] - shown when NOT running
+                                            .when(!is_running, |row| {
+                                                row.child(
+                                                    div()
+                                                        .id(("open-btn", ix))
+                                                        .px_2()
+                                                        .py_1()
+                                                        .bg(rgb(0x444444))
+                                                        .hover(|style| style.bg(rgb(0x555555)))
+                                                        .rounded_md()
+                                                        .cursor_pointer()
+                                                        .on_mouse_up(
+                                                            gpui::MouseButton::Left,
+                                                            cx.listener(move |view, _, _, cx| {
+                                                                view.on_open_click(
+                                                                    &branch_for_open,
+                                                                    cx,
+                                                                );
+                                                            }),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_color(rgb(0xffffff))
+                                                                .child("▶"),
+                                                        ),
+                                                )
+                                            })
+                                            // Stop button [⏹] - shown when running
+                                            .when(is_running, |row| {
+                                                row.child(
+                                                    div()
+                                                        .id(("stop-btn", ix))
+                                                        .px_2()
+                                                        .py_1()
+                                                        .bg(rgb(0x444488))
+                                                        .hover(|style| style.bg(rgb(0x555599)))
+                                                        .rounded_md()
+                                                        .cursor_pointer()
+                                                        .on_mouse_up(
+                                                            gpui::MouseButton::Left,
+                                                            cx.listener(move |view, _, _, cx| {
+                                                                view.on_stop_click(
+                                                                    &branch_for_stop,
+                                                                    cx,
+                                                                );
+                                                            }),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_color(rgb(0xffffff))
+                                                                .child("⏹"),
+                                                        ),
+                                                )
+                                            })
+                                            // Destroy button [×]
+                                            .child(
+                                                div()
+                                                    .id(("destroy-btn", ix))
+                                                    .px_2()
+                                                    .py_1()
+                                                    .bg(rgb(0x662222))
+                                                    .hover(|style| style.bg(rgb(0x883333)))
+                                                    .rounded_md()
+                                                    .cursor_pointer()
+                                                    .on_mouse_up(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(move |view, _, _, cx| {
+                                                            view.on_destroy_click(
+                                                                &branch_for_destroy,
+                                                                cx,
+                                                            );
+                                                        }),
+                                                    )
+                                                    .child(
+                                                        div().text_color(rgb(0xffffff)).child("×"),
+                                                    ),
+                                            ),
+                                    )
+                                    // Error message (if open/stop failed for this row)
+                                    .when_some(row_error, |this, error| {
+                                        this.child(div().px_4().pb_2().child(
+                                            div().text_sm().text_color(rgb(0xff6b6b)).child(error),
+                                        ))
+                                    })
+                            })
+                            .collect()
+                    }),
+                )
+                .h_full(),
             )
-            .h_full(),
-        )
+        }
     }
 }
 

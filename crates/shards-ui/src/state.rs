@@ -4,6 +4,9 @@
 //! create dialog, and form state.
 
 use shards_core::Session;
+use std::path::PathBuf;
+
+use crate::projects::Project;
 
 /// Process status for a shard, distinguishing between running, stopped, and unknown states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,6 +191,22 @@ impl Default for CreateFormState {
     }
 }
 
+/// Which field is focused in the add project dialog.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum AddProjectDialogField {
+    #[default]
+    Path,
+    Name,
+}
+
+/// Form state for adding a new project.
+#[derive(Clone, Debug, Default)]
+pub struct AddProjectFormState {
+    pub path: String,
+    pub name: String,
+    pub focused_field: AddProjectDialogField,
+}
+
 /// Main application state.
 pub struct AppState {
     pub displays: Vec<ShardDisplay>,
@@ -218,12 +237,23 @@ pub struct AppState {
 
     /// Timestamp of last successful status refresh
     pub last_refresh: std::time::Instant,
+
+    // Project management state
+    pub projects: Vec<Project>,
+    pub active_project: Option<PathBuf>,
+    pub show_add_project_dialog: bool,
+    pub add_project_form: AddProjectFormState,
+    pub add_project_error: Option<String>,
+    pub show_project_dropdown: bool,
 }
 
 impl AppState {
     /// Create new application state, loading sessions from disk.
     pub fn new() -> Self {
         let (displays, load_error) = crate::actions::refresh_sessions();
+
+        // Load projects from disk
+        let projects_data = crate::projects::load_projects();
 
         Self {
             displays,
@@ -240,6 +270,12 @@ impl AppState {
             editor_error: None,
             focus_error: None,
             last_refresh: std::time::Instant::now(),
+            projects: projects_data.projects,
+            active_project: projects_data.active,
+            show_add_project_dialog: false,
+            add_project_form: AddProjectFormState::default(),
+            add_project_error: None,
+            show_project_dropdown: false,
         }
     }
 
@@ -317,6 +353,34 @@ impl AppState {
         self.focus_error = None;
     }
 
+    /// Reset the add project form to default state.
+    pub fn reset_add_project_form(&mut self) {
+        self.add_project_form = AddProjectFormState::default();
+        self.add_project_error = None;
+    }
+
+    /// Get the project ID for the active project.
+    pub fn active_project_id(&self) -> Option<String> {
+        self.active_project
+            .as_ref()
+            .map(|p| crate::projects::derive_project_id(p))
+    }
+
+    /// Get displays filtered by active project.
+    ///
+    /// If no active project is set, returns all displays.
+    pub fn filtered_displays(&self) -> Vec<&ShardDisplay> {
+        if let Some(active_id) = self.active_project_id() {
+            self.displays
+                .iter()
+                .filter(|d| d.session.project_id == active_id)
+                .collect()
+        } else {
+            // No active project - show all shards
+            self.displays.iter().collect()
+        }
+    }
+
     /// Count shards with Stopped status.
     pub fn stopped_count(&self) -> usize {
         self.displays
@@ -344,25 +408,39 @@ impl Default for AppState {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_reset_confirm_dialog_clears_all_fields() {
-        // Create state with confirm dialog open and an error
-        let mut state = AppState {
+    /// Create a minimal AppState for testing.
+    fn make_test_state() -> AppState {
+        AppState {
             displays: Vec::new(),
             load_error: None,
             show_create_dialog: false,
             create_form: CreateFormState::default(),
             create_error: None,
-            show_confirm_dialog: true,
-            confirm_target_branch: Some("feature-branch".to_string()),
-            confirm_error: Some("Some error".to_string()),
+            show_confirm_dialog: false,
+            confirm_target_branch: None,
+            confirm_error: None,
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
             editor_error: None,
             focus_error: None,
             last_refresh: std::time::Instant::now(),
-        };
+            projects: Vec::new(),
+            active_project: None,
+            show_add_project_dialog: false,
+            add_project_form: AddProjectFormState::default(),
+            add_project_error: None,
+            show_project_dropdown: false,
+        }
+    }
+
+    #[test]
+    fn test_reset_confirm_dialog_clears_all_fields() {
+        // Create state with confirm dialog open and an error
+        let mut state = make_test_state();
+        state.show_confirm_dialog = true;
+        state.confirm_target_branch = Some("feature-branch".to_string());
+        state.confirm_error = Some("Some error".to_string());
 
         state.reset_confirm_dialog();
 
@@ -373,25 +451,11 @@ mod tests {
 
     #[test]
     fn test_clear_open_error() {
-        let mut state = AppState {
-            displays: Vec::new(),
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: Some(OperationError {
-                branch: "branch".to_string(),
-                message: "error".to_string(),
-            }),
-            stop_error: None,
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: std::time::Instant::now(),
-        };
+        let mut state = make_test_state();
+        state.open_error = Some(OperationError {
+            branch: "branch".to_string(),
+            message: "error".to_string(),
+        });
 
         state.clear_open_error();
 
@@ -400,25 +464,11 @@ mod tests {
 
     #[test]
     fn test_clear_stop_error() {
-        let mut state = AppState {
-            displays: Vec::new(),
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: None,
-            stop_error: Some(OperationError {
-                branch: "branch".to_string(),
-                message: "error".to_string(),
-            }),
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: std::time::Instant::now(),
-        };
+        let mut state = make_test_state();
+        state.stop_error = Some(OperationError {
+            branch: "branch".to_string(),
+            message: "error".to_string(),
+        });
 
         state.clear_stop_error();
 
@@ -770,22 +820,8 @@ mod tests {
     #[test]
     fn test_update_statuses_only_updates_last_refresh() {
         let initial_time = std::time::Instant::now();
-        let mut state = AppState {
-            displays: Vec::new(),
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: None,
-            stop_error: None,
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: initial_time,
-        };
+        let mut state = make_test_state();
+        state.last_refresh = initial_time;
 
         // Small delay to ensure time difference
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -867,38 +903,24 @@ mod tests {
             note: None,
         };
 
-        let mut state = AppState {
-            displays: vec![
-                ShardDisplay {
-                    session: session_with_dead_pid,
-                    status: ProcessStatus::Running, // Start as Running (incorrect)
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: session_with_live_pid,
-                    status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: session_no_pid,
-                    status: ProcessStatus::Stopped, // Start as Stopped (correct)
-                    git_status: GitStatus::Unknown,
-                },
-            ],
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: None,
-            stop_error: None,
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: std::time::Instant::now(),
-        };
+        let mut state = make_test_state();
+        state.displays = vec![
+            ShardDisplay {
+                session: session_with_dead_pid,
+                status: ProcessStatus::Running, // Start as Running (incorrect)
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: session_with_live_pid,
+                status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: session_no_pid,
+                status: ProcessStatus::Stopped, // Start as Stopped (correct)
+                git_status: GitStatus::Unknown,
+            },
+        ];
 
         state.update_statuses_only();
 
@@ -926,22 +948,7 @@ mod tests {
 
     #[test]
     fn test_stopped_count_empty() {
-        let state = AppState {
-            displays: Vec::new(),
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: None,
-            stop_error: None,
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: std::time::Instant::now(),
-        };
+        let state = make_test_state();
 
         assert_eq!(state.stopped_count(), 0);
         assert_eq!(state.running_count(), 0);
@@ -973,50 +980,159 @@ mod tests {
             note: None,
         };
 
-        let state = AppState {
-            displays: vec![
-                ShardDisplay {
-                    session: make_session("1", "branch-1"),
-                    status: ProcessStatus::Stopped,
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: make_session("2", "branch-2"),
-                    status: ProcessStatus::Running,
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: make_session("3", "branch-3"),
-                    status: ProcessStatus::Stopped,
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: make_session("4", "branch-4"),
-                    status: ProcessStatus::Running,
-                    git_status: GitStatus::Unknown,
-                },
-                ShardDisplay {
-                    session: make_session("5", "branch-5"),
-                    status: ProcessStatus::Unknown,
-                    git_status: GitStatus::Unknown,
-                },
-            ],
-            load_error: None,
-            show_create_dialog: false,
-            create_form: CreateFormState::default(),
-            create_error: None,
-            show_confirm_dialog: false,
-            confirm_target_branch: None,
-            confirm_error: None,
-            open_error: None,
-            stop_error: None,
-            bulk_errors: Vec::new(),
-            editor_error: None,
-            focus_error: None,
-            last_refresh: std::time::Instant::now(),
-        };
+        let mut state = make_test_state();
+        state.displays = vec![
+            ShardDisplay {
+                session: make_session("1", "branch-1"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("2", "branch-2"),
+                status: ProcessStatus::Running,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("3", "branch-3"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("4", "branch-4"),
+                status: ProcessStatus::Running,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("5", "branch-5"),
+                status: ProcessStatus::Unknown,
+                git_status: GitStatus::Unknown,
+            },
+        ];
 
         assert_eq!(state.stopped_count(), 2, "Should count 2 stopped shards");
         assert_eq!(state.running_count(), 2, "Should count 2 running shards");
+    }
+
+    // --- Project-related tests ---
+
+    #[test]
+    fn test_reset_add_project_form() {
+        let mut state = make_test_state();
+        state.add_project_form.path = "/some/path".to_string();
+        state.add_project_form.name = "test".to_string();
+        state.add_project_error = Some("Error".to_string());
+
+        state.reset_add_project_form();
+
+        assert!(state.add_project_form.path.is_empty());
+        assert!(state.add_project_form.name.is_empty());
+        assert!(state.add_project_error.is_none());
+    }
+
+    #[test]
+    fn test_active_project_id() {
+        let mut state = make_test_state();
+
+        // No active project
+        assert!(state.active_project_id().is_none());
+
+        // With active project
+        state.active_project = Some(PathBuf::from("/Users/test/Projects/my-project"));
+        assert_eq!(state.active_project_id(), Some("my-project".to_string()));
+    }
+
+    #[test]
+    fn test_filtered_displays_no_active_project() {
+        use shards_core::sessions::types::SessionStatus;
+
+        let make_session = |id: &str, project_id: &str| Session {
+            id: id.to_string(),
+            branch: format!("branch-{}", id),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            project_id: project_id.to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: String::new(),
+            last_activity: None,
+            note: None,
+        };
+
+        let mut state = make_test_state();
+        state.displays = vec![
+            ShardDisplay {
+                session: make_session("1", "project-a"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("2", "project-b"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+        ];
+
+        // No active project - should return all
+        let filtered = state.filtered_displays();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_displays_with_active_project() {
+        use shards_core::sessions::types::SessionStatus;
+
+        let make_session = |id: &str, project_id: &str| Session {
+            id: id.to_string(),
+            branch: format!("branch-{}", id),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            project_id: project_id.to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: String::new(),
+            last_activity: None,
+            note: None,
+        };
+
+        let mut state = make_test_state();
+        state.displays = vec![
+            ShardDisplay {
+                session: make_session("1", "project-a"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("2", "project-b"),
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+            },
+            ShardDisplay {
+                session: make_session("3", "project-a"),
+                status: ProcessStatus::Running,
+                git_status: GitStatus::Unknown,
+            },
+        ];
+
+        // Active project set - should filter
+        state.active_project = Some(PathBuf::from("/Users/test/Projects/project-a"));
+        let filtered = state.filtered_displays();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|d| d.session.project_id == "project-a"));
     }
 }

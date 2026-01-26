@@ -3,8 +3,14 @@
 //! This module contains functions that interact with shards-core
 //! to perform operations like creating, destroying, relaunching, and listing shards.
 
+use std::path::{Path, PathBuf};
+
 use shards_core::{CreateSessionRequest, Session, ShardsConfig, session_ops};
 
+use crate::projects::{
+    Project, ProjectValidation, derive_project_id, load_projects, save_projects,
+    validate_project_path,
+};
 use crate::state::{OperationError, ProcessStatus, ShardDisplay};
 
 /// Create a new shard with the given branch name, agent, and optional note.
@@ -217,6 +223,114 @@ fn execute_bulk_operation(
     );
 
     (success_count, errors)
+}
+
+// --- Project Management Actions ---
+
+/// Add a new project after validation.
+///
+/// Returns the added project on success, or an error message if validation fails.
+pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, String> {
+    tracing::info!(
+        event = "ui.add_project.started",
+        path = %path.display()
+    );
+
+    let mut data = load_projects();
+
+    match validate_project_path(&path, &data.projects) {
+        ProjectValidation::Valid => {}
+        ProjectValidation::NotADirectory => {
+            return Err(format!("'{}' is not a directory", path.display()));
+        }
+        ProjectValidation::NotAGitRepo => {
+            return Err(format!("'{}' is not a git repository", path.display()));
+        }
+        ProjectValidation::AlreadyExists => {
+            return Err("Project already exists".to_string());
+        }
+    }
+
+    let project_name = name.unwrap_or_else(|| derive_project_id(&path));
+    let project = Project {
+        path: path.clone(),
+        name: project_name,
+    };
+
+    data.projects.push(project.clone());
+
+    // If this is the first project, make it active
+    if data.projects.len() == 1 {
+        data.active = Some(path.clone());
+    }
+
+    save_projects(&data)?;
+
+    tracing::info!(
+        event = "ui.add_project.completed",
+        path = %path.display(),
+        name = %project.name
+    );
+
+    Ok(project)
+}
+
+/// Remove a project from the list (doesn't affect shards).
+pub fn remove_project(path: &Path) -> Result<(), String> {
+    tracing::info!(
+        event = "ui.remove_project.started",
+        path = %path.display()
+    );
+
+    let mut data = load_projects();
+
+    let original_len = data.projects.len();
+    data.projects.retain(|p| p.path != path);
+
+    if data.projects.len() == original_len {
+        return Err("Project not found".to_string());
+    }
+
+    // Clear active project if it was removed
+    if data.active.as_ref() == Some(&path.to_path_buf()) {
+        data.active = data.projects.first().map(|p| p.path.clone());
+    }
+
+    save_projects(&data)?;
+
+    tracing::info!(
+        event = "ui.remove_project.completed",
+        path = %path.display()
+    );
+
+    Ok(())
+}
+
+/// Set the active project.
+pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
+    tracing::info!(
+        event = "ui.set_active_project.started",
+        path = ?path
+    );
+
+    let mut data = load_projects();
+
+    // Validate that the project exists if a path is provided
+    if let Some(ref p) = path
+        && !data.projects.iter().any(|proj| &proj.path == p)
+    {
+        return Err("Project not found".to_string());
+    }
+
+    data.active = path.clone();
+    save_projects(&data)?;
+
+    tracing::info!(
+        event = "ui.set_active_project.completed",
+        path = ?path
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]

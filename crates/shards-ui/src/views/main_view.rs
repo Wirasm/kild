@@ -8,9 +8,13 @@ use gpui::{
     div, prelude::*, rgb,
 };
 
+use std::path::PathBuf;
+
 use crate::actions;
-use crate::state::{AppState, CreateDialogField};
-use crate::views::{confirm_dialog, create_dialog, shard_list};
+use crate::state::{AddProjectDialogField, AppState, CreateDialogField};
+use crate::views::{
+    add_project_dialog, confirm_dialog, create_dialog, project_selector, shard_list,
+};
 
 /// Main application view that composes the shard list, header, and create dialog.
 ///
@@ -360,6 +364,113 @@ impl MainView {
         cx.notify();
     }
 
+    // --- Project management handlers ---
+
+    /// Handle click on Add Project button.
+    pub fn on_add_project_click(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.add_project_dialog.opened");
+        self.state.show_add_project_dialog = true;
+        self.state.show_project_dropdown = false;
+        cx.notify();
+    }
+
+    /// Handle add project dialog cancel.
+    pub fn on_add_project_cancel(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.add_project_dialog.cancelled");
+        self.state.show_add_project_dialog = false;
+        self.state.reset_add_project_form();
+        cx.notify();
+    }
+
+    /// Handle add project dialog submit.
+    pub fn on_add_project_submit(&mut self, cx: &mut Context<Self>) {
+        let path_str = self.state.add_project_form.path.trim().to_string();
+        let name = if self.state.add_project_form.name.trim().is_empty() {
+            None
+        } else {
+            Some(self.state.add_project_form.name.trim().to_string())
+        };
+
+        if path_str.is_empty() {
+            self.state.add_project_error = Some("Path cannot be empty".to_string());
+            cx.notify();
+            return;
+        }
+
+        let path = PathBuf::from(&path_str);
+
+        match actions::add_project(path.clone(), name) {
+            Ok(project) => {
+                tracing::info!(
+                    event = "ui.add_project.succeeded",
+                    path = %path.display(),
+                    name = %project.name
+                );
+                // Update local state with new project
+                self.state.projects.push(project);
+                if self.state.projects.len() == 1 {
+                    self.state.active_project = Some(path);
+                }
+                self.state.show_add_project_dialog = false;
+                self.state.reset_add_project_form();
+                // Refresh sessions to filter by new active project
+                self.state.refresh_sessions();
+            }
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.add_project.error_displayed",
+                    path = %path.display(),
+                    error = %e
+                );
+                self.state.add_project_error = Some(e);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Handle project selection from dropdown.
+    pub fn on_project_select(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        tracing::info!(
+            event = "ui.project_selected",
+            path = %path.display()
+        );
+
+        if let Err(e) = actions::set_active_project(Some(path.clone())) {
+            tracing::error!(event = "ui.project_select.failed", error = %e);
+        }
+
+        self.state.active_project = Some(path);
+        self.state.show_project_dropdown = false;
+        cx.notify();
+    }
+
+    /// Handle remove project from list.
+    pub fn on_remove_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        tracing::info!(
+            event = "ui.remove_project.started",
+            path = %path.display()
+        );
+
+        if let Err(e) = actions::remove_project(&path) {
+            tracing::error!(event = "ui.remove_project.failed", error = %e);
+            return;
+        }
+
+        // Update local state
+        self.state.projects.retain(|p| p.path != path);
+        if self.state.active_project.as_ref() == Some(&path) {
+            self.state.active_project = self.state.projects.first().map(|p| p.path.clone());
+        }
+        self.state.show_project_dropdown = false;
+        cx.notify();
+    }
+
+    /// Toggle project dropdown open/closed.
+    pub fn on_toggle_project_dropdown(&mut self, cx: &mut Context<Self>) {
+        self.state.show_project_dropdown = !self.state.show_project_dropdown;
+        cx.notify();
+    }
+
     /// Render a bulk operation button with consistent styling.
     fn render_bulk_button(
         &self,
@@ -410,12 +521,77 @@ impl MainView {
     /// When create dialog is open: handles branch name input (alphanumeric, -, _, /, space converts to hyphen),
     /// form submission (Enter), dialog dismissal (Escape), and agent cycling (Tab).
     /// When confirm dialog is open: handles dialog dismissal (Escape).
+    /// When add project dialog is open: handles path/name input, submission, and dismissal.
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let key_str = event.keystroke.key.to_string();
 
         // Handle confirm dialog escape
         if self.state.show_confirm_dialog && key_str == "escape" {
             self.on_confirm_cancel(cx);
+            return;
+        }
+
+        // Handle add project dialog keyboard input
+        if self.state.show_add_project_dialog {
+            match key_str.as_str() {
+                "backspace" => {
+                    match self.state.add_project_form.focused_field {
+                        AddProjectDialogField::Path => {
+                            self.state.add_project_form.path.pop();
+                        }
+                        AddProjectDialogField::Name => {
+                            self.state.add_project_form.name.pop();
+                        }
+                    }
+                    cx.notify();
+                }
+                "enter" => {
+                    self.on_add_project_submit(cx);
+                }
+                "escape" => {
+                    self.on_add_project_cancel(cx);
+                }
+                "tab" => {
+                    // Cycle focus between fields
+                    self.state.add_project_form.focused_field =
+                        match self.state.add_project_form.focused_field {
+                            AddProjectDialogField::Path => AddProjectDialogField::Name,
+                            AddProjectDialogField::Name => AddProjectDialogField::Path,
+                        };
+                    cx.notify();
+                }
+                key if key.len() == 1 => {
+                    if let Some(c) = key.chars().next() {
+                        // Path and name fields accept most characters (file paths can have spaces, etc.)
+                        if !c.is_control() {
+                            match self.state.add_project_form.focused_field {
+                                AddProjectDialogField::Path => {
+                                    self.state.add_project_form.path.push(c);
+                                }
+                                AddProjectDialogField::Name => {
+                                    self.state.add_project_form.name.push(c);
+                                }
+                            }
+                            cx.notify();
+                        }
+                    }
+                }
+                "space" => {
+                    // Allow spaces in both path and name
+                    match self.state.add_project_form.focused_field {
+                        AddProjectDialogField::Path => {
+                            self.state.add_project_form.path.push(' ');
+                        }
+                        AddProjectDialogField::Name => {
+                            self.state.add_project_form.name.push(' ');
+                        }
+                    }
+                    cx.notify();
+                }
+                _ => {
+                    // Ignore other keys
+                }
+            }
             return;
         }
 
@@ -521,10 +697,18 @@ impl Render for MainView {
                     .justify_between()
                     .child(
                         div()
-                            .text_xl()
-                            .text_color(rgb(0xffffff))
-                            .font_weight(FontWeight::BOLD)
-                            .child("Shards"),
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .text_color(rgb(0xffffff))
+                                    .font_weight(FontWeight::BOLD)
+                                    .child("Shards"),
+                            )
+                            // Project selector dropdown
+                            .child(project_selector::render_project_selector(&self.state, cx)),
                     )
                     .child(
                         div()
@@ -658,6 +842,13 @@ impl Render for MainView {
             // Confirm dialog (conditional)
             .when(self.state.show_confirm_dialog, |this| {
                 this.child(confirm_dialog::render_confirm_dialog(&self.state, cx))
+            })
+            // Add project dialog (conditional)
+            .when(self.state.show_add_project_dialog, |this| {
+                this.child(add_project_dialog::render_add_project_dialog(
+                    &self.state,
+                    cx,
+                ))
             })
     }
 }

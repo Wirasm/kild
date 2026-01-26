@@ -4999,7 +4999,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "core-text",
+ "dirs 5.0.1",
  "gpui",
+ "serde",
+ "serde_json",
  "shards-core",
  "tempfile",
  "tracing",
