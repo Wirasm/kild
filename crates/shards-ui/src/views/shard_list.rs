@@ -107,10 +107,12 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                             // Show Open button when stopped, Stop button when running
                             let is_running = display.status == ProcessStatus::Running;
 
-                            // Clone branch for button closures
+                            // Clone data for use in closures
                             let branch_for_open = branch.clone();
                             let branch_for_stop = branch.clone();
                             let branch_for_destroy = branch.clone();
+                            let git_dirty = display.git_dirty;
+                            let note = display.session.note.clone();
 
                             div()
                                 .id(ix)
@@ -126,6 +128,10 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                         .items_center()
                                         .gap_3()
                                         .child(div().text_color(status_color).child("●"))
+                                        // Git dirty indicator (orange dot when uncommitted changes)
+                                        .when(git_dirty, |row| {
+                                            row.child(div().text_color(rgb(0xffa500)).child("●"))
+                                        })
                                         .child(
                                             div()
                                                 .flex_1()
@@ -158,6 +164,23 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                 )
                                             },
                                         )
+                                        // Note column (truncated to 25 chars)
+                                        .when_some(note, |row, note_text| {
+                                            let truncated = if note_text.chars().count() > 25 {
+                                                format!(
+                                                    "{}...",
+                                                    note_text.chars().take(25).collect::<String>()
+                                                )
+                                            } else {
+                                                note_text
+                                            };
+                                            row.child(
+                                                div()
+                                                    .text_color(rgb(0x888888))
+                                                    .text_sm()
+                                                    .child(truncated),
+                                            )
+                                        })
                                         // Open button [▶] - shown when NOT running
                                         .when(!is_running, |row| {
                                             row.child(

@@ -9,7 +9,7 @@ use gpui::{
 };
 
 use crate::actions;
-use crate::state::AppState;
+use crate::state::{AppState, CreateDialogField};
 use crate::views::{confirm_dialog, create_dialog, shard_list};
 
 /// Main application view that composes the shard list, header, and create dialog.
@@ -73,8 +73,13 @@ impl MainView {
     pub fn on_dialog_submit(&mut self, cx: &mut Context<Self>) {
         let branch = self.state.create_form.branch_name.trim().to_string();
         let agent = self.state.create_form.selected_agent.clone();
+        let note = if self.state.create_form.note.trim().is_empty() {
+            None
+        } else {
+            Some(self.state.create_form.note.trim().to_string())
+        };
 
-        match actions::create_shard(&branch, &agent) {
+        match actions::create_shard(&branch, &agent, note) {
             Ok(_session) => {
                 // Success - close dialog and refresh list
                 self.state.show_create_dialog = false;
@@ -229,7 +234,15 @@ impl MainView {
 
         match key_str.as_str() {
             "backspace" => {
-                self.state.create_form.branch_name.pop();
+                match self.state.create_form.focused_field {
+                    CreateDialogField::BranchName => {
+                        self.state.create_form.branch_name.pop();
+                    }
+                    CreateDialogField::Note => {
+                        self.state.create_form.note.pop();
+                    }
+                    CreateDialogField::Agent => {}
+                }
                 cx.notify();
             }
             "enter" => {
@@ -239,21 +252,49 @@ impl MainView {
                 self.on_dialog_cancel(cx);
             }
             "space" => {
-                // Allow spaces but convert to hyphens for branch names
-                self.state.create_form.branch_name.push('-');
+                match self.state.create_form.focused_field {
+                    CreateDialogField::BranchName => {
+                        // Convert spaces to hyphens for branch names
+                        self.state.create_form.branch_name.push('-');
+                    }
+                    CreateDialogField::Note => {
+                        // Allow actual spaces in notes
+                        self.state.create_form.note.push(' ');
+                    }
+                    CreateDialogField::Agent => {}
+                }
                 cx.notify();
             }
             "tab" => {
-                // Cycle agent on tab
-                self.on_agent_cycle(cx);
+                // Cycle focus between fields
+                self.state.create_form.focused_field = match self.state.create_form.focused_field {
+                    CreateDialogField::BranchName => CreateDialogField::Agent,
+                    CreateDialogField::Agent => CreateDialogField::Note,
+                    CreateDialogField::Note => CreateDialogField::BranchName,
+                };
+                cx.notify();
             }
             key if key.len() == 1 => {
-                // Single character - add to branch name if valid for branch names
-                if let Some(c) = key.chars().next()
-                    && (c.is_alphanumeric() || c == '-' || c == '_' || c == '/')
-                {
-                    self.state.create_form.branch_name.push(c);
-                    cx.notify();
+                if let Some(c) = key.chars().next() {
+                    match self.state.create_form.focused_field {
+                        CreateDialogField::BranchName => {
+                            // Branch names: alphanumeric, -, _, /
+                            if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+                                self.state.create_form.branch_name.push(c);
+                                cx.notify();
+                            }
+                        }
+                        CreateDialogField::Note => {
+                            // Notes: any non-control character
+                            if !c.is_control() {
+                                self.state.create_form.note.push(c);
+                                cx.notify();
+                            }
+                        }
+                        CreateDialogField::Agent => {
+                            // Agent field uses click/tab to cycle, not typed input
+                        }
+                    }
                 }
             }
             _ => {

@@ -28,12 +28,28 @@ pub struct OperationError {
 pub struct ShardDisplay {
     pub session: Session,
     pub status: ProcessStatus,
+    pub git_dirty: bool,
+}
+
+/// Check if a worktree has uncommitted changes.
+fn check_git_dirty(worktree_path: &std::path::Path) -> bool {
+    std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(worktree_path)
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false)
 }
 
 impl ShardDisplay {
     pub fn from_session(session: Session) -> Self {
         let status = Self::check_process_status(session.process_id, &session.branch);
-        Self { session, status }
+        let git_dirty = if session.worktree_path.exists() {
+            check_git_dirty(&session.worktree_path)
+        } else {
+            false
+        };
+        Self { session, status, git_dirty }
     }
 
     fn check_process_status(process_id: Option<u32>, branch: &str) -> ProcessStatus {
@@ -57,12 +73,23 @@ impl ShardDisplay {
     }
 }
 
+/// Which field is focused in the create dialog.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum CreateDialogField {
+    #[default]
+    BranchName,
+    Agent,
+    Note,
+}
+
 /// Form state for creating a new shard.
 #[derive(Clone, Debug)]
 pub struct CreateFormState {
     pub branch_name: String,
     pub selected_agent: String,
     pub selected_agent_index: usize,
+    pub note: String,
+    pub focused_field: CreateDialogField,
 }
 
 impl Default for CreateFormState {
@@ -79,6 +106,8 @@ impl Default for CreateFormState {
                 branch_name: String::new(),
                 selected_agent: default_agent.to_string(),
                 selected_agent_index: 0,
+                note: String::new(),
+                focused_field: CreateDialogField::default(),
             };
         }
 
@@ -99,6 +128,8 @@ impl Default for CreateFormState {
             branch_name: String::new(),
             selected_agent: agents[index].to_string(),
             selected_agent_index: index,
+            note: String::new(),
+            focused_field: CreateDialogField::default(),
         }
     }
 }

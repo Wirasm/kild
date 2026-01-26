@@ -5,7 +5,7 @@
 
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
 
-use crate::state::AppState;
+use crate::state::{AppState, CreateDialogField};
 use crate::views::MainView;
 
 /// Available agent names for selection (pre-sorted by shards-core).
@@ -26,6 +26,8 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
     let agents = agent_options();
     let current_agent = state.create_form.selected_agent.clone();
     let branch_name = state.create_form.branch_name.clone();
+    let note = state.create_form.note.clone();
+    let focused_field = state.create_form.focused_field.clone();
     let create_error = state.create_error.clone();
 
     // Overlay background (press Escape or click Cancel to dismiss)
@@ -71,7 +73,8 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                         .flex_col()
                         .gap_4()
                         // Branch name field
-                        .child(
+                        .child({
+                            let is_focused = focused_field == CreateDialogField::BranchName;
                             div()
                                 .flex()
                                 .flex_col()
@@ -89,7 +92,11 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                         .bg(rgb(0x1e1e1e))
                                         .rounded_md()
                                         .border_1()
-                                        .border_color(rgb(0x555555))
+                                        .border_color(if is_focused {
+                                            rgb(0x4a9eff)
+                                        } else {
+                                            rgb(0x555555)
+                                        })
                                         .min_h(px(36.0))
                                         .child(
                                             div()
@@ -100,14 +107,17 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                                 })
                                                 .child(if branch_name.is_empty() {
                                                     "Type branch name...".to_string()
-                                                } else {
+                                                } else if is_focused {
                                                     format!("{}|", branch_name)
+                                                } else {
+                                                    branch_name.clone()
                                                 }),
                                         ),
-                                ),
-                        )
+                                )
+                        })
                         // Agent selection field
-                        .child(
+                        .child({
+                            let is_focused = focused_field == CreateDialogField::Agent;
                             div()
                                 .flex()
                                 .flex_col()
@@ -122,7 +132,11 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                         .hover(|style| style.bg(rgb(0x2a2a2a)))
                                         .rounded_md()
                                         .border_1()
-                                        .border_color(rgb(0x555555))
+                                        .border_color(if is_focused {
+                                            rgb(0x4a9eff)
+                                        } else {
+                                            rgb(0x555555)
+                                        })
                                         .cursor_pointer()
                                         .on_mouse_up(
                                             gpui::MouseButton::Left,
@@ -152,8 +166,51 @@ pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> imp
                                                         )),
                                                 ),
                                         ),
-                                ),
-                        )
+                                )
+                        })
+                        // Note field (optional)
+                        .child({
+                            let is_focused = focused_field == CreateDialogField::Note;
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0xaaaaaa))
+                                        .child("Note (optional)"),
+                                )
+                                .child(
+                                    div()
+                                        .px_3()
+                                        .py_2()
+                                        .bg(rgb(0x1e1e1e))
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(if is_focused {
+                                            rgb(0x4a9eff)
+                                        } else {
+                                            rgb(0x555555)
+                                        })
+                                        .min_h(px(36.0))
+                                        .child(
+                                            div()
+                                                .text_color(if note.is_empty() {
+                                                    rgb(0x666666)
+                                                } else {
+                                                    rgb(0xffffff)
+                                                })
+                                                .child(if note.is_empty() {
+                                                    "What is this shard for?".to_string()
+                                                } else if is_focused {
+                                                    format!("{}|", note)
+                                                } else {
+                                                    note.clone()
+                                                }),
+                                        ),
+                                )
+                        })
                         // Error message (if any)
                         .when_some(create_error, |this, error| {
                             this.child(

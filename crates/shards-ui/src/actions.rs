@@ -7,14 +7,15 @@ use shards_core::{CreateSessionRequest, Session, ShardsConfig, session_ops};
 
 use crate::state::ShardDisplay;
 
-/// Create a new shard with the given branch name and agent.
+/// Create a new shard with the given branch name, agent, and optional note.
 ///
 /// Returns the created session on success, or an error message on failure.
-pub fn create_shard(branch: &str, agent: &str) -> Result<Session, String> {
+pub fn create_shard(branch: &str, agent: &str, note: Option<String>) -> Result<Session, String> {
     tracing::info!(
         event = "ui.create_shard.started",
         branch = branch,
-        agent = agent
+        agent = agent,
+        note = ?note
     );
 
     if branch.trim().is_empty() {
@@ -36,7 +37,7 @@ pub fn create_shard(branch: &str, agent: &str) -> Result<Session, String> {
         }
     };
 
-    let request = CreateSessionRequest::new(branch.to_string(), Some(agent.to_string()), None);
+    let request = CreateSessionRequest::new(branch.to_string(), Some(agent.to_string()), note);
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {
