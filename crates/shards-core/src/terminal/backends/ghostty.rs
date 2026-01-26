@@ -176,22 +176,50 @@ impl TerminalBackend for GhosttyBackend {
 
     #[cfg(target_os = "macos")]
     fn focus_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        use tracing::info;
+        use tracing::{error, info};
 
         debug!(
             event = "core.terminal.focus_ghostty_started",
             window_title = %window_id
         );
 
-        // Ghostty uses window title, not numeric ID
-        // First activate the app
+        // Ghostty uses window title for identification, not a numeric window ID like iTerm/Terminal.app.
+        // Unlike AppleScript-scriptable apps, Ghostty requires System Events to manipulate windows.
+        // Step 1: Activate the app to bring it to the foreground
+        // Step 2: Use System Events to find our specific window by title and raise it
         let activate_script = r#"tell application "Ghostty" to activate"#;
-        let _ = std::process::Command::new("osascript")
+        match std::process::Command::new("osascript")
             .arg("-e")
             .arg(activate_script)
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    event = "core.terminal.focus_ghostty_activate_failed",
+                    window_title = %window_id,
+                    stderr = %stderr.trim(),
+                    message = "Ghostty activation failed - focus may not work correctly"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.terminal.focus_ghostty_activate_failed",
+                    window_title = %window_id,
+                    error = %e,
+                    message = "Failed to execute osascript for Ghostty activation"
+                );
+            }
+            Ok(_) => {
+                debug!(
+                    event = "core.terminal.focus_ghostty_activated",
+                    window_title = %window_id
+                );
+            }
+        }
 
-        // Use System Events to find and raise the window by title
+        // Use System Events to find and raise the window by title.
+        // AXRaise is an accessibility action that brings a window to the front of other windows.
         let focus_script = format!(
             r#"tell application "System Events"
             tell process "Ghostty"
@@ -223,17 +251,40 @@ impl TerminalBackend for GhosttyBackend {
                     );
                     Ok(())
                 } else {
+                    warn!(
+                        event = "core.terminal.focus_failed",
+                        terminal = "Ghostty",
+                        window_title = %window_id,
+                        message = "Window not found"
+                    );
                     Err(TerminalError::FocusFailed {
                         message: format!("Ghostty window '{}' not found", window_id),
                     })
                 }
             }
-            Ok(output) => Err(TerminalError::FocusFailed {
-                message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            }),
-            Err(e) => Err(TerminalError::FocusFailed {
-                message: e.to_string(),
-            }),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    event = "core.terminal.focus_failed",
+                    terminal = "Ghostty",
+                    window_title = %window_id,
+                    stderr = %stderr.trim()
+                );
+                Err(TerminalError::FocusFailed {
+                    message: stderr.trim().to_string(),
+                })
+            }
+            Err(e) => {
+                error!(
+                    event = "core.terminal.focus_failed",
+                    terminal = "Ghostty",
+                    window_title = %window_id,
+                    error = %e
+                );
+                Err(TerminalError::FocusFailed {
+                    message: e.to_string(),
+                })
+            }
         }
     }
 

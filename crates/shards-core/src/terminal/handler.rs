@@ -346,7 +346,7 @@ pub fn close_terminal(terminal_type: &TerminalType, window_id: Option<&str>) {
 ///
 /// # Returns
 /// * `Ok(())` - Window was focused successfully
-/// * `Err(TerminalError)` - Focus failed (window not found, permission denied, etc.)
+/// * `Err(TerminalError)` - Focus failed (e.g., window not found, AppleScript execution error)
 pub fn focus_terminal(terminal_type: &TerminalType, window_id: &str) -> Result<(), TerminalError> {
     info!(
         event = "core.terminal.focus_requested",

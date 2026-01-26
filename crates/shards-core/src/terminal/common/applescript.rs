@@ -98,7 +98,10 @@ pub fn execute_spawn_script(
 #[cfg(not(target_os = "macos"))]
 pub fn close_applescript_window(_script: &str, _terminal_name: &str, _window_id: &str) {}
 
-/// Focus a window via AppleScript (returns result for user feedback).
+/// Focus a window via AppleScript.
+///
+/// Unlike `close_applescript_window` which is fire-and-forget, this returns a Result
+/// so callers can report focus failures to the user.
 #[cfg(target_os = "macos")]
 pub fn focus_applescript_window(
     script: &str,

@@ -30,6 +30,8 @@ const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
     end tell"#;
 
 /// AppleScript template for iTerm window focusing.
+/// - `activate` brings iTerm to the foreground (above other apps)
+/// - `set frontmost` ensures the specific window is in front of other iTerm windows
 const ITERM_FOCUS_SCRIPT: &str = r#"tell application "iTerm"
         activate
         set frontmost of window id {window_id} to true

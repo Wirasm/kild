@@ -27,6 +27,8 @@ const TERMINAL_CLOSE_SCRIPT: &str = r#"tell application "Terminal"
     end tell"#;
 
 /// AppleScript template for Terminal.app window focusing.
+/// - `activate` brings Terminal.app to the foreground (above other apps)
+/// - `set frontmost` ensures the specific window is in front of other Terminal.app windows
 const TERMINAL_FOCUS_SCRIPT: &str = r#"tell application "Terminal"
         activate
         set frontmost of window id {window_id} to true

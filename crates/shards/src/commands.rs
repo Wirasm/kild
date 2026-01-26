@@ -429,7 +429,7 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let session = match session_handler::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Failed to find shard '{}': {}", branch, e);
+            eprintln!("❌ Failed to find shard '{}': {}", branch, e);
             error!(event = "cli.focus_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -440,7 +440,7 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let terminal_type = match session.terminal_type.as_ref() {
         Some(t) => t,
         None => {
-            eprintln!("No terminal type recorded for shard '{}'", branch);
+            eprintln!("❌ No terminal type recorded for shard '{}'", branch);
             error!(
                 event = "cli.focus_failed",
                 branch = branch,
@@ -453,7 +453,7 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let window_id = match session.terminal_window_id.as_ref() {
         Some(id) => id,
         None => {
-            eprintln!("No window ID recorded for shard '{}'", branch);
+            eprintln!("❌ No window ID recorded for shard '{}'", branch);
             error!(
                 event = "cli.focus_failed",
                 branch = branch,
@@ -466,12 +466,12 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     // 3. Focus the terminal window
     match shards_core::terminal_ops::focus_terminal(terminal_type, window_id) {
         Ok(()) => {
-            println!("Focused shard '{}' terminal window", branch);
+            println!("✅ Focused shard '{}' terminal window", branch);
             info!(event = "cli.focus_completed", branch = branch);
             Ok(())
         }
         Err(e) => {
-            eprintln!("Failed to focus terminal for '{}': {}", branch, e);
+            eprintln!("❌ Failed to focus terminal for '{}': {}", branch, e);
             error!(event = "cli.focus_failed", branch = branch, error = %e);
             Err(e.into())
         }
