@@ -456,13 +456,17 @@ mod tests {
 
 /// Open a worktree path in the user's preferred editor.
 ///
-/// Editor selection priority:
+/// Editor selection priority (GUI context - no CLI flag available):
 /// 1. $EDITOR environment variable
 /// 2. Default: "zed"
 ///
-/// This is a fire-and-forget operation - we spawn the editor and don't wait.
-pub fn open_in_editor(worktree_path: &std::path::Path) {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "zed".to_string());
+/// Note: The CLI `code` command also supports an `--editor` flag that takes
+/// highest precedence, but this is unavailable in the GUI context.
+///
+/// Returns `Ok(())` on successful spawn, or an error message if the editor
+/// failed to launch (e.g., editor not found, permission denied).
+pub fn open_in_editor(worktree_path: &std::path::Path) -> Result<(), String> {
+    let editor = select_editor();
 
     tracing::info!(
         event = "ui.open_in_editor.started",
@@ -480,6 +484,7 @@ pub fn open_in_editor(worktree_path: &std::path::Path) {
                 path = %worktree_path.display(),
                 editor = %editor
             );
+            Ok(())
         }
         Err(e) => {
             tracing::error!(
@@ -488,5 +493,74 @@ pub fn open_in_editor(worktree_path: &std::path::Path) {
                 editor = %editor,
                 error = %e
             );
+            Err(format!(
+                "Failed to open editor '{}': {}. Check that $EDITOR is set correctly or 'zed' is installed.",
+                editor, e
+            ))
+        }
+    }
+}
+
+/// Determine which editor to use based on environment.
+///
+/// Priority:
+/// 1. $EDITOR environment variable
+/// 2. Default: "zed"
+fn select_editor() -> String {
+    std::env::var("EDITOR").unwrap_or_else(|_| "zed".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to ensure editor selection tests don't interfere with each other
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_select_editor_uses_env_when_set() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        // Save and restore original value
+        let original = std::env::var("EDITOR").ok();
+
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            std::env::set_var("EDITOR", "nvim");
+        }
+        let editor = select_editor();
+        assert_eq!(editor, "nvim");
+
+        // Restore
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("EDITOR", v),
+                None => std::env::remove_var("EDITOR"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_select_editor_defaults_to_zed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        // Save and restore original value
+        let original = std::env::var("EDITOR").ok();
+
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        unsafe {
+            std::env::remove_var("EDITOR");
+        }
+        let editor = select_editor();
+        assert_eq!(editor, "zed");
+
+        // Restore
+        // SAFETY: We hold ENV_LOCK to prevent concurrent access to env vars
+        if let Some(v) = original {
+            unsafe {
+                std::env::set_var("EDITOR", v);
+            }
         }
     }

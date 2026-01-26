@@ -210,6 +210,12 @@ pub struct AppState {
     // Bulk operation errors (shown as banner)
     pub bulk_errors: Vec<OperationError>,
 
+    // Editor error state (shown inline per-row)
+    pub editor_error: Option<OperationError>,
+
+    // Focus terminal error state (shown inline per-row)
+    pub focus_error: Option<OperationError>,
+
     /// Timestamp of last successful status refresh
     pub last_refresh: std::time::Instant,
 }
@@ -231,6 +237,8 @@ impl AppState {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         }
     }
@@ -299,6 +307,16 @@ impl AppState {
         self.bulk_errors.clear();
     }
 
+    /// Clear any editor error.
+    pub fn clear_editor_error(&mut self) {
+        self.editor_error = None;
+    }
+
+    /// Clear any focus terminal error.
+    pub fn clear_focus_error(&mut self) {
+        self.focus_error = None;
+    }
+
     /// Count shards with Stopped status.
     pub fn stopped_count(&self) -> usize {
         self.displays
@@ -341,6 +359,8 @@ mod tests {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 
@@ -368,6 +388,8 @@ mod tests {
             }),
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 
@@ -393,6 +415,8 @@ mod tests {
                 message: "error".to_string(),
             }),
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 
@@ -758,6 +782,8 @@ mod tests {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: initial_time,
         };
 
@@ -869,6 +895,8 @@ mod tests {
             open_error: None,
             stop_error: None,
             bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
             last_refresh: std::time::Instant::now(),
         };
 

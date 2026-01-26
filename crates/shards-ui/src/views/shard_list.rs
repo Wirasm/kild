@@ -79,6 +79,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
         let displays = state.displays.clone();
         let open_error = state.open_error.clone();
         let stop_error = state.stop_error.clone();
+        let editor_error = state.editor_error.clone();
+        let focus_error = state.focus_error.clone();
 
         div().flex_1().child(
             uniform_list(
@@ -95,13 +97,15 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                 ProcessStatus::Unknown => rgb(0x888888), // Gray
                             };
 
-                            // Check if this row has an open or stop error
+                            // Check if this row has any operation error (open, stop, editor, focus)
                             let has_matching_error =
                                 |err: &crate::state::OperationError| err.branch == branch;
                             let row_error = open_error
                                 .as_ref()
                                 .filter(|e| has_matching_error(e))
                                 .or_else(|| stop_error.as_ref().filter(|e| has_matching_error(e)))
+                                .or_else(|| editor_error.as_ref().filter(|e| has_matching_error(e)))
+                                .or_else(|| focus_error.as_ref().filter(|e| has_matching_error(e)))
                                 .map(|e| e.message.clone());
 
                             // Show Open button when stopped, Stop button when running
@@ -117,6 +121,7 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                             // Quick actions button clones
                             let worktree_path_for_copy = display.session.worktree_path.clone();
                             let worktree_path_for_edit = display.session.worktree_path.clone();
+                            let branch_for_edit = branch.clone();
                             let terminal_type_for_focus = display.session.terminal_type.clone();
                             let window_id_for_focus = display.session.terminal_window_id.clone();
                             let branch_for_focus = branch.clone();
@@ -218,7 +223,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                 ),
                                         )
                                         // Open in Editor button [Edit]
-                                        .child(
+                                        .child({
+                                            let branch_for_edit = branch_for_edit.clone();
                                             div()
                                                 .id(("edit-btn", ix))
                                                 .px_2()
@@ -232,6 +238,7 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                     cx.listener(move |view, _, _, cx| {
                                                         view.on_open_editor_click(
                                                             &worktree_path_for_edit,
+                                                            &branch_for_edit,
                                                             cx,
                                                         );
                                                     }),
@@ -241,8 +248,8 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                                                         .text_color(rgb(0xaaaaaa))
                                                         .text_sm()
                                                         .child("Edit"),
-                                                ),
-                                        )
+                                                )
+                                        })
                                         // Focus Terminal button [Focus] - only show when running
                                         .when(is_running, |row| {
                                             let tt = terminal_type_for_focus.clone();
