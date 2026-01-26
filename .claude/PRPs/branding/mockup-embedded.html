@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KILD — Embedded Terminals Vision</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Base surfaces */
+            --void: #08090A;
+            --obsidian: #0E1012;
+            --surface: #151719;
+            --elevated: #1C1F22;
+
+            /* Borders */
+            --border-subtle: #1F2328;
+            --border: #2D3139;
+            --border-strong: #3D434D;
+
+            /* Text */
+            --text-muted: #5C6370;
+            --text-subtle: #848D9C;
+            --text: #B8C0CC;
+            --text-bright: #E8ECF0;
+            --text-white: #F8FAFC;
+
+            /* Accents */
+            --ice: #38BDF8;
+            --ice-dim: #0EA5E9;
+            --ice-bright: #7DD3FC;
+            --ice-glow: rgba(56, 189, 248, 0.15);
+
+            --blade: #64748B;
+
+            --aurora: #34D399;
+            --aurora-dim: #10B981;
+            --aurora-glow: rgba(52, 211, 153, 0.15);
+
+            --copper: #FBBF24;
+            --copper-glow: rgba(251, 191, 36, 0.15);
+
+            --ember: #F87171;
+            --ember-glow: rgba(248, 113, 113, 0.15);
+
+            --kiri: #A78BFA;
+            --kiri-glow: rgba(167, 139, 250, 0.15);
+
+            /* Terminal colors */
+            --term-black: #282c34;
+            --term-red: #e06c75;
+            --term-green: #98c379;
+            --term-yellow: #e5c07b;
+            --term-blue: #61afef;
+            --term-magenta: #c678dd;
+            --term-cyan: #56b6c2;
+            --term-white: #abb2bf;
+            --term-bright-black: #5c6370;
+
+            /* Typography */
+            --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+            --text-xs: 11px;
+            --text-sm: 12px;
+            --text-base: 13px;
+            --text-md: 14px;
+
+            /* Spacing */
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+
+            /* Radii */
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-ui);
+            font-size: var(--text-base);
+            background: var(--void);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Main Layout */
+        .app {
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            grid-template-rows: auto 1fr auto;
+            height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-2) var(--space-4);
+            background: var(--obsidian);
+            border-bottom: 1px solid var(--border-subtle);
+            -webkit-app-region: drag;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-4);
+            -webkit-app-region: no-drag;
+        }
+
+        .traffic-lights {
+            display: flex;
+            gap: 8px;
+        }
+
+        .traffic-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .traffic-light.close { background: #ff5f56; }
+        .traffic-light.minimize { background: #ffbd2e; }
+        .traffic-light.maximize { background: #27c93f; }
+
+        .logo {
+            font-size: var(--text-md);
+            font-weight: 700;
+            color: var(--text-white);
+            letter-spacing: -0.02em;
+            margin-left: var(--space-4);
+        }
+
+        .header-stats {
+            display: flex;
+            gap: var(--space-3);
+            font-size: var(--text-xs);
+            color: var(--text-subtle);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .stat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .stat-dot.active { background: var(--aurora); }
+        .stat-dot.stopped { background: var(--copper); }
+
+        .header-actions {
+            display: flex;
+            gap: var(--space-2);
+            -webkit-app-region: no-drag;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-1);
+            padding: var(--space-1) var(--space-3);
+            font-family: var(--font-ui);
+            font-size: var(--text-xs);
+            font-weight: 500;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 100ms ease;
+        }
+
+        .btn-primary {
+            background: var(--ice);
+            color: var(--void);
+        }
+
+        .btn-primary:hover {
+            background: var(--ice-bright);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--elevated);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-subtle);
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .btn-icon {
+            padding: var(--space-1);
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--obsidian);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-2) var(--space-3);
+            font-size: var(--text-xs);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Kild List Item */
+        .kild-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            cursor: pointer;
+            transition: background 100ms;
+            border-left: 2px solid transparent;
+        }
+
+        .kild-item:hover {
+            background: var(--surface);
+        }
+
+        .kild-item.selected {
+            background: var(--surface);
+            border-left-color: var(--ice);
+        }
+
+        .kild-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 2px;
+            height: 16px;
+            background: var(--aurora);
+        }
+
+        .kild-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .kild-status.active {
+            background: var(--aurora);
+            box-shadow: 0 0 6px var(--aurora-glow);
+        }
+
+        .kild-status.stopped {
+            background: var(--copper);
+        }
+
+        .kild-status.crashed {
+            background: var(--ember);
+        }
+
+        .kild-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .kild-name {
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kild-meta {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .kild-agent {
+            font-size: 10px;
+            font-family: var(--font-mono);
+            color: var(--kiri);
+            padding: 1px 4px;
+            background: var(--kiri-glow);
+            border-radius: 3px;
+        }
+
+        /* Main Content */
+        .main {
+            display: flex;
+            flex-direction: column;
+            background: var(--void);
+            overflow: hidden;
+        }
+
+        /* Tab Bar */
+        .tab-bar {
+            display: flex;
+            align-items: center;
+            background: var(--obsidian);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 0 var(--space-2);
+            gap: var(--space-1);
+            overflow-x: auto;
+        }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            font-size: var(--text-sm);
+            color: var(--text-subtle);
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 100ms;
+        }
+
+        .tab:hover {
+            color: var(--text);
+            background: var(--surface);
+        }
+
+        .tab.active {
+            color: var(--text-bright);
+            border-bottom-color: var(--ice);
+            background: var(--surface);
+        }
+
+        .tab-status {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .tab-status.active {
+            background: var(--aurora);
+        }
+
+        .tab-status.stopped {
+            background: var(--copper);
+        }
+
+        .tab-status.crashed {
+            background: var(--ember);
+        }
+
+        .tab-close {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            border-radius: 3px;
+            opacity: 0;
+            transition: opacity 100ms;
+        }
+
+        .tab:hover .tab-close {
+            opacity: 1;
+        }
+
+        .tab-close:hover {
+            background: var(--border);
+            color: var(--text);
+        }
+
+        .tab-add {
+            padding: var(--space-2);
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+        }
+
+        .tab-add:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        /* Terminal Container */
+        .terminal-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Terminal Header */
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-2) var(--space-3);
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .terminal-title {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .terminal-title-text {
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--text-bright);
+        }
+
+        .terminal-title-path {
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+        }
+
+        .terminal-actions {
+            display: flex;
+            gap: var(--space-1);
+        }
+
+        /* Terminal */
+        .terminal {
+            flex: 1;
+            background: var(--term-black);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            line-height: 1.5;
+            padding: var(--space-3);
+            overflow-y: auto;
+            color: var(--term-white);
+        }
+
+        .term-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .term-prompt {
+            color: var(--term-green);
+        }
+
+        .term-command {
+            color: var(--term-white);
+        }
+
+        .term-output {
+            color: var(--term-white);
+            opacity: 0.8;
+        }
+
+        .term-error {
+            color: var(--term-red);
+        }
+
+        .term-info {
+            color: var(--term-blue);
+        }
+
+        .term-highlight {
+            color: var(--term-yellow);
+        }
+
+        .term-dim {
+            color: var(--term-bright-black);
+        }
+
+        .term-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 16px;
+            background: var(--term-white);
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* Agent Activity Indicator */
+        .agent-indicator {
+            position: fixed;
+            bottom: 60px;
+            right: var(--space-4);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            font-size: var(--text-xs);
+            color: var(--text-subtle);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .agent-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--kiri);
+            animation: agent-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes agent-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        /* Footer */
+        .footer {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-2) var(--space-4);
+            background: var(--obsidian);
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .shortcuts {
+            display: flex;
+            gap: var(--space-4);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 16px;
+            padding: 1px 4px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-subtle);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+        }
+
+        /* Split View Indicator */
+        .split-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: var(--space-2) var(--space-3);
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: var(--text-xs);
+            color: var(--text-subtle);
+            display: none;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-strong);
+        }
+
+        /* Vision Banner */
+        .vision-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(90deg, var(--kiri-glow), var(--ice-glow));
+            padding: var(--space-1) var(--space-4);
+            text-align: center;
+            font-size: var(--text-xs);
+            color: var(--text-subtle);
+            border-bottom: 1px solid var(--border-subtle);
+            z-index: 1000;
+        }
+
+        .vision-banner strong {
+            color: var(--kiri);
+        }
+    </style>
+</head>
+<body>
+    <div class="vision-banner">
+        <strong>VISION MOCKUP</strong> — Embedded Terminals (Post-MVP). Single window with integrated PTY terminals.
+    </div>
+
+    <div class="app" style="margin-top: 28px; height: calc(100vh - 28px);">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="traffic-lights">
+                    <span class="traffic-light close"></span>
+                    <span class="traffic-light minimize"></span>
+                    <span class="traffic-light maximize"></span>
+                </div>
+                <span class="logo">KILD</span>
+                <div class="header-stats">
+                    <span class="stat"><span class="stat-dot active"></span> 6 active</span>
+                    <span class="stat"><span class="stat-dot stopped"></span> 2 stopped</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-ghost btn-icon" title="Split View">⊞</button>
+                <button class="btn btn-ghost btn-icon" title="Settings">⚙</button>
+                <button class="btn btn-primary">+ New Kild</button>
+            </div>
+        </header>
+
+        <!-- Sidebar: Kild List -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-header">
+                    <span>Active</span>
+                    <span style="color: var(--aurora);">6</span>
+                </div>
+                <div class="sidebar-content">
+                    <div class="kild-item selected">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">feature-auth</div>
+                            <div class="kild-meta">kild · 23m</div>
+                        </div>
+                        <span class="kild-agent">claude</span>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">feature-payment</div>
+                            <div class="kild-meta">kild · 1h 12m</div>
+                        </div>
+                        <span class="kild-agent">claude</span>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">fix-login-bug</div>
+                            <div class="kild-meta">kild · 45m</div>
+                        </div>
+                        <span class="kild-agent">kiro</span>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">refactor-config</div>
+                            <div class="kild-meta">api-service · 2h</div>
+                        </div>
+                        <span class="kild-agent">claude</span>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">feature-search</div>
+                            <div class="kild-meta">web-client · 30m</div>
+                        </div>
+                        <span class="kild-agent">gemini</span>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status active"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">perf-queries</div>
+                            <div class="kild-meta">data-pipeline · 1h</div>
+                        </div>
+                        <span class="kild-agent">claude</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" style="border-top: 1px solid var(--border-subtle);">
+                <div class="sidebar-header">
+                    <span>Stopped</span>
+                    <span style="color: var(--copper);">2</span>
+                </div>
+                <div class="sidebar-content">
+                    <div class="kild-item">
+                        <span class="kild-status stopped"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">dark-mode</div>
+                            <div class="kild-meta">kild · 4h ago</div>
+                        </div>
+                    </div>
+                    <div class="kild-item">
+                        <span class="kild-status stopped"></span>
+                        <div class="kild-info">
+                            <div class="kild-name">docs-update</div>
+                            <div class="kild-meta">kild · 1d ago</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main: Terminal Area -->
+        <main class="main">
+            <!-- Tab Bar -->
+            <div class="tab-bar">
+                <button class="tab active">
+                    <span class="tab-status active"></span>
+                    feature-auth
+                    <span class="tab-close">×</span>
+                </button>
+                <button class="tab">
+                    <span class="tab-status active"></span>
+                    feature-payment
+                    <span class="tab-close">×</span>
+                </button>
+                <button class="tab">
+                    <span class="tab-status active"></span>
+                    fix-login-bug
+                    <span class="tab-close">×</span>
+                </button>
+                <button class="tab">
+                    <span class="tab-status stopped"></span>
+                    dark-mode
+                    <span class="tab-close">×</span>
+                </button>
+                <button class="tab-add">+</button>
+            </div>
+
+            <!-- Terminal -->
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">
+                        <span class="terminal-title-text">feature-auth</span>
+                        <span class="terminal-title-path">~/.kilds/kild/feature-auth</span>
+                    </div>
+                    <div class="terminal-actions">
+                        <button class="btn btn-ghost btn-icon" title="Copy path">📋</button>
+                        <button class="btn btn-ghost btn-icon" title="Open in editor">📝</button>
+                        <button class="btn btn-ghost btn-icon" title="Split">⊞</button>
+                        <button class="btn btn-secondary" style="padding: var(--space-1) var(--space-2);">⏹ Stop</button>
+                    </div>
+                </div>
+
+                <div class="terminal">
+                    <div class="term-line"><span class="term-prompt">~/.kilds/kild/feature-auth</span> <span class="term-dim">on</span> <span class="term-highlight">kild_8f2a3b</span></div>
+                    <div class="term-line"><span class="term-prompt">❯</span> <span class="term-command">claude</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">╭─────────────────────────────────────────────────────────────╮</span></div>
+                    <div class="term-line"><span class="term-info">│</span>  <span class="term-highlight">Claude Code</span>                                               <span class="term-info">│</span></div>
+                    <div class="term-line"><span class="term-info">│</span>  <span class="term-dim">Research, write, and run code — together.</span>                 <span class="term-info">│</span></div>
+                    <div class="term-line"><span class="term-info">╰─────────────────────────────────────────────────────────────╯</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-dim">Working in:</span> <span class="term-output">~/.kilds/kild/feature-auth</span></div>
+                    <div class="term-line"><span class="term-dim">Branch:</span> <span class="term-highlight">kild_8f2a3b</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-prompt">You:</span> Implement JWT authentication for the API. We need access tokens with 15-minute expiry and refresh tokens with 7-day expiry. Store refresh tokens in Redis.</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">Claude:</span> I'll implement JWT authentication for your API. Let me start by reading the existing auth structure.</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-dim">Reading</span> src/auth/mod.rs</div>
+                    <div class="term-line"><span class="term-dim">Reading</span> src/config/mod.rs</div>
+                    <div class="term-line"><span class="term-dim">Reading</span> Cargo.toml</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">Claude:</span> I can see you have a basic auth module. I'll add JWT support with the structure you described. Here's my plan:</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-output">1. Add `jsonwebtoken` and `redis` crates to Cargo.toml</span></div>
+                    <div class="term-line"><span class="term-output">2. Create `src/auth/jwt.rs` for token generation/validation</span></div>
+                    <div class="term-line"><span class="term-output">3. Create `src/auth/refresh.rs` for refresh token storage</span></div>
+                    <div class="term-line"><span class="term-output">4. Update `src/auth/mod.rs` to expose new functionality</span></div>
+                    <div class="term-line"><span class="term-output">5. Add tests</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">Claude:</span> Starting implementation...</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-dim">Writing</span> <span class="term-green">Cargo.toml</span> <span class="term-dim">(+3 deps)</span></div>
+                    <div class="term-line"><span class="term-dim">Creating</span> <span class="term-green">src/auth/jwt.rs</span></div>
+                    <div class="term-line"><span class="term-dim">Creating</span> <span class="term-green">src/auth/refresh.rs</span></div>
+                    <div class="term-line"><span class="term-dim">Updating</span> <span class="term-yellow">src/auth/mod.rs</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">Claude:</span> I've created the JWT module with:</div>
+                    <div class="term-line"><span class="term-output">- `create_access_token()` - 15 min expiry</span></div>
+                    <div class="term-line"><span class="term-output">- `create_refresh_token()` - 7 day expiry, stored in Redis</span></div>
+                    <div class="term-line"><span class="term-output">- `validate_token()` - verifies signature and expiry</span></div>
+                    <div class="term-line"><span class="term-output">- `refresh_access_token()` - exchanges refresh for new access</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-dim">Running</span> <span class="term-command">cargo check</span></div>
+                    <div class="term-line"><span class="term-green">✓</span> <span class="term-output">Compiling auth v0.1.0</span></div>
+                    <div class="term-line"><span class="term-green">✓</span> <span class="term-output">Finished check in 2.3s</span></div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-info">Claude:</span> Build passes. Would you like me to add tests now?</div>
+                    <div class="term-line"></div>
+                    <div class="term-line"><span class="term-prompt">You:</span> <span class="term-cursor"></span></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="shortcuts">
+                <span class="shortcut"><span class="kbd">⌘</span><span class="kbd">1-9</span> Switch tab</span>
+                <span class="shortcut"><span class="kbd">⌘</span><span class="kbd">T</span> New kild</span>
+                <span class="shortcut"><span class="kbd">⌘</span><span class="kbd">W</span> Close tab</span>
+                <span class="shortcut"><span class="kbd">⌘</span><span class="kbd">\\</span> Split</span>
+                <span class="shortcut"><span class="kbd">⌘</span><span class="kbd">K</span> Command palette</span>
+            </div>
+            <span>KILD v1.0 — Embedded Terminals</span>
+        </footer>
+    </div>
+
+    <!-- Agent Activity Indicator -->
+    <div class="agent-indicator">
+        <span class="agent-pulse"></span>
+        <span>claude thinking...</span>
+    </div>
+
+    <script>
+        // Tab switching
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+            });
+        });
+
+        // Sidebar item selection
+        const kildItems = document.querySelectorAll('.kild-item');
+        kildItems.forEach(item => {
+            item.addEventListener('click', () => {
+                kildItems.forEach(i => i.classList.remove('selected'));
+                item.classList.add('selected');
+            });
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Cmd+1-9 for tabs
+            if (e.metaKey && e.key >= '1' && e.key <= '9') {
+                const index = parseInt(e.key) - 1;
+                if (tabs[index]) {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tabs[index].classList.add('active');
+                }
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>

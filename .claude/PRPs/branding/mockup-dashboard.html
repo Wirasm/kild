@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KILD Dashboard — External Terminals</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Base surfaces */
+            --void: #08090A;
+            --obsidian: #0E1012;
+            --surface: #151719;
+            --elevated: #1C1F22;
+
+            /* Borders */
+            --border-subtle: #1F2328;
+            --border: #2D3139;
+            --border-strong: #3D434D;
+
+            /* Text */
+            --text-muted: #5C6370;
+            --text-subtle: #848D9C;
+            --text: #B8C0CC;
+            --text-bright: #E8ECF0;
+            --text-white: #F8FAFC;
+
+            /* Accents */
+            --ice: #38BDF8;
+            --ice-dim: #0EA5E9;
+            --ice-bright: #7DD3FC;
+            --ice-glow: rgba(56, 189, 248, 0.15);
+
+            --blade: #64748B;
+            --blade-bright: #94A3B8;
+
+            --aurora: #34D399;
+            --aurora-dim: #10B981;
+            --aurora-glow: rgba(52, 211, 153, 0.15);
+
+            --copper: #FBBF24;
+            --copper-dim: #D97706;
+            --copper-glow: rgba(251, 191, 36, 0.15);
+
+            --ember: #F87171;
+            --ember-glow: rgba(248, 113, 113, 0.15);
+
+            --kiri: #A78BFA;
+            --kiri-glow: rgba(167, 139, 250, 0.15);
+
+            /* Typography */
+            --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+            --text-xs: 11px;
+            --text-sm: 12px;
+            --text-base: 13px;
+            --text-md: 14px;
+            --text-lg: 16px;
+
+            /* Spacing */
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+
+            /* Radii */
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-ui);
+            font-size: var(--text-base);
+            background: var(--void);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Main Layout */
+        .app {
+            display: grid;
+            grid-template-columns: 200px 1fr 320px;
+            grid-template-rows: auto 1fr auto;
+            height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-3) var(--space-4);
+            background: var(--obsidian);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-4);
+        }
+
+        .logo {
+            font-size: var(--text-lg);
+            font-weight: 700;
+            color: var(--text-white);
+            letter-spacing: -0.02em;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: var(--space-4);
+            font-size: var(--text-sm);
+            color: var(--text-subtle);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .stat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .stat-dot.active { background: var(--aurora); }
+        .stat-dot.stopped { background: var(--copper); }
+        .stat-dot.crashed { background: var(--ember); }
+
+        .header-actions {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            font-family: var(--font-ui);
+            font-size: var(--text-sm);
+            font-weight: 500;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 100ms ease;
+        }
+
+        .btn-primary {
+            background: var(--ice);
+            color: var(--void);
+        }
+
+        .btn-primary:hover {
+            background: var(--ice-bright);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--elevated);
+            border-color: var(--border-strong);
+        }
+
+        .btn-success {
+            background: var(--aurora);
+            color: var(--void);
+        }
+
+        .btn-success:hover {
+            background: var(--aurora-dim);
+        }
+
+        .btn-warning {
+            background: var(--copper);
+            color: var(--void);
+        }
+
+        .btn-warning:hover {
+            background: var(--copper-dim);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-subtle);
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .btn-icon {
+            padding: var(--space-2);
+            min-width: 32px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Sidebar (Projects) */
+        .sidebar {
+            background: var(--obsidian);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: var(--space-3) var(--space-4);
+            font-size: var(--text-xs);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .project-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4);
+            cursor: pointer;
+            transition: background 100ms;
+        }
+
+        .project-item:hover {
+            background: var(--surface);
+        }
+
+        .project-item.selected {
+            background: var(--surface);
+            border-left: 2px solid var(--ice);
+            padding-left: calc(var(--space-4) - 2px);
+        }
+
+        .project-icon {
+            width: 16px;
+            height: 16px;
+            background: var(--border);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .project-name {
+            font-size: var(--text-sm);
+            color: var(--text);
+            flex: 1;
+        }
+
+        .project-count {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            background: var(--border-subtle);
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
+
+        .sidebar-footer {
+            padding: var(--space-3) var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        /* Main Content (Kild List) */
+        .main {
+            display: flex;
+            flex-direction: column;
+            background: var(--void);
+        }
+
+        .main-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .main-title {
+            font-size: var(--text-md);
+            font-weight: 600;
+            color: var(--text-bright);
+        }
+
+        .main-actions {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        .bulk-btn-count {
+            font-size: var(--text-xs);
+            opacity: 0.7;
+            margin-left: var(--space-1);
+        }
+
+        /* Kild List */
+        .kild-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .kild-row {
+            display: grid;
+            grid-template-columns: 24px 1fr 80px 100px 80px auto;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+            cursor: pointer;
+            transition: background 100ms;
+        }
+
+        .kild-row:hover {
+            background: var(--surface);
+        }
+
+        .kild-row.selected {
+            background: var(--surface);
+            border-left: 2px solid var(--ice);
+            padding-left: calc(var(--space-4) - 2px);
+        }
+
+        .kild-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            justify-self: center;
+        }
+
+        .kild-status-dot.active {
+            background: var(--aurora);
+            box-shadow: 0 0 8px var(--aurora-glow);
+        }
+
+        .kild-status-dot.stopped {
+            background: var(--copper);
+        }
+
+        .kild-status-dot.crashed {
+            background: var(--ember);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .kild-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .kild-name {
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--text-bright);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kild-note {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kild-agent {
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
+            color: var(--kiri);
+        }
+
+        .kild-time {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .kild-git {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .kild-git-dirty {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--copper);
+        }
+
+        .kild-actions {
+            display: flex;
+            gap: var(--space-1);
+            opacity: 0;
+            transition: opacity 100ms;
+        }
+
+        .kild-row:hover .kild-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: var(--text-sm);
+        }
+
+        .action-btn:hover {
+            background: var(--elevated);
+            color: var(--text);
+        }
+
+        .action-btn.danger:hover {
+            background: var(--ember-glow);
+            color: var(--ember);
+        }
+
+        /* Detail Panel */
+        .detail-panel {
+            background: var(--obsidian);
+            border-left: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-header {
+            padding: var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .detail-title {
+            font-size: var(--text-md);
+            font-weight: 600;
+            color: var(--text-bright);
+            margin-bottom: var(--space-1);
+        }
+
+        .detail-subtitle {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-4);
+        }
+
+        .detail-section {
+            margin-bottom: var(--space-5);
+        }
+
+        .detail-section-title {
+            font-size: var(--text-xs);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: var(--space-2);
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: var(--space-2) 0;
+            font-size: var(--text-sm);
+        }
+
+        .detail-row-label {
+            color: var(--text-subtle);
+        }
+
+        .detail-row-value {
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+        }
+
+        .detail-note {
+            padding: var(--space-3);
+            background: var(--surface);
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            color: var(--text);
+            line-height: 1.5;
+        }
+
+        .detail-path {
+            padding: var(--space-2) var(--space-3);
+            background: var(--surface);
+            border-radius: var(--radius-md);
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+            color: var(--text-subtle);
+            word-break: break-all;
+        }
+
+        .detail-actions {
+            padding: var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+
+        .detail-actions-row {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        .detail-actions .btn {
+            flex: 1;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 2px var(--space-2);
+            font-size: var(--text-xs);
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+        }
+
+        .status-badge.active {
+            background: var(--aurora-glow);
+            color: var(--aurora);
+        }
+
+        .status-badge.stopped {
+            background: var(--copper-glow);
+            color: var(--copper);
+        }
+
+        .status-badge.crashed {
+            background: var(--ember-glow);
+            color: var(--ember);
+        }
+
+        /* Footer */
+        .footer {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-2) var(--space-4);
+            background: var(--obsidian);
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .shortcuts {
+            display: flex;
+            gap: var(--space-4);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            padding: 2px 5px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-subtle);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-6);
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: var(--space-4);
+            opacity: 0.3;
+        }
+
+        .empty-state-title {
+            font-size: var(--text-md);
+            color: var(--text-subtle);
+            margin-bottom: var(--space-2);
+        }
+
+        .empty-state-text {
+            font-size: var(--text-sm);
+            margin-bottom: var(--space-4);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(8, 9, 10, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            width: 400px;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            padding: var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .modal-title {
+            font-size: var(--text-md);
+            font-weight: 600;
+            color: var(--text-bright);
+        }
+
+        .modal-body {
+            padding: var(--space-4);
+        }
+
+        .modal-footer {
+            padding: var(--space-3) var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-2);
+        }
+
+        .form-group {
+            margin-bottom: var(--space-4);
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-label {
+            display: block;
+            font-size: var(--text-xs);
+            font-weight: 500;
+            color: var(--text-subtle);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: var(--space-1);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: var(--space-2) var(--space-3);
+            font-family: var(--font-ui);
+            font-size: var(--text-sm);
+            color: var(--text);
+            background: var(--obsidian);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--ice);
+            box-shadow: 0 0 0 3px var(--ice-glow);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-select {
+            appearance: none;
+            padding-right: var(--space-6);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235C6370' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-strong);
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <span class="logo">KILD</span>
+                <div class="header-stats">
+                    <span class="stat"><span class="stat-dot active"></span> 12 active</span>
+                    <span class="stat"><span class="stat-dot stopped"></span> 5 stopped</span>
+                    <span class="stat"><span class="stat-dot crashed"></span> 1 crashed</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-success" id="openAllBtn">
+                    <span>▶</span> Open All<span class="bulk-btn-count">(5)</span>
+                </button>
+                <button class="btn btn-warning" id="stopAllBtn">
+                    <span>⏹</span> Stop All<span class="bulk-btn-count">(12)</span>
+                </button>
+                <button class="btn btn-primary" id="createBtn">
+                    <span>+</span> Create Kild
+                </button>
+            </div>
+        </header>
+
+        <!-- Sidebar: Projects -->
+        <aside class="sidebar">
+            <div class="sidebar-header">Scope</div>
+            <div class="sidebar-content">
+                <div class="project-item selected">
+                    <div class="project-icon">K</div>
+                    <span class="project-name">kild</span>
+                    <span class="project-count">8</span>
+                </div>
+                <div class="project-item">
+                    <div class="project-icon">A</div>
+                    <span class="project-name">api-service</span>
+                    <span class="project-count">4</span>
+                </div>
+                <div class="project-item">
+                    <div class="project-icon">W</div>
+                    <span class="project-name">web-client</span>
+                    <span class="project-count">3</span>
+                </div>
+                <div class="project-item">
+                    <div class="project-icon">D</div>
+                    <span class="project-name">data-pipeline</span>
+                    <span class="project-count">2</span>
+                </div>
+                <div class="project-item">
+                    <div class="project-icon">I</div>
+                    <span class="project-name">infra</span>
+                    <span class="project-count">1</span>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <button class="btn btn-ghost" style="width: 100%;">+ Add Project</button>
+            </div>
+        </aside>
+
+        <!-- Main: Kild List -->
+        <main class="main">
+            <div class="main-header">
+                <span class="main-title">kild — 8 kilds</span>
+                <div class="main-actions">
+                    <button class="btn btn-ghost btn-icon" title="Refresh">↻</button>
+                    <button class="btn btn-ghost btn-icon" title="Filter">⚙</button>
+                </div>
+            </div>
+            <div class="kild-list">
+                <!-- Active Kilds -->
+                <div class="kild-row selected" data-status="active">
+                    <span class="kild-status-dot active"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">feature-auth</span>
+                        <span class="kild-note">JWT authentication for API</span>
+                    </div>
+                    <span class="kild-agent">claude</span>
+                    <span class="kild-time">23 min</span>
+                    <div class="kild-git">
+                        <span class="kild-git-dirty" title="Uncommitted changes"></span>
+                        <span>+42 -12</span>
+                    </div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Focus terminal">🎯</button>
+                        <button class="action-btn" title="Stop">⏹</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <div class="kild-row" data-status="active">
+                    <span class="kild-status-dot active"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">feature-payment-refund</span>
+                        <span class="kild-note">Refund flow for Stripe integration</span>
+                    </div>
+                    <span class="kild-agent">claude</span>
+                    <span class="kild-time">1h 12m</span>
+                    <div class="kild-git">
+                        <span class="kild-git-dirty"></span>
+                        <span>+156 -34</span>
+                    </div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Focus terminal">🎯</button>
+                        <button class="action-btn" title="Stop">⏹</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <div class="kild-row" data-status="active">
+                    <span class="kild-status-dot active"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">fix-login-redirect</span>
+                        <span class="kild-note">Issue #234 - infinite redirect loop</span>
+                    </div>
+                    <span class="kild-agent">kiro</span>
+                    <span class="kild-time">45 min</span>
+                    <div class="kild-git">
+                        <span class="kild-git-dirty"></span>
+                        <span>+8 -3</span>
+                    </div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Focus terminal">🎯</button>
+                        <button class="action-btn" title="Stop">⏹</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <div class="kild-row" data-status="active">
+                    <span class="kild-status-dot active"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">refactor-config-loader</span>
+                        <span class="kild-note">Config hierarchy improvements</span>
+                    </div>
+                    <span class="kild-agent">claude</span>
+                    <span class="kild-time">2h 5m</span>
+                    <div class="kild-git"></div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Focus terminal">🎯</button>
+                        <button class="action-btn" title="Stop">⏹</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <!-- Stopped Kilds -->
+                <div class="kild-row" data-status="stopped">
+                    <span class="kild-status-dot stopped"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">feature-dark-mode</span>
+                        <span class="kild-note">Theme system implementation</span>
+                    </div>
+                    <span class="kild-agent">claude</span>
+                    <span class="kild-time">4h ago</span>
+                    <div class="kild-git">
+                        <span class="kild-git-dirty"></span>
+                        <span>+89 -12</span>
+                    </div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Open">▶</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <div class="kild-row" data-status="stopped">
+                    <span class="kild-status-dot stopped"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">perf-query-optimization</span>
+                        <span class="kild-note">Database query performance</span>
+                    </div>
+                    <span class="kild-agent">kiro</span>
+                    <span class="kild-time">1d ago</span>
+                    <div class="kild-git"></div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Open">▶</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <!-- Crashed Kild -->
+                <div class="kild-row" data-status="crashed">
+                    <span class="kild-status-dot crashed"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">experiment-new-api</span>
+                        <span class="kild-note">Experimental API v2 design</span>
+                    </div>
+                    <span class="kild-agent">gemini</span>
+                    <span class="kild-time">crashed 12m ago</span>
+                    <div class="kild-git">
+                        <span class="kild-git-dirty"></span>
+                        <span>+234 -56</span>
+                    </div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Restart">▶</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+
+                <div class="kild-row" data-status="stopped">
+                    <span class="kild-status-dot stopped"></span>
+                    <div class="kild-info">
+                        <span class="kild-name">docs-api-reference</span>
+                        <span class="kild-note">API documentation updates</span>
+                    </div>
+                    <span class="kild-agent">claude</span>
+                    <span class="kild-time">2d ago</span>
+                    <div class="kild-git"></div>
+                    <div class="kild-actions">
+                        <button class="action-btn" title="Copy path">📋</button>
+                        <button class="action-btn" title="Open in editor">📝</button>
+                        <button class="action-btn" title="Open">▶</button>
+                        <button class="action-btn danger" title="Destroy">🗑</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Detail Panel -->
+        <aside class="detail-panel">
+            <div class="detail-header">
+                <div class="detail-title">feature-auth</div>
+                <div class="detail-subtitle">
+                    <span class="status-badge active">● Active</span>
+                </div>
+            </div>
+            <div class="detail-content">
+                <div class="detail-section">
+                    <div class="detail-section-title">Note</div>
+                    <div class="detail-note">JWT authentication for API. Implementing access tokens, refresh tokens, and session management.</div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Details</div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Agent</span>
+                        <span class="detail-row-value">claude</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Status</span>
+                        <span class="detail-row-value" style="color: var(--aurora);">Running</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Duration</span>
+                        <span class="detail-row-value">23m 45s</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Created</span>
+                        <span class="detail-row-value">Today 14:32</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Branch</span>
+                        <span class="detail-row-value">kild_8f2a3b</span>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Git Status</div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Changes</span>
+                        <span class="detail-row-value" style="color: var(--copper);">Uncommitted</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-row-label">Files</span>
+                        <span class="detail-row-value">+42 -12 (5 files)</span>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Path</div>
+                    <div class="detail-path">~/.kilds/kild/feature-auth</div>
+                </div>
+            </div>
+            <div class="detail-actions">
+                <div class="detail-actions-row">
+                    <button class="btn btn-secondary">📋 Copy Path</button>
+                    <button class="btn btn-secondary">📝 Open Editor</button>
+                </div>
+                <div class="detail-actions-row">
+                    <button class="btn btn-secondary">🎯 Focus Terminal</button>
+                    <button class="btn btn-warning">⏹ Stop</button>
+                </div>
+                <button class="btn btn-danger" style="background: transparent; color: var(--ember); border-color: var(--ember);">🗑 Destroy Kild</button>
+            </div>
+        </aside>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="shortcuts">
+                <span class="shortcut"><span class="kbd">j</span>/<span class="kbd">k</span> Navigate</span>
+                <span class="shortcut"><span class="kbd">c</span> Create</span>
+                <span class="shortcut"><span class="kbd">o</span> Open</span>
+                <span class="shortcut"><span class="kbd">s</span> Stop</span>
+                <span class="shortcut"><span class="kbd">d</span> Destroy</span>
+                <span class="shortcut"><span class="kbd">f</span> Focus</span>
+                <span class="shortcut"><span class="kbd">?</span> Help</span>
+            </div>
+            <span>KILD v0.3.0 — External Terminals</span>
+        </footer>
+    </div>
+
+    <!-- Create Modal -->
+    <div class="modal-overlay" id="createModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Create Kild</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Branch Name</label>
+                    <input type="text" class="form-input" placeholder="feature-auth">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Agent</label>
+                    <select class="form-input form-select">
+                        <option>claude</option>
+                        <option>kiro</option>
+                        <option>gemini</option>
+                        <option>codex</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Note (optional)</label>
+                    <input type="text" class="form-input" placeholder="What is this kild for?">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelCreate">Cancel</button>
+                <button class="btn btn-primary">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple interactivity
+        const createBtn = document.getElementById('createBtn');
+        const createModal = document.getElementById('createModal');
+        const cancelCreate = document.getElementById('cancelCreate');
+
+        createBtn.addEventListener('click', () => {
+            createModal.classList.add('active');
+        });
+
+        cancelCreate.addEventListener('click', () => {
+            createModal.classList.remove('active');
+        });
+
+        createModal.addEventListener('click', (e) => {
+            if (e.target === createModal) {
+                createModal.classList.remove('active');
+            }
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                createModal.classList.remove('active');
+            }
+            if (e.key === 'c' && !createModal.classList.contains('active')) {
+                createModal.classList.add('active');
+                e.preventDefault();
+            }
+        });
+
+        // Row selection
+        const rows = document.querySelectorAll('.kild-row');
+        let selectedIndex = 0;
+
+        function updateSelection() {
+            rows.forEach((row, i) => {
+                row.classList.toggle('selected', i === selectedIndex);
+            });
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (createModal.classList.contains('active')) return;
+
+            if (e.key === 'j' || e.key === 'ArrowDown') {
+                selectedIndex = Math.min(selectedIndex + 1, rows.length - 1);
+                updateSelection();
+                e.preventDefault();
+            }
+            if (e.key === 'k' || e.key === 'ArrowUp') {
+                selectedIndex = Math.max(selectedIndex - 1, 0);
+                updateSelection();
+                e.preventDefault();
+            }
+        });
+
+        // Project selection
+        const projects = document.querySelectorAll('.project-item');
+        projects.forEach(project => {
+            project.addEventListener('click', () => {
+                projects.forEach(p => p.classList.remove('selected'));
+                project.classList.add('selected');
+            });
+        });
+    </script>
+</body>
+</html>

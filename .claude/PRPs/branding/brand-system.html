@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KILD Brand System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* === DARK THEME: TALLINN NIGHT === */
+
+            /* Base surfaces - deep, cold blacks */
+            --void: #08090A;           /* Deepest background */
+            --obsidian: #0E1012;       /* Sidebars, panels */
+            --surface: #151719;        /* Cards, elevated surfaces */
+            --elevated: #1C1F22;       /* Modals, dropdowns */
+
+            /* Borders & dividers */
+            --border-subtle: #1F2328;  /* Subtle separators */
+            --border: #2D3139;         /* Default borders */
+            --border-strong: #3D434D;  /* Emphasized borders */
+
+            /* Text hierarchy */
+            --text-muted: #5C6370;     /* Disabled, hints */
+            --text-subtle: #848D9C;    /* Secondary text */
+            --text: #B8C0CC;           /* Primary text */
+            --text-bright: #E8ECF0;    /* Headings, emphasis */
+            --text-white: #F8FAFC;     /* Maximum contrast */
+
+            /* === ACCENT COLORS === */
+
+            /* Primary: Ice Blue - the cut, primary actions */
+            --ice: #38BDF8;            /* Primary blue */
+            --ice-dim: #0EA5E9;        /* Pressed state */
+            --ice-bright: #7DD3FC;     /* Hover state */
+            --ice-glow: rgba(56, 189, 248, 0.15); /* Focus ring, glows */
+
+            /* Secondary: Blade Steel - subtle accents */
+            --blade: #64748B;          /* Steel gray-blue */
+            --blade-bright: #94A3B8;   /* Lighter steel */
+
+            /* Status: Aurora - active/running/success */
+            --aurora: #34D399;         /* Success green */
+            --aurora-dim: #10B981;     /* Darker green */
+            --aurora-glow: rgba(52, 211, 153, 0.15);
+
+            /* Status: Copper - stopped/paused/warning */
+            --copper: #FBBF24;         /* Amber */
+            --copper-dim: #D97706;     /* Darker amber */
+            --copper-glow: rgba(251, 191, 36, 0.15);
+
+            /* Status: Ember - error/crashed */
+            --ember: #F87171;          /* Soft red */
+            --ember-dim: #EF4444;      /* Stronger red */
+            --ember-glow: rgba(248, 113, 113, 0.15);
+
+            /* Agent: Kiri Purple - AI activity indicator */
+            --kiri: #A78BFA;           /* Agent purple */
+            --kiri-dim: #8B5CF6;       /* Darker purple */
+            --kiri-glow: rgba(167, 139, 250, 0.15);
+
+            /* === LIGHT THEME: BALTIC ICE === */
+            --light-glacial: #FAFBFC;
+            --light-mist: #F1F5F9;
+            --light-surface: #E2E8F0;
+            --light-border: #CBD5E1;
+            --light-text: #1E293B;
+            --light-text-subtle: #475569;
+            --light-ice: #0284C7;
+            --light-aurora: #059669;
+            --light-copper: #B45309;
+            --light-ember: #DC2626;
+
+            /* === TYPOGRAPHY === */
+            --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+            /* Font sizes */
+            --text-xs: 11px;
+            --text-sm: 12px;
+            --text-base: 13px;
+            --text-md: 14px;
+            --text-lg: 16px;
+            --text-xl: 18px;
+            --text-2xl: 24px;
+            --text-3xl: 32px;
+
+            /* Font weights */
+            --weight-normal: 400;
+            --weight-medium: 500;
+            --weight-semibold: 600;
+            --weight-bold: 700;
+
+            /* Line heights */
+            --leading-tight: 1.25;
+            --leading-normal: 1.5;
+            --leading-relaxed: 1.625;
+
+            /* === SPACING === */
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+            --space-8: 32px;
+            --space-10: 40px;
+            --space-12: 48px;
+
+            /* === RADII === */
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --radius-xl: 12px;
+
+            /* === SHADOWS === */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+            --shadow-glow-ice: 0 0 20px var(--ice-glow);
+            --shadow-glow-aurora: 0 0 20px var(--aurora-glow);
+
+            /* === TRANSITIONS === */
+            --transition-fast: 100ms ease;
+            --transition-normal: 150ms ease;
+            --transition-slow: 250ms ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-ui);
+            font-size: var(--text-base);
+            line-height: var(--leading-normal);
+            background: var(--void);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .brand-system {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--space-8);
+        }
+
+        /* Header */
+        .brand-header {
+            text-align: center;
+            padding: var(--space-12) 0;
+            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: var(--space-10);
+        }
+
+        .brand-header h1 {
+            font-size: var(--text-3xl);
+            font-weight: var(--weight-bold);
+            color: var(--text-white);
+            letter-spacing: -0.02em;
+            margin-bottom: var(--space-2);
+        }
+
+        .brand-header .tagline {
+            font-size: var(--text-lg);
+            color: var(--text-subtle);
+            font-weight: var(--weight-normal);
+        }
+
+        .brand-header .subtitle {
+            font-size: var(--text-sm);
+            color: var(--text-muted);
+            margin-top: var(--space-4);
+            font-family: var(--font-mono);
+        }
+
+        /* Section */
+        .section {
+            margin-bottom: var(--space-12);
+        }
+
+        .section-title {
+            font-size: var(--text-xl);
+            font-weight: var(--weight-semibold);
+            color: var(--text-bright);
+            margin-bottom: var(--space-2);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .section-title::before {
+            content: '';
+            width: 3px;
+            height: 20px;
+            background: var(--ice);
+            border-radius: 2px;
+        }
+
+        .section-description {
+            font-size: var(--text-sm);
+            color: var(--text-subtle);
+            margin-bottom: var(--space-6);
+        }
+
+        /* Color Swatches */
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: var(--space-4);
+        }
+
+        .color-group {
+            margin-bottom: var(--space-6);
+        }
+
+        .color-group-title {
+            font-size: var(--text-sm);
+            font-weight: var(--weight-semibold);
+            color: var(--text);
+            margin-bottom: var(--space-3);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .color-swatch {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .color-swatch-preview {
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+            font-weight: var(--weight-medium);
+        }
+
+        .color-swatch-info {
+            padding: var(--space-3);
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .color-swatch-name {
+            font-size: var(--text-sm);
+            font-weight: var(--weight-medium);
+            color: var(--text-bright);
+        }
+
+        .color-swatch-value {
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
+            color: var(--text-subtle);
+            margin-top: 2px;
+        }
+
+        .color-swatch-usage {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            margin-top: var(--space-1);
+        }
+
+        /* Typography samples */
+        .type-samples {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+        }
+
+        .type-sample {
+            display: flex;
+            align-items: baseline;
+            gap: var(--space-6);
+            padding: var(--space-4);
+            background: var(--surface);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .type-sample-label {
+            min-width: 120px;
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+        }
+
+        .type-sample-text {
+            flex: 1;
+        }
+
+        .type-3xl { font-size: var(--text-3xl); font-weight: var(--weight-bold); color: var(--text-white); }
+        .type-2xl { font-size: var(--text-2xl); font-weight: var(--weight-semibold); color: var(--text-bright); }
+        .type-xl { font-size: var(--text-xl); font-weight: var(--weight-semibold); color: var(--text-bright); }
+        .type-lg { font-size: var(--text-lg); font-weight: var(--weight-medium); color: var(--text); }
+        .type-md { font-size: var(--text-md); font-weight: var(--weight-normal); color: var(--text); }
+        .type-base { font-size: var(--text-base); font-weight: var(--weight-normal); color: var(--text); }
+        .type-sm { font-size: var(--text-sm); font-weight: var(--weight-normal); color: var(--text-subtle); }
+        .type-xs { font-size: var(--text-xs); font-weight: var(--weight-normal); color: var(--text-muted); }
+        .type-mono { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text); }
+
+        /* Buttons */
+        .button-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-4);
+            align-items: flex-start;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+
+        .button-group-label {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4);
+            font-family: var(--font-ui);
+            font-size: var(--text-sm);
+            font-weight: var(--weight-medium);
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+
+        .btn:focus {
+            outline: none;
+        }
+
+        /* Primary button - Ice blue */
+        .btn-primary {
+            background: var(--ice);
+            color: var(--void);
+            border-color: var(--ice);
+        }
+
+        .btn-primary:hover {
+            background: var(--ice-bright);
+            border-color: var(--ice-bright);
+        }
+
+        .btn-primary:active {
+            background: var(--ice-dim);
+            border-color: var(--ice-dim);
+        }
+
+        .btn-primary:focus {
+            box-shadow: 0 0 0 3px var(--ice-glow);
+        }
+
+        /* Secondary button - Surface */
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--elevated);
+            border-color: var(--border-strong);
+            color: var(--text-bright);
+        }
+
+        .btn-secondary:active {
+            background: var(--obsidian);
+        }
+
+        /* Ghost button - Transparent */
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-subtle);
+            border-color: transparent;
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        /* Success button - Aurora green */
+        .btn-success {
+            background: var(--aurora);
+            color: var(--void);
+            border-color: var(--aurora);
+        }
+
+        .btn-success:hover {
+            background: var(--aurora-dim);
+            border-color: var(--aurora-dim);
+        }
+
+        /* Warning button - Copper */
+        .btn-warning {
+            background: var(--copper);
+            color: var(--void);
+            border-color: var(--copper);
+        }
+
+        .btn-warning:hover {
+            background: var(--copper-dim);
+            border-color: var(--copper-dim);
+        }
+
+        /* Danger button - Ember */
+        .btn-danger {
+            background: transparent;
+            color: var(--ember);
+            border-color: var(--ember);
+        }
+
+        .btn-danger:hover {
+            background: var(--ember);
+            color: var(--void);
+        }
+
+        /* Button sizes */
+        .btn-sm {
+            padding: var(--space-1) var(--space-2);
+            font-size: var(--text-xs);
+        }
+
+        .btn-lg {
+            padding: var(--space-3) var(--space-6);
+            font-size: var(--text-md);
+        }
+
+        /* Icon buttons */
+        .btn-icon {
+            padding: var(--space-2);
+            min-width: 32px;
+            min-height: 32px;
+        }
+
+        .btn-icon.btn-sm {
+            padding: var(--space-1);
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        /* Disabled state */
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Status indicators */
+        .status-grid {
+            display: flex;
+            gap: var(--space-6);
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-4);
+            background: var(--surface);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .status-dot.active {
+            background: var(--aurora);
+            box-shadow: 0 0 8px var(--aurora-glow);
+        }
+
+        .status-dot.stopped {
+            background: var(--copper);
+        }
+
+        .status-dot.crashed {
+            background: var(--ember);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.agent {
+            background: var(--kiri);
+            box-shadow: 0 0 8px var(--kiri-glow);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-label {
+            font-size: var(--text-sm);
+            color: var(--text);
+        }
+
+        .status-sublabel {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        /* Input fields */
+        .input-grid {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+            max-width: 400px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-1);
+        }
+
+        .input-label {
+            font-size: var(--text-xs);
+            font-weight: var(--weight-medium);
+            color: var(--text-subtle);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .input {
+            padding: var(--space-2) var(--space-3);
+            font-family: var(--font-ui);
+            font-size: var(--text-sm);
+            color: var(--text);
+            background: var(--obsidian);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            transition: all var(--transition-fast);
+        }
+
+        .input:hover {
+            border-color: var(--border-strong);
+        }
+
+        .input:focus {
+            outline: none;
+            border-color: var(--ice);
+            box-shadow: 0 0 0 3px var(--ice-glow);
+        }
+
+        .input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input.error {
+            border-color: var(--ember);
+        }
+
+        .input.error:focus {
+            box-shadow: 0 0 0 3px var(--ember-glow);
+        }
+
+        /* Select dropdown */
+        .select {
+            appearance: none;
+            padding-right: var(--space-8);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235C6370' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+        }
+
+        /* Cards */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: var(--space-4);
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            font-size: var(--text-sm);
+            font-weight: var(--weight-semibold);
+            color: var(--text-bright);
+        }
+
+        .card-body {
+            padding: var(--space-4);
+        }
+
+        .card-footer {
+            padding: var(--space-3) var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+            background: var(--obsidian);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 2px var(--space-2);
+            font-size: var(--text-xs);
+            font-weight: var(--weight-medium);
+            border-radius: var(--radius-sm);
+        }
+
+        .badge-default {
+            background: var(--surface);
+            color: var(--text-subtle);
+        }
+
+        .badge-ice {
+            background: var(--ice-glow);
+            color: var(--ice-bright);
+        }
+
+        .badge-aurora {
+            background: var(--aurora-glow);
+            color: var(--aurora);
+        }
+
+        .badge-copper {
+            background: var(--copper-glow);
+            color: var(--copper);
+        }
+
+        .badge-ember {
+            background: var(--ember-glow);
+            color: var(--ember);
+        }
+
+        .badge-kiri {
+            background: var(--kiri-glow);
+            color: var(--kiri);
+        }
+
+        /* Keyboard shortcuts */
+        .kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            padding: 2px 6px;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+            font-weight: var(--weight-medium);
+            color: var(--text-subtle);
+            background: var(--obsidian);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 1px 0 var(--border);
+        }
+
+        /* Shortcut hint bar */
+        .shortcut-bar {
+            display: flex;
+            gap: var(--space-4);
+            padding: var(--space-2) var(--space-4);
+            background: var(--obsidian);
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        /* Two column layout for sections */
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-8);
+        }
+
+        @media (max-width: 900px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Component showcase */
+        .showcase {
+            padding: var(--space-6);
+            background: var(--obsidian);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .showcase-title {
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            margin-bottom: var(--space-4);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* Light theme preview */
+        .light-theme-preview {
+            background: var(--light-glacial);
+            padding: var(--space-6);
+            border-radius: var(--radius-lg);
+            color: var(--light-text);
+        }
+
+        .light-theme-preview .card {
+            background: white;
+            border-color: var(--light-border);
+        }
+
+        .light-theme-preview .card-header {
+            border-color: var(--light-border);
+        }
+
+        .light-theme-preview .card-title {
+            color: var(--light-text);
+        }
+
+        .light-theme-preview .card-footer {
+            background: var(--light-mist);
+            border-color: var(--light-border);
+        }
+
+        .light-theme-preview .btn-secondary {
+            background: white;
+            border-color: var(--light-border);
+            color: var(--light-text);
+        }
+
+        .light-theme-preview .btn-primary {
+            background: var(--light-ice);
+            border-color: var(--light-ice);
+        }
+
+        /* Icons (simple SVG placeholders) */
+        .icon {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 1.5;
+            fill: none;
+        }
+
+        .icon-sm {
+            width: 14px;
+            height: 14px;
+        }
+
+        .icon-lg {
+            width: 20px;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="brand-system">
+        <header class="brand-header">
+            <h1>KILD</h1>
+            <p class="tagline">Fracture the Honryū.</p>
+            <p class="subtitle">Brand System v1.0 — Nordic Ice / Japanese Precision</p>
+        </header>
+
+        <!-- Colors: Dark Theme -->
+        <section class="section">
+            <h2 class="section-title">Colors — Tallinn Night (Dark Theme)</h2>
+            <p class="section-description">The default theme. Deep, cold blacks with ice blue accents. Designed for long sessions in the dark.</p>
+
+            <div class="color-group">
+                <h3 class="color-group-title">Base Surfaces</h3>
+                <div class="color-grid">
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #08090A; color: #5C6370;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Void</div>
+                            <div class="color-swatch-value">#08090A</div>
+                            <div class="color-swatch-usage">Deepest background</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #0E1012; color: #5C6370;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Obsidian</div>
+                            <div class="color-swatch-value">#0E1012</div>
+                            <div class="color-swatch-usage">Sidebars, panels</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #848D9C;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Surface</div>
+                            <div class="color-swatch-value">#151719</div>
+                            <div class="color-swatch-usage">Cards, rows</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #1C1F22; color: #B8C0CC;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Elevated</div>
+                            <div class="color-swatch-value">#1C1F22</div>
+                            <div class="color-swatch-usage">Modals, dropdowns</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="color-group">
+                <h3 class="color-group-title">Text Hierarchy</h3>
+                <div class="color-grid">
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #F8FAFC;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">White</div>
+                            <div class="color-swatch-value">#F8FAFC</div>
+                            <div class="color-swatch-usage">Maximum contrast</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #E8ECF0;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Bright</div>
+                            <div class="color-swatch-value">#E8ECF0</div>
+                            <div class="color-swatch-usage">Headings, emphasis</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #B8C0CC;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Text</div>
+                            <div class="color-swatch-value">#B8C0CC</div>
+                            <div class="color-swatch-usage">Primary body text</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #848D9C;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Subtle</div>
+                            <div class="color-swatch-value">#848D9C</div>
+                            <div class="color-swatch-usage">Secondary text</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #151719; color: #5C6370;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Muted</div>
+                            <div class="color-swatch-value">#5C6370</div>
+                            <div class="color-swatch-usage">Disabled, hints</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="color-group">
+                <h3 class="color-group-title">Accent Colors</h3>
+                <div class="color-grid">
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #38BDF8; color: #08090A;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Ice</div>
+                            <div class="color-swatch-value">#38BDF8</div>
+                            <div class="color-swatch-usage">Primary actions, the Cut</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #64748B; color: #F8FAFC;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Blade</div>
+                            <div class="color-swatch-value">#64748B</div>
+                            <div class="color-swatch-usage">Steel gray, subtle accents</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="color-group">
+                <h3 class="color-group-title">Status Colors</h3>
+                <div class="color-grid">
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #34D399; color: #08090A;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Aurora</div>
+                            <div class="color-swatch-value">#34D399</div>
+                            <div class="color-swatch-usage">Active, running, success</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #FBBF24; color: #08090A;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Copper</div>
+                            <div class="color-swatch-value">#FBBF24</div>
+                            <div class="color-swatch-usage">Stopped, paused, warning</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #F87171; color: #08090A;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Ember</div>
+                            <div class="color-swatch-value">#F87171</div>
+                            <div class="color-swatch-usage">Error, crashed</div>
+                        </div>
+                    </div>
+                    <div class="color-swatch">
+                        <div class="color-swatch-preview" style="background: #A78BFA; color: #08090A;">Aa</div>
+                        <div class="color-swatch-info">
+                            <div class="color-swatch-name">Kiri (Fog)</div>
+                            <div class="color-swatch-value">#A78BFA</div>
+                            <div class="color-swatch-usage">Agent activity, AI indicator</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Typography -->
+        <section class="section">
+            <h2 class="section-title">Typography</h2>
+            <p class="section-description">Inter for UI, JetBrains Mono for code. Clean, functional, readable.</p>
+
+            <div class="type-samples">
+                <div class="type-sample">
+                    <span class="type-sample-label">text-3xl / 32px</span>
+                    <span class="type-sample-text type-3xl">Fracture the Honryū</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-2xl / 24px</span>
+                    <span class="type-sample-text type-2xl">The Tōryō's Dashboard</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-xl / 18px</span>
+                    <span class="type-sample-text type-xl">Section Heading</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-lg / 16px</span>
+                    <span class="type-sample-text type-lg">Card Title, Important Labels</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-md / 14px</span>
+                    <span class="type-sample-text type-md">Body text, descriptions, longer form content</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-base / 13px</span>
+                    <span class="type-sample-text type-base">Default UI text, list items, table cells</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-sm / 12px</span>
+                    <span class="type-sample-text type-sm">Secondary information, timestamps, metadata</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">text-xs / 11px</span>
+                    <span class="type-sample-text type-xs">Badges, hints, very small labels</span>
+                </div>
+                <div class="type-sample">
+                    <span class="type-sample-label">mono / 12px</span>
+                    <span class="type-sample-text type-mono">kild create feature-auth --agent claude</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Buttons -->
+        <section class="section">
+            <h2 class="section-title">Buttons</h2>
+            <p class="section-description">Action buttons with clear hierarchy. Primary for main actions, secondary for alternatives.</p>
+
+            <div class="showcase">
+                <div class="showcase-title">Button Variants</div>
+                <div class="button-grid">
+                    <div class="button-group">
+                        <span class="button-group-label">Primary</span>
+                        <button class="btn btn-primary">Create Kild</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Secondary</span>
+                        <button class="btn btn-secondary">Cancel</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Ghost</span>
+                        <button class="btn btn-ghost">Settings</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Success</span>
+                        <button class="btn btn-success">Open All</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Warning</span>
+                        <button class="btn btn-warning">Stop All</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Danger</span>
+                        <button class="btn btn-danger">Destroy</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="showcase" style="margin-top: var(--space-4);">
+                <div class="showcase-title">Button Sizes</div>
+                <div class="button-grid">
+                    <div class="button-group">
+                        <span class="button-group-label">Small</span>
+                        <button class="btn btn-primary btn-sm">Small</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Default</span>
+                        <button class="btn btn-primary">Default</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Large</span>
+                        <button class="btn btn-primary btn-lg">Large</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Icon</span>
+                        <button class="btn btn-secondary btn-icon">+</button>
+                    </div>
+                    <div class="button-group">
+                        <span class="button-group-label">Disabled</span>
+                        <button class="btn btn-primary" disabled>Disabled</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Status Indicators -->
+        <section class="section">
+            <h2 class="section-title">Status Indicators</h2>
+            <p class="section-description">Visual feedback for kild states. Color + glow for running, muted for stopped.</p>
+
+            <div class="showcase">
+                <div class="showcase-title">Kild Status</div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-dot active"></span>
+                        <div>
+                            <div class="status-label">Active</div>
+                            <div class="status-sublabel">Agent running</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-dot stopped"></span>
+                        <div>
+                            <div class="status-label">Stopped</div>
+                            <div class="status-sublabel">Worktree preserved</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-dot crashed"></span>
+                        <div>
+                            <div class="status-label">Crashed</div>
+                            <div class="status-sublabel">Agent unreachable</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-dot agent"></span>
+                        <div>
+                            <div class="status-label">Agent Active</div>
+                            <div class="status-sublabel">AI is working</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Inputs -->
+        <section class="section">
+            <h2 class="section-title">Form Inputs</h2>
+            <p class="section-description">Text inputs with clear focus states. Ice blue focus ring.</p>
+
+            <div class="two-column">
+                <div class="showcase">
+                    <div class="showcase-title">Text Inputs</div>
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label class="input-label">Branch Name</label>
+                            <input type="text" class="input" placeholder="feature-auth">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Note</label>
+                            <input type="text" class="input" value="Implementing JWT authentication">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Error State</label>
+                            <input type="text" class="input error" value="invalid-branch-name!">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="showcase">
+                    <div class="showcase-title">Select Dropdown</div>
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label class="input-label">Agent</label>
+                            <select class="input select">
+                                <option>claude</option>
+                                <option>kiro</option>
+                                <option>gemini</option>
+                                <option>codex</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Project</label>
+                            <select class="input select">
+                                <option>kild</option>
+                                <option>other-project</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Badges -->
+        <section class="section">
+            <h2 class="section-title">Badges</h2>
+            <p class="section-description">Small labels for categorization and status.</p>
+
+            <div class="showcase">
+                <div class="showcase-title">Badge Variants</div>
+                <div class="button-grid">
+                    <span class="badge badge-default">Default</span>
+                    <span class="badge badge-ice">Ice</span>
+                    <span class="badge badge-aurora">Active</span>
+                    <span class="badge badge-copper">Stopped</span>
+                    <span class="badge badge-ember">Error</span>
+                    <span class="badge badge-kiri">Agent</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Cards -->
+        <section class="section">
+            <h2 class="section-title">Cards</h2>
+            <p class="section-description">Container component for grouping related content.</p>
+
+            <div class="card-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">feature-auth</span>
+                        <span class="badge badge-aurora">Active</span>
+                    </div>
+                    <div class="card-body">
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">Implementing JWT authentication for the API.</p>
+                    </div>
+                    <div class="card-footer">
+                        <span style="font-size: var(--text-xs); color: var(--text-muted);">claude · kild · 23 min</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">fix-login-bug</span>
+                        <span class="badge badge-copper">Stopped</span>
+                    </div>
+                    <div class="card-body">
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">Issue #234 - login redirect loop</p>
+                    </div>
+                    <div class="card-footer">
+                        <span style="font-size: var(--text-xs); color: var(--text-muted);">kiro · kild · 2h ago</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Keyboard Shortcuts -->
+        <section class="section">
+            <h2 class="section-title">Keyboard Shortcuts</h2>
+            <p class="section-description">Key indicators and shortcut hint bar.</p>
+
+            <div class="showcase">
+                <div class="showcase-title">Key Indicators</div>
+                <div class="button-grid" style="margin-bottom: var(--space-6);">
+                    <span class="kbd">j</span>
+                    <span class="kbd">k</span>
+                    <span class="kbd">c</span>
+                    <span class="kbd">d</span>
+                    <span class="kbd">Esc</span>
+                    <span class="kbd">Enter</span>
+                    <span class="kbd">⌘</span>
+                    <span class="kbd">⇧</span>
+                </div>
+
+                <div class="showcase-title">Shortcut Hint Bar</div>
+                <div class="shortcut-bar">
+                    <span class="shortcut-item"><span class="kbd">j</span>/<span class="kbd">k</span> Navigate</span>
+                    <span class="shortcut-item"><span class="kbd">c</span> Create</span>
+                    <span class="shortcut-item"><span class="kbd">o</span> Open</span>
+                    <span class="shortcut-item"><span class="kbd">s</span> Stop</span>
+                    <span class="shortcut-item"><span class="kbd">d</span> Destroy</span>
+                    <span class="shortcut-item"><span class="kbd">?</span> Help</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Light Theme Preview -->
+        <section class="section">
+            <h2 class="section-title">Colors — Baltic Ice (Light Theme)</h2>
+            <p class="section-description">Alternative light theme for bright environments. Same semantic colors, inverted surfaces.</p>
+
+            <div class="light-theme-preview">
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">feature-auth</span>
+                            <span class="badge badge-aurora">Active</span>
+                        </div>
+                        <div class="card-body">
+                            <p style="font-size: var(--text-sm); color: var(--light-text-subtle);">Implementing JWT authentication for the API.</p>
+                        </div>
+                        <div class="card-footer">
+                            <div style="display: flex; gap: var(--space-2);">
+                                <button class="btn btn-primary btn-sm">Open</button>
+                                <button class="btn btn-secondary btn-sm">Destroy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Design Principles -->
+        <section class="section">
+            <h2 class="section-title">Design Principles</h2>
+            <p class="section-description">The philosophy behind KILD's visual identity.</p>
+
+            <div class="card-grid">
+                <div class="card">
+                    <div class="card-body">
+                        <h4 style="font-size: var(--text-md); color: var(--text-bright); margin-bottom: var(--space-2);">Cold Precision</h4>
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">Nordic ice meets Japanese blade. The UI should feel sharp, precise, and cold. No soft edges, no warm colors by default. Warmth is reserved for warnings.</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <h4 style="font-size: var(--text-md); color: var(--text-bright); margin-bottom: var(--space-2);">Lift the Fog</h4>
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">Every element should increase visibility. Status is clear at a glance. Scale gracefully to 30+ kilds. The Tōryō must see everything.</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <h4 style="font-size: var(--text-md); color: var(--text-bright); margin-bottom: var(--space-2);">Keyboard First</h4>
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">Power users live in the keyboard. Every action has a shortcut. The UI should be fully operable without a mouse.</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <h4 style="font-size: var(--text-md); color: var(--text-bright); margin-bottom: var(--space-2);">Honest Feedback</h4>
+                        <p style="font-size: var(--text-sm); color: var(--text-subtle);">No silent failures. Errors are visible. Status is truthful. If something is crashed, it says crashed. The UI doesn't hide problems.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
