@@ -23,6 +23,7 @@ use crate::views::{
 /// - Whitespace trimming (leading/trailing spaces removed)
 /// - Tilde expansion (~/ -> home directory, or ~ alone)
 /// - Missing leading slash (users/... -> /users/... if valid directory)
+/// - Path canonicalization (resolves symlinks, normalizes case on macOS)
 ///
 /// # Errors
 ///
@@ -44,10 +45,10 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
         };
 
         if let Some(rest) = path_str.strip_prefix("~/") {
-            return Ok(home.join(rest));
+            return canonicalize_path(home.join(rest));
         }
         if path_str == "~" {
-            return Ok(home);
+            return canonicalize_path(home);
         }
         // Tilde in middle like "~project" - no expansion, fall through
     }
@@ -64,7 +65,7 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
                     original = path_str,
                     normalized = %with_slash.display()
                 );
-                return Ok(with_slash);
+                return canonicalize_path(with_slash);
             }
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
                 warn!(
@@ -80,7 +81,39 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
         }
     }
 
-    Ok(PathBuf::from(path_str))
+    canonicalize_path(PathBuf::from(path_str))
+}
+
+/// Canonicalize a path to ensure consistent hashing across UI and core.
+///
+/// This resolves symlinks and normalizes case on case-insensitive filesystems (macOS).
+/// Canonicalization ensures that `/users/rasmus/project` and `/Users/rasmus/project`
+/// produce the same hash value, which is critical for project filtering.
+///
+/// If canonicalization fails (path doesn't exist or is inaccessible), returns the
+/// original path to allow downstream validation to provide a better error message
+/// rather than failing here with a generic "path not found" error.
+fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
+    match path.canonicalize() {
+        Ok(canonical) => {
+            if canonical != path {
+                debug!(
+                    event = "ui.normalize_path.canonicalized",
+                    original = %path.display(),
+                    canonical = %canonical.display()
+                );
+            }
+            Ok(canonical)
+        }
+        Err(e) => {
+            debug!(
+                event = "ui.normalize_path.canonicalize_failed",
+                path = %path.display(),
+                error = %e
+            );
+            Ok(path)
+        }
+    }
 }
 
 /// Main application view that composes the shard list, header, and create dialog.
@@ -966,7 +999,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_normalize_path_with_leading_slash() {
+    fn test_normalize_path_with_leading_slash_nonexistent() {
         let result = normalize_project_path("/Users/test/project").unwrap();
         assert_eq!(result, PathBuf::from("/Users/test/project"));
     }
@@ -981,7 +1014,10 @@ mod tests {
     #[test]
     fn test_normalize_path_bare_tilde() {
         let result = normalize_project_path("~").unwrap();
-        let expected_home = dirs::home_dir().expect("test requires home dir");
+        let expected_home = dirs::home_dir()
+            .expect("test requires home dir")
+            .canonicalize()
+            .expect("home should be canonicalizable");
         assert_eq!(result, expected_home);
     }
 
@@ -993,23 +1029,18 @@ mod tests {
 
     #[test]
     fn test_normalize_path_without_leading_slash_fallback() {
-        // Non-existent path should remain unchanged (passthrough)
         let result = normalize_project_path("nonexistent/path/here").unwrap();
         assert_eq!(result, PathBuf::from("nonexistent/path/here"));
     }
 
     #[test]
     fn test_normalize_path_empty_string() {
-        // Empty input passes through as empty path
-        // Caller validates for empty before calling this function
         let result = normalize_project_path("").unwrap();
         assert_eq!(result, PathBuf::from(""));
     }
 
     #[test]
     fn test_normalize_path_whitespace_only() {
-        // Whitespace-only trims to empty, passes through
-        // Caller validates for empty before calling this function
         let result = normalize_project_path("   ").unwrap();
         assert_eq!(result, PathBuf::from(""));
     }
@@ -1018,5 +1049,73 @@ mod tests {
     fn test_normalize_path_tilde_in_middle_not_expanded() {
         let result = normalize_project_path("/Users/test/~project").unwrap();
         assert_eq!(result, PathBuf::from("/Users/test/~project"));
+    }
+
+    #[test]
+    fn test_normalize_path_canonicalizes_existing_path() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        let result = normalize_project_path(path.to_str().unwrap()).unwrap();
+        let expected = path.canonicalize().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_normalize_path_lowercase_canonicalized() {
+        if let Some(home) = dirs::home_dir() {
+            let lowercase_path = home.to_str().unwrap().to_lowercase();
+            let result = normalize_project_path(&lowercase_path).unwrap();
+
+            assert!(result.exists(), "Canonicalized path should exist");
+
+            let expected = home.canonicalize().unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_canonicalize_path_existing() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().to_path_buf();
+
+        let result = canonicalize_path(path.clone()).unwrap();
+        let expected = path.canonicalize().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_canonicalize_path_nonexistent_returns_original() {
+        let path = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let result = canonicalize_path(path.clone()).unwrap();
+        assert_eq!(result, path);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_normalize_path_resolves_symlinks() {
+        use std::os::unix::fs::symlink;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let real_path = temp_dir.path().join("real_dir");
+        std::fs::create_dir(&real_path).unwrap();
+
+        let symlink_path = temp_dir.path().join("symlink_dir");
+        symlink(&real_path, &symlink_path).unwrap();
+
+        let result = normalize_project_path(symlink_path.to_str().unwrap()).unwrap();
+
+        // Should resolve symlink to the real path
+        let expected = real_path.canonicalize().unwrap();
+        assert_eq!(result, expected, "Symlinks should resolve to real path");
+        assert_ne!(
+            result, symlink_path,
+            "Result should differ from symlink path"
+        );
     }
 }
