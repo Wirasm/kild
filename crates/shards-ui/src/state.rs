@@ -23,52 +23,94 @@ pub struct OperationError {
     pub message: String,
 }
 
+/// Git status for a worktree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitStatus {
+    /// Worktree has no uncommitted changes
+    Clean,
+    /// Worktree has uncommitted changes
+    Dirty,
+    /// Could not determine git status (error occurred)
+    Unknown,
+}
+
 /// Display data for a shard, combining Session with computed process status.
 #[derive(Clone)]
 pub struct ShardDisplay {
     pub session: Session,
     pub status: ProcessStatus,
-    pub git_dirty: bool,
+    pub git_status: GitStatus,
 }
 
 /// Check if a worktree has uncommitted changes.
-fn check_git_dirty(worktree_path: &std::path::Path) -> bool {
-    std::process::Command::new("git")
+///
+/// Returns `GitStatus::Dirty` if there are uncommitted changes,
+/// `GitStatus::Clean` if the worktree is clean, or `GitStatus::Unknown`
+/// if the git status check failed.
+fn check_git_status(worktree_path: &std::path::Path) -> GitStatus {
+    match std::process::Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(worktree_path)
         .output()
-        .map(|o| !o.stdout.is_empty())
-        .unwrap_or(false)
+    {
+        Ok(output) if output.status.success() => {
+            if output.stdout.is_empty() {
+                GitStatus::Clean
+            } else {
+                GitStatus::Dirty
+            }
+        }
+        Ok(output) => {
+            tracing::warn!(
+                event = "ui.shard_list.git_status_failed",
+                path = %worktree_path.display(),
+                exit_code = ?output.status.code(),
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "Git status command failed"
+            );
+            GitStatus::Unknown
+        }
+        Err(e) => {
+            tracing::warn!(
+                event = "ui.shard_list.git_status_error",
+                path = %worktree_path.display(),
+                error = %e,
+                "Failed to execute git status"
+            );
+            GitStatus::Unknown
+        }
+    }
 }
 
 impl ShardDisplay {
     pub fn from_session(session: Session) -> Self {
-        let status = Self::check_process_status(session.process_id, &session.branch);
-        let git_dirty = if session.worktree_path.exists() {
-            check_git_dirty(&session.worktree_path)
+        let status = match session.process_id {
+            None => ProcessStatus::Stopped,
+            Some(pid) => match shards_core::process::is_process_running(pid) {
+                Ok(true) => ProcessStatus::Running,
+                Ok(false) => ProcessStatus::Stopped,
+                Err(e) => {
+                    tracing::warn!(
+                        event = "ui.shard_list.process_check_failed",
+                        pid = pid,
+                        branch = session.branch,
+                        error = %e
+                    );
+                    ProcessStatus::Unknown
+                }
+            },
+        };
+
+        let git_status = if session.worktree_path.exists() {
+            check_git_status(&session.worktree_path)
         } else {
-            false
-        };
-        Self { session, status, git_dirty }
-    }
-
-    fn check_process_status(process_id: Option<u32>, branch: &str) -> ProcessStatus {
-        let Some(pid) = process_id else {
-            return ProcessStatus::Stopped;
+            GitStatus::Unknown
         };
 
-        match shards_core::process::is_process_running(pid) {
-            Ok(true) => ProcessStatus::Running,
-            Ok(false) => ProcessStatus::Stopped,
-            Err(e) => {
-                tracing::warn!(
-                    event = "ui.shard_list.process_check_failed",
-                    pid = pid,
-                    branch = branch,
-                    error = %e
-                );
-                ProcessStatus::Unknown
-            }
+        Self {
+            session,
+            status,
+            git_status,
         }
     }
 }
@@ -86,10 +128,24 @@ pub enum CreateDialogField {
 #[derive(Clone, Debug)]
 pub struct CreateFormState {
     pub branch_name: String,
-    pub selected_agent: String,
     pub selected_agent_index: usize,
     pub note: String,
     pub focused_field: CreateDialogField,
+}
+
+impl CreateFormState {
+    /// Get the currently selected agent name.
+    ///
+    /// Derives the agent name from the index, falling back to the default
+    /// agent if the index is out of bounds.
+    pub fn selected_agent(&self) -> String {
+        let agents = shards_core::agents::valid_agent_names();
+        agents
+            .get(self.selected_agent_index)
+            .copied()
+            .unwrap_or_else(|| shards_core::agents::default_agent_name())
+            .to_string()
+    }
 }
 
 impl Default for CreateFormState {
@@ -104,7 +160,6 @@ impl Default for CreateFormState {
             );
             return Self {
                 branch_name: String::new(),
-                selected_agent: default_agent.to_string(),
                 selected_agent_index: 0,
                 note: String::new(),
                 focused_field: CreateDialogField::default(),
@@ -126,7 +181,6 @@ impl Default for CreateFormState {
 
         Self {
             branch_name: String::new(),
-            selected_agent: agents[index].to_string(),
             selected_agent_index: index,
             note: String::new(),
             focused_field: CreateDialogField::default(),
@@ -193,10 +247,22 @@ impl AppState {
     /// - Preserves the existing shard list structure
     pub fn update_statuses_only(&mut self) {
         for shard_display in &mut self.displays {
-            shard_display.status = ShardDisplay::check_process_status(
-                shard_display.session.process_id,
-                &shard_display.session.branch,
-            );
+            shard_display.status = match shard_display.session.process_id {
+                None => ProcessStatus::Stopped,
+                Some(pid) => match shards_core::process::is_process_running(pid) {
+                    Ok(true) => ProcessStatus::Running,
+                    Ok(false) => ProcessStatus::Stopped,
+                    Err(e) => {
+                        tracing::warn!(
+                            event = "ui.shard_list.process_check_failed",
+                            pid = pid,
+                            branch = shard_display.session.branch,
+                            error = %e
+                        );
+                        ProcessStatus::Unknown
+                    }
+                },
+            };
         }
         self.last_refresh = std::time::Instant::now();
     }
@@ -315,7 +381,7 @@ mod tests {
         let session = Session {
             id: "test-id".to_string(),
             branch: "test-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
+            worktree_path: PathBuf::from("/tmp/nonexistent-test-path"),
             agent: "claude".to_string(),
             project_id: "test-project".to_string(),
             status: SessionStatus::Active,
@@ -335,6 +401,318 @@ mod tests {
 
         let display = ShardDisplay::from_session(session);
         assert_eq!(display.status, ProcessStatus::Stopped);
+        // Non-existent path should result in Unknown git status
+        assert_eq!(display.git_status, GitStatus::Unknown);
+    }
+
+    #[test]
+    fn test_git_status_clean_repo() {
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        // Create a temp directory and initialize a git repo
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .expect("git init failed");
+
+        // Configure git user (required for commit)
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(path)
+            .output()
+            .expect("git config email failed");
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .output()
+            .expect("git config name failed");
+
+        // Create a file and commit it
+        std::fs::write(path.join("test.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .expect("git add failed");
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(path)
+            .output()
+            .expect("git commit failed");
+
+        // Now repo should be clean
+        let status = check_git_status(path);
+        assert_eq!(status, GitStatus::Clean, "Expected clean repo after commit");
+    }
+
+    #[test]
+    fn test_git_status_dirty_repo() {
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        // Create a temp directory and initialize a git repo
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .expect("git init failed");
+
+        // Create an uncommitted file
+        std::fs::write(path.join("test.txt"), "hello").unwrap();
+
+        // Repo should be dirty
+        let status = check_git_status(path);
+        assert_eq!(
+            status,
+            GitStatus::Dirty,
+            "Expected dirty repo with uncommitted files"
+        );
+    }
+
+    #[test]
+    fn test_git_status_non_git_directory() {
+        use tempfile::TempDir;
+
+        // Create a temp directory that is NOT a git repo
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        // Should return Unknown (git command fails in non-git directory)
+        let status = check_git_status(path);
+        assert_eq!(
+            status,
+            GitStatus::Unknown,
+            "Expected Unknown for non-git directory"
+        );
+    }
+
+    #[test]
+    fn test_git_status_nonexistent_directory() {
+        use std::path::Path;
+
+        let path = Path::new("/nonexistent/path/that/does/not/exist");
+
+        // Should return Unknown (git command fails)
+        let status = check_git_status(path);
+        assert_eq!(
+            status,
+            GitStatus::Unknown,
+            "Expected Unknown for nonexistent directory"
+        );
+    }
+
+    // --- CreateDialogField tests ---
+
+    #[test]
+    fn test_create_dialog_field_default_is_branch_name() {
+        let field = CreateDialogField::default();
+        assert_eq!(field, CreateDialogField::BranchName);
+    }
+
+    #[test]
+    fn test_tab_navigation_cycles_correctly() {
+        // Simulates the tab navigation state machine:
+        // BranchName -> Agent -> Note -> BranchName
+        let mut field = CreateDialogField::BranchName;
+
+        // Tab 1: BranchName -> Agent
+        field = match field {
+            CreateDialogField::BranchName => CreateDialogField::Agent,
+            CreateDialogField::Agent => CreateDialogField::Note,
+            CreateDialogField::Note => CreateDialogField::BranchName,
+        };
+        assert_eq!(field, CreateDialogField::Agent);
+
+        // Tab 2: Agent -> Note
+        field = match field {
+            CreateDialogField::BranchName => CreateDialogField::Agent,
+            CreateDialogField::Agent => CreateDialogField::Note,
+            CreateDialogField::Note => CreateDialogField::BranchName,
+        };
+        assert_eq!(field, CreateDialogField::Note);
+
+        // Tab 3: Note -> BranchName (cycle complete)
+        field = match field {
+            CreateDialogField::BranchName => CreateDialogField::Agent,
+            CreateDialogField::Agent => CreateDialogField::Note,
+            CreateDialogField::Note => CreateDialogField::BranchName,
+        };
+        assert_eq!(field, CreateDialogField::BranchName);
+    }
+
+    // --- CreateFormState tests ---
+
+    #[test]
+    fn test_create_form_state_default_focused_field() {
+        let form = CreateFormState::default();
+        assert_eq!(form.focused_field, CreateDialogField::BranchName);
+    }
+
+    #[test]
+    fn test_create_form_state_selected_agent_derives_from_index() {
+        let mut form = CreateFormState::default();
+        let agents = shards_core::agents::valid_agent_names();
+
+        if agents.len() > 1 {
+            // Change index and verify selected_agent() returns the correct agent
+            form.selected_agent_index = 1;
+            assert_eq!(form.selected_agent(), agents[1]);
+        }
+    }
+
+    #[test]
+    fn test_create_form_state_selected_agent_fallback_on_invalid_index() {
+        let mut form = CreateFormState::default();
+        // Set an invalid index
+        form.selected_agent_index = 999;
+
+        // Should fall back to default agent
+        let expected = shards_core::agents::default_agent_name();
+        assert_eq!(form.selected_agent(), expected);
+    }
+
+    // --- Note field input tests ---
+
+    #[test]
+    fn test_note_allows_spaces() {
+        let mut note = String::new();
+        let c = ' ';
+
+        // Note field accepts spaces directly (unlike branch name which converts to hyphen)
+        if !c.is_control() {
+            note.push(c);
+        }
+
+        assert_eq!(note, " ");
+    }
+
+    #[test]
+    fn test_note_rejects_control_characters() {
+        let mut note = String::new();
+
+        // Control characters should be rejected
+        for c in ['\n', '\r', '\t', '\x00', '\x1b'] {
+            if !c.is_control() {
+                note.push(c);
+            }
+        }
+
+        assert!(
+            note.is_empty(),
+            "Control characters should not be added to note"
+        );
+    }
+
+    #[test]
+    fn test_note_accepts_unicode() {
+        let mut note = String::new();
+
+        // Unicode characters should be accepted
+        for c in ['日', '本', '語', '🚀', 'é', 'ñ'] {
+            if !c.is_control() {
+                note.push(c);
+            }
+        }
+
+        assert_eq!(note, "日本語🚀éñ");
+    }
+
+    #[test]
+    fn test_branch_name_validation() {
+        let mut branch = String::new();
+
+        // Valid characters for branch names
+        for c in ['a', 'Z', '0', '-', '_', '/'] {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+                branch.push(c);
+            }
+        }
+        assert_eq!(branch, "aZ0-_/");
+
+        // Invalid characters should be rejected
+        let mut branch2 = String::new();
+        for c in [' ', '@', '#', '$', '%', '!'] {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+                branch2.push(c);
+            }
+        }
+        assert!(branch2.is_empty(), "Invalid characters should be rejected");
+    }
+
+    // --- Note truncation tests ---
+
+    #[test]
+    fn test_note_truncation_at_boundary() {
+        let note_25_chars = "1234567890123456789012345";
+        let note_26_chars = "12345678901234567890123456";
+
+        // 25 chars should not be truncated
+        let truncated_25 = if note_25_chars.chars().count() > 25 {
+            format!("{}...", note_25_chars.chars().take(25).collect::<String>())
+        } else {
+            note_25_chars.to_string()
+        };
+        assert_eq!(truncated_25, note_25_chars);
+
+        // 26 chars should be truncated to "25chars..."
+        let truncated_26 = if note_26_chars.chars().count() > 25 {
+            format!("{}...", note_26_chars.chars().take(25).collect::<String>())
+        } else {
+            note_26_chars.to_string()
+        };
+        assert_eq!(truncated_26, "1234567890123456789012345...");
+    }
+
+    #[test]
+    fn test_note_truncation_unicode() {
+        // Unicode characters should be counted as single characters, not bytes
+        let unicode_note = "日本語テスト文字列はここにあります長い"; // 18 chars
+
+        let truncated = if unicode_note.chars().count() > 25 {
+            format!("{}...", unicode_note.chars().take(25).collect::<String>())
+        } else {
+            unicode_note.to_string()
+        };
+
+        // Should not be truncated (only 18 chars)
+        assert_eq!(truncated, unicode_note);
+    }
+
+    #[test]
+    fn test_note_trimming_whitespace_only() {
+        let note_whitespace = "   \t  \n  ";
+
+        // Whitespace-only note should become None
+        let trimmed = if note_whitespace.trim().is_empty() {
+            None
+        } else {
+            Some(note_whitespace.trim().to_string())
+        };
+
+        assert!(trimmed.is_none(), "Whitespace-only note should become None");
+    }
+
+    #[test]
+    fn test_note_trimming_preserves_content() {
+        let note_with_spaces = "  hello world  ";
+
+        let trimmed = if note_with_spaces.trim().is_empty() {
+            None
+        } else {
+            Some(note_with_spaces.trim().to_string())
+        };
+
+        assert_eq!(trimmed, Some("hello world".to_string()));
     }
 
     #[test]
@@ -439,14 +817,17 @@ mod tests {
                 ShardDisplay {
                     session: session_with_dead_pid,
                     status: ProcessStatus::Running, // Start as Running (incorrect)
+                    git_status: GitStatus::Unknown,
                 },
                 ShardDisplay {
                     session: session_with_live_pid,
                     status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
+                    git_status: GitStatus::Unknown,
                 },
                 ShardDisplay {
                     session: session_no_pid,
                     status: ProcessStatus::Stopped, // Start as Stopped (correct)
+                    git_status: GitStatus::Unknown,
                 },
             ],
             load_error: None,

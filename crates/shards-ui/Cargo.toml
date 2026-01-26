@@ -15,3 +15,6 @@ gpui.workspace = true
 core-text.workspace = true  # Pin to fix gpui dependency conflict
 tracing.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -15,10 +15,13 @@ use crate::views::MainView;
 /// - Cancel and Destroy buttons
 /// - Error message display (if destroy fails)
 pub fn render_confirm_dialog(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
-    let branch = state
-        .confirm_target_branch
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let branch = state.confirm_target_branch.clone().unwrap_or_else(|| {
+        tracing::warn!(
+            event = "ui.confirm_dialog.missing_target_branch",
+            "Confirm dialog rendered without target branch - this is a bug"
+        );
+        "unknown".to_string()
+    });
     let confirm_error = state.confirm_error.clone();
 
     // Overlay background

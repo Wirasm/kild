@@ -24,7 +24,7 @@ pub fn agent_options() -> Vec<&'static str> {
 /// - Error message display
 pub fn render_create_dialog(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
     let agents = agent_options();
-    let current_agent = state.create_form.selected_agent.clone();
+    let current_agent = state.create_form.selected_agent();
     let branch_name = state.create_form.branch_name.clone();
     let note = state.create_form.note.clone();
     let focused_field = state.create_form.focused_field.clone();

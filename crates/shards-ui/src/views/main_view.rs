@@ -72,7 +72,7 @@ impl MainView {
     /// Handle dialog submit button click.
     pub fn on_dialog_submit(&mut self, cx: &mut Context<Self>) {
         let branch = self.state.create_form.branch_name.trim().to_string();
-        let agent = self.state.create_form.selected_agent.clone();
+        let agent = self.state.create_form.selected_agent();
         let note = if self.state.create_form.note.trim().is_empty() {
             None
         } else {
@@ -111,10 +111,9 @@ impl MainView {
         }
         let next_index = (self.state.create_form.selected_agent_index + 1) % agents.len();
         self.state.create_form.selected_agent_index = next_index;
-        self.state.create_form.selected_agent = agents[next_index].to_string();
         tracing::info!(
             event = "ui.create_dialog.agent_changed",
-            agent = self.state.create_form.selected_agent
+            agent = %self.state.create_form.selected_agent()
         );
         cx.notify();
     }
