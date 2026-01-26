@@ -217,6 +217,6 @@ This enables parallel AI workflows without manual terminal management.
 
 ## License
 
-Apache License 2.0 — free to use, modify, and distribute.
+Source-available. Free to use for personal and internal business purposes. Not for resale or commercial redistribution.
 
-The name "KILD", logo, and associated branding are trademarks of Widinglabs OÜ and are not covered by the Apache 2.0 license. See [LICENSE.md](LICENSE.md) for details.
+The name "KILD", logo, and associated branding are trademarks of Widinglabs OÜ. See [LICENSE.md](LICENSE.md) for full terms.
