@@ -132,6 +132,7 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 |-------|-------|-------------|
 | `cli` | `crates/shards/` | User-facing CLI commands |
 | `core` | `crates/shards-core/` | Core library logic |
+| `ui` | `crates/shards-ui/` | GPUI native GUI |
 
 **Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`
 

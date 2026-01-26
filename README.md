@@ -28,12 +28,13 @@ cargo run -p shards-ui
 ```
 
 The GUI currently supports:
-- Shard listing with status indicators
+- Shard listing with status indicators (running, stopped, git dirty state)
 - Creating new shards with agent selection
 - Opening new agents in existing shards
 - Stopping agents without destroying shards
 - Destroying shards with confirmation dialog
 - Bulk operations: Open All stopped shards, Stop All running shards
+- Quick actions: Copy path to clipboard, open in editor, focus terminal window
 
 See the [PRD](.claude/PRPs/prds/gpui-native-terminal-ui.prd.md) for the development roadmap.
 
