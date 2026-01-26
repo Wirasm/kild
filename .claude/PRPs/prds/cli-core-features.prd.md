@@ -10,6 +10,7 @@
 
 | Date       | Change                                                                                         |
 | ---------- | ---------------------------------------------------------------------------------------------- |
+| 2026-01-26 | Phase 2.3 Git Commits (`shards commits`): COMPLETE                                             |
 | 2026-01-26 | Phase 2.2 Git Diff (`shards diff`): COMPLETE                                                   |
 | 2026-01-26 | Phase 2.5 Bulk Open/Stop (`--all`): COMPLETE                                                   |
 | 2026-01-26 | Phase 2.1 Focus Terminal (`shards focus`): COMPLETE                                            |
@@ -106,7 +107,7 @@ Important features that improve workflow significantly.
 | -------------- | ------------------------- | ------------------------------------- | ------- |
 | Focus terminal | `shards focus <branch>`   | Quick window switching                | ✅ DONE |
 | Git diff       | `shards diff <branch>`    | See changes without entering worktree | ✅ DONE |
-| Git commits    | `shards commits <branch>` | See work done                         |         |
+| Git commits    | `shards commits <branch>` | See work done                         | ✅ DONE |
 | Bulk destroy   | `shards destroy --all`    | Clean slate                           |         |
 | Bulk open      | `shards open --all`       | Launch agents in all stopped shards   | ✅ DONE |
 | Bulk stop      | `shards stop --all`       | Stop all running agents               | ✅ DONE |
@@ -590,7 +591,9 @@ shards diff feature-auth --staged
 
 ---
 
-#### 2.3 Git Commits (`shards commits`)
+#### 2.3 Git Commits (`shards commits`) - COMPLETE
+
+**Status**: COMPLETE (2026-01-26)
 
 **What**: Show recent commits made in a shard.
 

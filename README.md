@@ -124,6 +124,16 @@ shards diff <branch>
 shards diff <branch> --staged
 ```
 
+### Show recent commits
+```bash
+# Show last 10 commits (default)
+shards commits <branch>
+
+# Show last 5 commits
+shards commits <branch> -n 5
+shards commits <branch> --count 5
+```
+
 ### Stop a shard
 ```bash
 # Stop agent, preserve worktree

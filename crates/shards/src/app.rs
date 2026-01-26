@@ -177,6 +177,24 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("commits")
+                .about("Show recent commits in a shard's branch")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the shard")
+                        .required(true)
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("count")
+                        .long("count")
+                        .short('n')
+                        .help("Number of commits to show (default: 10)")
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("10")
+                )
+        )
+        .subcommand(
             Command::new("restart")
                 .about("Restart agent in existing shard without destroying worktree")
                 .arg(
@@ -696,6 +714,60 @@ mod tests {
             "test-branch"
         );
         assert!(diff_matches.get_flag("staged"));
+    }
+
+    #[test]
+    fn test_cli_commits_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "commits", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let commits_matches = matches.subcommand_matches("commits").unwrap();
+        assert_eq!(
+            commits_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        // Default count is 10
+        assert_eq!(*commits_matches.get_one::<usize>("count").unwrap(), 10);
+    }
+
+    #[test]
+    fn test_cli_commits_with_count_long() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["shards", "commits", "test-branch", "--count", "5"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let commits_matches = matches.subcommand_matches("commits").unwrap();
+        assert_eq!(
+            commits_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert_eq!(*commits_matches.get_one::<usize>("count").unwrap(), 5);
+    }
+
+    #[test]
+    fn test_cli_commits_with_count_short() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "commits", "test-branch", "-n", "3"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let commits_matches = matches.subcommand_matches("commits").unwrap();
+        assert_eq!(
+            commits_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert_eq!(*commits_matches.get_one::<usize>("count").unwrap(), 3);
+    }
+
+    #[test]
+    fn test_cli_commits_requires_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["shards", "commits"]);
+        assert!(matches.is_err());
     }
 
     #[test]

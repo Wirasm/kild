@@ -70,6 +70,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("code", sub_matches)) => handle_code_command(sub_matches),
         Some(("focus", sub_matches)) => handle_focus_command(sub_matches),
         Some(("diff", sub_matches)) => handle_diff_command(sub_matches),
+        Some(("commits", sub_matches)) => handle_commits_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("cleanup", sub_matches)) => handle_cleanup_command(sub_matches),
         Some(("health", sub_matches)) => handle_health_command(sub_matches),
@@ -722,6 +723,96 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+fn handle_commits_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required")?;
+    let count = *matches.get_one::<usize>("count").unwrap_or(&10);
+
+    // Validate branch name
+    if !is_valid_branch_name(branch) {
+        eprintln!("Invalid branch name: {}", branch);
+        error!(event = "cli.commits_invalid_branch", branch = branch);
+        return Err("Invalid branch name".into());
+    }
+
+    info!(
+        event = "cli.commits_started",
+        branch = branch,
+        count = count
+    );
+
+    let session = match session_handler::get_session(branch) {
+        Ok(session) => session,
+        Err(e) => {
+            eprintln!("Failed to find shard '{}': {}", branch, e);
+            error!(
+                event = "cli.commits_failed",
+                branch = branch,
+                error = %e
+            );
+            events::log_app_error(&e);
+            return Err(e.into());
+        }
+    };
+
+    // Run git log in worktree directory
+    let output = std::process::Command::new("git")
+        .current_dir(&session.worktree_path)
+        .args(["log", "--oneline", "-n", &count.to_string()])
+        .output()
+        .map_err(|e| {
+            eprintln!(
+                "Failed to execute git in '{}': {}",
+                session.worktree_path.display(),
+                e
+            );
+            eprintln!("Hint: Make sure git is installed and the worktree path is accessible.");
+            error!(
+                event = "cli.commits_git_spawn_failed",
+                branch = branch,
+                worktree_path = %session.worktree_path.display(),
+                error = %e
+            );
+            format!("Failed to execute git: {}", e)
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Git error: {}", stderr);
+        error!(
+            event = "cli.commits_git_failed",
+            branch = branch,
+            error = %stderr
+        );
+        return Err(format!("git log failed: {}", stderr).into());
+    }
+
+    // Output commits to stdout, handling broken pipe gracefully
+    if let Err(e) = std::io::stdout().write_all(&output.stdout) {
+        // Broken pipe is expected when piped to tools like `head`
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("Failed to write output: {}", e);
+            error!(
+                event = "cli.commits_write_failed",
+                branch = branch,
+                error = %e
+            );
+            return Err(format!("Failed to write commits output: {}", e).into());
+        }
+    }
+
+    info!(
+        event = "cli.commits_completed",
+        branch = branch,
+        count = count
+    );
+
+    Ok(())
+}
+
 fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
@@ -1255,5 +1346,75 @@ mod tests {
         unsafe {
             std::env::remove_var("EDITOR");
         }
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_accepts_valid_names() {
+        // Simple alphanumeric names
+        assert!(is_valid_branch_name("feature-auth"));
+        assert!(is_valid_branch_name("my_branch"));
+        assert!(is_valid_branch_name("branch123"));
+
+        // Names with forward slashes (git feature branches)
+        assert!(is_valid_branch_name("feat/login"));
+        assert!(is_valid_branch_name("feature/user/auth"));
+
+        // Mixed valid characters
+        assert!(is_valid_branch_name("fix-123_test/branch"));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_empty() {
+        assert!(!is_valid_branch_name(""));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_path_traversal() {
+        // Path traversal attempts
+        assert!(!is_valid_branch_name(".."));
+        assert!(!is_valid_branch_name("foo/../bar"));
+        assert!(!is_valid_branch_name("../etc/passwd"));
+        assert!(!is_valid_branch_name("branch/.."));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_absolute_paths() {
+        assert!(!is_valid_branch_name("/absolute"));
+        assert!(!is_valid_branch_name("/etc/passwd"));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_trailing_slash() {
+        assert!(!is_valid_branch_name("branch/"));
+        assert!(!is_valid_branch_name("feature/test/"));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_special_characters() {
+        // Spaces
+        assert!(!is_valid_branch_name("has spaces"));
+
+        // Shell injection characters
+        assert!(!is_valid_branch_name("branch;rm -rf"));
+        assert!(!is_valid_branch_name("branch|cat"));
+        assert!(!is_valid_branch_name("branch&echo"));
+        assert!(!is_valid_branch_name("branch`whoami`"));
+        assert!(!is_valid_branch_name("branch$(pwd)"));
+
+        // Other special characters
+        assert!(!is_valid_branch_name("branch*"));
+        assert!(!is_valid_branch_name("branch?"));
+        assert!(!is_valid_branch_name("branch<file"));
+        assert!(!is_valid_branch_name("branch>file"));
+    }
+
+    #[test]
+    fn test_is_valid_branch_name_rejects_too_long() {
+        let long_name = "a".repeat(256);
+        assert!(!is_valid_branch_name(&long_name));
+
+        // 255 is valid
+        let max_name = "a".repeat(255);
+        assert!(is_valid_branch_name(&max_name));
     }
 }
