@@ -5,7 +5,7 @@
 
 use shards_core::{CreateSessionRequest, Session, ShardsConfig, session_ops};
 
-use crate::state::{ProcessStatus, ShardDisplay};
+use crate::state::{OperationError, ProcessStatus, ShardDisplay};
 
 /// Create a new shard with the given branch name, agent, and optional note.
 ///
@@ -143,8 +143,8 @@ pub fn stop_shard(branch: &str) -> Result<(), String> {
 
 /// Open agents in all stopped shards.
 ///
-/// Returns (opened_count, errors) where errors contains branch names and error messages.
-pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<(String, String)>) {
+/// Returns (opened_count, errors) where errors contains operation errors with branch names.
+pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<OperationError>) {
     tracing::info!(event = "ui.open_all_stopped.started");
 
     let stopped: Vec<_> = displays
@@ -171,7 +171,10 @@ pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<(String, Strin
                     branch = shard_display.session.branch,
                     error = %e
                 );
-                errors.push((shard_display.session.branch.clone(), e.to_string()));
+                errors.push(OperationError {
+                    branch: shard_display.session.branch.clone(),
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -187,8 +190,8 @@ pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<(String, Strin
 
 /// Stop all running shards.
 ///
-/// Returns (stopped_count, errors) where errors contains branch names and error messages.
-pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<(String, String)>) {
+/// Returns (stopped_count, errors) where errors contains operation errors with branch names.
+pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<OperationError>) {
     tracing::info!(event = "ui.stop_all_running.started");
 
     let running: Vec<_> = displays
@@ -214,7 +217,10 @@ pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<(String, Strin
                     branch = shard_display.session.branch,
                     error = %e
                 );
-                errors.push((shard_display.session.branch.clone(), e.to_string()));
+                errors.push(OperationError {
+                    branch: shard_display.session.branch.clone(),
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -226,4 +232,239 @@ pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<(String, Strin
     );
 
     (stopped, errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{GitStatus, ProcessStatus, ShardDisplay};
+    use shards_core::Session;
+    use shards_core::sessions::types::SessionStatus;
+    use std::path::PathBuf;
+
+    /// Get branches of all stopped shards (for testing filtering logic).
+    fn get_stopped_branches(displays: &[ShardDisplay]) -> Vec<String> {
+        displays
+            .iter()
+            .filter(|d| d.status == ProcessStatus::Stopped)
+            .map(|d| d.session.branch.clone())
+            .collect()
+    }
+
+    /// Get branches of all running shards (for testing filtering logic).
+    fn get_running_branches(displays: &[ShardDisplay]) -> Vec<String> {
+        displays
+            .iter()
+            .filter(|d| d.status == ProcessStatus::Running)
+            .map(|d| d.session.branch.clone())
+            .collect()
+    }
+
+    fn make_session(id: &str, branch: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            branch: branch.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            project_id: "test-project".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: String::new(),
+            last_activity: None,
+            note: None,
+        }
+    }
+
+    fn make_display(id: &str, branch: &str, status: ProcessStatus) -> ShardDisplay {
+        ShardDisplay {
+            session: make_session(id, branch),
+            status,
+            git_status: GitStatus::Unknown,
+        }
+    }
+
+    // --- Filtering Logic Tests ---
+
+    #[test]
+    fn test_get_stopped_branches_only_returns_stopped() {
+        let displays = vec![
+            make_display("1", "stopped-1", ProcessStatus::Stopped),
+            make_display("2", "running-1", ProcessStatus::Running),
+            make_display("3", "stopped-2", ProcessStatus::Stopped),
+            make_display("4", "running-2", ProcessStatus::Running),
+        ];
+
+        let stopped = get_stopped_branches(&displays);
+
+        assert_eq!(stopped.len(), 2);
+        assert!(stopped.contains(&"stopped-1".to_string()));
+        assert!(stopped.contains(&"stopped-2".to_string()));
+        assert!(!stopped.contains(&"running-1".to_string()));
+        assert!(!stopped.contains(&"running-2".to_string()));
+    }
+
+    #[test]
+    fn test_get_running_branches_only_returns_running() {
+        let displays = vec![
+            make_display("1", "stopped-1", ProcessStatus::Stopped),
+            make_display("2", "running-1", ProcessStatus::Running),
+            make_display("3", "stopped-2", ProcessStatus::Stopped),
+            make_display("4", "running-2", ProcessStatus::Running),
+        ];
+
+        let running = get_running_branches(&displays);
+
+        assert_eq!(running.len(), 2);
+        assert!(running.contains(&"running-1".to_string()));
+        assert!(running.contains(&"running-2".to_string()));
+        assert!(!running.contains(&"stopped-1".to_string()));
+        assert!(!running.contains(&"stopped-2".to_string()));
+    }
+
+    // --- Unknown Status Handling Tests ---
+
+    #[test]
+    fn test_get_stopped_branches_ignores_unknown_status() {
+        let displays = vec![
+            make_display("1", "stopped-1", ProcessStatus::Stopped),
+            make_display("2", "unknown-1", ProcessStatus::Unknown),
+            make_display("3", "running-1", ProcessStatus::Running),
+            make_display("4", "unknown-2", ProcessStatus::Unknown),
+        ];
+
+        let stopped = get_stopped_branches(&displays);
+
+        assert_eq!(stopped.len(), 1);
+        assert_eq!(stopped[0], "stopped-1");
+        // Unknown status shards should NOT be included
+        assert!(!stopped.contains(&"unknown-1".to_string()));
+        assert!(!stopped.contains(&"unknown-2".to_string()));
+    }
+
+    #[test]
+    fn test_get_running_branches_ignores_unknown_status() {
+        let displays = vec![
+            make_display("1", "stopped-1", ProcessStatus::Stopped),
+            make_display("2", "unknown-1", ProcessStatus::Unknown),
+            make_display("3", "running-1", ProcessStatus::Running),
+            make_display("4", "unknown-2", ProcessStatus::Unknown),
+        ];
+
+        let running = get_running_branches(&displays);
+
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0], "running-1");
+        // Unknown status shards should NOT be included
+        assert!(!running.contains(&"unknown-1".to_string()));
+        assert!(!running.contains(&"unknown-2".to_string()));
+    }
+
+    // --- Empty Input Tests ---
+
+    #[test]
+    fn test_get_stopped_branches_empty_input() {
+        let displays: Vec<ShardDisplay> = vec![];
+        let stopped = get_stopped_branches(&displays);
+        assert!(stopped.is_empty());
+    }
+
+    #[test]
+    fn test_get_running_branches_empty_input() {
+        let displays: Vec<ShardDisplay> = vec![];
+        let running = get_running_branches(&displays);
+        assert!(running.is_empty());
+    }
+
+    #[test]
+    fn test_get_stopped_branches_no_stopped_shards() {
+        let displays = vec![
+            make_display("1", "running-1", ProcessStatus::Running),
+            make_display("2", "running-2", ProcessStatus::Running),
+        ];
+
+        let stopped = get_stopped_branches(&displays);
+        assert!(stopped.is_empty());
+    }
+
+    #[test]
+    fn test_get_running_branches_no_running_shards() {
+        let displays = vec![
+            make_display("1", "stopped-1", ProcessStatus::Stopped),
+            make_display("2", "stopped-2", ProcessStatus::Stopped),
+        ];
+
+        let running = get_running_branches(&displays);
+        assert!(running.is_empty());
+    }
+
+    // --- All Same Status Tests ---
+
+    #[test]
+    fn test_get_stopped_branches_all_stopped() {
+        let displays = vec![
+            make_display("1", "branch-1", ProcessStatus::Stopped),
+            make_display("2", "branch-2", ProcessStatus::Stopped),
+            make_display("3", "branch-3", ProcessStatus::Stopped),
+        ];
+
+        let stopped = get_stopped_branches(&displays);
+
+        assert_eq!(stopped.len(), 3);
+        assert!(stopped.contains(&"branch-1".to_string()));
+        assert!(stopped.contains(&"branch-2".to_string()));
+        assert!(stopped.contains(&"branch-3".to_string()));
+    }
+
+    #[test]
+    fn test_get_running_branches_all_running() {
+        let displays = vec![
+            make_display("1", "branch-1", ProcessStatus::Running),
+            make_display("2", "branch-2", ProcessStatus::Running),
+            make_display("3", "branch-3", ProcessStatus::Running),
+        ];
+
+        let running = get_running_branches(&displays);
+
+        assert_eq!(running.len(), 3);
+        assert!(running.contains(&"branch-1".to_string()));
+        assert!(running.contains(&"branch-2".to_string()));
+        assert!(running.contains(&"branch-3".to_string()));
+    }
+
+    // --- All Unknown Status Test ---
+
+    #[test]
+    fn test_get_stopped_branches_all_unknown() {
+        let displays = vec![
+            make_display("1", "unknown-1", ProcessStatus::Unknown),
+            make_display("2", "unknown-2", ProcessStatus::Unknown),
+        ];
+
+        let stopped = get_stopped_branches(&displays);
+        assert!(
+            stopped.is_empty(),
+            "Unknown status should not be treated as Stopped"
+        );
+    }
+
+    #[test]
+    fn test_get_running_branches_all_unknown() {
+        let displays = vec![
+            make_display("1", "unknown-1", ProcessStatus::Unknown),
+            make_display("2", "unknown-2", ProcessStatus::Unknown),
+        ];
+
+        let running = get_running_branches(&displays);
+        assert!(
+            running.is_empty(),
+            "Unknown status should not be treated as Running"
+        );
+    }
 }

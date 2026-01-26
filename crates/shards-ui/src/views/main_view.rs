@@ -216,17 +216,22 @@ impl MainView {
     fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_all_clicked");
 
+        // Clear previous bulk errors
+        self.state.clear_bulk_errors();
+
         let (opened, errors) = actions::open_all_stopped(&self.state.displays);
 
-        for (branch, err) in &errors {
+        // Store errors for UI display
+        for error in &errors {
             tracing::warn!(
                 event = "ui.open_all.partial_failure",
-                branch = branch,
-                error = err
+                branch = error.branch,
+                error = error.message
             );
         }
+        self.state.bulk_errors = errors;
 
-        if opened > 0 || !errors.is_empty() {
+        if opened > 0 || !self.state.bulk_errors.is_empty() {
             self.state.refresh_sessions();
         }
         cx.notify();
@@ -236,19 +241,31 @@ impl MainView {
     fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_all_clicked");
 
+        // Clear previous bulk errors
+        self.state.clear_bulk_errors();
+
         let (stopped, errors) = actions::stop_all_running(&self.state.displays);
 
-        for (branch, err) in &errors {
+        // Store errors for UI display
+        for error in &errors {
             tracing::warn!(
                 event = "ui.stop_all.partial_failure",
-                branch = branch,
-                error = err
+                branch = error.branch,
+                error = error.message
             );
         }
+        self.state.bulk_errors = errors;
 
-        if stopped > 0 || !errors.is_empty() {
+        if stopped > 0 || !self.state.bulk_errors.is_empty() {
             self.state.refresh_sessions();
         }
+        cx.notify();
+    }
+
+    /// Clear bulk operation errors (called when user dismisses the banner).
+    fn on_dismiss_bulk_errors(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.bulk_errors.dismissed");
+        self.state.clear_bulk_errors();
         cx.notify();
     }
 
@@ -507,6 +524,61 @@ impl Render for MainView {
                             ),
                     ),
             )
+            // Bulk operation errors banner (dismissible)
+            .when(!self.state.bulk_errors.is_empty(), |this| {
+                let error_count = self.state.bulk_errors.len();
+                this.child(
+                    div()
+                        .mx_4()
+                        .mt_2()
+                        .px_4()
+                        .py_2()
+                        .bg(rgb(0x662222))
+                        .rounded_md()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        // Header with dismiss button
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xff6b6b))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(format!(
+                                            "{} operation{} failed:",
+                                            error_count,
+                                            if error_count == 1 { "" } else { "s" }
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .id("dismiss-bulk-errors")
+                                        .px_2()
+                                        .cursor_pointer()
+                                        .text_color(rgb(0xaaaaaa))
+                                        .hover(|style| style.text_color(rgb(0xffffff)))
+                                        .on_mouse_up(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|view, _, _, cx| {
+                                                view.on_dismiss_bulk_errors(cx);
+                                            }),
+                                        )
+                                        .child("×"),
+                                ),
+                        )
+                        // Error list
+                        .children(self.state.bulk_errors.iter().map(|e| {
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xffaaaa))
+                                .child(format!("• {}: {}", e.branch, e.message))
+                        })),
+                )
+            })
             // Shard list
             .child(shard_list::render_shard_list(&self.state, cx))
             // Create dialog (conditional)

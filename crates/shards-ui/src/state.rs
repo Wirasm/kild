@@ -207,6 +207,9 @@ pub struct AppState {
     // Stop error state (shown inline per-row)
     pub stop_error: Option<OperationError>,
 
+    // Bulk operation errors (shown as banner)
+    pub bulk_errors: Vec<OperationError>,
+
     /// Timestamp of last successful status refresh
     pub last_refresh: std::time::Instant,
 }
@@ -227,6 +230,7 @@ impl AppState {
             confirm_error: None,
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         }
     }
@@ -290,6 +294,11 @@ impl AppState {
         self.stop_error = None;
     }
 
+    /// Clear any bulk operation errors.
+    pub fn clear_bulk_errors(&mut self) {
+        self.bulk_errors.clear();
+    }
+
     /// Count shards with Stopped status.
     pub fn stopped_count(&self) -> usize {
         self.displays
@@ -331,6 +340,7 @@ mod tests {
             confirm_error: Some("Some error".to_string()),
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
@@ -357,6 +367,7 @@ mod tests {
                 message: "error".to_string(),
             }),
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
@@ -381,6 +392,7 @@ mod tests {
                 branch: "branch".to_string(),
                 message: "error".to_string(),
             }),
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
@@ -745,6 +757,7 @@ mod tests {
             confirm_error: None,
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: initial_time,
         };
 
@@ -855,6 +868,7 @@ mod tests {
             confirm_error: None,
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
@@ -895,6 +909,7 @@ mod tests {
             confirm_error: None,
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
@@ -965,6 +980,7 @@ mod tests {
             confirm_error: None,
             open_error: None,
             stop_error: None,
+            bulk_errors: Vec::new(),
             last_refresh: std::time::Instant::now(),
         };
 
