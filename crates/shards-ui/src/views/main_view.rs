@@ -215,48 +215,36 @@ impl MainView {
     /// Handle click on the Open All button.
     fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_all_clicked");
-
-        // Clear previous bulk errors
-        self.state.clear_bulk_errors();
-
-        let (opened, errors) = actions::open_all_stopped(&self.state.displays);
-
-        // Store errors for UI display
-        for error in &errors {
-            tracing::warn!(
-                event = "ui.open_all.partial_failure",
-                branch = error.branch,
-                error = error.message
-            );
-        }
-        self.state.bulk_errors = errors;
-
-        if opened > 0 || !self.state.bulk_errors.is_empty() {
-            self.state.refresh_sessions();
-        }
-        cx.notify();
+        self.handle_bulk_operation(actions::open_all_stopped, "ui.open_all.partial_failure", cx);
     }
 
     /// Handle click on the Stop All button.
     fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_all_clicked");
+        self.handle_bulk_operation(actions::stop_all_running, "ui.stop_all.partial_failure", cx);
+    }
 
-        // Clear previous bulk errors
+    /// Common handler for bulk operations (open all / stop all).
+    fn handle_bulk_operation(
+        &mut self,
+        operation: impl Fn(&[crate::state::ShardDisplay]) -> (usize, Vec<crate::state::OperationError>),
+        error_event: &str,
+        cx: &mut Context<Self>,
+    ) {
         self.state.clear_bulk_errors();
 
-        let (stopped, errors) = actions::stop_all_running(&self.state.displays);
+        let (count, errors) = operation(&self.state.displays);
 
-        // Store errors for UI display
         for error in &errors {
             tracing::warn!(
-                event = "ui.stop_all.partial_failure",
+                event = error_event,
                 branch = error.branch,
                 error = error.message
             );
         }
         self.state.bulk_errors = errors;
 
-        if stopped > 0 || !self.state.bulk_errors.is_empty() {
+        if count > 0 || !self.state.bulk_errors.is_empty() {
             self.state.refresh_sessions();
         }
         cx.notify();
@@ -267,6 +255,51 @@ impl MainView {
         tracing::info!(event = "ui.bulk_errors.dismissed");
         self.state.clear_bulk_errors();
         cx.notify();
+    }
+
+    /// Render a bulk operation button with consistent styling.
+    fn render_bulk_button(
+        &self,
+        id: &'static str,
+        label: &str,
+        count: usize,
+        enabled_bg: u32,
+        enabled_hover: u32,
+        on_click: impl Fn(&gpui::MouseUpEvent, &mut Window, &mut gpui::App) + 'static,
+    ) -> impl IntoElement {
+        let is_disabled = count == 0;
+        let bg_color = if is_disabled {
+            rgb(0x333333)
+        } else {
+            rgb(enabled_bg)
+        };
+        let hover_color = if is_disabled {
+            rgb(0x333333)
+        } else {
+            rgb(enabled_hover)
+        };
+        let text_color = if is_disabled {
+            rgb(0x666666)
+        } else {
+            rgb(0xffffff)
+        };
+
+        div()
+            .id(id)
+            .px_3()
+            .py_1()
+            .bg(bg_color)
+            .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
+            .rounded_md()
+            .when(!is_disabled, |d| d.cursor_pointer())
+            .when(!is_disabled, |d| {
+                d.on_mouse_up(gpui::MouseButton::Left, on_click)
+            })
+            .child(
+                div()
+                    .text_color(text_color)
+                    .child(format!("{} ({})", label, count)),
+            )
     }
 
     /// Handle keyboard input for dialogs.
@@ -396,89 +429,23 @@ impl Render for MainView {
                             .items_center()
                             .gap_2()
                             // Open All button - green when enabled
-                            .child({
-                                let stopped_count = self.state.stopped_count();
-                                let is_disabled = stopped_count == 0;
-                                let bg_color = if is_disabled {
-                                    rgb(0x333333)
-                                } else {
-                                    rgb(0x446644)
-                                };
-                                let hover_color = if is_disabled {
-                                    rgb(0x333333)
-                                } else {
-                                    rgb(0x557755)
-                                };
-                                let text_color = if is_disabled {
-                                    rgb(0x666666)
-                                } else {
-                                    rgb(0xffffff)
-                                };
-
-                                div()
-                                    .id("open-all-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .bg(bg_color)
-                                    .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
-                                    .rounded_md()
-                                    .when(!is_disabled, |d| d.cursor_pointer())
-                                    .when(!is_disabled, |d| {
-                                        d.on_mouse_up(
-                                            gpui::MouseButton::Left,
-                                            cx.listener(|view, _, _, cx| {
-                                                view.on_open_all_click(cx);
-                                            }),
-                                        )
-                                    })
-                                    .child(
-                                        div()
-                                            .text_color(text_color)
-                                            .child(format!("Open All ({})", stopped_count)),
-                                    )
-                            })
+                            .child(self.render_bulk_button(
+                                "open-all-btn",
+                                "Open All",
+                                self.state.stopped_count(),
+                                0x446644,
+                                0x557755,
+                                cx.listener(|view, _, _, cx| view.on_open_all_click(cx)),
+                            ))
                             // Stop All button - red when enabled
-                            .child({
-                                let running_count = self.state.running_count();
-                                let is_disabled = running_count == 0;
-                                let bg_color = if is_disabled {
-                                    rgb(0x333333)
-                                } else {
-                                    rgb(0x664444)
-                                };
-                                let hover_color = if is_disabled {
-                                    rgb(0x333333)
-                                } else {
-                                    rgb(0x775555)
-                                };
-                                let text_color = if is_disabled {
-                                    rgb(0x666666)
-                                } else {
-                                    rgb(0xffffff)
-                                };
-
-                                div()
-                                    .id("stop-all-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .bg(bg_color)
-                                    .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
-                                    .rounded_md()
-                                    .when(!is_disabled, |d| d.cursor_pointer())
-                                    .when(!is_disabled, |d| {
-                                        d.on_mouse_up(
-                                            gpui::MouseButton::Left,
-                                            cx.listener(|view, _, _, cx| {
-                                                view.on_stop_all_click(cx);
-                                            }),
-                                        )
-                                    })
-                                    .child(
-                                        div()
-                                            .text_color(text_color)
-                                            .child(format!("Stop All ({})", running_count)),
-                                    )
-                            })
+                            .child(self.render_bulk_button(
+                                "stop-all-btn",
+                                "Stop All",
+                                self.state.running_count(),
+                                0x664444,
+                                0x775555,
+                                cx.listener(|view, _, _, cx| view.on_stop_all_click(cx)),
+                            ))
                             // Refresh button - TEXT label, gray background (secondary action)
                             .child(
                                 div()

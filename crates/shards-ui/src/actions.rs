@@ -145,93 +145,78 @@ pub fn stop_shard(branch: &str) -> Result<(), String> {
 ///
 /// Returns (opened_count, errors) where errors contains operation errors with branch names.
 pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<OperationError>) {
-    tracing::info!(event = "ui.open_all_stopped.started");
-
-    let stopped: Vec<_> = displays
-        .iter()
-        .filter(|d| d.status == ProcessStatus::Stopped)
-        .collect();
-
-    let mut opened = 0;
-    let mut errors = Vec::new();
-
-    for shard_display in stopped {
-        match session_ops::open_session(&shard_display.session.branch, None) {
-            Ok(session) => {
-                tracing::info!(
-                    event = "ui.open_all_stopped.shard_opened",
-                    branch = session.branch,
-                    process_id = session.process_id
-                );
-                opened += 1;
-            }
-            Err(e) => {
-                tracing::error!(
-                    event = "ui.open_all_stopped.shard_failed",
-                    branch = shard_display.session.branch,
-                    error = %e
-                );
-                errors.push(OperationError {
-                    branch: shard_display.session.branch.clone(),
-                    message: e.to_string(),
-                });
-            }
-        }
-    }
-
-    tracing::info!(
-        event = "ui.open_all_stopped.completed",
-        opened = opened,
-        failed = errors.len()
-    );
-
-    (opened, errors)
+    execute_bulk_operation(
+        displays,
+        ProcessStatus::Stopped,
+        |branch| {
+            session_ops::open_session(branch, None)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        },
+        "ui.open_all_stopped",
+    )
 }
 
 /// Stop all running shards.
 ///
 /// Returns (stopped_count, errors) where errors contains operation errors with branch names.
 pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<OperationError>) {
-    tracing::info!(event = "ui.stop_all_running.started");
+    execute_bulk_operation(
+        displays,
+        ProcessStatus::Running,
+        |branch| session_ops::stop_session(branch).map_err(|e| e.to_string()),
+        "ui.stop_all_running",
+    )
+}
 
-    let running: Vec<_> = displays
+/// Execute a bulk operation on shards with a specific status.
+fn execute_bulk_operation(
+    displays: &[ShardDisplay],
+    target_status: ProcessStatus,
+    operation: impl Fn(&str) -> Result<(), String>,
+    event_prefix: &str,
+) -> (usize, Vec<OperationError>) {
+    tracing::info!(event = format!("{}.started", event_prefix));
+
+    let targets: Vec<_> = displays
         .iter()
-        .filter(|d| d.status == ProcessStatus::Running)
+        .filter(|d| d.status == target_status)
         .collect();
 
-    let mut stopped = 0;
+    let mut success_count = 0;
     let mut errors = Vec::new();
 
-    for shard_display in running {
-        match session_ops::stop_session(&shard_display.session.branch) {
+    for shard_display in targets {
+        let branch = &shard_display.session.branch;
+        match operation(branch) {
             Ok(()) => {
                 tracing::info!(
-                    event = "ui.stop_all_running.shard_stopped",
-                    branch = shard_display.session.branch
+                    event = format!("{}.shard_completed", event_prefix),
+                    branch = branch
                 );
-                stopped += 1;
+                success_count += 1;
             }
             Err(e) => {
                 tracing::error!(
-                    event = "ui.stop_all_running.shard_failed",
-                    branch = shard_display.session.branch,
+                    event = format!("{}.shard_failed", event_prefix),
+                    branch = branch,
                     error = %e
                 );
                 errors.push(OperationError {
-                    branch: shard_display.session.branch.clone(),
-                    message: e.to_string(),
+                    branch: branch.clone(),
+                    message: e,
                 });
             }
         }
     }
 
     tracing::info!(
-        event = "ui.stop_all_running.completed",
-        stopped = stopped,
+        event = format!("{}.completed", event_prefix),
+        succeeded = success_count,
         failed = errors.len()
     );
 
-    (stopped, errors)
+    (success_count, errors)
 }
 
 #[cfg(test)]
