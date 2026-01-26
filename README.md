@@ -115,6 +115,15 @@ shards code <branch> --editor vim
 shards focus <branch>
 ```
 
+### View git changes in a shard
+```bash
+# Show uncommitted changes
+shards diff <branch>
+
+# Show only staged changes
+shards diff <branch> --staged
+```
+
 ### Stop a shard
 ```bash
 # Stop agent, preserve worktree
