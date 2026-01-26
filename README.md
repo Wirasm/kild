@@ -103,6 +103,12 @@ shards code <branch>
 shards code <branch> --editor vim
 ```
 
+### Focus on a shard
+```bash
+# Bring terminal window to foreground
+shards focus <branch>
+```
+
 ### Stop a shard
 ```bash
 # Stop agent, preserve worktree

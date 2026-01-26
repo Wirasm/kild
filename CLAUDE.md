@@ -69,6 +69,7 @@ cargo run -- -q list                     # Quiet mode (suppress JSON logs)
 cargo run -- cd my-branch                # Print worktree path for shell integration
 cargo run -- open my-branch              # Open new agent in existing shard (additive)
 cargo run -- code my-branch              # Open worktree in editor
+cargo run -- focus my-branch             # Bring terminal window to foreground
 cargo run -- stop my-branch              # Stop agent, preserve shard
 cargo run -- destroy my-branch           # Destroy shard
 cargo run -- destroy my-branch --force   # Force destroy (bypass git checks)
@@ -200,6 +201,7 @@ pub trait TerminalBackend: Send + Sync {
     fn is_available(&self) -> bool;
     fn execute_spawn(&self, config: &SpawnConfig, window_title: Option<&str>)
         -> Result<Option<String>, TerminalError>;
+    fn focus_window(&self, window_id: Option<&str>) -> Result<(), TerminalError>;
     fn close_window(&self, window_id: Option<&str>);
 }
 ```
