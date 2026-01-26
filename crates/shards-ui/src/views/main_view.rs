@@ -32,20 +32,17 @@ impl MainView {
                     .timer(crate::refresh::REFRESH_INTERVAL)
                     .await;
 
-                match this.update(cx, |view, cx| {
+                if let Err(e) = this.update(cx, |view, cx| {
                     tracing::debug!(event = "ui.auto_refresh.tick");
                     view.state.update_statuses_only();
                     cx.notify();
                 }) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::debug!(
-                            event = "ui.auto_refresh.stopped",
-                            reason = "view_dropped",
-                            error = ?e
-                        );
-                        break;
-                    }
+                    tracing::debug!(
+                        event = "ui.auto_refresh.stopped",
+                        reason = "view_dropped",
+                        error = ?e
+                    );
+                    break;
                 }
             }
         });

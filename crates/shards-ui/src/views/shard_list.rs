@@ -96,10 +96,12 @@ pub fn render_shard_list(state: &AppState, cx: &mut Context<MainView>) -> impl I
                             };
 
                             // Check if this row has an open or stop error
+                            let has_matching_error =
+                                |err: &crate::state::OperationError| err.branch == branch;
                             let row_error = open_error
                                 .as_ref()
-                                .filter(|e| e.branch == branch)
-                                .or_else(|| stop_error.as_ref().filter(|e| e.branch == branch))
+                                .filter(|e| has_matching_error(e))
+                                .or_else(|| stop_error.as_ref().filter(|e| has_matching_error(e)))
                                 .map(|e| e.message.clone());
 
                             // Show Open button when stopped, Stop button when running

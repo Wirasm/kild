@@ -32,24 +32,28 @@ pub struct ShardDisplay {
 
 impl ShardDisplay {
     pub fn from_session(session: Session) -> Self {
-        let status = match session.process_id {
-            None => ProcessStatus::Stopped,
-            Some(pid) => match shards_core::process::is_process_running(pid) {
-                Ok(true) => ProcessStatus::Running,
-                Ok(false) => ProcessStatus::Stopped,
-                Err(e) => {
-                    tracing::warn!(
-                        event = "ui.shard_list.process_check_failed",
-                        pid = pid,
-                        branch = session.branch,
-                        error = %e
-                    );
-                    ProcessStatus::Unknown
-                }
-            },
+        let status = Self::check_process_status(session.process_id, &session.branch);
+        Self { session, status }
+    }
+
+    fn check_process_status(process_id: Option<u32>, branch: &str) -> ProcessStatus {
+        let Some(pid) = process_id else {
+            return ProcessStatus::Stopped;
         };
 
-        Self { session, status }
+        match shards_core::process::is_process_running(pid) {
+            Ok(true) => ProcessStatus::Running,
+            Ok(false) => ProcessStatus::Stopped,
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.shard_list.process_check_failed",
+                    pid = pid,
+                    branch = branch,
+                    error = %e
+                );
+                ProcessStatus::Unknown
+            }
+        }
     }
 }
 
@@ -158,21 +162,10 @@ impl AppState {
     /// - Preserves the existing shard list structure
     pub fn update_statuses_only(&mut self) {
         for shard_display in &mut self.displays {
-            if let Some(pid) = shard_display.session.process_id {
-                shard_display.status = match shards_core::process::is_process_running(pid) {
-                    Ok(true) => ProcessStatus::Running,
-                    Ok(false) => ProcessStatus::Stopped,
-                    Err(e) => {
-                        tracing::warn!(
-                            event = "ui.status_update.process_check_failed",
-                            pid = pid,
-                            branch = shard_display.session.branch,
-                            error = %e
-                        );
-                        ProcessStatus::Unknown
-                    }
-                };
-            }
+            shard_display.status = ShardDisplay::check_process_status(
+                shard_display.session.process_id,
+                &shard_display.session.branch,
+            );
         }
         self.last_refresh = std::time::Instant::now();
     }
