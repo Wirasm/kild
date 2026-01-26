@@ -5,7 +5,7 @@
 
 use shards_core::{CreateSessionRequest, Session, ShardsConfig, session_ops};
 
-use crate::state::ShardDisplay;
+use crate::state::{ProcessStatus, ShardDisplay};
 
 /// Create a new shard with the given branch name, agent, and optional note.
 ///
@@ -139,4 +139,91 @@ pub fn stop_shard(branch: &str) -> Result<(), String> {
             Err(e.to_string())
         }
     }
+}
+
+/// Open agents in all stopped shards.
+///
+/// Returns (opened_count, errors) where errors contains branch names and error messages.
+pub fn open_all_stopped(displays: &[ShardDisplay]) -> (usize, Vec<(String, String)>) {
+    tracing::info!(event = "ui.open_all_stopped.started");
+
+    let stopped: Vec<_> = displays
+        .iter()
+        .filter(|d| d.status == ProcessStatus::Stopped)
+        .collect();
+
+    let mut opened = 0;
+    let mut errors = Vec::new();
+
+    for shard_display in stopped {
+        match session_ops::open_session(&shard_display.session.branch, None) {
+            Ok(session) => {
+                tracing::info!(
+                    event = "ui.open_all_stopped.shard_opened",
+                    branch = session.branch,
+                    process_id = session.process_id
+                );
+                opened += 1;
+            }
+            Err(e) => {
+                tracing::error!(
+                    event = "ui.open_all_stopped.shard_failed",
+                    branch = shard_display.session.branch,
+                    error = %e
+                );
+                errors.push((shard_display.session.branch.clone(), e.to_string()));
+            }
+        }
+    }
+
+    tracing::info!(
+        event = "ui.open_all_stopped.completed",
+        opened = opened,
+        failed = errors.len()
+    );
+
+    (opened, errors)
+}
+
+/// Stop all running shards.
+///
+/// Returns (stopped_count, errors) where errors contains branch names and error messages.
+pub fn stop_all_running(displays: &[ShardDisplay]) -> (usize, Vec<(String, String)>) {
+    tracing::info!(event = "ui.stop_all_running.started");
+
+    let running: Vec<_> = displays
+        .iter()
+        .filter(|d| d.status == ProcessStatus::Running)
+        .collect();
+
+    let mut stopped = 0;
+    let mut errors = Vec::new();
+
+    for shard_display in running {
+        match session_ops::stop_session(&shard_display.session.branch) {
+            Ok(()) => {
+                tracing::info!(
+                    event = "ui.stop_all_running.shard_stopped",
+                    branch = shard_display.session.branch
+                );
+                stopped += 1;
+            }
+            Err(e) => {
+                tracing::error!(
+                    event = "ui.stop_all_running.shard_failed",
+                    branch = shard_display.session.branch,
+                    error = %e
+                );
+                errors.push((shard_display.session.branch.clone(), e.to_string()));
+            }
+        }
+    }
+
+    tracing::info!(
+        event = "ui.stop_all_running.completed",
+        stopped = stopped,
+        failed = errors.len()
+    );
+
+    (stopped, errors)
 }

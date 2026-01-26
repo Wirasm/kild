@@ -212,6 +212,46 @@ impl MainView {
         cx.notify();
     }
 
+    /// Handle click on the Open All button.
+    fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.open_all_clicked");
+
+        let (opened, errors) = actions::open_all_stopped(&self.state.displays);
+
+        for (branch, err) in &errors {
+            tracing::warn!(
+                event = "ui.open_all.partial_failure",
+                branch = branch,
+                error = err
+            );
+        }
+
+        if opened > 0 || !errors.is_empty() {
+            self.state.refresh_sessions();
+        }
+        cx.notify();
+    }
+
+    /// Handle click on the Stop All button.
+    fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.stop_all_clicked");
+
+        let (stopped, errors) = actions::stop_all_running(&self.state.displays);
+
+        for (branch, err) in &errors {
+            tracing::warn!(
+                event = "ui.stop_all.partial_failure",
+                branch = branch,
+                error = err
+            );
+        }
+
+        if stopped > 0 || !errors.is_empty() {
+            self.state.refresh_sessions();
+        }
+        cx.notify();
+    }
+
     /// Handle keyboard input for dialogs.
     ///
     /// When create dialog is open: handles branch name input (alphanumeric, -, _, /, space converts to hyphen),
@@ -338,6 +378,90 @@ impl Render for MainView {
                             .flex()
                             .items_center()
                             .gap_2()
+                            // Open All button - green when enabled
+                            .child({
+                                let stopped_count = self.state.stopped_count();
+                                let is_disabled = stopped_count == 0;
+                                let bg_color = if is_disabled {
+                                    rgb(0x333333)
+                                } else {
+                                    rgb(0x446644)
+                                };
+                                let hover_color = if is_disabled {
+                                    rgb(0x333333)
+                                } else {
+                                    rgb(0x557755)
+                                };
+                                let text_color = if is_disabled {
+                                    rgb(0x666666)
+                                } else {
+                                    rgb(0xffffff)
+                                };
+
+                                div()
+                                    .id("open-all-btn")
+                                    .px_3()
+                                    .py_1()
+                                    .bg(bg_color)
+                                    .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
+                                    .rounded_md()
+                                    .when(!is_disabled, |d| d.cursor_pointer())
+                                    .when(!is_disabled, |d| {
+                                        d.on_mouse_up(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|view, _, _, cx| {
+                                                view.on_open_all_click(cx);
+                                            }),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .text_color(text_color)
+                                            .child(format!("Open All ({})", stopped_count)),
+                                    )
+                            })
+                            // Stop All button - red when enabled
+                            .child({
+                                let running_count = self.state.running_count();
+                                let is_disabled = running_count == 0;
+                                let bg_color = if is_disabled {
+                                    rgb(0x333333)
+                                } else {
+                                    rgb(0x664444)
+                                };
+                                let hover_color = if is_disabled {
+                                    rgb(0x333333)
+                                } else {
+                                    rgb(0x775555)
+                                };
+                                let text_color = if is_disabled {
+                                    rgb(0x666666)
+                                } else {
+                                    rgb(0xffffff)
+                                };
+
+                                div()
+                                    .id("stop-all-btn")
+                                    .px_3()
+                                    .py_1()
+                                    .bg(bg_color)
+                                    .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
+                                    .rounded_md()
+                                    .when(!is_disabled, |d| d.cursor_pointer())
+                                    .when(!is_disabled, |d| {
+                                        d.on_mouse_up(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|view, _, _, cx| {
+                                                view.on_stop_all_click(cx);
+                                            }),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .text_color(text_color)
+                                            .child(format!("Stop All ({})", running_count)),
+                                    )
+                            })
                             // Refresh button - TEXT label, gray background (secondary action)
                             .child(
                                 div()
