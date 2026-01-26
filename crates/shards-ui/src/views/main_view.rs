@@ -16,6 +16,37 @@ use crate::views::{
     add_project_dialog, confirm_dialog, create_dialog, project_selector, shard_list,
 };
 
+/// Normalize user-entered path for project addition.
+///
+/// Handles:
+/// - Tilde expansion (~/ -> home directory)
+/// - Missing leading slash (users/... -> /users/...)
+fn normalize_project_path(path_str: &str) -> PathBuf {
+    let path_str = path_str.trim();
+
+    // Handle tilde expansion
+    if let Some(rest) = path_str.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    } else if path_str == "~" && let Some(home) = dirs::home_dir() {
+        return home;
+    }
+
+    // Handle missing leading slash - if path looks like an absolute path without the /
+    // e.g., "users/rasmus/..." should become "/users/rasmus/..."
+    if !path_str.starts_with('/') && !path_str.starts_with('~') {
+        // Check if adding / would make it a valid directory
+        let with_slash = format!("/{}", path_str);
+        let potential_path = PathBuf::from(&with_slash);
+        if potential_path.is_dir() {
+            return potential_path;
+        }
+    }
+
+    PathBuf::from(path_str)
+}
+
 /// Main application view that composes the shard list, header, and create dialog.
 ///
 /// Owns application state and handles keyboard input for the create dialog.
@@ -397,7 +428,8 @@ impl MainView {
             return;
         }
 
-        let path = PathBuf::from(&path_str);
+        // Normalize path: expand ~ and ensure absolute path
+        let path = normalize_project_path(&path_str);
 
         match actions::add_project(path.clone(), name) {
             Ok(project) => {
@@ -855,5 +887,30 @@ impl Render for MainView {
                     cx,
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_path_with_leading_slash() {
+        let result = normalize_project_path("/Users/test/project");
+        assert_eq!(result, PathBuf::from("/Users/test/project"));
+    }
+
+    #[test]
+    fn test_normalize_path_tilde_expansion() {
+        let result = normalize_project_path("~/projects/test");
+        // Should expand to home directory
+        assert!(result.to_string_lossy().contains("projects/test"));
+        assert!(!result.to_string_lossy().starts_with("~"));
+    }
+
+    #[test]
+    fn test_normalize_path_trims_whitespace() {
+        let result = normalize_project_path("  /Users/test/project  ");
+        assert_eq!(result, PathBuf::from("/Users/test/project"));
     }
 }
