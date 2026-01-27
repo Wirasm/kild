@@ -106,7 +106,7 @@ cargo run -p kild -- destroy --all --force       # Force destroy all (skip confi
 
 **Key modules in kild-ui:**
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
-- `components/` - Reusable UI components (Button with themed variants)
+- `components/` - Reusable UI components (Button, StatusIndicator with themed variants)
 - `projects.rs` - Project storage, validation, persistence to ~/.kild/projects.json
 - `state.rs` - Application state with project filtering
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
