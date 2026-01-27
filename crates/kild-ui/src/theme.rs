@@ -14,7 +14,8 @@
 //!     .border_color(theme::ice())
 //! ```
 
-// Allow dead_code - these constants will be used when views are migrated (Phase 9.6)
+// Allow dead_code - these constants are defined ahead of usage in view components.
+// Remove this attribute once views are migrated to use the theme module.
 #![allow(dead_code)]
 
 use gpui::Rgba;
@@ -24,6 +25,10 @@ use gpui::Rgba;
 // =============================================================================
 
 // Base surfaces (darkest to lightest)
+// - void: deepest background, app edges, behind everything
+// - obsidian: sidebars, panels
+// - surface: cards, content areas
+// - elevated: modals, dropdowns, floating elements
 pub fn void() -> Rgba {
     gpui::rgb(0x08090A)
 }
@@ -116,13 +121,18 @@ pub fn blade_bright() -> Rgba {
 
 /// Create a color with alpha for glow effects.
 ///
+/// Alpha is clamped to the valid range 0.0-1.0.
+///
 /// # Example
 /// ```ignore
 /// // For glow effects, use 0.15 alpha:
 /// let ice_glow = with_alpha(ice(), 0.15);
 /// ```
 pub fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
-    Rgba { a: alpha, ..color }
+    Rgba {
+        a: alpha.clamp(0.0, 1.0),
+        ..color
+    }
 }
 
 // =============================================================================
