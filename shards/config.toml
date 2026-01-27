@@ -1,3 +1,0 @@
-[include_patterns]
-patterns = [".env*", "*.local.json", "build/artifacts/**"]
-enabled = true
