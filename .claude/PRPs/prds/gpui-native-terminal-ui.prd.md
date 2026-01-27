@@ -1107,7 +1107,7 @@ cargo run -p shards-ui
 
 | # | Subphase | Focus | Status |
 |---|----------|-------|--------|
-| 9.1 | Theme Foundation | Color palette, typography, spacing constants | TODO |
+| 9.1 | Theme Foundation | Color palette, typography, spacing constants | DONE |
 | 9.2 | Button Component | All button variants with proper styling | TODO |
 | 9.3 | StatusIndicator Component | Status dots and badges with glow effects | TODO |
 | 9.4 | TextInput Component | Form input with focus states | TODO |
@@ -1133,7 +1133,7 @@ cargo run -p shards-ui
 
 #### 9.1 Theme Foundation
 
-**Status**: TODO
+**Status**: DONE
 
 **What**: Create the theme module with all color, typography, and spacing constants from the brand system.
 

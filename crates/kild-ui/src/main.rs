@@ -11,6 +11,7 @@ mod actions;
 mod projects;
 mod refresh;
 mod state;
+mod theme;
 mod views;
 
 use views::MainView;
