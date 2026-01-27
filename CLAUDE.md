@@ -105,6 +105,7 @@ cargo run -p kild -- destroy --all --force       # Force destroy all (skip confi
 - `events/` - App lifecycle event helpers
 
 **Key modules in kild-ui:**
+- `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
 - `projects.rs` - Project storage, validation, persistence to ~/.kild/projects.json
 - `state.rs` - Application state with project filtering
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
