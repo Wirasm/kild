@@ -4,10 +4,13 @@
 //! visual consistency across the application.
 
 mod button;
+mod modal;
 mod status_indicator;
 mod text_input;
 
 pub use button::{Button, ButtonVariant};
+#[allow(unused_imports)]
+pub use modal::Modal;
 #[allow(unused_imports)]
 pub use status_indicator::{Status, StatusIndicator, StatusMode};
 
