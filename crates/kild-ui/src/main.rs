@@ -8,11 +8,14 @@ use gpui::{
 };
 
 mod actions;
+mod components;
 mod projects;
 mod refresh;
 mod state;
 mod theme;
 mod views;
+
+pub use components::{Button, ButtonVariant};
 
 use views::MainView;
 

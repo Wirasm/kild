@@ -160,8 +160,8 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 8 | Projects | Project management, active project context | Switch projects, filter shards | ✅ DONE |
 | 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted components | TODO |
 | 9.1 | Theme Foundation | Color palette, typography, spacing | Theme constants accessible | ✅ DONE |
-| 9.2 | Button Component | All button variants | Reusable Button component | TODO |
-| 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | TODO |
+| 9.2 | Button Component | All button variants | Reusable Button component | ✅ DONE |
+| 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | PLANNED |
 | 9.4 | TextInput Component | Form input with focus states | Reusable TextInput | TODO |
 | 9.5 | Modal Component | Dialog structure | Reusable Modal | TODO |
 | 9.6 | Theme Integration | Apply theme to all views | Visual match to mockup | TODO |
@@ -1108,7 +1108,7 @@ cargo run -p shards-ui
 | # | Subphase | Focus | Status |
 |---|----------|-------|--------|
 | 9.1 | Theme Foundation | Color palette, typography, spacing constants | DONE |
-| 9.2 | Button Component | All button variants with proper styling | TODO |
+| 9.2 | Button Component | All button variants with proper styling | DONE |
 | 9.3 | StatusIndicator Component | Status dots and badges with glow effects | TODO |
 | 9.4 | TextInput Component | Form input with focus states | TODO |
 | 9.5 | Modal Component | Reusable dialog structure | TODO |
