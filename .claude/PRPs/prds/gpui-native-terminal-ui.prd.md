@@ -161,8 +161,8 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted components | TODO |
 | 9.1 | Theme Foundation | Color palette, typography, spacing | Theme constants accessible | ✅ DONE |
 | 9.2 | Button Component | All button variants | Reusable Button component | ✅ DONE |
-| 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | DONE |
-| 9.4 | TextInput Component | Form input with focus states | Reusable TextInput | IN-PROGRESS |
+| 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | ✅ DONE |
+| 9.4 | TextInput Component | Form input with focus states | Reusable TextInput | ✅ DONE |
 | 9.5 | Modal Component | Dialog structure | Reusable Modal | TODO |
 | 9.6 | Theme Integration | Apply theme to all views | Visual match to mockup | TODO |
 | 10 | Keyboard Shortcuts | Full keyboard control | Navigate and operate UI without mouse | TODO |
@@ -1110,7 +1110,7 @@ cargo run -p shards-ui
 | 9.1 | Theme Foundation | Color palette, typography, spacing constants | DONE |
 | 9.2 | Button Component | All button variants with proper styling | DONE |
 | 9.3 | StatusIndicator Component | Status dots and badges with glow effects | DONE |
-| 9.4 | TextInput Component | Form input with focus states | IN-PROGRESS |
+| 9.4 | TextInput Component | Form input with focus states | DONE |
 | 9.5 | Modal Component | Reusable dialog structure | TODO |
 | 9.6 | Theme Integration | Apply theme to all views, final polish | TODO |
 
@@ -1389,7 +1389,7 @@ cargo build -p kild-ui
 
 #### 9.4 TextInput Component
 
-**Status**: TODO
+**Status**: DONE
 
 **What**: Extract and polish the TextInput component with proper focus states and styling.
 
