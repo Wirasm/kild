@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use super::backends::{AetherBackend, ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend};
+use super::backends::{ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend};
 use super::traits::AgentBackend;
 use super::types::AgentType;
 
@@ -25,7 +25,6 @@ impl AgentRegistry {
         backends.insert(AgentType::Kiro, Box::new(KiroBackend));
         backends.insert(AgentType::Gemini, Box::new(GeminiBackend));
         backends.insert(AgentType::Codex, Box::new(CodexBackend));
-        backends.insert(AgentType::Aether, Box::new(AetherBackend));
         Self { backends }
     }
 
@@ -138,7 +137,6 @@ mod tests {
         assert!(is_valid_agent("kiro"));
         assert!(is_valid_agent("gemini"));
         assert!(is_valid_agent("codex"));
-        assert!(is_valid_agent("aether"));
 
         // Now case-insensitive
         assert!(is_valid_agent("Claude"));
@@ -151,12 +149,11 @@ mod tests {
     #[test]
     fn test_valid_agent_names() {
         let names = valid_agent_names();
-        assert_eq!(names.len(), 5);
+        assert_eq!(names.len(), 4);
         assert!(names.contains(&"claude"));
         assert!(names.contains(&"kiro"));
         assert!(names.contains(&"gemini"));
         assert!(names.contains(&"codex"));
-        assert!(names.contains(&"aether"));
     }
 
     #[test]
@@ -175,7 +172,6 @@ mod tests {
         assert_eq!(get_default_command("kiro"), Some("kiro-cli chat"));
         assert_eq!(get_default_command("gemini"), Some("gemini"));
         assert_eq!(get_default_command("codex"), Some("codex"));
-        assert_eq!(get_default_command("aether"), Some("aether"));
         assert_eq!(get_default_command("unknown"), None);
     }
 
@@ -210,7 +206,7 @@ mod tests {
     #[test]
     fn test_registry_contains_all_agents() {
         // Ensure all expected agents are registered
-        let expected_agents = ["claude", "kiro", "gemini", "codex", "aether"];
+        let expected_agents = ["claude", "kiro", "gemini", "codex"];
         for agent in expected_agents {
             assert!(
                 is_valid_agent(agent),

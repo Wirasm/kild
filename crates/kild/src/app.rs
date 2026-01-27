@@ -29,7 +29,7 @@ pub fn build_cli() -> Command {
                         .long("agent")
                         .short('a')
                         .help("AI agent to launch (overrides config)")
-                        .value_parser(["claude", "kiro", "gemini", "codex", "aether"])
+                        .value_parser(["claude", "kiro", "gemini", "codex"])
                 )
                 .arg(
                     Arg::new("terminal")
@@ -114,7 +114,7 @@ pub fn build_cli() -> Command {
                         .long("agent")
                         .short('a')
                         .help("Agent to launch (default: kild's original agent)")
-                        .value_parser(["claude", "kiro", "gemini", "codex", "aether"])
+                        .value_parser(["claude", "kiro", "gemini", "codex"])
                 )
                 .arg(
                     Arg::new("all")
@@ -215,7 +215,7 @@ pub fn build_cli() -> Command {
                         .long("agent")
                         .short('a')
                         .help("AI agent to use (overrides current agent)")
-                        .value_parser(["claude", "kiro", "gemini", "codex", "aether"])
+                        .value_parser(["claude", "kiro", "gemini", "codex"])
                 )
         )
         .subcommand(

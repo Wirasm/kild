@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_config_validation_all_valid_agents() {
-        let valid_agents = ["claude", "kiro", "gemini", "codex", "aether"];
+        let valid_agents = ["claude", "kiro", "gemini", "codex"];
         for agent in valid_agents {
             let mut config = KildConfig::default();
             config.agent = AgentConfig {
