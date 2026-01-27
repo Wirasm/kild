@@ -282,7 +282,7 @@ fn format_partial_failure_error(operation: &str, failed: usize, total: usize) ->
     )
 }
 
-/// Handle `kilddestroy --all` - destroy all shards for current project
+/// Handle `kild destroy --all` - destroy all kilds for current project
 fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.destroy_all_started", force = force);
 
@@ -444,7 +444,7 @@ fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     }
 }
 
-/// Handle `kildopen --all` - open agents in all stopped shards
+/// Handle `kild open --all` - open agents in all stopped kilds
 fn handle_open_all(agent_override: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", agent_override = ?agent_override);
 
@@ -550,7 +550,7 @@ fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     }
 }
 
-/// Handle `kildstop --all` - stop all running shards
+/// Handle `kild stop --all` - stop all running kilds
 fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.stop_all_started");
 

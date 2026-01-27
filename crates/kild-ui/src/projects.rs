@@ -84,7 +84,7 @@ pub fn derive_display_name(path: &Path) -> String {
 
 /// Load projects from ~/.kild/projects.json.
 ///
-/// Falls back to `./shards/projects.json` if home directory cannot be determined.
+/// Falls back to `./.kild/projects.json` if home directory cannot be determined.
 /// Returns default empty state if file doesn't exist or is corrupted (with warning logged).
 pub fn load_projects() -> ProjectsData {
     let path = projects_file_path();

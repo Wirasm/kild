@@ -86,9 +86,9 @@ fn find_agent_process_with_retry(
 /// # Arguments
 /// * `working_directory` - The directory to run the command in
 /// * `command` - The command to execute
-/// * `config` - The shards configuration
+/// * `config` - The kild configuration
 /// * `session_id` - Optional session ID for unique Ghostty window titles
-/// * `shards_dir` - Optional shards directory for PID file tracking
+/// * `kild_dir` - Optional kild directory for PID file tracking
 ///
 /// Returns a SpawnResult containing the terminal type, process info, and window ID
 pub fn spawn_terminal(
@@ -96,7 +96,7 @@ pub fn spawn_terminal(
     command: &str,
     config: &KildConfig,
     session_id: Option<&str>,
-    shards_dir: Option<&Path>,
+    kild_dir: Option<&Path>,
 ) -> Result<SpawnResult, TerminalError> {
     info!(
         event = "core.terminal.spawn_started",
@@ -131,8 +131,8 @@ pub fn spawn_terminal(
         working_directory = %working_directory.display()
     );
 
-    // Set up PID file tracking if session_id and shards_dir are provided
-    let pid_file_path = match (session_id, shards_dir) {
+    // Set up PID file tracking if session_id and kild_dir are provided
+    let pid_file_path = match (session_id, kild_dir) {
         (Some(sid), Some(sdir)) => {
             // Ensure PID directory exists
             ensure_pid_dir(sdir).map_err(|e| TerminalError::SpawnFailed {

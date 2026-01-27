@@ -48,7 +48,7 @@ pub struct Config {
 ///
 /// This is the primary configuration structure that gets loaded from:
 /// 1. User config: `~/.kild/config.toml`
-/// 2. Project config: `./.shards/config.toml`
+/// 2. Project config: `./.kild/config.toml`
 ///
 /// Project config values override user config values.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

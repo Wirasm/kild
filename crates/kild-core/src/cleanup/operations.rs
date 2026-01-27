@@ -190,13 +190,13 @@ pub fn detect_untracked_worktrees(
             );
         }
 
-        let is_in_shards_dir = match (&canonical_worktree, &canonical_project_dir) {
+        let is_in_kild_dir = match (&canonical_worktree, &canonical_project_dir) {
             (Ok(wt), Ok(pd)) => wt.starts_with(pd),
             // Fall back to non-canonical comparison if canonicalize fails
             _ => worktree_path.starts_with(&project_worktrees_dir),
         };
 
-        if is_in_shards_dir {
+        if is_in_kild_dir {
             // Check if this worktree has a corresponding session
             let worktree_path_str = canonical_worktree
                 .as_ref()

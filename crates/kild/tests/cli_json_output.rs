@@ -135,7 +135,7 @@ fn test_list_json_logs_to_stderr_not_stdout() {
     );
 }
 
-/// Verify that 'shards status <branch> --json' outputs valid JSON object
+/// Verify that 'kild status <branch> --json' outputs valid JSON object
 #[test]
 fn test_status_json_outputs_valid_json_object() {
     // First get a branch name from list

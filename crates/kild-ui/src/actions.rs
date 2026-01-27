@@ -13,7 +13,7 @@ use crate::projects::{
 };
 use crate::state::{KildDisplay, OperationError, ProcessStatus};
 
-/// Create a new shard with the given branch name, agent, optional note, and optional project path.
+/// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
 /// When `project_path` is provided (UI context), detects project from that path.
 /// When `None` (shouldn't happen in UI), falls back to current working directory detection.
@@ -105,7 +105,7 @@ pub fn refresh_sessions() -> (Vec<KildDisplay>, Option<String>) {
     }
 }
 
-/// Destroy a shard by branch name.
+/// Destroy a kild by branch name.
 ///
 /// Thin wrapper around kild-core's `destroy_session`, which handles
 /// terminal cleanup, process termination, worktree removal, and session file deletion.
@@ -124,9 +124,9 @@ pub fn destroy_kild(branch: &str) -> Result<(), String> {
     }
 }
 
-/// Open a new agent terminal in an existing shard (additive - doesn't close existing terminals).
+/// Open a new agent terminal in an existing kild (additive - doesn't close existing terminals).
 ///
-/// Unlike relaunch, this does NOT close existing terminals - multiple agents can run in the same shard.
+/// Unlike relaunch, this does NOT close existing terminals - multiple agents can run in the same kild.
 pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Session, String> {
     tracing::info!(event = "ui.open_kild.started", branch = branch, agent = ?agent);
 
@@ -146,9 +146,9 @@ pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Session, String>
     }
 }
 
-/// Stop the agent process in a shard without destroying the shard.
+/// Stop the agent process in a kild without destroying the kild.
 ///
-/// The worktree and session file are preserved. The shard can be reopened with open_kild().
+/// The worktree and session file are preserved. The kild can be reopened with open_kild().
 pub fn stop_kild(branch: &str) -> Result<(), String> {
     tracing::info!(event = "ui.stop_kild.started", branch = branch);
 
@@ -192,7 +192,7 @@ pub fn stop_all_running(displays: &[KildDisplay]) -> (usize, Vec<OperationError>
     )
 }
 
-/// Execute a bulk operation on shards with a specific status.
+/// Execute a bulk operation on kilds with a specific status.
 fn execute_bulk_operation(
     displays: &[KildDisplay],
     target_status: ProcessStatus,
@@ -214,14 +214,14 @@ fn execute_bulk_operation(
         match operation(branch) {
             Ok(()) => {
                 tracing::info!(
-                    event = format!("{}.shard_completed", event_prefix),
+                    event = format!("{}.kild_completed", event_prefix),
                     branch = branch
                 );
                 success_count += 1;
             }
             Err(e) => {
                 tracing::error!(
-                    event = format!("{}.shard_failed", event_prefix),
+                    event = format!("{}.kild_failed", event_prefix),
                     branch = branch,
                     error = %e
                 );

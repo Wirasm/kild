@@ -126,7 +126,7 @@ fn test_quiet_flag_preserves_stdout() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // User-facing output should still be present (table header or "no shards" message)
+    // User-facing output should still be present (table header or "no kilds" message)
     assert!(
         !stdout.is_empty(),
         "Quiet mode should preserve user-facing stdout output"

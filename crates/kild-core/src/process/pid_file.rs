@@ -12,23 +12,21 @@ use tracing::debug;
 
 use crate::process::errors::ProcessError;
 
-/// Directory name for storing PID files within the shards directory
+/// Directory name for storing PID files within the kild directory
 const PID_DIR_NAME: &str = "pids";
 
 /// Get the PID file path for a given session ID
 ///
-/// PID files are stored at `~/.shards/pids/<session_id>.pid`
-pub fn get_pid_file_path(shards_dir: &Path, session_id: &str) -> PathBuf {
+/// PID files are stored at `~/.kild/pids/<session_id>.pid`
+pub fn get_pid_file_path(kild_dir: &Path, session_id: &str) -> PathBuf {
     // Sanitize session_id to be safe for filenames (replace / with -)
     let safe_id = session_id.replace('/', "-");
-    shards_dir
-        .join(PID_DIR_NAME)
-        .join(format!("{}.pid", safe_id))
+    kild_dir.join(PID_DIR_NAME).join(format!("{}.pid", safe_id))
 }
 
 /// Ensure the PID directory exists
-pub fn ensure_pid_dir(shards_dir: &Path) -> Result<PathBuf, ProcessError> {
-    let pid_dir = shards_dir.join(PID_DIR_NAME);
+pub fn ensure_pid_dir(kild_dir: &Path) -> Result<PathBuf, ProcessError> {
+    let pid_dir = kild_dir.join(PID_DIR_NAME);
     if !pid_dir.exists() {
         fs::create_dir_all(&pid_dir).map_err(|e| ProcessError::PidFileError {
             path: pid_dir.clone(),
@@ -176,28 +174,28 @@ mod tests {
 
     #[test]
     fn test_get_pid_file_path() {
-        let shards_dir = Path::new("/home/user/.shards");
+        let kild_dir = Path::new("/home/user/.kild");
 
         // Simple session ID
-        let path = get_pid_file_path(shards_dir, "abc123");
-        assert_eq!(path, PathBuf::from("/home/user/.shards/pids/abc123.pid"));
+        let path = get_pid_file_path(kild_dir, "abc123");
+        assert_eq!(path, PathBuf::from("/home/user/.kild/pids/abc123.pid"));
 
         // Session ID with slash (project/branch format)
-        let path = get_pid_file_path(shards_dir, "project-id/feature-branch");
+        let path = get_pid_file_path(kild_dir, "project-id/feature-branch");
         assert_eq!(
             path,
-            PathBuf::from("/home/user/.shards/pids/project-id-feature-branch.pid")
+            PathBuf::from("/home/user/.kild/pids/project-id-feature-branch.pid")
         );
     }
 
     #[test]
     fn test_ensure_pid_dir() {
         let temp_dir = TempDir::new().unwrap();
-        let shards_dir = temp_dir.path();
+        let kild_dir = temp_dir.path();
 
-        let pid_dir = ensure_pid_dir(shards_dir).unwrap();
+        let pid_dir = ensure_pid_dir(kild_dir).unwrap();
         assert!(pid_dir.exists());
-        assert_eq!(pid_dir, shards_dir.join("pids"));
+        assert_eq!(pid_dir, kild_dir.join("pids"));
     }
 
     #[test]
