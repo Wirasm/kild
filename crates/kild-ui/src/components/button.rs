@@ -20,13 +20,13 @@ pub enum ButtonVariant {
     Primary,
     /// Secondary action - Surface background with border
     Secondary,
-    /// Ghost button - Transparent, text only
+    /// Ghost button - Transparent background, surface background on hover
     Ghost,
     /// Success action - Aurora (green) background
     Success,
-    /// Warning action - Copper (yellow) background
+    /// Warning action - Copper (amber) background
     Warning,
-    /// Danger action - Ember (red) for destructive actions
+    /// Danger action - Transparent with Ember (red) text and border
     Danger,
 }
 
@@ -73,12 +73,15 @@ impl ButtonVariant {
         }
     }
 
-    /// Get the border color for this variant (if any).
-    fn border_color(&self) -> Option<Rgba> {
+    /// Get the border color for this variant.
+    ///
+    /// Returns transparent for variants without borders (Primary, Ghost, Success, Warning).
+    /// Secondary and Danger variants have visible borders.
+    fn border_color(&self) -> Rgba {
         match self {
-            ButtonVariant::Secondary => Some(theme::border()),
-            ButtonVariant::Danger => Some(theme::ember()),
-            _ => None,
+            ButtonVariant::Secondary => theme::border(),
+            ButtonVariant::Danger => theme::ember(),
+            _ => theme::with_alpha(theme::void(), 0.0),
         }
     }
 }
@@ -150,22 +153,22 @@ impl RenderOnce for Button {
             .px(px(theme::SPACE_3))
             .py(px(theme::SPACE_2))
             .bg(bg)
+            .border_1()
+            .border_color(border)
             .rounded(px(theme::RADIUS_MD))
             .child(div().text_color(text).child(self.label));
 
-        // Apply border if variant has one
-        if let Some(border_color) = border {
-            button = button.border_1().border_color(border_color);
+        if self.disabled {
+            // Disabled: show not-allowed cursor to indicate non-interactivity
+            button = button.cursor(gpui::CursorStyle::OperationNotAllowed);
+        } else if let Some(handler) = on_click {
+            // Enabled with handler: interactive button with hover and click
+            button = button
+                .hover(|style| style.bg(hover_bg))
+                .cursor_pointer()
+                .on_click(handler);
         }
-
-        // Apply hover and click only when not disabled
-        if !self.disabled {
-            button = button.hover(|style| style.bg(hover_bg)).cursor_pointer();
-
-            if let Some(handler) = on_click {
-                button = button.on_click(handler);
-            }
-        }
+        // Enabled without handler: no hover/cursor changes (display-only button)
 
         button
     }
