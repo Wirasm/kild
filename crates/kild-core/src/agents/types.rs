@@ -63,15 +63,12 @@ impl std::str::FromStr for AgentType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s).ok_or_else(|| {
-            format!(
-                "Unknown agent '{}'. Supported: {}",
-                s,
-                AgentType::all()
-                    .iter()
-                    .map(|a| a.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+            let supported = AgentType::all()
+                .iter()
+                .map(|a| a.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Unknown agent '{}'. Supported: {}", s, supported)
         })
     }
 }

@@ -159,11 +159,9 @@ mod tests {
     fn test_valid_agent_names() {
         let names = valid_agent_names();
         assert_eq!(names.len(), 5);
-        assert!(names.contains(&"amp"));
-        assert!(names.contains(&"claude"));
-        assert!(names.contains(&"kiro"));
-        assert!(names.contains(&"gemini"));
-        assert!(names.contains(&"codex"));
+        for agent in ["amp", "claude", "kiro", "gemini", "codex"] {
+            assert!(names.contains(&agent));
+        }
     }
 
     #[test]
