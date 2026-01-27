@@ -159,7 +159,7 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 7.7 | Quick Actions | Per-row action buttons | Copy Path, Open Editor, Focus Terminal | ✅ DONE |
 | 8 | Projects | Project management, active project context | Switch projects, filter shards | ✅ DONE |
 | 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted components | TODO |
-| 9.1 | Theme Foundation | Color palette, typography, spacing | Theme constants accessible | TODO |
+| 9.1 | Theme Foundation | Color palette, typography, spacing | Theme constants accessible | IN-PROGRESS |
 | 9.2 | Button Component | All button variants | Reusable Button component | TODO |
 | 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | TODO |
 | 9.4 | TextInput Component | Form input with focus states | Reusable TextInput | TODO |
@@ -1107,7 +1107,7 @@ cargo run -p shards-ui
 
 | # | Subphase | Focus | Status |
 |---|----------|-------|--------|
-| 9.1 | Theme Foundation | Color palette, typography, spacing constants | TODO |
+| 9.1 | Theme Foundation | Color palette, typography, spacing constants | DONE |
 | 9.2 | Button Component | All button variants with proper styling | TODO |
 | 9.3 | StatusIndicator Component | Status dots and badges with glow effects | TODO |
 | 9.4 | TextInput Component | Form input with focus states | TODO |
@@ -1133,7 +1133,7 @@ cargo run -p shards-ui
 
 #### 9.1 Theme Foundation
 
-**Status**: TODO
+**Status**: DONE
 
 **What**: Create the theme module with all color, typography, and spacing constants from the brand system.
 
