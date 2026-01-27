@@ -1,4 +1,4 @@
-# Installing and Updating Shards
+# Installing and Updating KILD
 
 ## Prerequisites
 
@@ -8,20 +8,20 @@
 
 ## Install Globally
 
-From the SHARDS repo root, run:
+From the KILD repo root, run:
 
 ```bash
-cargo install --path crates/shards
+cargo install --path crates/kild
 ```
 
-This compiles and installs the `shards` binary to `~/.cargo/bin/shards`.
+This compiles and installs the `kild` binary to `~/.cargo/bin/kild`.
 
 ## Verify Installation
 
 ```bash
-which shards          # Should show ~/.cargo/bin/shards
-shards --version      # Check version
-shards list           # Test it works (run from any git repo)
+which kild          # Should show ~/.cargo/bin/kild
+kild --version      # Check version
+kild list           # Test it works (run from any git repo)
 ```
 
 ## Update to Latest
@@ -29,9 +29,9 @@ shards list           # Test it works (run from any git repo)
 When you pull new changes or merge PRs, update the installed binary:
 
 ```bash
-# From the SHARDS repo
+# From the KILD repo
 git pull origin main
-cargo install --path crates/shards --force
+cargo install --path crates/kild --force
 ```
 
 The `--force` flag overwrites the existing binary with the new build.
@@ -41,7 +41,7 @@ The `--force` flag overwrites the existing binary with the new build.
 If you want a single command to pull and reinstall:
 
 ```bash
-cd /path/to/SHARDS && git pull origin main && cargo install --path crates/shards --force
+cd /path/to/KILD && git pull origin main && cargo install --path crates/kild --force
 ```
 
 ## Testing Before Installing
@@ -49,8 +49,8 @@ cd /path/to/SHARDS && git pull origin main && cargo install --path crates/shards
 If you want to test changes before installing globally, build and run directly:
 
 ```bash
-cargo build --release --bin shards
-./target/release/shards list
+cargo build --release --bin kild
+./target/release/kild list
 ```
 
 This builds but does not install - useful for testing branches before merging.
@@ -58,7 +58,7 @@ This builds but does not install - useful for testing branches before merging.
 ## Uninstall
 
 ```bash
-cargo uninstall shards
+cargo uninstall kild
 ```
 
 ## Troubleshooting
@@ -71,5 +71,5 @@ cargo uninstall shards
 - Check you have write access to `~/.cargo/bin`
 
 **Old version still running**
-- Run `which shards` to confirm path
+- Run `which kild` to confirm path
 - Use `--force` flag when reinstalling

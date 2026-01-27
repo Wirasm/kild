@@ -1,18 +1,18 @@
 ---
-name: shards
+name: kild
 description: |
   Create and manage parallel AI development sessions in isolated Git worktrees.
 
   TRIGGERS - Use this skill when user says:
-  - Creating: "create a shard", "spin up shards", "new shard for", "create worktrees"
-  - Listing: "list shards", "show shards", "active shards", "shards list"
-  - Status: "shard status", "check shard", "shard health", "how are my shards"
-  - Navigation: "cd to shard", "go to shard", "path to shard", "open in editor", "edit shard", "code shard"
-  - Lifecycle: "stop shard", "open shard", "destroy shard", "clean up shards"
+  - Creating: "create a kild", "spin up kilds", "new kild for", "create worktrees"
+  - Listing: "list kilds", "show kilds", "active kilds", "kilds list"
+  - Status: "kild status", "check kild", "kild health", "how are my kilds"
+  - Navigation: "cd to kild", "go to kild", "path to kild", "open in editor", "edit kild", "code kild"
+  - Lifecycle: "stop kild", "open kild", "destroy kild", "clean up kilds"
   - Output: "list as json", "json output", "quiet mode"
 
-  Shards creates isolated Git worktrees where AI agents work independently without
-  affecting your main branch. Each shard gets its own terminal window, port range,
+  KILD creates isolated Git worktrees where AI agents work independently without
+  affecting your main branch. Each kild gets its own terminal window, port range,
   and process tracking.
 
   IMPORTANT: Always use defaults from user's config. Only specify --agent, --terminal,
@@ -20,50 +20,50 @@ description: |
 
   EXAMPLES
 
-  User says "Create a shard for the auth feature"
-  Command - shards create feature-auth
+  User says "Create a kild for the auth feature"
+  Command - kild create feature-auth
   Result - Creates worktree using default agent from config, opens in default terminal
 
-  User says "Create a shard with kiro instead"
-  Command - shards create feature-auth --agent kiro
+  User says "Create a kild with kiro instead"
+  Command - kild create feature-auth --agent kiro
   Result - Overrides default agent with kiro
 
-  User says "Show me all active shards"
-  Command - shards list
+  User says "Show me all active kilds"
+  Command - kild list
   Result - Table showing branch, agent, status, note, ports, and process info
 
-  User says "Open the auth shard in my editor"
-  Command - shards code feature-auth
+  User says "Open the auth kild in my editor"
+  Command - kild code feature-auth
   Result - Opens worktree in user's default editor ($EDITOR or zed)
 
-  User says "Go to the auth shard directory"
-  Command - shards cd feature-auth
-  Result - Prints path for shell integration: /Users/x/.shards/worktrees/project/feature-auth
+  User says "Go to the auth kild directory"
+  Command - kild cd feature-auth
+  Result - Prints path for shell integration: /Users/x/.kild/worktrees/project/feature-auth
 
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-# Shards CLI - Parallel AI Development Manager
+# KILD CLI - Parallel AI Development Manager
 
-Shards creates isolated Git worktrees for parallel AI development sessions. Each shard runs in its own workspace with dedicated port ranges and process tracking.
+KILD creates isolated Git worktrees for parallel AI development sessions. Each kild runs in its own workspace with dedicated port ranges and process tracking.
 
 ## Important: Use Defaults
 
 **Always use the user's configured defaults.** Users set their preferences in config files:
-- `~/.shards/config.toml` (user-level)
-- `./.shards/config.toml` (project-level)
+- `~/.kild/config.toml` (user-level)
+- `./.kild/config.toml` (project-level)
 
 **DO NOT specify `--agent`, `--terminal`, or `--flags` unless the user explicitly asks to override.**
 
 ```bash
 # CORRECT - use defaults
-shards create feature-auth
+kild create feature-auth
 
 # CORRECT - user asked for kiro specifically
-shards create feature-auth --agent kiro
+kild create feature-auth --agent kiro
 
 # WRONG - don't assume agent
-shards create feature-auth --agent claude
+kild create feature-auth --agent claude
 ```
 
 **When to override:**
@@ -73,17 +73,17 @@ shards create feature-auth --agent claude
 
 ## Core Commands
 
-### Create a Shard
+### Create a Kild
 ```bash
-shards create <branch> [--agent <agent>] [--terminal <terminal>] [--flags <flags>] [--note <note>]
+kild create <branch> [--agent <agent>] [--terminal <terminal>] [--flags <flags>] [--note <note>]
 ```
 
 Creates an isolated workspace with:
-- New Git worktree in `~/.shards/worktrees/<project>/<branch>/`
+- New Git worktree in `~/.kild/worktrees/<project>/<branch>/`
 - Unique port range (10 ports, starting from 3000)
 - Native terminal with AI agent launched
 - Process tracking (PID, name, start time)
-- Session metadata saved to `~/.shards/sessions/`
+- Session metadata saved to `~/.kild/sessions/`
 
 **Supported agents** - claude, kiro, gemini, codex, aether
 **Supported terminals** - ghostty, iterm, terminal, native
@@ -91,25 +91,25 @@ Creates an isolated workspace with:
 **Examples**
 ```bash
 # Basic - uses defaults from config
-shards create feature-auth
-# Result: Creates shard with default agent/terminal from config
+kild create feature-auth
+# Result: Creates kild with default agent/terminal from config
 
 # With description
-shards create feature-auth --note "Implementing JWT authentication"
-# Result: Creates shard with note shown in list/status output
+kild create feature-auth --note "Implementing JWT authentication"
+# Result: Creates kild with note shown in list/status output
 
 # Override agent (only when user requests)
-shards create feature-auth --agent kiro
+kild create feature-auth --agent kiro
 # Result: Uses kiro instead of default agent
 
 # Override terminal (only when user requests)
-shards create feature-auth --terminal iterm
+kild create feature-auth --terminal iterm
 # Result: Opens in iTerm instead of default terminal
 ```
 
-### List All Shards
+### List All Kilds
 ```bash
-shards list [--json]
+kild list [--json]
 ```
 
 Shows table with branch, agent, status, timestamps, port range, process status, command, and note.
@@ -117,39 +117,39 @@ Shows table with branch, agent, status, timestamps, port range, process status, 
 **Examples**
 ```bash
 # Human-readable table
-shards list
-# Result: Formatted table with all shard info
+kild list
+# Result: Formatted table with all kild info
 
 # JSON for scripting
-shards list --json
+kild list --json
 # Result: JSON array of session objects
 
 # Filter with jq
-shards list --json | jq '.[] | select(.status == "Active") | .branch'
+kild list --json | jq '.[] | select(.status == "Active") | .branch'
 # Result: List of active branch names
 ```
 
 ### Status (Detailed View)
 ```bash
-shards status <branch> [--json]
+kild status <branch> [--json]
 ```
 
-Shows detailed info for a specific shard including worktree path, process metadata, port allocation, and note.
+Shows detailed info for a specific kild including worktree path, process metadata, port allocation, and note.
 
 **Examples**
 ```bash
 # Human-readable
-shards status feature-auth
-# Result: Detailed status box with all shard info
+kild status feature-auth
+# Result: Detailed status box with all kild info
 
 # JSON for scripting
-shards status feature-auth --json
+kild status feature-auth --json
 # Result: JSON object with full session data
 ```
 
 ### Print Worktree Path (Shell Integration)
 ```bash
-shards cd <branch>
+kild cd <branch>
 ```
 
 Prints the worktree path for shell integration. Use with shell wrapper for actual directory change.
@@ -157,72 +157,72 @@ Prints the worktree path for shell integration. Use with shell wrapper for actua
 **Examples**
 ```bash
 # Print path
-shards cd feature-auth
-# Result: /Users/x/.shards/worktrees/project/feature-auth
+kild cd feature-auth
+# Result: /Users/x/.kild/worktrees/project/feature-auth
 
 # Shell integration (user adds to .zshrc/.bashrc)
-scd() { cd "$(shards cd "$1")" }
+kcd() { cd "$(kild cd "$1")" }
 
 # Then use:
-scd feature-auth
+kcd feature-auth
 # Result: Actually changes directory to the worktree
 ```
 
 ### Open in Editor
 ```bash
-shards code <branch> [--editor <editor>]
+kild code <branch> [--editor <editor>]
 ```
 
-Opens the shard's worktree in the user's editor. Priority: `--editor` flag > `$EDITOR` env var > "zed" default.
+Opens the kild's worktree in the user's editor. Priority: `--editor` flag > `$EDITOR` env var > "zed" default.
 
 **Examples**
 ```bash
 # Use default editor
-shards code feature-auth
+kild code feature-auth
 # Result: Opens worktree in $EDITOR or zed
 
 # Override editor
-shards code feature-auth --editor vim
+kild code feature-auth --editor vim
 # Result: Opens worktree in vim
 ```
 
-### Open a New Agent in a Shard
+### Open a New Agent in a Kild
 ```bash
-shards open <branch> [--agent <agent>]
+kild open <branch> [--agent <agent>]
 ```
 
-Opens a new agent terminal in an existing shard. This is **additive** - it doesn't close existing terminals, allowing multiple agents to work in the same shard.
+Opens a new agent terminal in an existing kild. This is **additive** - it doesn't close existing terminals, allowing multiple agents to work in the same kild.
 
 **Examples**
 ```bash
 # Reopen with default agent
-shards open feature-auth
+kild open feature-auth
 # Result: New terminal opens with default agent
 
 # Open with different agent
-shards open feature-auth --agent kiro
+kild open feature-auth --agent kiro
 # Result: New terminal opens with kiro (original agent still running if any)
 ```
 
-### Stop a Shard
+### Stop a Kild
 ```bash
-shards stop <branch>
+kild stop <branch>
 ```
 
-Stops the agent process and closes the terminal, but preserves the shard (worktree and uncommitted changes remain). Can be reopened later with `shards open`.
+Stops the agent process and closes the terminal, but preserves the kild (worktree and uncommitted changes remain). Can be reopened later with `kild open`.
 
 **Example**
 ```bash
-shards stop feature-auth
+kild stop feature-auth
 # Result: Terminal closes, worktree preserved, status changes to "Stopped"
 ```
 
-### Destroy a Shard
+### Destroy a Kild
 ```bash
-shards destroy <branch> [--force]
+kild destroy <branch> [--force]
 ```
 
-Completely removes a shard - closes terminal, kills process, removes worktree and branch, deletes session.
+Completely removes a kild - closes terminal, kills process, removes worktree and branch, deletes session.
 
 **Flags**
 - `--force` / `-f` - Force destroy even with uncommitted changes (bypasses git safety checks)
@@ -230,17 +230,17 @@ Completely removes a shard - closes terminal, kills process, removes worktree an
 **Examples**
 ```bash
 # Normal destroy (blocks if uncommitted changes)
-shards destroy feature-auth
-# Result: Removes shard if clean
+kild destroy feature-auth
+# Result: Removes kild if clean
 
 # Force destroy (bypasses git checks)
-shards destroy feature-auth --force
-# Result: Removes shard regardless of uncommitted changes
+kild destroy feature-auth --force
+# Result: Removes kild regardless of uncommitted changes
 ```
 
 ### Health Monitoring
 ```bash
-shards health [branch] [--json] [--watch] [--interval <seconds>]
+kild health [branch] [--json] [--watch] [--interval <seconds>]
 ```
 
 Shows health dashboard with process status, CPU/memory metrics, and summary statistics.
@@ -248,21 +248,21 @@ Shows health dashboard with process status, CPU/memory metrics, and summary stat
 **Examples**
 ```bash
 # Dashboard view
-shards health
-# Result: Table with CPU, memory, status for all shards
+kild health
+# Result: Table with CPU, memory, status for all kilds
 
 # Watch mode (auto-refresh)
-shards health --watch --interval 5
+kild health --watch --interval 5
 # Result: Live dashboard updating every 5 seconds
 
 # JSON output
-shards health --json
+kild health --json
 # Result: JSON with health metrics
 ```
 
 ### Cleanup Orphaned Resources
 ```bash
-shards cleanup [--all] [--orphans] [--no-pid] [--stopped] [--older-than <days>]
+kild cleanup [--all] [--orphans] [--no-pid] [--stopped] [--older-than <days>]
 ```
 
 Cleans up resources that got out of sync (crashes, manual deletions, etc.).
@@ -278,8 +278,8 @@ Cleans up resources that got out of sync (crashes, manual deletions, etc.).
 
 ### Quiet Mode
 ```bash
-shards -q <command>
-shards --quiet <command>
+kild -q <command>
+kild --quiet <command>
 ```
 
 Suppresses JSON log output for clean, scriptable output.
@@ -287,34 +287,34 @@ Suppresses JSON log output for clean, scriptable output.
 **Examples**
 ```bash
 # Normal (shows JSON logs)
-shards list
+kild list
 # Result: JSON logs + table
 
 # Quiet (clean output)
-shards -q list
+kild -q list
 # Result: Just the table, no logs
 
 # Useful for scripting
-shards -q list --json | jq '.[] | .branch'
+kild -q list --json | jq '.[] | .branch'
 # Result: Clean JSON without log noise
 ```
 
 ## Configuration
 
-Shards uses hierarchical TOML config. Later sources override earlier:
+KILD uses hierarchical TOML config. Later sources override earlier:
 
-1. **Hardcoded defaults** - Built into shards
-2. **User config** - `~/.shards/config.toml`
-3. **Project config** - `./.shards/config.toml`
+1. **Hardcoded defaults** - Built into kild
+2. **User config** - `~/.kild/config.toml`
+3. **Project config** - `./.kild/config.toml`
 4. **CLI flags** - Always win
 
 ### Config File Structure
 
 ```toml
-# ~/.shards/config.toml or ./.shards/config.toml
+# ~/.kild/config.toml or ./.kild/config.toml
 
 [agent]
-default = "claude"  # Default agent for new shards
+default = "claude"  # Default agent for new kilds
 
 [terminal]
 preferred = "ghostty"  # Default terminal: ghostty, iterm, terminal, native
@@ -323,7 +323,7 @@ max_retry_attempts = 5  # Retries for PID capture
 
 [ports]
 base = 3000       # Starting port number
-range_size = 10   # Ports per shard
+range_size = 10   # Ports per kild
 
 [agents.claude]
 command = "claude"
@@ -344,7 +344,7 @@ If a user wants to change defaults, help them edit their config:
 
 **User wants claude with auto-permissions by default:**
 ```toml
-# ~/.shards/config.toml
+# ~/.kild/config.toml
 [agent]
 default = "claude"
 
@@ -354,14 +354,14 @@ flags = "--dangerously-skip-permissions"
 
 **User wants to use iTerm instead of Ghostty:**
 ```toml
-# ~/.shards/config.toml
+# ~/.kild/config.toml
 [terminal]
 preferred = "iterm"
 ```
 
 **Project-specific agent:**
 ```toml
-# ./.shards/config.toml (in project root)
+# ./.kild/config.toml (in project root)
 [agent]
 default = "kiro"  # This project uses kiro
 ```
@@ -380,30 +380,30 @@ Each agent has its own flag for skipping permission prompts. These should be set
 flags = "--dangerously-skip-permissions"
 ```
 
-Then just: `shards create feature-x` (flags auto-applied)
+Then just: `kild create feature-x` (flags auto-applied)
 
 **Override only when needed:**
 ```bash
 # User explicitly wants no flags this time
-shards create feature-x --flags ''
+kild create feature-x --flags ''
 ```
 
 ## Key Features
 
 - **Process Tracking** - Captures PID, process name, start time. Validates identity before killing.
-- **Port Allocation** - Unique port range per shard (default 10 ports from base 3000).
-- **Session Persistence** - File-based storage in `~/.shards/sessions/`
-- **Session Notes** - Document what each shard is for with `--note`
+- **Port Allocation** - Unique port range per kild (default 10 ports from base 3000).
+- **Session Persistence** - File-based storage in `~/.kild/sessions/`
+- **Session Notes** - Document what each kild is for with `--note`
 - **JSON Output** - Scriptable output with `--json` flag
 - **Quiet Mode** - Clean output with `-q` flag
 
 ## Best Practices
 
 - Use descriptive branch names like `feature-auth`, `bug-fix-123`, `issue-456`
-- Add notes to remember what each shard is for: `--note "Working on auth"`
-- Always destroy shards when done to clean up resources
-- Use `shards cleanup` after crashes or manual deletions
-- Set your preferred defaults in `~/.shards/config.toml` once
+- Add notes to remember what each kild is for: `--note "Working on auth"`
+- Always destroy kilds when done to clean up resources
+- Use `kild cleanup` after crashes or manual deletions
+- Set your preferred defaults in `~/.kild/config.toml` once
 
 ## Additional Resources
 
