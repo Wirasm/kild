@@ -1,13 +1,13 @@
-# Shards Configuration - All Options
+# KILD Configuration - All Options
 #
 # Config files are loaded in order (later overrides earlier):
 #   1. Hardcoded defaults
-#   2. User config:    ~/.shards/config.toml
-#   3. Project config: ./.shards/config.toml
+#   2. User config:    ~/.kild/config.toml
+#   3. Project config: ./.kild/config.toml
 #   4. CLI flags
 #
-# Copy this file to ~/.shards/config.toml for user-wide settings
-# or to .shards/config.toml in your project for project-specific settings.
+# Copy this file to ~/.kild/config.toml for user-wide settings
+# or to .kild/config.toml in your project for project-specific settings.
 
 # =============================================================================
 # AGENT CONFIGURATION
@@ -71,7 +71,7 @@ startup_command = "aider"
 # =============================================================================
 
 [health]
-# Minutes of inactivity before a shard is considered idle
+# Minutes of inactivity before a kild is considered idle
 # Default: 10
 idle_threshold_minutes = 10
 

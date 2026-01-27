@@ -1,4 +1,4 @@
-# Contributing to Shards
+# Contributing to KILD
 
 ## Code Formatting Standards
 
@@ -55,17 +55,17 @@ All log events follow the pattern: `{layer}.{domain}.{action}_{state}`
 
 | Layer | Crate | Description |
 |-------|-------|-------------|
-| `cli` | `crates/shards/` | User-facing CLI commands |
-| `core` | `crates/shards-core/` | Core library logic |
+| `cli` | `crates/kild/` | User-facing CLI commands |
+| `core` | `crates/kild-core/` | Core library logic |
 
 ### Examples
 
 ```rust
-// CLI layer (in crates/shards/)
+// CLI layer (in crates/kild/)
 info!(event = "cli.create_started", branch = branch);
 info!(event = "cli.list_completed", count = sessions.len());
 
-// Core layer (in crates/shards-core/)
+// Core layer (in crates/kild-core/)
 info!(event = "core.session.create_completed", session_id = id);
 error!(event = "core.terminal.pid_file_process_check_failed", error = %e);
 info!(event = "core.git.worktree.create_started", branch = branch);

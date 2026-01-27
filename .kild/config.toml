@@ -1,4 +1,4 @@
-# Shards project configuration
+# KILD project configuration
 
 [agent]
 default = "claude"

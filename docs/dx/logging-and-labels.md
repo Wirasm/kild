@@ -7,8 +7,8 @@ This project uses a unified naming convention across structured logs and GitHub 
 Both systems use: `{layer}.{domain}`
 
 **Layers:**
-- `core` - Library logic (`crates/shards-core/`)
-- `cli` - User-facing commands (`crates/shards/`)
+- `core` - Library logic (`crates/kild-core/`)
+- `cli` - User-facing commands (`crates/kild/`)
 
 **Domains:**
 - `session` - Session lifecycle
