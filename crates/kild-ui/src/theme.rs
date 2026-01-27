@@ -114,25 +114,15 @@ pub fn blade_bright() -> Rgba {
 // GLOW EFFECTS (colors with alpha for shadows/glows)
 // =============================================================================
 
-/// Create a color with alpha for glow effects
+/// Create a color with alpha for glow effects.
+///
+/// # Example
+/// ```ignore
+/// // For glow effects, use 0.15 alpha:
+/// let ice_glow = with_alpha(ice(), 0.15);
+/// ```
 pub fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
     Rgba { a: alpha, ..color }
-}
-
-pub fn ice_glow() -> Rgba {
-    with_alpha(ice(), 0.15)
-}
-pub fn aurora_glow() -> Rgba {
-    with_alpha(aurora(), 0.15)
-}
-pub fn copper_glow() -> Rgba {
-    with_alpha(copper(), 0.15)
-}
-pub fn ember_glow() -> Rgba {
-    with_alpha(ember(), 0.15)
-}
-pub fn kiri_glow() -> Rgba {
-    with_alpha(kiri(), 0.15)
 }
 
 // =============================================================================
@@ -175,5 +165,5 @@ pub const RADIUS_LG: f32 = 8.0;
 
 /// Semi-transparent overlay for modals (Void at 80% opacity)
 pub fn overlay() -> Rgba {
-    gpui::rgba(0x08090ACC) // Void color (#08090A) at ~80% opacity
+    gpui::rgba(0x08090ACC)
 }
