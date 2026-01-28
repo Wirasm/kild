@@ -237,14 +237,8 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                             )
                                             // Note column (truncated to 25 chars)
                                             .when_some(note, |row, note_text| {
-                                                let truncated = if note_text.chars().count() > 25 {
-                                                    format!(
-                                                        "{}...",
-                                                        note_text
-                                                            .chars()
-                                                            .take(25)
-                                                            .collect::<String>()
-                                                    )
+                                                let display_text = if note_text.len() > 25 {
+                                                    format!("{}...", &note_text[..25])
                                                 } else {
                                                     note_text
                                                 };
@@ -252,7 +246,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                                     div()
                                                         .text_color(theme::text_subtle())
                                                         .text_size(px(theme::TEXT_SM))
-                                                        .child(truncated),
+                                                        .child(display_text),
                                                 )
                                             })
                                             // Copy Path button [Copy] - Ghost variant

@@ -129,7 +129,8 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                     view.on_project_select_all(cx);
                                 }),
                             )
-                            .child(
+                            .child({
+                                let is_active = active_for_dropdown.is_none();
                                 div()
                                     .flex()
                                     .items_center()
@@ -137,24 +138,20 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                     .child(
                                         div()
                                             .w(px(16.0))
-                                            .text_color(if active_for_dropdown.is_none() {
+                                            .text_color(if is_active {
                                                 theme::ice()
                                             } else {
                                                 theme::border()
                                             })
-                                            .child(if active_for_dropdown.is_none() {
-                                                "●"
-                                            } else {
-                                                "○"
-                                            }),
+                                            .child(if is_active { "●" } else { "○" }),
                                     )
                                     .child(
                                         div()
                                             .text_color(theme::text_white())
                                             .font_weight(FontWeight::MEDIUM)
                                             .child("All Projects"),
-                                    ),
-                            ),
+                                    )
+                            }),
                     )
                     // Divider after "All Projects"
                     .child(

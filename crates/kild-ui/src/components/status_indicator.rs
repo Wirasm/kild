@@ -134,13 +134,8 @@ impl RenderOnce for StatusIndicator {
             }
             StatusMode::Badge => {
                 // Pill shape: background glow + dot + text
-                // For badges without glow, use transparent background
-                let bg_color = glow.unwrap_or(Rgba {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.0,
-                });
+                // For badges without glow, use transparent background (alpha = 0.0)
+                let bg_color = glow.unwrap_or_default();
                 div()
                     .flex()
                     .items_center()
