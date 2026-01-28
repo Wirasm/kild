@@ -518,43 +518,37 @@ impl MainView {
         );
         self.state.clear_focus_error();
 
-        let result = match (terminal_type, window_id) {
-            (Some(tt), Some(wid)) => kild_core::terminal_ops::focus_terminal(tt, wid)
-                .map_err(|e| format!("Failed to focus terminal: {}", e)),
-            (None, None) => {
-                tracing::debug!(
-                    event = "ui.focus_terminal_no_window_info",
-                    branch = branch,
-                    message = "Legacy session - no terminal info recorded"
-                );
-                Err("Terminal window info not available. This session was created before window tracking was added.".to_string())
-            }
-            _ => {
-                tracing::warn!(
-                    event = "ui.focus_terminal_inconsistent_state",
-                    branch = branch,
-                    has_terminal_type = terminal_type.is_some(),
-                    has_window_id = window_id.is_some(),
-                    message = "Inconsistent terminal state - one field present, one missing"
-                );
-                Err(
-                    "Terminal window info is incomplete. Try stopping and reopening the kild."
-                        .to_string(),
-                )
-            }
+        // Validate we have both terminal type and window ID
+        let Some(tt) = terminal_type else {
+            self.record_focus_error(branch, "Terminal window info not available. This session was created before window tracking was added.", cx);
+            return;
         };
 
-        if let Err(e) = result {
-            tracing::warn!(
-                event = "ui.focus_terminal_click.error_displayed",
-                branch = branch,
-                error = %e
-            );
-            self.state.focus_error = Some(crate::state::OperationError {
-                branch: branch.to_string(),
-                message: e,
-            });
+        let Some(wid) = window_id else {
+            self.record_focus_error(branch, "Terminal window info not available. This session was created before window tracking was added.", cx);
+            return;
+        };
+
+        // Both fields present - attempt to focus terminal
+        if let Err(e) = kild_core::terminal_ops::focus_terminal(tt, wid) {
+            let message = format!("Failed to focus terminal: {}", e);
+            self.record_focus_error(branch, &message, cx);
+        } else {
+            cx.notify();
         }
+    }
+
+    /// Record a focus terminal error and notify the UI.
+    fn record_focus_error(&mut self, branch: &str, message: &str, cx: &mut Context<Self>) {
+        tracing::warn!(
+            event = "ui.focus_terminal_click.error_displayed",
+            branch = branch,
+            error = message
+        );
+        self.state.focus_error = Some(crate::state::OperationError {
+            branch: branch.to_string(),
+            message: message.to_string(),
+        });
         cx.notify();
     }
 
@@ -729,12 +723,10 @@ impl MainView {
                 }
                 "tab" => {
                     // Cycle focus between fields
-                    let current_field = &self.state.add_project_form.focused_field;
                     self.state.add_project_form.focused_field =
-                        if matches!(current_field, AddProjectDialogField::Path) {
-                            AddProjectDialogField::Name
-                        } else {
-                            AddProjectDialogField::Path
+                        match self.state.add_project_form.focused_field {
+                            AddProjectDialogField::Path => AddProjectDialogField::Name,
+                            AddProjectDialogField::Name => AddProjectDialogField::Path,
                         };
                     cx.notify();
                 }

@@ -65,27 +65,20 @@ impl SessionWatcher {
     /// Returns `true` if any relevant events (create/modify/remove of .json files)
     /// were detected since the last call.
     pub fn has_pending_events(&self) -> bool {
+        let mut found_relevant_event = false;
+
         loop {
             match self.receiver.try_recv() {
                 Ok(Ok(event)) => {
-                    if Self::is_relevant_event(&event) {
+                    if Self::is_relevant_event(&event) && !found_relevant_event {
                         tracing::debug!(
                             event = "ui.watcher.event_detected",
                             kind = ?event.kind,
                             paths = ?event.paths
                         );
-                        // Drain remaining events and return true
-                        while let Ok(result) = self.receiver.try_recv() {
-                            if let Err(e) = result {
-                                tracing::warn!(
-                                    event = "ui.watcher.event_error_while_draining",
-                                    error = %e
-                                );
-                            }
-                        }
-                        return true;
+                        found_relevant_event = true;
                     }
-                    // Not relevant, continue checking
+                    // Continue draining to prevent queue buildup
                 }
                 Ok(Err(e)) => {
                     tracing::warn!(
@@ -95,12 +88,11 @@ impl SessionWatcher {
                     // Continue checking - errors are non-fatal
                 }
                 Err(TryRecvError::Empty) => {
-                    // No more events
-                    return false;
+                    return found_relevant_event;
                 }
                 Err(TryRecvError::Disconnected) => {
                     tracing::warn!(event = "ui.watcher.channel_disconnected");
-                    return false;
+                    return found_relevant_event;
                 }
             }
         }
