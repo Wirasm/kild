@@ -574,4 +574,28 @@ mod tests {
         let stale_sessions = stale_result.unwrap();
         assert_eq!(stale_sessions.len(), 0);
     }
+
+    #[test]
+    fn test_detect_stale_sessions_missing_id_field() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
+
+        // Session with stale worktree but missing id field - should be skipped
+        let session_content = serde_json::json!({
+            "worktree_path": "/non/existent/path",
+            "branch": "test-branch",
+            "agent": "test-agent"
+        });
+
+        fs::write(
+            test_path.join("no-id-session.json"),
+            session_content.to_string(),
+        )
+        .unwrap();
+
+        let result = detect_stale_sessions(test_path);
+        assert!(result.is_ok());
+        // Sessions without id field are skipped even if worktree is stale
+        assert_eq!(result.unwrap().len(), 0);
+    }
 }
