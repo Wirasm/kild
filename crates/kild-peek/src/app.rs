@@ -10,10 +10,10 @@ pub fn build_cli() -> Command {
              and verify native UI.",
         )
         .arg(
-            Arg::new("quiet")
-                .short('q')
-                .long("quiet")
-                .help("Suppress log output, show only essential information")
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Enable verbose logging output")
                 .action(ArgAction::SetTrue)
                 .global(true),
         )
@@ -386,13 +386,13 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_quiet_flag() {
+    fn test_cli_verbose_flag() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec!["kild-peek", "-q", "list", "windows"]);
+        let matches = app.try_get_matches_from(vec!["kild-peek", "-v", "list", "windows"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
     }
 
     #[test]

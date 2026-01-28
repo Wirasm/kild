@@ -51,9 +51,9 @@ cargo install --path .
 ### Global flags
 
 ```bash
-# Suppress JSON log output (show only user-facing output)
-kild -q <command>
-kild --quiet <command>
+# Enable verbose logging output (shows JSON logs)
+kild -v <command>
+kild --verbose <command>
 ```
 
 ### Create a new kild

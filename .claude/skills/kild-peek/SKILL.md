@@ -29,12 +29,12 @@ kild-peek captures screenshots, lists windows, compares images, and validates UI
 
 **If installed globally:**
 ```bash
-kild-peek -q list windows
+kild-peek list windows
 ```
 
 **During development (via cargo):**
 ```bash
-cargo run -p kild-peek -- -q list windows
+cargo run -p kild-peek -- list windows
 ```
 
 The examples below use `kild-peek` directly. Prefix with `cargo run -p kild-peek --` if not installed.
@@ -44,7 +44,7 @@ The examples below use `kild-peek` directly. Prefix with `cargo run -p kild-peek
 **Always list windows before capturing** to identify the correct target:
 
 ```bash
-kild-peek -q list windows
+kild-peek list windows
 ```
 
 This shows all visible windows with:
@@ -80,7 +80,7 @@ SCRATCHPAD="/private/tmp/claude/-Users-rasmus--kild-worktrees-kild-peek-cli/scra
 mkdir -p "$SCRATCHPAD"
 
 # Save screenshots there
-kild-peek -q screenshot --window "KILD" -o "$SCRATCHPAD/kild-ui.png"
+kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/kild-ui.png"
 ```
 
 This keeps screenshots organized and easy to clean up.
@@ -89,7 +89,7 @@ This keeps screenshots organized and easy to clean up.
 
 ### List Windows
 ```bash
-kild-peek -q list windows [--json]
+kild-peek list windows [--json]
 ```
 
 Shows all visible windows. Always run this first to identify targets.
@@ -97,25 +97,25 @@ Shows all visible windows. Always run this first to identify targets.
 **Examples:**
 ```bash
 # Human-readable table
-kild-peek -q list windows
+kild-peek list windows
 
 # JSON for parsing
-kild-peek -q list windows --json
+kild-peek list windows --json
 
 # Find specific window
-kild-peek -q list windows --json | grep -i "terminal"
+kild-peek list windows --json | grep -i "terminal"
 ```
 
 ### List Monitors
 ```bash
-kild-peek -q list monitors [--json]
+kild-peek list monitors [--json]
 ```
 
 Shows all connected displays.
 
 ### Capture Screenshot
 ```bash
-kild-peek -q screenshot [--window <title>] [--window-id <id>] [--monitor <index>] -o <path>
+kild-peek screenshot [--window <title>] [--window-id <id>] [--monitor <index>] -o <path>
 ```
 
 Captures a screenshot of a window or monitor.
@@ -132,21 +132,21 @@ Captures a screenshot of a window or monitor.
 **Examples:**
 ```bash
 # Capture by window title
-kild-peek -q screenshot --window "KILD" -o "$SCRATCHPAD/kild.png"
+kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/kild.png"
 
 # Capture by window ID (more precise)
-kild-peek -q screenshot --window-id 8002 -o "$SCRATCHPAD/window.png"
+kild-peek screenshot --window-id 8002 -o "$SCRATCHPAD/window.png"
 
 # Capture primary monitor
-kild-peek -q screenshot -o "$SCRATCHPAD/screen.png"
+kild-peek screenshot -o "$SCRATCHPAD/screen.png"
 
 # Capture as JPEG
-kild-peek -q screenshot --window "Terminal" -o "$SCRATCHPAD/term.jpg" --format jpg --quality 90
+kild-peek screenshot --window "Terminal" -o "$SCRATCHPAD/term.jpg" --format jpg --quality 90
 ```
 
 ### Compare Images (Diff)
 ```bash
-kild-peek -q diff <image1> <image2> [--threshold <0-100>] [--json]
+kild-peek diff <image1> <image2> [--threshold <0-100>] [--json]
 ```
 
 Compares two images using SSIM (Structural Similarity Index).
@@ -162,18 +162,18 @@ Compares two images using SSIM (Structural Similarity Index).
 **Examples:**
 ```bash
 # Compare with default 95% threshold
-kild-peek -q diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png"
+kild-peek diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png"
 
 # Compare with lower threshold (more lenient)
-kild-peek -q diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --threshold 80
+kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --threshold 80
 
 # JSON output for scripting
-kild-peek -q diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --json
+kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --json
 ```
 
 ### Assert UI State
 ```bash
-kild-peek -q assert --window <title> [--exists|--visible|--similar <baseline>] [--json]
+kild-peek assert --window <title> [--exists|--visible|--similar <baseline>] [--json]
 ```
 
 Runs assertions on UI state. Returns exit code 0 for pass, 1 for fail.
@@ -190,16 +190,16 @@ Runs assertions on UI state. Returns exit code 0 for pass, 1 for fail.
 **Examples:**
 ```bash
 # Assert window exists
-kild-peek -q assert --window "KILD" --exists
+kild-peek assert --window "KILD" --exists
 
 # Assert window is visible
-kild-peek -q assert --window "Terminal" --visible
+kild-peek assert --window "Terminal" --visible
 
 # Assert UI matches baseline
-kild-peek -q assert --window "KILD" --similar "$SCRATCHPAD/baseline.png" --threshold 90
+kild-peek assert --window "KILD" --similar "$SCRATCHPAD/baseline.png" --threshold 90
 
 # JSON output
-kild-peek -q assert --window "KILD" --exists --json
+kild-peek assert --window "KILD" --exists --json
 ```
 
 ## Workflow Examples
@@ -208,44 +208,44 @@ kild-peek -q assert --window "KILD" --exists --json
 
 ```bash
 # 1. List windows to find target
-kild-peek -q list windows
+kild-peek list windows
 
 # 2. Capture before state
-kild-peek -q screenshot --window "KILD" -o "$SCRATCHPAD/before.png"
+kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/before.png"
 
 # 3. Make changes...
 
 # 4. Capture after state
-kild-peek -q screenshot --window "KILD" -o "$SCRATCHPAD/after.png"
+kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/after.png"
 
 # 5. Compare
-kild-peek -q diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png" --threshold 80
+kild-peek diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png" --threshold 80
 ```
 
 ### Validate UI State in Tests
 
 ```bash
 # Assert the KILD UI is running and visible
-kild-peek -q assert --window "KILD" --visible
+kild-peek assert --window "KILD" --visible
 
 # Assert it matches expected appearance
-kild-peek -q assert --window "KILD" --similar "./baselines/kild-empty-state.png" --threshold 90
+kild-peek assert --window "KILD" --similar "./baselines/kild-empty-state.png" --threshold 90
 ```
 
 ### Capture Multiple Windows
 
 ```bash
 # List all windows
-kild-peek -q list windows --json > "$SCRATCHPAD/windows.json"
+kild-peek list windows --json > "$SCRATCHPAD/windows.json"
 
 # Capture specific ones by ID
-kild-peek -q screenshot --window-id 8002 -o "$SCRATCHPAD/kild.png"
-kild-peek -q screenshot --window-id 8429 -o "$SCRATCHPAD/ghostty.png"
+kild-peek screenshot --window-id 8002 -o "$SCRATCHPAD/kild.png"
+kild-peek screenshot --window-id 8429 -o "$SCRATCHPAD/ghostty.png"
 ```
 
 ## Tips
 
-1. **Always use `-q` (quiet mode)** to suppress JSON logs and get clean output
+1. **Output is clean by default** - JSON logs are suppressed unless you use `-v/--verbose`
 2. **List windows first** to identify the correct target before capturing
 3. **Use `--window-id`** when multiple windows have similar titles
 4. **Save to scratchpad** for easy cleanup of temporary screenshots
@@ -254,6 +254,6 @@ kild-peek -q screenshot --window-id 8429 -o "$SCRATCHPAD/ghostty.png"
 
 ## Global Flags
 
-- `-q, --quiet` - Suppress log output, show only essential information
+- `-v, --verbose` - Enable verbose logging output (shows JSON logs)
 - `-h, --help` - Show help for any command
 - `-V, --version` - Show version

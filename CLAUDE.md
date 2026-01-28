@@ -65,7 +65,7 @@ cargo run -p kild -- create my-branch --agent claude --note "Working on auth fea
 cargo run -p kild -- list
 cargo run -p kild -- list --json                 # JSON output for scripting
 cargo run -p kild -- status my-branch --json     # JSON output for single kild
-cargo run -p kild -- -q list                     # Quiet mode (suppress JSON logs)
+cargo run -p kild -- -v list                     # Verbose mode (enable JSON logs)
 cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (additive)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
@@ -92,7 +92,7 @@ cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
 cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
 cargo run -p kild-peek -- assert --window "KILD" --exists
 cargo run -p kild-peek -- assert --window "KILD" --visible
-cargo run -p kild-peek -- -q list windows        # Quiet mode (no logs)
+cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 ```
 
 ## Architecture
@@ -146,11 +146,11 @@ cargo run -p kild-peek -- -q list windows        # Quiet mode (no logs)
 
 Logging is initialized via `kild_core::init_logging(quiet)` in the CLI main.rs. Output is JSON format via tracing-subscriber.
 
-When `quiet` is true (via `-q` flag), only error-level events are emitted. When false, info-level and above events are emitted.
+By default, only error-level events are emitted (clean output). When `-v/--verbose` flag is used, info-level and above events are emitted.
 
 Control log level with `RUST_LOG` env var: `RUST_LOG=debug cargo run -- list`
 
-Suppress logs entirely with the quiet flag: `cargo run -- -q list`
+Enable verbose logs with the verbose flag: `cargo run -- -v list`
 
 ### Event Naming Convention
 

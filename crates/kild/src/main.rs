@@ -8,9 +8,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = app::build_cli();
     let matches = app.get_matches();
 
-    // Extract quiet flag before initializing logging
-    let quiet = matches.get_flag("quiet");
-    init_logging(quiet);
+    // Extract verbose flag before initializing logging
+    // Default (no flag) = quiet mode, -v/--verbose = verbose mode
+    let verbose = matches.get_flag("verbose");
+    init_logging(!verbose);
 
     commands::run_command(&matches)?;
 

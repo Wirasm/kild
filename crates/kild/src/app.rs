@@ -6,10 +6,10 @@ pub fn build_cli() -> Command {
         .about("Manage parallel AI development agents in isolated Git worktrees")
         .long_about("KILD creates isolated git worktrees and launches AI coding agents in dedicated terminal windows. Each 'kild' is a disposable work context where an AI agent can operate autonomously without disrupting your main working directory.")
         .arg(
-            Arg::new("quiet")
-                .short('q')
-                .long("quiet")
-                .help("Suppress log output, show only essential information")
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Enable verbose logging output")
                 .action(ArgAction::SetTrue)
                 .global(true),
         )
@@ -501,34 +501,34 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_quiet_flag_short() {
+    fn test_cli_verbose_flag_short() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec!["kild", "-q", "list"]);
+        let matches = app.try_get_matches_from(vec!["kild", "-v", "list"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
     }
 
     #[test]
-    fn test_cli_quiet_flag_long() {
+    fn test_cli_verbose_flag_long() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec!["kild", "--quiet", "list"]);
+        let matches = app.try_get_matches_from(vec!["kild", "--verbose", "list"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
     }
 
     #[test]
-    fn test_cli_quiet_flag_with_subcommand_args() {
+    fn test_cli_verbose_flag_with_subcommand_args() {
         let app = build_cli();
-        // Quiet flag should work regardless of position (before subcommand)
-        let matches = app.try_get_matches_from(vec!["kild", "-q", "create", "test-branch"]);
+        // Verbose flag should work regardless of position (before subcommand)
+        let matches = app.try_get_matches_from(vec!["kild", "-v", "create", "test-branch"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
 
         let create_matches = matches.subcommand_matches("create").unwrap();
         assert_eq!(
@@ -538,45 +538,45 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_quiet_flag_default_false() {
+    fn test_cli_verbose_flag_default_false() {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "list"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(!matches.get_flag("quiet"));
+        assert!(!matches.get_flag("verbose"));
     }
 
     #[test]
-    fn test_cli_quiet_flag_after_subcommand() {
+    fn test_cli_verbose_flag_after_subcommand() {
         let app = build_cli();
         // Global flag should work after subcommand too
-        let matches = app.try_get_matches_from(vec!["kild", "list", "-q"]);
+        let matches = app.try_get_matches_from(vec!["kild", "list", "-v"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
     }
 
     #[test]
-    fn test_cli_quiet_flag_after_subcommand_long() {
+    fn test_cli_verbose_flag_after_subcommand_long() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec!["kild", "list", "--quiet"]);
+        let matches = app.try_get_matches_from(vec!["kild", "list", "--verbose"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
     }
 
     #[test]
-    fn test_cli_quiet_flag_after_subcommand_args() {
+    fn test_cli_verbose_flag_after_subcommand_args() {
         let app = build_cli();
-        // Test: kild create test-branch --quiet
-        let matches = app.try_get_matches_from(vec!["kild", "create", "test-branch", "--quiet"]);
+        // Test: kild create test-branch --verbose
+        let matches = app.try_get_matches_from(vec!["kild", "create", "test-branch", "--verbose"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
 
         let create_matches = matches.subcommand_matches("create").unwrap();
         assert_eq!(
@@ -586,15 +586,15 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_quiet_flag_with_destroy_force() {
+    fn test_cli_verbose_flag_with_destroy_force() {
         let app = build_cli();
-        // Test quiet flag combined with other flags
+        // Test verbose flag combined with other flags
         let matches =
-            app.try_get_matches_from(vec!["kild", "-q", "destroy", "test-branch", "--force"]);
+            app.try_get_matches_from(vec!["kild", "-v", "destroy", "test-branch", "--force"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
-        assert!(matches.get_flag("quiet"));
+        assert!(matches.get_flag("verbose"));
 
         let destroy_matches = matches.subcommand_matches("destroy").unwrap();
         assert!(destroy_matches.get_flag("force"));

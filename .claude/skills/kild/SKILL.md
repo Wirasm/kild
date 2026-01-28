@@ -9,7 +9,7 @@ description: |
   - Status: "kild status", "check kild", "kild health", "how are my kilds"
   - Navigation: "cd to kild", "go to kild", "path to kild", "open in editor", "edit kild", "code kild"
   - Lifecycle: "stop kild", "open kild", "destroy kild", "clean up kilds"
-  - Output: "list as json", "json output", "quiet mode"
+  - Output: "list as json", "json output", "verbose mode"
 
   KILD creates isolated Git worktrees where AI agents work independently without
   affecting your main branch. Each kild gets its own terminal window, port range,
@@ -276,26 +276,26 @@ Cleans up resources that got out of sync (crashes, manual deletions, etc.).
 
 ## Global Flags
 
-### Quiet Mode
+### Verbose Mode
 ```bash
-kild -q <command>
-kild --quiet <command>
+kild -v <command>
+kild --verbose <command>
 ```
 
-Suppresses JSON log output for clean, scriptable output.
+Enables JSON log output for debugging. By default, logs are suppressed for clean output.
 
 **Examples**
 ```bash
-# Normal (shows JSON logs)
+# Normal (clean output, no JSON logs)
 kild list
-# Result: JSON logs + table
-
-# Quiet (clean output)
-kild -q list
 # Result: Just the table, no logs
 
-# Useful for scripting
-kild -q list --json | jq '.[] | .branch'
+# Verbose (shows JSON logs)
+kild -v list
+# Result: JSON logs + table
+
+# Scripting (logs suppressed by default)
+kild list --json | jq '.[] | .branch'
 # Result: Clean JSON without log noise
 ```
 
@@ -395,7 +395,7 @@ kild create feature-x --flags ''
 - **Session Persistence** - File-based storage in `~/.kild/sessions/`
 - **Session Notes** - Document what each kild is for with `--note`
 - **JSON Output** - Scriptable output with `--json` flag
-- **Quiet Mode** - Clean output with `-q` flag
+- **Verbose Mode** - Debug output with `-v` flag
 
 ## Best Practices
 
