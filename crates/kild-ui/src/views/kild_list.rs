@@ -39,11 +39,19 @@ fn format_relative_time(timestamp: &str) -> String {
     }
 }
 
+/// Returns true if the welcome screen should be shown.
+///
+/// Welcome screen appears only when there are no projects AND no kilds.
+/// This ensures CLI-created kilds are visible even without UI projects.
+fn should_show_welcome(state: &AppState) -> bool {
+    state.projects.is_empty() && state.displays.is_empty()
+}
+
 /// Render the kild list based on current state.
 ///
 /// Handles states:
 /// - Error: Display error message
-/// - No projects: Display welcome message with Add Project button
+/// - No projects AND no kilds: Display welcome message with Add Project button
 /// - Empty: Display "No active kilds" message for the current project
 /// - List: Display uniform_list of kilds with Open/Stop and Destroy buttons
 pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
@@ -67,7 +75,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                     .text_size(px(theme::TEXT_SM))
                     .child(error_msg.clone()),
             )
-    } else if state.projects.is_empty() && state.displays.is_empty() {
+    } else if should_show_welcome(state) {
         // No projects AND no kilds - show welcome message
         div()
             .flex()
@@ -442,5 +450,101 @@ mod tests {
         use chrono::Duration;
         let three_days_ago = (Utc::now() - Duration::days(3)).to_rfc3339();
         assert_eq!(format_relative_time(&three_days_ago), "3d ago");
+    }
+
+    #[test]
+    fn test_should_show_welcome_when_no_projects_and_no_displays() {
+        use crate::state::{AddProjectFormState, AppState, CreateFormState};
+
+        let state = AppState {
+            displays: Vec::new(),
+            load_error: None,
+            show_create_dialog: false,
+            create_form: CreateFormState::default(),
+            create_error: None,
+            show_confirm_dialog: false,
+            confirm_target_branch: None,
+            confirm_error: None,
+            open_error: None,
+            stop_error: None,
+            bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
+            selected_kild_id: None,
+            last_refresh: std::time::Instant::now(),
+            projects: Vec::new(),
+            active_project: None,
+            show_add_project_dialog: false,
+            add_project_form: AddProjectFormState::default(),
+            add_project_error: None,
+        };
+
+        assert!(state.projects.is_empty());
+        assert!(state.displays.is_empty());
+        assert!(should_show_welcome(&state));
+    }
+
+    #[test]
+    fn test_should_not_show_welcome_when_displays_exist_without_projects() {
+        use crate::state::{
+            AddProjectFormState, AppState, CreateFormState, GitStatus, KildDisplay, ProcessStatus,
+        };
+        use kild_core::sessions::types::{Session, SessionStatus};
+        use std::path::PathBuf;
+
+        // Create a kild display (simulating CLI-created kild)
+        let session = Session {
+            id: "test-id".to_string(),
+            branch: "test-branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            project_id: "test-project".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: String::new(),
+            last_activity: None,
+            note: None,
+        };
+
+        let state = AppState {
+            displays: vec![KildDisplay {
+                session,
+                status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+                diff_stats: None,
+            }],
+            load_error: None,
+            show_create_dialog: false,
+            create_form: CreateFormState::default(),
+            create_error: None,
+            show_confirm_dialog: false,
+            confirm_target_branch: None,
+            confirm_error: None,
+            open_error: None,
+            stop_error: None,
+            bulk_errors: Vec::new(),
+            editor_error: None,
+            focus_error: None,
+            selected_kild_id: None,
+            last_refresh: std::time::Instant::now(),
+            projects: Vec::new(),
+            active_project: None,
+            show_add_project_dialog: false,
+            add_project_form: AddProjectFormState::default(),
+            add_project_error: None,
+        };
+
+        assert!(state.projects.is_empty());
+        assert!(!state.displays.is_empty());
+        // This is the bug fix: welcome should NOT show when kilds exist
+        assert!(!should_show_welcome(&state));
     }
 }
