@@ -381,9 +381,8 @@ mod tests {
     fn test_detect_stale_sessions_empty_dir() {
         let temp_dir = TempDir::new().unwrap();
 
-        let result = detect_stale_sessions(temp_dir.path());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 0);
+        let stale_sessions = detect_stale_sessions(temp_dir.path()).unwrap();
+        assert_eq!(stale_sessions.len(), 0);
     }
 
     #[test]
@@ -391,9 +390,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let nonexistent_dir = temp_dir.path().join("nonexistent");
 
-        let result = detect_stale_sessions(&nonexistent_dir);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 0);
+        let stale_sessions = detect_stale_sessions(&nonexistent_dir).unwrap();
+        assert_eq!(stale_sessions.len(), 0);
     }
 
     #[test]
@@ -410,12 +408,11 @@ mod tests {
         });
 
         let session_file = test_path.join("test-session.json");
-        fs::write(&session_file, session_content.to_string()).unwrap();
+        fs::write(session_file, session_content.to_string()).unwrap();
 
-        let result = detect_stale_sessions(test_path);
-        assert!(result.is_ok());
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         // Should not detect as stale since worktree path exists
-        assert_eq!(result.unwrap().len(), 0);
+        assert_eq!(stale_sessions.len(), 0);
     }
 
     #[test]
@@ -433,11 +430,9 @@ mod tests {
         });
 
         let session_file = test_path.join("stale-session.json");
-        fs::write(&session_file, session_content.to_string()).unwrap();
+        fs::write(session_file, session_content.to_string()).unwrap();
 
-        let result = detect_stale_sessions(test_path);
-        assert!(result.is_ok());
-        let stale_sessions = result.unwrap();
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "stale-session");
     }
@@ -449,11 +444,9 @@ mod tests {
 
         // Create an invalid JSON file
         let session_file = test_path.join("invalid-session.json");
-        fs::write(&session_file, "invalid json content").unwrap();
+        fs::write(session_file, "invalid json content").unwrap();
 
-        let result = detect_stale_sessions(test_path);
-        assert!(result.is_ok());
-        let stale_sessions = result.unwrap();
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "invalid-session");
     }
@@ -492,9 +485,7 @@ mod tests {
         // Create a non-JSON file (should be ignored)
         fs::write(test_path.join("not-a-session.txt"), "not json").unwrap();
 
-        let result = detect_stale_sessions(test_path);
-        assert!(result.is_ok());
-        let stale_sessions = result.unwrap();
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "stale-session");
     }
@@ -538,16 +529,14 @@ mod tests {
         let test_path = temp_dir.path();
 
         // Test that all detection functions work together
-        let stale_result = detect_stale_sessions(test_path);
-        assert!(stale_result.is_ok());
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
+        assert_eq!(stale_sessions.len(), 0);
 
         // Test with a malformed session file
         let malformed_content = "{ invalid json }";
         fs::write(test_path.join("malformed.json"), malformed_content).unwrap();
 
-        let stale_result = detect_stale_sessions(test_path);
-        assert!(stale_result.is_ok());
-        let stale_sessions = stale_result.unwrap();
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "malformed");
 
@@ -559,9 +548,7 @@ mod tests {
         });
         fs::write(test_path.join("valid.json"), valid_session.to_string()).unwrap();
 
-        let stale_result = detect_stale_sessions(test_path);
-        assert!(stale_result.is_ok());
-        let stale_sessions = stale_result.unwrap();
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         assert_eq!(stale_sessions.len(), 2); // malformed + valid with missing worktree
     }
 
@@ -569,9 +556,7 @@ mod tests {
     fn test_cleanup_workflow_empty_directory() {
         let temp_dir = TempDir::new().unwrap();
 
-        let stale_result = detect_stale_sessions(temp_dir.path());
-        assert!(stale_result.is_ok());
-        let stale_sessions = stale_result.unwrap();
+        let stale_sessions = detect_stale_sessions(temp_dir.path()).unwrap();
         assert_eq!(stale_sessions.len(), 0);
     }
 
@@ -593,9 +578,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = detect_stale_sessions(test_path);
-        assert!(result.is_ok());
+        let stale_sessions = detect_stale_sessions(test_path).unwrap();
         // Sessions without id field are skipped even if worktree is stale
-        assert_eq!(result.unwrap().len(), 0);
+        assert_eq!(stale_sessions.len(), 0);
     }
 }
