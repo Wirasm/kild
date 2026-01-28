@@ -37,9 +37,15 @@ impl ProjectItemData {
         let first_char = name
             .chars()
             .next()
-            .unwrap_or('?')
-            .to_uppercase()
-            .to_string();
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_else(|| {
+                tracing::debug!(
+                    event = "ui.sidebar.empty_project_name",
+                    project_path = %path.display(),
+                    "Project has empty name - showing '?' icon"
+                );
+                "?".to_string()
+            });
 
         Self {
             idx,
