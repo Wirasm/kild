@@ -372,26 +372,30 @@ impl AppState {
         // Check if session count changed (external create/destroy).
         // This is a best-effort check - race conditions are possible (e.g., session
         // added and removed in the same cycle) but will be caught on the next refresh.
-        let disk_count_result = count_session_files();
+        let disk_count = count_session_files();
 
-        if let Some(disk_count) = disk_count_result {
-            if disk_count != self.displays.len() {
+        match disk_count {
+            Some(count) if count != self.displays.len() => {
                 tracing::info!(
                     event = "ui.auto_refresh.session_count_mismatch",
-                    disk_count = disk_count,
+                    disk_count = count,
                     memory_count = self.displays.len(),
                     action = "triggering full refresh"
                 );
                 self.refresh_sessions();
                 return;
             }
-        } else {
-            // Cannot determine count - skip mismatch check and just update statuses.
-            // This is a non-critical degradation (directory read failure).
-            tracing::debug!(
-                event = "ui.auto_refresh.count_check_skipped",
-                reason = "cannot read sessions directory"
-            );
+            None => {
+                // Cannot determine count - skip mismatch check and just update statuses.
+                // This is a non-critical degradation (directory read failure).
+                tracing::debug!(
+                    event = "ui.auto_refresh.count_check_skipped",
+                    reason = "cannot read sessions directory"
+                );
+            }
+            Some(_) => {
+                // Count matches - continue to status update
+            }
         }
 
         // No count change (or count unavailable) - just update process statuses
@@ -555,10 +559,11 @@ fn count_session_files_in_dir(sessions_dir: &std::path::Path) -> Option<usize> {
 
     match std::fs::read_dir(sessions_dir) {
         Ok(entries) => {
-            let count = entries
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
-                .count();
+            let is_json_file = |entry: &std::fs::DirEntry| {
+                entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+            };
+
+            let count = entries.filter_map(|e| e.ok()).filter(is_json_file).count();
             Some(count)
         }
         Err(e) => {
