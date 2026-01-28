@@ -17,6 +17,7 @@ KILD eliminates context switching between scattered terminals when working with 
 - **Session Tracking**: Persistent registry tracks all active kilds
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Agent-Friendly**: Designed for programmatic use by AI assistants
+- **Visual Verification**: Companion `kild-peek` tool for capturing screenshots and inspecting native UI (see `.claude/skills/kild-peek/SKILL.md`)
 
 ## GUI (Experimental)
 

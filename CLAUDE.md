@@ -83,6 +83,16 @@ cargo run -p kild -- destroy my-branch           # Destroy kild
 cargo run -p kild -- destroy my-branch --force   # Force destroy (bypass git checks)
 cargo run -p kild -- destroy --all               # Destroy all kilds (with confirmation)
 cargo run -p kild -- destroy --all --force       # Force destroy all (skip confirmation)
+
+# kild-peek - Native app inspection
+cargo run -p kild-peek -- list windows           # List all visible windows
+cargo run -p kild-peek -- list monitors          # List connected monitors
+cargo run -p kild-peek -- screenshot --window "Terminal" -o /tmp/term.png
+cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
+cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
+cargo run -p kild-peek -- assert --window "KILD" --exists
+cargo run -p kild-peek -- assert --window "KILD" --visible
+cargo run -p kild-peek -- -q list windows        # Quiet mode (no logs)
 ```
 
 ## Architecture
@@ -91,6 +101,8 @@ cargo run -p kild -- destroy --all --force       # Force destroy all (skip confi
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
+- `crates/kild-peek-core` - Core library for native app inspection (window listing, screenshots, image comparison, assertions)
+- `crates/kild-peek` - CLI for visual verification of native macOS applications
 
 **Key modules in kild-core:**
 - `sessions/` - Session lifecycle (create, open, stop, destroy, list)
@@ -111,6 +123,14 @@ cargo run -p kild -- destroy --all --force       # Force destroy all (skip confi
 - `state.rs` - Application state with project filtering and kild counts
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
 - `views/` - GPUI components (main view with 3-column layout: sidebar, kild list, detail panel)
+
+**Key modules in kild-peek-core:**
+- `window/` - Window and monitor enumeration via macOS APIs
+- `screenshot/` - Screenshot capture with multiple targets (window, monitor, base64 output)
+- `diff/` - Image comparison using SSIM algorithm
+- `assert/` - UI state assertions (window exists, visible, image similarity)
+- `logging/` - Tracing initialization matching kild-core patterns
+- `events/` - App lifecycle event helpers
 
 **Module pattern:** Each domain follows `errors.rs`, `types.rs`, `operations.rs`, `handler.rs` structure.
 
@@ -141,8 +161,10 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 | `cli` | `crates/kild/` | User-facing CLI commands |
 | `core` | `crates/kild-core/` | Core library logic |
 | `ui` | `crates/kild-ui/` | GPUI native GUI |
+| `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
+| `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`
+**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `window`, `screenshot`, `diff`, `assert`
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
@@ -198,15 +220,19 @@ events::log_app_error(&error);       // core.app.error_occurred
 
 ```bash
 # By layer
-grep 'event":"core\.'   # Core library events
-grep 'event":"cli\.'    # CLI events
-grep 'event":"ui\.'     # GUI events
+grep 'event":"core\.'      # Core library events
+grep 'event":"cli\.'       # CLI events
+grep 'event":"ui\.'        # GUI events
+grep 'event":"peek\.core\.' # kild-peek core events
+grep 'event":"peek\.cli\.'  # kild-peek CLI events
 
 # By domain
 grep 'core\.session\.'  # Session events
 grep 'core\.terminal\.' # Terminal events
 grep 'core\.git\.'      # Git events
 grep 'ui\.projects\.'   # Project management events
+grep 'peek\.core\.window\.'     # Window enumeration events
+grep 'peek\.core\.screenshot\.' # Screenshot capture events
 
 # By outcome
 grep '_failed"'         # All failures

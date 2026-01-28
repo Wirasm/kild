@@ -30,8 +30,15 @@ uuid = { version = "1", features = ["v4"] }
 # CLI-only dependencies
 clap = { version = "4.0", features = ["derive"] }
 
+# Screenshot and image processing dependencies
+xcap = "0.8"
+image = "0.25"
+image-compare = "0.5"
+base64 = "0.22"
+
 # Internal workspace dependencies
 kild-core = { path = "crates/kild-core" }
+kild-peek-core = { path = "crates/kild-peek-core" }
 
 # UI dependencies
 gpui = "0.2"

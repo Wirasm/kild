@@ -1,0 +1,17 @@
+[package]
+name = "kild-peek-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for kild-peek - native application inspector for AI-assisted development"
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+xcap.workspace = true
+image.workspace = true
+image-compare.workspace = true
+base64.workspace = true
