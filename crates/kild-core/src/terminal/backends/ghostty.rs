@@ -12,6 +12,149 @@ use crate::terminal::{
     types::SpawnConfig,
 };
 
+/// Find the Ghostty process PID that contains the given session identifier in its command line.
+/// Returns None if no matching process is found.
+#[cfg(target_os = "macos")]
+fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
+    use tracing::debug;
+
+    // Use pgrep -f to find processes with session_id in their command line
+    let pgrep_output = std::process::Command::new("pgrep")
+        .arg("-f")
+        .arg(session_id)
+        .output()
+        .ok()?;
+
+    if !pgrep_output.status.success() {
+        debug!(
+            event = "core.terminal.ghostty_pgrep_no_match",
+            session_id = %session_id
+        );
+        return None;
+    }
+
+    let pids: Vec<u32> = String::from_utf8_lossy(&pgrep_output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect();
+
+    debug!(
+        event = "core.terminal.ghostty_pgrep_candidates",
+        session_id = %session_id,
+        candidate_count = pids.len()
+    );
+
+    // Find the Ghostty process among candidates
+    // The Ghostty process will have "ghostty" in its command name
+    for pid in pids {
+        if is_ghostty_process(pid) {
+            debug!(
+                event = "core.terminal.ghostty_pid_found",
+                session_id = %session_id,
+                pid = pid
+            );
+            return Some(pid);
+        }
+    }
+
+    debug!(
+        event = "core.terminal.ghostty_pid_not_found",
+        session_id = %session_id
+    );
+    None
+}
+
+/// Check if a process is a Ghostty process by examining its command name.
+#[cfg(target_os = "macos")]
+fn is_ghostty_process(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .map(|output| {
+            let comm = String::from_utf8_lossy(&output.stdout);
+            comm.to_lowercase().contains("ghostty")
+        })
+        .unwrap_or(false)
+}
+
+/// Focus a Ghostty window by finding its process via PID and using System Events.
+#[cfg(target_os = "macos")]
+fn focus_by_pid(pid: u32) -> Result<(), TerminalError> {
+    use tracing::{debug, info};
+
+    debug!(
+        event = "core.terminal.focus_ghostty_by_pid_started",
+        pid = pid
+    );
+
+    // Use System Events with unix id to target the specific process
+    let focus_script = format!(
+        r#"tell application "System Events"
+            set targetProc to first process whose unix id is {}
+            set frontmost of targetProc to true
+            tell targetProc
+                if (count of windows) > 0 then
+                    perform action "AXRaise" of window 1
+                    return "focused"
+                else
+                    return "no windows"
+                end if
+            end tell
+        end tell"#,
+        pid
+    );
+
+    match std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&focus_script)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let result = String::from_utf8_lossy(&output.stdout);
+            let result_trimmed = result.trim();
+            if result_trimmed == "focused" {
+                info!(
+                    event = "core.terminal.focus_completed",
+                    terminal = "Ghostty",
+                    method = "pid",
+                    pid = pid
+                );
+                Ok(())
+            } else {
+                debug!(
+                    event = "core.terminal.focus_ghostty_by_pid_no_windows",
+                    pid = pid,
+                    result = %result_trimmed
+                );
+                Err(TerminalError::FocusFailed {
+                    message: format!("Ghostty process {} has no windows", pid),
+                })
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            debug!(
+                event = "core.terminal.focus_ghostty_by_pid_failed",
+                pid = pid,
+                stderr = %stderr.trim()
+            );
+            Err(TerminalError::FocusFailed {
+                message: format!("Failed to focus Ghostty by PID {}: {}", pid, stderr.trim()),
+            })
+        }
+        Err(e) => {
+            debug!(
+                event = "core.terminal.focus_ghostty_by_pid_error",
+                pid = pid,
+                error = %e
+            );
+            Err(TerminalError::FocusFailed {
+                message: format!("osascript error for PID {}: {}", pid, e),
+            })
+        }
+    }
+}
+
 /// Backend implementation for Ghostty terminal.
 pub struct GhosttyBackend;
 
@@ -176,50 +319,60 @@ impl TerminalBackend for GhosttyBackend {
 
     #[cfg(target_os = "macos")]
     fn focus_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        use tracing::{error, info};
+        use tracing::{debug, error, info, warn};
 
         debug!(
             event = "core.terminal.focus_ghostty_started",
-            window_title = %window_id
+            window_id = %window_id
         );
 
-        // Ghostty uses window title for identification, not a numeric window ID like iTerm/Terminal.app.
-        // Unlike AppleScript-scriptable apps, Ghostty requires System Events to manipulate windows.
-        // Step 1: Activate the app to bring it to the foreground
-        // Step 2: Use System Events to find our specific window by title and raise it
+        // Step 1: Activate Ghostty app to bring it to the foreground
         let activate_script = r#"tell application "Ghostty" to activate"#;
-        match std::process::Command::new("osascript")
+        if let Err(e) = std::process::Command::new("osascript")
             .arg("-e")
             .arg(activate_script)
             .output()
         {
-            Ok(output) if output.status.success() => {
-                debug!(
-                    event = "core.terminal.focus_ghostty_activated",
-                    window_title = %window_id
-                );
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!(
-                    event = "core.terminal.focus_ghostty_activate_failed",
-                    window_title = %window_id,
-                    stderr = %stderr.trim(),
-                    message = "Ghostty activation failed - focus may not work correctly"
-                );
-            }
-            Err(e) => {
-                warn!(
-                    event = "core.terminal.focus_ghostty_activate_failed",
-                    window_title = %window_id,
-                    error = %e,
-                    message = "Failed to execute osascript for Ghostty activation"
-                );
-            }
+            warn!(
+                event = "core.terminal.focus_ghostty_activate_failed",
+                window_id = %window_id,
+                error = %e,
+                message = "Failed to activate Ghostty - continuing with focus attempt"
+            );
         }
 
-        // Use System Events to find and raise the window by title.
-        // AXRaise is an accessibility action that brings a window to the front of other windows.
+        // Step 2: Try PID-based focus first (handles dynamic title changes)
+        // The session ID is embedded in the process command line and persists
+        // even when the window title is overwritten by running commands.
+        if let Some(pid) = find_ghostty_pid_by_session(window_id) {
+            debug!(
+                event = "core.terminal.focus_ghostty_trying_pid",
+                window_id = %window_id,
+                pid = pid
+            );
+            match focus_by_pid(pid) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    debug!(
+                        event = "core.terminal.focus_ghostty_pid_failed_fallback",
+                        window_id = %window_id,
+                        pid = pid,
+                        error = %e,
+                        message = "PID-based focus failed, falling back to title search"
+                    );
+                }
+            }
+        } else {
+            debug!(
+                event = "core.terminal.focus_ghostty_no_pid_fallback",
+                window_id = %window_id,
+                message = "No matching Ghostty process found, falling back to title search"
+            );
+        }
+
+        // Step 3: Fallback to title-based search (for edge cases)
+        // This handles scenarios where the process might not be found via pgrep
+        // but the window title still matches (e.g., no command running yet).
         let focus_script = format!(
             r#"tell application "System Events"
             tell process "Ghostty"
@@ -247,18 +400,22 @@ impl TerminalBackend for GhosttyBackend {
                     info!(
                         event = "core.terminal.focus_completed",
                         terminal = "Ghostty",
-                        window_title = %window_id
+                        method = "title",
+                        window_id = %window_id
                     );
                     Ok(())
                 } else {
                     warn!(
                         event = "core.terminal.focus_failed",
                         terminal = "Ghostty",
-                        window_title = %window_id,
-                        message = "Window not found"
+                        window_id = %window_id,
+                        message = "Window not found by PID or title"
                     );
                     Err(TerminalError::FocusFailed {
-                        message: format!("Ghostty window '{}' not found", window_id),
+                        message: format!(
+                            "Ghostty window '{}' not found (terminal may have been closed)",
+                            window_id
+                        ),
                     })
                 }
             }
@@ -267,7 +424,7 @@ impl TerminalBackend for GhosttyBackend {
                 warn!(
                     event = "core.terminal.focus_failed",
                     terminal = "Ghostty",
-                    window_title = %window_id,
+                    window_id = %window_id,
                     stderr = %stderr.trim()
                 );
                 Err(TerminalError::FocusFailed {
@@ -278,7 +435,7 @@ impl TerminalBackend for GhosttyBackend {
                 error!(
                     event = "core.terminal.focus_failed",
                     terminal = "Ghostty",
-                    window_title = %window_id,
+                    window_id = %window_id,
                     error = %e
                 );
                 Err(TerminalError::FocusFailed {
@@ -351,5 +508,23 @@ mod tests {
         assert!(ghostty_command.contains("kild-test-session"));
         assert!(ghostty_command.contains("claude"));
         assert!(ghostty_command.contains("/tmp/test"));
+    }
+
+    #[test]
+    fn test_is_ghostty_process_helper() {
+        // Just verify the function doesn't panic with invalid PID
+        // Can't test actual behavior without a running Ghostty process
+        let result = is_ghostty_process(99999999);
+        assert!(!result, "Non-existent PID should not be a Ghostty process");
+    }
+
+    #[test]
+    fn test_find_ghostty_pid_no_match() {
+        // Search for a session ID that definitely doesn't exist
+        let result = find_ghostty_pid_by_session("nonexistent-session-12345-xyz");
+        assert!(
+            result.is_none(),
+            "Should return None for non-existent session"
+        );
     }
 }
