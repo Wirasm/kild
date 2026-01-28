@@ -108,9 +108,9 @@ cargo run -p kild -- destroy --all --force       # Force destroy all (skip confi
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
 - `components/` - Reusable UI components (Button, StatusIndicator, Modal, TextInput with themed variants)
 - `projects.rs` - Project storage, validation, persistence to ~/.kild/projects.json
-- `state.rs` - Application state with project filtering
+- `state.rs` - Application state with project filtering and kild counts
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
-- `views/` - GPUI components (main view, kild list, dialogs, project selector)
+- `views/` - GPUI components (main view with 3-column layout: sidebar, kild list, detail panel)
 
 **Module pattern:** Each domain follows `errors.rs`, `types.rs`, `operations.rs`, `handler.rs` structure.
 

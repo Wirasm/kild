@@ -166,8 +166,8 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 9.5 | Modal Component | Dialog structure | Reusable Modal | ✅ DONE |
 | 9.6 | Theme Integration | Apply theme to all views | Visual match to mockup | ✅ DONE |
 | 9.7 | Git Diff Stats | Diff data in list rows | Show `+adds -dels` per kild | ✅ DONE |
-| 9.8 | Selection & Detail Panel | Click row → detail view | Right panel with full kild info | COMPLETE |
-| 9.9 | Sidebar Layout | 3-column layout | Project sidebar replaces dropdown | IN-PROGRESS |
+| 9.8 | Selection & Detail Panel | Click row → detail view | Right panel with full kild info | ✅ DONE |
+| 9.9 | Sidebar Layout | 3-column layout | Project sidebar replaces dropdown | ✅ DONE |
 | 10 | Keyboard Shortcuts | Full keyboard control | Navigate and operate UI without mouse | TODO |
 
 ### Dependency Graph
@@ -1028,14 +1028,14 @@ cargo run -p shards-ui
 **Files to Create**:
 | File | Purpose |
 |------|---------|
-| `crates/shards-ui/src/projects.rs` | Load/save/validate projects |
-| `crates/shards-ui/src/views/project_selector.rs` | Dropdown/panel for switching projects |
-| `crates/shards-ui/src/views/add_project_dialog.rs` | Dialog for adding new project |
+| `crates/kild-ui/src/projects.rs` | Load/save/validate projects |
+| `crates/kild-ui/src/views/sidebar.rs` | Fixed left sidebar for project navigation |
+| `crates/kild-ui/src/views/add_project_dialog.rs` | Dialog for adding new project |
 
 **Files to Modify**:
 | File | Change |
 |------|--------|
-| `crates/shards-ui/src/views/main_view.rs` | Add project selector to header |
+| `crates/shards-ui/src/views/main_view.rs` | Add project sidebar (3-column layout) |
 | `crates/shards-ui/src/views/shard_list.rs` | Filter by active project |
 | `crates/shards-ui/src/state.rs` | Track active project, project list |
 | `crates/shards-ui/src/actions.rs` | Add project CRUD actions |
@@ -1127,7 +1127,7 @@ cargo run -p shards-ui
 | 9.6 | Theme Integration | Apply theme to all views, final polish | DONE |
 | 9.7 | Git Diff Stats | Diff data in list rows | DONE |
 | 9.8 | Selection & Detail Panel | Click row → detail view | DONE |
-| 9.9 | Sidebar Layout | 3-column layout with sidebar | TODO |
+| 9.9 | Sidebar Layout | 3-column layout with sidebar | DONE |
 
 #### Dependency Graph
 
@@ -1581,7 +1581,7 @@ cargo build -p kild-ui
 | `crates/kild-ui/src/views/main_view.rs` | Use theme colors, Button component |
 | `crates/kild-ui/src/views/kild_list.rs` | Use theme colors, StatusIndicator, action buttons |
 | `crates/kild-ui/src/views/create_dialog.rs` | Use Modal, TextInput, Button components |
-| `crates/kild-ui/src/views/project_selector.rs` | Use theme colors |
+| `crates/kild-ui/src/views/sidebar.rs` | Use theme colors |
 | `crates/kild-ui/src/views/detail_panel.rs` | Use theme colors, StatusIndicator, Button |
 
 **Checklist**:
@@ -1793,7 +1793,7 @@ After (3-column):
 | `crates/kild-ui/src/components/mod.rs` | Export ProjectListItem |
 | `crates/kild-ui/src/views/mod.rs` | Export sidebar |
 | `crates/kild-ui/src/views/main_view.rs` | 3-column grid layout |
-| `crates/kild-ui/src/views/project_selector.rs` | Remove or repurpose (sidebar replaces it) |
+| `crates/kild-ui/src/views/sidebar.rs` | New file - fixed left sidebar component |
 
 **Sidebar features**:
 - "SCOPE" header (uppercase, muted)
