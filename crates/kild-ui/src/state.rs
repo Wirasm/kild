@@ -370,19 +370,29 @@ impl AppState {
     /// for a full refresh that includes git information.
     pub fn update_statuses_only(&mut self) {
         // Check if session count changed (external create/destroy)
-        let disk_count = count_session_files();
-        if disk_count != self.displays.len() {
-            tracing::info!(
-                event = "ui.auto_refresh.session_count_mismatch",
-                disk_count = disk_count,
-                memory_count = self.displays.len(),
-                action = "triggering full refresh"
+        let disk_count_result = count_session_files();
+
+        if let Some(disk_count) = disk_count_result {
+            if disk_count != self.displays.len() {
+                tracing::info!(
+                    event = "ui.auto_refresh.session_count_mismatch",
+                    disk_count = disk_count,
+                    memory_count = self.displays.len(),
+                    action = "triggering full refresh"
+                );
+                self.refresh_sessions();
+                return;
+            }
+        } else {
+            // Cannot determine count - skip mismatch check and just update statuses.
+            // This is a non-critical degradation (directory read failure).
+            tracing::debug!(
+                event = "ui.auto_refresh.count_check_skipped",
+                reason = "cannot read sessions directory"
             );
-            self.refresh_sessions();
-            return;
         }
 
-        // No count change - just update process statuses
+        // No count change (or count unavailable) - just update process statuses
         for kild_display in &mut self.displays {
             kild_display.status = determine_process_status(&kild_display.session);
         }
@@ -523,26 +533,32 @@ impl Default for AppState {
 ///
 /// This is a lightweight check used by `update_statuses_only()` to detect
 /// when sessions have been added or removed externally (e.g., via CLI).
-fn count_session_files() -> usize {
+///
+/// Returns `None` if the directory cannot be read (permission error, I/O error, etc.),
+/// allowing the caller to distinguish between "0 sessions exist" and "cannot determine count".
+fn count_session_files() -> Option<usize> {
     let config = kild_core::config::Config::new();
     let sessions_dir = config.sessions_dir();
 
     if !sessions_dir.exists() {
-        return 0;
+        return Some(0);
     }
 
     match std::fs::read_dir(&sessions_dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
-            .count(),
+        Ok(entries) => {
+            let count = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+                .count();
+            Some(count)
+        }
         Err(e) => {
             tracing::warn!(
                 event = "ui.count_session_files.read_dir_failed",
                 path = %sessions_dir.display(),
                 error = %e
             );
-            0
+            None
         }
     }
 }
