@@ -687,6 +687,12 @@ mod tests {
     fn test_add_project_uses_provided_name() {
         use tempfile::TempDir;
 
+        // Use isolated projects file for test
+        let projects_dir = TempDir::new().unwrap();
+        let projects_file = projects_dir.path().join("projects.json");
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::set_var("KILD_PROJECTS_FILE", &projects_file) };
+
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path();
 
@@ -699,17 +705,23 @@ mod tests {
 
         let result = super::add_project(path.to_path_buf(), Some("Custom Name".to_string()));
 
-        // This will actually save to the real projects file, so we need to check the returned project
-        // If it succeeds, it should have the custom name
-        if let Ok(project) = result {
-            assert_eq!(project.name(), "Custom Name");
-        }
-        // If it fails due to file system issues, that's acceptable for this test
+        // Clean up env var
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
+
+        let project = result.expect("add_project should succeed");
+        assert_eq!(project.name(), "Custom Name");
     }
 
     #[test]
     fn test_add_project_derives_name_from_path() {
         use tempfile::TempDir;
+
+        // Use isolated projects file for test
+        let projects_dir = TempDir::new().unwrap();
+        let projects_file = projects_dir.path().join("projects.json");
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::set_var("KILD_PROJECTS_FILE", &projects_file) };
 
         // Create a temp dir with a specific name
         let temp_dir = TempDir::new().unwrap();
@@ -724,12 +736,14 @@ mod tests {
 
         let result = super::add_project(path.to_path_buf(), None);
 
-        // If it succeeds, the name should be derived from the path
-        if let Ok(project) = result {
-            // Name should be the directory name (temp dir names are random)
-            assert!(!project.name().is_empty());
-            assert_ne!(project.name(), "unknown");
-        }
+        // Clean up env var
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
+
+        let project = result.expect("add_project should succeed");
+        // Name should be the directory name (temp dir names are random)
+        assert!(!project.name().is_empty());
+        assert_ne!(project.name(), "unknown");
     }
 
     // --- Validation function tests ---

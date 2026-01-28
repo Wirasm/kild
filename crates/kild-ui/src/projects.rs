@@ -309,6 +309,11 @@ pub fn migrate_projects_to_canonical() -> Result<(), String> {
 }
 
 fn projects_file_path() -> PathBuf {
+    // Allow override via env var for testing
+    if let Ok(path) = std::env::var("KILD_PROJECTS_FILE") {
+        return PathBuf::from(path);
+    }
+
     match dirs::home_dir() {
         Some(home) => home.join(".kild").join("projects.json"),
         None => {
@@ -638,5 +643,30 @@ mod tests {
             "Canonical paths should produce identical project IDs for filtering"
         );
         assert_eq!(id_from_canonical, session_project_id);
+    }
+
+    #[test]
+    fn test_projects_file_path_env_override() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let custom_path = temp_dir.path().join("custom_projects.json");
+
+        // Set env var
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::set_var("KILD_PROJECTS_FILE", &custom_path) };
+
+        // Verify override works
+        let path = super::projects_file_path();
+        assert_eq!(path, custom_path);
+
+        // Clean up
+        // SAFETY: This is a test environment with no parallel access to this env var
+        unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
+
+        // Verify default works after cleanup
+        let default_path = super::projects_file_path();
+        assert!(default_path.ends_with("projects.json"));
+        assert!(default_path.to_string_lossy().contains(".kild"));
     }
 }
