@@ -189,12 +189,37 @@ kild open <branch>
 kild cleanup
 ```
 
+## Configuration
+
+KILD uses a hierarchical TOML configuration system:
+
+- **User config**: `~/.kild/config.toml` (global settings)
+- **Project config**: `./.kild/config.toml` (project-specific settings)
+- **Defaults**: Built-in sensible defaults
+
+See `.kild/config.example.toml` for all available options.
+
+### Key Configuration Features
+
+**File Include Patterns**: By default, KILD copies certain files to new worktrees even if gitignored:
+- `.env*` - Environment files
+- `*.local.json` - Local config files
+- `.claude/**` - Claude AI context files
+- `.cursor/**` - Cursor AI context files
+
+Configure additional patterns in `[include_patterns]` section. Your patterns extend the defaults.
+
+**Agent Settings**: Configure default agent, startup commands, and flags per agent.
+
+**Terminal Preferences**: Set preferred terminal emulator (Ghostty, iTerm2, Terminal.app).
+
 ## How It Works
 
 1. **Worktree Creation**: Creates a new Git worktree in `.kild/<name>` with a unique branch
-2. **Agent Launch**: Launches the specified agent command in a native terminal window
-3. **Session Tracking**: Records session metadata in `~/.kild/registry.json`
-4. **Lifecycle Management**: Provides commands to monitor, stop, and clean up sessions
+2. **File Copying**: Copies configured patterns (env files, AI context) to worktree
+3. **Agent Launch**: Launches the specified agent command in a native terminal window
+4. **Session Tracking**: Records session metadata in `~/.kild/registry.json`
+5. **Lifecycle Management**: Provides commands to monitor, stop, and clean up sessions
 
 ## Requirements
 

@@ -98,10 +98,17 @@ history_retention_days = 7
 enabled = true
 
 # Glob patterns for files to copy (relative to repo root)
+#
+# DEFAULT PATTERNS (applied automatically if you don't specify any):
+#   - ".env*"           - Environment files
+#   - "*.local.json"    - Local config files
+#   - ".claude/**"      - Claude AI context files
+#   - ".cursor/**"      - Cursor AI context files
+#
+# Your patterns EXTEND the defaults (not replace).
+# User config (~/.kild/config.toml) patterns are also merged with project patterns.
 patterns = [
-    ".env*",           # Environment files
-    "*.local.json",    # Local config files
-    "build/artifacts/**"  # Build artifacts
+    "build/artifacts/**",  # Project-specific: build artifacts
 ]
 
 # Maximum file size to copy (skip larger files with warning)

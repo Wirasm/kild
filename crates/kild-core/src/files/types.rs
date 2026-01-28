@@ -16,11 +16,14 @@ use serde::{Deserialize, Serialize};
 ///     max_file_size: Some("10MB".to_string()),
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncludeConfig {
     /// Glob patterns to match against relative file paths.
     /// Examples: ".env*", "*.local.json", "build/artifacts/**"
-    #[serde(default)]
+    ///
+    /// When deserialized from TOML, defaults to `default_include_patterns()`
+    /// if not specified.
+    #[serde(default = "default_include_patterns")]
     pub patterns: Vec<String>,
 
     /// Whether include pattern copying is enabled. Defaults to true.
@@ -67,4 +70,30 @@ pub struct CopyOptions {
 
 fn default_enabled() -> bool {
     true
+}
+
+/// Returns the default include patterns.
+///
+/// These patterns provide sensible defaults for common use cases:
+/// - `.env*` - Environment files
+/// - `*.local.json` - Local config files
+/// - `.claude/**` - Claude AI context files
+/// - `.cursor/**` - Cursor AI context files
+pub fn default_include_patterns() -> Vec<String> {
+    vec![
+        ".env*".to_string(),
+        "*.local.json".to_string(),
+        ".claude/**".to_string(),
+        ".cursor/**".to_string(),
+    ]
+}
+
+impl Default for IncludeConfig {
+    fn default() -> Self {
+        Self {
+            patterns: default_include_patterns(),
+            enabled: true,
+            max_file_size: None,
+        }
+    }
 }

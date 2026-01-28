@@ -262,6 +262,8 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 
 Priority (highest wins): CLI args → project config (`./.kild/config.toml`) → user config (`~/.kild/config.toml`) → defaults
 
+**Array Merging:** `include_patterns.patterns` arrays are merged (deduplicated) from user and project configs. Other config values follow standard override behavior.
+
 ## Error Handling
 
 All domain errors implement `KildError` trait with `error_code()` and `is_user_error()`. Use `thiserror` for definitions.
