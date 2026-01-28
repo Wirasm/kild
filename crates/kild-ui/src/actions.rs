@@ -7,10 +7,7 @@ use std::path::{Path, PathBuf};
 
 use kild_core::{CreateSessionRequest, KildConfig, Session, session_ops};
 
-use crate::projects::{
-    Project, ProjectValidation, derive_display_name, load_projects, save_projects,
-    validate_project_path,
-};
+use crate::projects::{Project, ProjectError, load_projects, save_projects};
 use crate::state::{KildDisplay, OperationError, ProcessStatus};
 
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
@@ -247,6 +244,7 @@ fn execute_bulk_operation(
 /// Add a new project after validation.
 ///
 /// Returns the added project on success, or an error message if validation fails.
+/// The path is canonicalized to ensure consistent hashing for filtering.
 pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, String> {
     tracing::info!(
         event = "ui.add_project.started",
@@ -255,38 +253,34 @@ pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, Strin
 
     let mut data = load_projects();
 
-    match validate_project_path(&path, &data.projects) {
-        ProjectValidation::Valid => {}
-        ProjectValidation::NotADirectory => {
-            return Err(format!("'{}' is not a directory", path.display()));
+    // Create validated project with canonical path
+    let project = Project::new(path.clone(), name).map_err(|e| match e {
+        ProjectError::NotADirectory => format!("'{}' is not a directory", path.display()),
+        ProjectError::NotAGitRepo => format!("'{}' is not a git repository", path.display()),
+        ProjectError::CanonicalizationFailed(io_err) => {
+            format!("Cannot access '{}': {}", path.display(), io_err)
         }
-        ProjectValidation::NotAGitRepo => {
-            return Err(format!("'{}' is not a git repository", path.display()));
-        }
-        ProjectValidation::AlreadyExists => {
-            return Err("Project already exists".to_string());
-        }
+    })?;
+
+    // Check if project already exists (by canonical path)
+    if data.projects.iter().any(|p| p.path() == project.path()) {
+        return Err("Project already exists".to_string());
     }
 
-    let project_name = name.unwrap_or_else(|| derive_display_name(&path));
-    let project = Project {
-        path: path.clone(),
-        name: project_name,
-    };
-
+    let canonical_path = project.path().to_path_buf();
     data.projects.push(project.clone());
 
     // If this is the first project, make it active
     if data.projects.len() == 1 {
-        data.active = Some(path.clone());
+        data.active = Some(canonical_path.clone());
     }
 
     save_projects(&data)?;
 
     tracing::info!(
         event = "ui.add_project.completed",
-        path = %path.display(),
-        name = %project.name
+        path = %canonical_path.display(),
+        name = %project.name()
     );
 
     Ok(project)
@@ -302,7 +296,7 @@ pub fn remove_project(path: &Path) -> Result<(), String> {
     let mut data = load_projects();
 
     let original_len = data.projects.len();
-    data.projects.retain(|p| p.path != path);
+    data.projects.retain(|p| p.path() != path);
 
     if data.projects.len() == original_len {
         return Err("Project not found".to_string());
@@ -310,7 +304,7 @@ pub fn remove_project(path: &Path) -> Result<(), String> {
 
     // Clear active project if it was removed
     if data.active.as_ref() == Some(&path.to_path_buf()) {
-        data.active = data.projects.first().map(|p| p.path.clone());
+        data.active = data.projects.first().map(|p| p.path().to_path_buf());
     }
 
     save_projects(&data)?;
@@ -334,7 +328,7 @@ pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
 
     // Validate that the project exists if a path is provided
     if let Some(p) = &path {
-        let project_exists = data.projects.iter().any(|proj| &proj.path == p);
+        let project_exists = data.projects.iter().any(|proj| proj.path() == p.as_path());
         if !project_exists {
             return Err("Project not found".to_string());
         }
@@ -645,8 +639,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.contains("is not a directory"),
-            "Expected 'not a directory' error, got: {}",
+            err.contains("Cannot access"),
+            "Expected 'Cannot access' error, got: {}",
             err
         );
     }
@@ -707,7 +701,7 @@ mod tests {
         // This will actually save to the real projects file, so we need to check the returned project
         // If it succeeds, it should have the custom name
         if let Ok(project) = result {
-            assert_eq!(project.name, "Custom Name");
+            assert_eq!(project.name(), "Custom Name");
         }
         // If it fails due to file system issues, that's acceptable for this test
     }
@@ -732,8 +726,8 @@ mod tests {
         // If it succeeds, the name should be derived from the path
         if let Ok(project) = result {
             // Name should be the directory name (temp dir names are random)
-            assert!(!project.name.is_empty());
-            assert_ne!(project.name, "unknown");
+            assert!(!project.name().is_empty());
+            assert_ne!(project.name(), "unknown");
         }
     }
 
@@ -741,8 +735,10 @@ mod tests {
 
     #[test]
     fn test_derive_display_name_works_correctly() {
+        use crate::projects::derive_display_name;
+
         let path = PathBuf::from("/Users/test/Projects/my-awesome-project");
-        let name = super::derive_display_name(&path);
+        let name = derive_display_name(&path);
         assert_eq!(name, "my-awesome-project");
     }
 }

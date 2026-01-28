@@ -9,12 +9,6 @@ mod status_indicator;
 mod text_input;
 
 pub use button::{Button, ButtonVariant};
-#[allow(unused_imports)]
 pub use modal::Modal;
-#[allow(unused_imports)]
-pub use status_indicator::{Status, StatusIndicator, StatusMode};
-
-// Allow unused_imports - TextInput is defined ahead of usage in create_dialog.rs.
-// Remove this attribute once Phase 9.6 integrates this component.
-#[allow(unused_imports)]
+pub use status_indicator::{Status, StatusIndicator};
 pub use text_input::TextInput;

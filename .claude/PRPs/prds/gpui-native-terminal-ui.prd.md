@@ -158,13 +158,16 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 | 7.6 | Bulk Operations | Open All / Stop All buttons | Bulk lifecycle operations | ✅ DONE |
 | 7.7 | Quick Actions | Per-row action buttons | Copy Path, Open Editor, Focus Terminal | ✅ DONE |
 | 8 | Projects | Project management, active project context | Switch projects, filter shards | ✅ DONE |
-| 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted components | TODO |
+| 9 | Theme & Components | Color palette + reusable UI components | Polished design, extracted components | ✅ DONE |
 | 9.1 | Theme Foundation | Color palette, typography, spacing | Theme constants accessible | ✅ DONE |
 | 9.2 | Button Component | All button variants | Reusable Button component | ✅ DONE |
 | 9.3 | StatusIndicator Component | Status dots and badges | Reusable StatusIndicator | ✅ DONE |
 | 9.4 | TextInput Component | Form input with focus states | Reusable TextInput | ✅ DONE |
 | 9.5 | Modal Component | Dialog structure | Reusable Modal | ✅ DONE |
-| 9.6 | Theme Integration | Apply theme to all views | Visual match to mockup | TODO |
+| 9.6 | Theme Integration | Apply theme to all views | Visual match to mockup | ✅ DONE |
+| 9.7 | Git Diff Stats | Diff data in list rows | Show `+adds -dels` per kild | TODO |
+| 9.8 | Selection & Detail Panel | Click row → detail view | Right panel with full kild info | TODO |
+| 9.9 | Sidebar Layout | 3-column layout | Project sidebar replaces dropdown | TODO |
 | 10 | Keyboard Shortcuts | Full keyboard control | Navigate and operate UI without mouse | TODO |
 
 ### Dependency Graph
@@ -172,13 +175,12 @@ Build a native GPUI application as a **visual dashboard** for shard management. 
 ```
 GUI Phases:
 Phase 1 → 2 → 3 → 4 → 5 → 6 → 7 → 7.5 → 7.6 → 7.7 → 8 → 9 → 10
-  ✅     ✅   ✅   ✅   ✅   ✅   ✅    ✅     ✅     ✅    ✅   │    │
-                                                              │    └─ Keyboard control
-                                                              │
-                                                              └─ Theme & Components
+  ✅     ✅   ✅   ✅   ✅   ✅   ✅    ✅     ✅     ✅    ✅   ✅   │
                                                                    │
-Phase 9 Internal Dependencies:                                     │
-                                                                   ▼
+                                                              └─ Keyboard control
+
+Phase 9 Internal Dependencies:
+
   9.1 Theme Foundation ─┬─► 9.2 Button ─────────┐
                         │                       │
                         ├─► 9.3 StatusIndicator ├──► 9.6 Theme Integration
@@ -187,6 +189,16 @@ Phase 9 Internal Dependencies:                                     │
                         │                       │
                         └─► 9.5 Modal ──────────┘
                             (uses Button)
+                                                │
+                                                ▼
+  9.6 Theme Integration ──► 9.7 Git Diff Stats ──► 9.8 Selection & Detail Panel
+                                                              │
+                                                              ▼
+                                                   9.9 Sidebar Layout ──► Phase 10
+
+  9.7 adds data layer (git diff stats)
+  9.8 adds selection state + right panel (depends on 9.7 for diff display)
+  9.9 restructures layout to 3-column (can use detail panel from 9.8)
 
 Cross-PRD Dependencies (CLI → GUI):
 ┌─────────────────────────────────────────────────────────────┐
@@ -1112,7 +1124,10 @@ cargo run -p shards-ui
 | 9.3 | StatusIndicator Component | Status dots and badges with glow effects | DONE |
 | 9.4 | TextInput Component | Form input with focus states | DONE |
 | 9.5 | Modal Component | Reusable dialog structure | DONE |
-| 9.6 | Theme Integration | Apply theme to all views, final polish | TODO |
+| 9.6 | Theme Integration | Apply theme to all views, final polish | DONE |
+| 9.7 | Git Diff Stats | Diff data in list rows | TODO |
+| 9.8 | Selection & Detail Panel | Click row → detail view | TODO |
+| 9.9 | Sidebar Layout | 3-column layout with sidebar | TODO |
 
 #### Dependency Graph
 
@@ -1123,10 +1138,15 @@ cargo run -p shards-ui
  │                        │
  ├──► 9.3 StatusIndicator │
  │                        ├──► 9.6 Theme Integration
- ├──► 9.4 TextInput ──────┤
- │                        │
- └──► 9.5 Modal ──────────┘
-      (uses Button)
+ ├──► 9.4 TextInput ──────┤           │
+ │                        │           ▼
+ └──► 9.5 Modal ──────────┘     9.7 Git Diff Stats
+      (uses Button)                   │
+                                      ▼
+                            9.8 Selection & Detail Panel
+                                      │
+                                      ▼
+                            9.9 Sidebar Layout
 ```
 
 ---
@@ -1607,6 +1627,200 @@ cargo run -p kild-ui
 # Verify: All interactive states work (hover, focus, selected)
 # Verify: Components are reusable (no duplication)
 ```
+
+---
+
+### Phase 9.7: Git Diff Stats
+
+**Goal**: Display git diff statistics (`+additions -deletions`) for each kild in the list view.
+
+**Why this phase exists**: The mockup shows `+42 -12` next to the git dirty indicator. Currently we only show a dot for dirty/clean. This phase adds the data layer to fetch diff stats from git2 and displays them in the list.
+
+**Data to fetch** (via git2):
+- `insertions`: lines added (green `+N`)
+- `deletions`: lines removed (red `-N`)
+- `files_changed`: number of files modified (optional, for detail panel)
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `crates/kild-core/src/git/diff.rs` | Git diff stats fetching via git2 |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `crates/kild-core/src/git/mod.rs` | Export diff module |
+| `crates/kild-ui/src/state.rs` | Add `GitDiffStats` to `KildDisplay` |
+| `crates/kild-ui/src/views/kild_list.rs` | Display `+N -N` next to dirty indicator |
+
+**GitDiffStats type**:
+```rust
+#[derive(Debug, Clone, Default)]
+pub struct GitDiffStats {
+    pub insertions: usize,
+    pub deletions: usize,
+    pub files_changed: usize,
+}
+```
+
+**Display format**:
+- Dirty with stats: `● +42 -12` (orange dot, green additions, red deletions)
+- Clean: no indicator (or subtle checkmark)
+- Unknown/error: `?` (current behavior)
+
+**Validation**:
+```bash
+cargo test -p kild-core  # New diff tests pass
+cargo run -p kild-ui     # See +N -N in list rows
+```
+
+**What NOT to do**:
+- Don't fetch full diff content (just stats)
+- Don't block UI on diff fetching (async/background)
+- Don't show stats for clean repos (only when dirty)
+
+---
+
+### Phase 9.8: Selection & Detail Panel
+
+**Goal**: Click a kild row to select it and show full details in a right-side panel.
+
+**Why this phase exists**: The mockup has a 320px detail panel on the right showing the selected kild's full info (note, agent, status, duration, created, branch, git status, path). Currently there's no selection state and no detail view.
+
+**Selection behavior**:
+- Single selection (one kild at a time)
+- Click row to select
+- Selection persists across refreshes (by session ID)
+- Keyboard selection comes in Phase 10
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `crates/kild-ui/src/components/detail_section.rs` | Section with title + content |
+| `crates/kild-ui/src/components/detail_row.rs` | Label + value pair |
+| `crates/kild-ui/src/views/detail_panel.rs` | Right panel showing selected kild |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `crates/kild-ui/src/components/mod.rs` | Export new components |
+| `crates/kild-ui/src/state.rs` | Add `selected_kild: Option<String>` (session ID) |
+| `crates/kild-ui/src/views/kild_list.rs` | Add click handler, selected row styling |
+| `crates/kild-ui/src/views/main_view.rs` | 2-column layout (main + detail panel) |
+
+**Detail panel sections** (from mockup):
+1. **Header**: Branch name + StatusBadge
+2. **Note**: Full note text in styled box
+3. **Details**: Agent, Status, Duration, Created, Branch (kild_hash)
+4. **Git Status**: Changes status, Files `+N -N (X files)`
+5. **Path**: Worktree path (copyable)
+6. **Actions**: Copy Path, Open Editor, Focus/Open/Stop, Destroy
+
+**Layout change**:
+```
+Before (1-column):
+┌──────────────────────────────────────────────────────────┐
+│ Header                                                    │
+├──────────────────────────────────────────────────────────┤
+│ Kild List (full width)                                    │
+└──────────────────────────────────────────────────────────┘
+
+After (2-column):
+┌──────────────────────────────────────────────────────────┐
+│ Header                                                    │
+├────────────────────────────────────┬─────────────────────┤
+│ Kild List                          │ Detail Panel (320px) │
+│ (flex: 1)                          │ (fixed width)        │
+└────────────────────────────────────┴─────────────────────┘
+```
+
+**Validation**:
+```bash
+cargo run -p kild-ui
+# Click a kild row → row highlights with ice border
+# Detail panel shows on right with all sections
+# Click different row → detail panel updates
+# Actions in detail panel work (Copy, Edit, Stop, Destroy)
+```
+
+**What NOT to do**:
+- Don't implement keyboard selection yet (Phase 10)
+- Don't add sidebar yet (Phase 9.9)
+- Don't make detail panel collapsible yet
+
+---
+
+### Phase 9.9: Sidebar Layout
+
+**Goal**: Replace the header project dropdown with a left sidebar showing all projects.
+
+**Why this phase exists**: The mockup shows a 200px left sidebar with project list (icon, name, count). Currently projects are in a dropdown in the header. The sidebar provides better visibility and quicker switching.
+
+**Layout change**:
+```
+Before (2-column from 9.8):
+┌──────────────────────────────────────────────────────────┐
+│ Header [Project Dropdown ▼]                               │
+├────────────────────────────────────┬─────────────────────┤
+│ Kild List                          │ Detail Panel         │
+└────────────────────────────────────┴─────────────────────┘
+
+After (3-column):
+┌──────────────────────────────────────────────────────────┐
+│ Header (no dropdown)                                      │
+├───────────┬────────────────────────┬─────────────────────┤
+│ Sidebar   │ Kild List              │ Detail Panel         │
+│ (200px)   │ (flex: 1)              │ (320px)              │
+│           │                        │                      │
+│ SCOPE     │                        │                      │
+│ ● kild    │                        │                      │
+│   api     │                        │                      │
+│   web     │                        │                      │
+│           │                        │                      │
+│ + Add     │                        │                      │
+└───────────┴────────────────────────┴─────────────────────┘
+```
+
+**Files to Create**:
+| File | Purpose |
+|------|---------|
+| `crates/kild-ui/src/components/project_list_item.rs` | Project row with icon, name, count |
+| `crates/kild-ui/src/views/sidebar.rs` | Left sidebar with project list |
+
+**Files to Modify**:
+| File | Change |
+|------|--------|
+| `crates/kild-ui/src/components/mod.rs` | Export ProjectListItem |
+| `crates/kild-ui/src/views/mod.rs` | Export sidebar |
+| `crates/kild-ui/src/views/main_view.rs` | 3-column grid layout |
+| `crates/kild-ui/src/views/project_selector.rs` | Remove or repurpose (sidebar replaces it) |
+
+**Sidebar features**:
+- "SCOPE" header (uppercase, muted)
+- Project list with:
+  - Icon (first letter of project name, styled box)
+  - Project name
+  - Kild count badge
+  - Selected state (ice left border)
+- "All Projects" option at top
+- "+ Add Project" button at bottom
+- Remove current project option (when selected)
+
+**Validation**:
+```bash
+cargo run -p kild-ui
+# Sidebar visible on left with project list
+# Click project → filters kild list
+# Selected project has ice border
+# "All Projects" shows all kilds
+# "+ Add Project" opens add dialog
+# Header no longer has project dropdown
+```
+
+**What NOT to do**:
+- Don't make sidebar collapsible yet
+- Don't add drag-to-reorder projects
+- Don't add project icons beyond first letter
 
 ---
 

@@ -4,10 +4,6 @@
 //! This component does not handle keyboard events or maintain input state -
 //! the parent view is responsible for event handling and state management.
 
-// Allow dead_code - this component is defined ahead of usage in create_dialog.rs.
-// Remove this attribute once Phase 9.6 integrates this component.
-#![allow(dead_code)]
-
 use gpui::{ElementId, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px};
 
 use crate::theme;

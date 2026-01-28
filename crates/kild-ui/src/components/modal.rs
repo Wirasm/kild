@@ -3,10 +3,6 @@
 //! Provides consistent modal styling with overlay, centered dialog box,
 //! and header/body/footer structure. All colors come from the theme module.
 
-// Allow dead_code - Modal is defined ahead of usage in view components.
-// Remove this attribute once dialogs are migrated to use Modal (Phase 9.6).
-#![allow(dead_code)]
-
 use gpui::{
     AnyElement, ElementId, IntoElement, Pixels, RenderOnce, SharedString, Window, div, prelude::*,
     px,

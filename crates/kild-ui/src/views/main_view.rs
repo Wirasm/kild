@@ -5,8 +5,11 @@
 
 use gpui::{
     Context, FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent, Render, Task, Window,
-    div, prelude::*, rgb,
+    div, prelude::*, px,
 };
+
+use crate::components::{Button, ButtonVariant};
+use crate::theme;
 use tracing::{debug, warn};
 
 use std::path::PathBuf;
@@ -523,7 +526,7 @@ impl MainView {
                 tracing::info!(
                     event = "ui.add_project.succeeded",
                     path = %path.display(),
-                    name = %project.name
+                    name = %project.name()
                 );
                 // Update local state with new project
                 self.state.projects.push(project);
@@ -598,9 +601,9 @@ impl MainView {
         }
 
         // Update local state
-        self.state.projects.retain(|p| p.path != path);
+        self.state.projects.retain(|p| p.path() != path);
         if self.state.active_project.as_ref() == Some(&path) {
-            self.state.active_project = self.state.projects.first().map(|p| p.path.clone());
+            self.state.active_project = self.state.projects.first().map(|p| p.path().to_path_buf());
         }
         self.state.show_project_dropdown = false;
         cx.notify();
@@ -610,51 +613,6 @@ impl MainView {
     pub fn on_toggle_project_dropdown(&mut self, cx: &mut Context<Self>) {
         self.state.show_project_dropdown = !self.state.show_project_dropdown;
         cx.notify();
-    }
-
-    /// Render a bulk operation button with consistent styling.
-    fn render_bulk_button(
-        &self,
-        id: &'static str,
-        label: &str,
-        count: usize,
-        enabled_bg: u32,
-        enabled_hover: u32,
-        on_click: impl Fn(&gpui::MouseUpEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> impl IntoElement {
-        let is_disabled = count == 0;
-        let bg_color = if is_disabled {
-            rgb(0x333333)
-        } else {
-            rgb(enabled_bg)
-        };
-        let hover_color = if is_disabled {
-            rgb(0x333333)
-        } else {
-            rgb(enabled_hover)
-        };
-        let text_color = if is_disabled {
-            rgb(0x666666)
-        } else {
-            rgb(0xffffff)
-        };
-
-        div()
-            .id(id)
-            .px_3()
-            .py_1()
-            .bg(bg_color)
-            .when(!is_disabled, |d| d.hover(|style| style.bg(hover_color)))
-            .rounded_md()
-            .when(!is_disabled, |d| d.cursor_pointer())
-            .when(!is_disabled, |d| {
-                d.on_mouse_up(gpui::MouseButton::Left, on_click)
-            })
-            .child(
-                div()
-                    .text_color(text_color)
-                    .child(format!("{} ({})", label, count)),
-            )
     }
 
     /// Handle keyboard input for dialogs.
@@ -821,18 +779,21 @@ impl Focusable for MainView {
 
 impl Render for MainView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let stopped_count = self.state.stopped_count();
+        let running_count = self.state.running_count();
+
         div()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1e1e1e))
+            .bg(theme::void())
             // Header with title, Refresh button, and Create button
             .child(
                 div()
-                    .px_4()
-                    .py_3()
+                    .px(px(theme::SPACE_4))
+                    .py(px(theme::SPACE_3))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -840,11 +801,11 @@ impl Render for MainView {
                         div()
                             .flex()
                             .items_center()
-                            .gap_3()
+                            .gap(px(theme::SPACE_3))
                             .child(
                                 div()
-                                    .text_xl()
-                                    .text_color(rgb(0xffffff))
+                                    .text_size(px(theme::TEXT_XL))
+                                    .text_color(theme::text_white())
                                     .font_weight(FontWeight::BOLD)
                                     .child("KILD"),
                             )
@@ -855,67 +816,50 @@ impl Render for MainView {
                         div()
                             .flex()
                             .items_center()
-                            .gap_2()
-                            // Open All button - green when enabled
-                            .child(self.render_bulk_button(
-                                "open-all-btn",
-                                "Open All",
-                                self.state.stopped_count(),
-                                0x446644,
-                                0x557755,
-                                cx.listener(|view, _, _, cx| view.on_open_all_click(cx)),
-                            ))
-                            // Stop All button - red when enabled
-                            .child(self.render_bulk_button(
-                                "stop-all-btn",
-                                "Stop All",
-                                self.state.running_count(),
-                                0x664444,
-                                0x775555,
-                                cx.listener(|view, _, _, cx| view.on_stop_all_click(cx)),
-                            ))
-                            // Refresh button - TEXT label, gray background (secondary action)
+                            .gap(px(theme::SPACE_2))
+                            // Open All button - Success variant
                             .child(
-                                div()
-                                    .id("refresh-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .bg(rgb(0x444444))
-                                    .hover(|style| style.bg(rgb(0x555555)))
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .on_mouse_up(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|view, _, _, cx| {
-                                            view.on_refresh_click(cx);
-                                        }),
-                                    )
-                                    .child(div().text_color(rgb(0xffffff)).child("Refresh")),
+                                Button::new(
+                                    "open-all-btn",
+                                    format!("Open All ({})", stopped_count),
+                                )
+                                .variant(ButtonVariant::Success)
+                                .disabled(stopped_count == 0)
+                                .on_click(cx.listener(
+                                    |view, _, _, cx| {
+                                        view.on_open_all_click(cx);
+                                    },
+                                )),
                             )
-                            // Create button - blue/accent background (primary action)
+                            // Stop All button - Warning variant
                             .child(
-                                div()
-                                    .id("create-header-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .bg(rgb(0x4a9eff))
-                                    .hover(|style| style.bg(rgb(0x5aafff)))
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .on_mouse_up(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|view, _, _, cx| {
-                                            view.on_create_button_click(cx);
-                                        }),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_1()
-                                            .child(div().text_color(rgb(0xffffff)).child("+"))
-                                            .child(div().text_color(rgb(0xffffff)).child("Create")),
-                                    ),
+                                Button::new(
+                                    "stop-all-btn",
+                                    format!("Stop All ({})", running_count),
+                                )
+                                .variant(ButtonVariant::Warning)
+                                .disabled(running_count == 0)
+                                .on_click(cx.listener(
+                                    |view, _, _, cx| {
+                                        view.on_stop_all_click(cx);
+                                    },
+                                )),
+                            )
+                            // Refresh button - Ghost variant
+                            .child(
+                                Button::new("refresh-btn", "Refresh")
+                                    .variant(ButtonVariant::Ghost)
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.on_refresh_click(cx);
+                                    })),
+                            )
+                            // Create button - Primary variant
+                            .child(
+                                Button::new("create-header-btn", "+ Create")
+                                    .variant(ButtonVariant::Primary)
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.on_create_button_click(cx);
+                                    })),
                             ),
                     ),
             )
@@ -924,15 +868,15 @@ impl Render for MainView {
                 let error_count = self.state.bulk_errors.len();
                 this.child(
                     div()
-                        .mx_4()
-                        .mt_2()
-                        .px_4()
-                        .py_2()
-                        .bg(rgb(0x662222))
-                        .rounded_md()
+                        .mx(px(theme::SPACE_4))
+                        .mt(px(theme::SPACE_2))
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_2))
+                        .bg(theme::with_alpha(theme::ember(), 0.15))
+                        .rounded(px(theme::RADIUS_MD))
                         .flex()
                         .flex_col()
-                        .gap_1()
+                        .gap(px(theme::SPACE_1))
                         // Header with dismiss button
                         .child(
                             div()
@@ -941,7 +885,7 @@ impl Render for MainView {
                                 .items_center()
                                 .child(
                                     div()
-                                        .text_color(rgb(0xff6b6b))
+                                        .text_color(theme::ember())
                                         .font_weight(FontWeight::BOLD)
                                         .child(format!(
                                             "{} operation{} failed:",
@@ -950,26 +894,18 @@ impl Render for MainView {
                                         )),
                                 )
                                 .child(
-                                    div()
-                                        .id("dismiss-bulk-errors")
-                                        .px_2()
-                                        .cursor_pointer()
-                                        .text_color(rgb(0xaaaaaa))
-                                        .hover(|style| style.text_color(rgb(0xffffff)))
-                                        .on_mouse_up(
-                                            gpui::MouseButton::Left,
-                                            cx.listener(|view, _, _, cx| {
-                                                view.on_dismiss_bulk_errors(cx);
-                                            }),
-                                        )
-                                        .child("×"),
+                                    Button::new("dismiss-bulk-errors", "×")
+                                        .variant(ButtonVariant::Ghost)
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_dismiss_bulk_errors(cx);
+                                        })),
                                 ),
                         )
                         // Error list
                         .children(self.state.bulk_errors.iter().map(|e| {
                             div()
-                                .text_sm()
-                                .text_color(rgb(0xffaaaa))
+                                .text_size(px(theme::TEXT_SM))
+                                .text_color(theme::with_alpha(theme::ember(), 0.8))
                                 .child(format!("• {}: {}", e.branch, e.message))
                         })),
                 )

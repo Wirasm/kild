@@ -7,13 +7,112 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+/// Error when creating a validated project.
+#[derive(Debug)]
+pub enum ProjectError {
+    /// Path is not a directory.
+    NotADirectory,
+    /// Path is not a git repository.
+    NotAGitRepo,
+    /// Path cannot be canonicalized.
+    CanonicalizationFailed(std::io::Error),
+}
+
+impl std::fmt::Display for ProjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectError::NotADirectory => write!(f, "Path is not a directory"),
+            ProjectError::NotAGitRepo => write!(f, "Path is not a git repository"),
+            ProjectError::CanonicalizationFailed(e) => {
+                write!(f, "Cannot resolve path: {}", e)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProjectError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ProjectError::CanonicalizationFailed(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 /// A project is a git repository where kilds can be created.
+///
+/// Projects are stored with canonical paths to ensure consistent hashing
+/// for filtering. Use [`Project::new`] to create validated projects.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Project {
-    /// File system path to the repository root
-    pub path: PathBuf,
-    /// Display name (defaults to directory name if not set)
-    pub name: String,
+    /// File system path to the repository root (canonical).
+    path: PathBuf,
+    /// Display name (defaults to directory name if not set).
+    name: String,
+}
+
+impl Project {
+    /// Create a new validated project with canonical path.
+    ///
+    /// This validates that the path is a git repository and canonicalizes it
+    /// to ensure consistent hashing for filtering.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Path cannot be canonicalized (doesn't exist or is inaccessible)
+    /// - Path is not a directory
+    /// - Path is not a git repository
+    pub fn new(path: PathBuf, name: Option<String>) -> Result<Self, ProjectError> {
+        // Canonicalize first to get proper path
+        let canonical = path
+            .canonicalize()
+            .map_err(ProjectError::CanonicalizationFailed)?;
+
+        if !canonical.is_dir() {
+            return Err(ProjectError::NotADirectory);
+        }
+
+        if !is_git_repo(&canonical) {
+            return Err(ProjectError::NotAGitRepo);
+        }
+
+        let name = name.unwrap_or_else(|| derive_display_name(&canonical));
+
+        Ok(Self {
+            path: canonical,
+            name,
+        })
+    }
+
+    /// Create a project without validation (for deserialization/migration).
+    ///
+    /// Use [`Project::new`] when adding projects from user input.
+    #[cfg(test)]
+    pub(crate) fn new_unchecked(path: PathBuf, name: String) -> Self {
+        Self { path, name }
+    }
+
+    /// Get the project path (canonical if created via `new()`).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Get the project name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Set the project name.
+    #[allow(dead_code)]
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    /// Set the project path (used during migration).
+    pub(crate) fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
 }
 
 /// Stored projects data.
@@ -154,22 +253,22 @@ pub fn migrate_projects_to_canonical() -> Result<(), String> {
     let mut changed = false;
 
     for project in &mut data.projects {
-        match project.path.canonicalize() {
-            Ok(canonical) if canonical != project.path => {
+        match project.path().canonicalize() {
+            Ok(canonical) if canonical != project.path() => {
                 tracing::info!(
                     event = "ui.projects.path_migrated",
-                    original = %project.path.display(),
+                    original = %project.path().display(),
                     canonical = %canonical.display()
                 );
-                project.path = canonical;
+                project.set_path(canonical);
                 changed = true;
             }
             Ok(_) => {}
             Err(e) => {
                 tracing::warn!(
                     event = "ui.projects.path_canonicalize_failed",
-                    path = %project.path.display(),
-                    project_name = %project.name,
+                    path = %project.path().display(),
+                    project_name = %project.name(),
                     error = %e,
                     "Project path may no longer exist or is inaccessible"
                 );
@@ -224,7 +323,10 @@ fn projects_file_path() -> PathBuf {
 }
 
 /// Validation result for adding a project.
+///
+/// Used by tests to verify validation logic.
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum ProjectValidation {
     Valid,
     NotADirectory,
@@ -233,6 +335,10 @@ pub enum ProjectValidation {
 }
 
 /// Validate a path before adding as a project.
+///
+/// Note: Production code uses `Project::new()` which does validation and canonicalization.
+/// This function is kept for testing individual validation cases.
+#[allow(dead_code)]
 pub fn validate_project_path(path: &Path, existing: &[Project]) -> ProjectValidation {
     if !path.is_dir() {
         return ProjectValidation::NotADirectory;
@@ -240,7 +346,7 @@ pub fn validate_project_path(path: &Path, existing: &[Project]) -> ProjectValida
     if !is_git_repo(path) {
         return ProjectValidation::NotAGitRepo;
     }
-    if existing.iter().any(|p| p.path == path) {
+    if existing.iter().any(|p| p.path() == path) {
         return ProjectValidation::AlreadyExists;
     }
     ProjectValidation::Valid
@@ -306,10 +412,10 @@ mod tests {
             .output()
             .expect("git init failed");
 
-        let existing = vec![Project {
-            path: path.to_path_buf(),
-            name: "test".to_string(),
-        }];
+        let existing = vec![Project::new_unchecked(
+            path.to_path_buf(),
+            "test".to_string(),
+        )];
 
         let result = validate_project_path(path, &existing);
         assert_eq!(result, ProjectValidation::AlreadyExists);
@@ -386,14 +492,14 @@ mod tests {
     fn test_projects_data_serialization_roundtrip() {
         let data = ProjectsData {
             projects: vec![
-                Project {
-                    path: PathBuf::from("/path/to/project-a"),
-                    name: "Project A".to_string(),
-                },
-                Project {
-                    path: PathBuf::from("/path/to/project-b"),
-                    name: "Project B".to_string(),
-                },
+                Project::new_unchecked(
+                    PathBuf::from("/path/to/project-a"),
+                    "Project A".to_string(),
+                ),
+                Project::new_unchecked(
+                    PathBuf::from("/path/to/project-b"),
+                    "Project B".to_string(),
+                ),
             ],
             active: Some(PathBuf::from("/path/to/project-a")),
         };
@@ -406,10 +512,10 @@ mod tests {
 
         // Verify equality
         assert_eq!(loaded.projects.len(), 2);
-        assert_eq!(loaded.projects[0].path, PathBuf::from("/path/to/project-a"));
-        assert_eq!(loaded.projects[0].name, "Project A");
-        assert_eq!(loaded.projects[1].path, PathBuf::from("/path/to/project-b"));
-        assert_eq!(loaded.projects[1].name, "Project B");
+        assert_eq!(loaded.projects[0].path(), Path::new("/path/to/project-a"));
+        assert_eq!(loaded.projects[0].name(), "Project A");
+        assert_eq!(loaded.projects[1].path(), Path::new("/path/to/project-b"));
+        assert_eq!(loaded.projects[1].name(), "Project B");
         assert_eq!(loaded.active, Some(PathBuf::from("/path/to/project-a")));
     }
 
@@ -422,18 +528,12 @@ mod tests {
 
     #[test]
     fn test_project_equality() {
-        let project1 = Project {
-            path: PathBuf::from("/path/to/project"),
-            name: "Project".to_string(),
-        };
-        let project2 = Project {
-            path: PathBuf::from("/path/to/project"),
-            name: "Project".to_string(),
-        };
-        let project3 = Project {
-            path: PathBuf::from("/different/path"),
-            name: "Project".to_string(),
-        };
+        let project1 =
+            Project::new_unchecked(PathBuf::from("/path/to/project"), "Project".to_string());
+        let project2 =
+            Project::new_unchecked(PathBuf::from("/path/to/project"), "Project".to_string());
+        let project3 =
+            Project::new_unchecked(PathBuf::from("/different/path"), "Project".to_string());
 
         assert_eq!(project1, project2);
         assert_ne!(project1, project3);

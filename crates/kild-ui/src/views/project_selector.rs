@@ -2,10 +2,11 @@
 //!
 //! Dropdown for switching between projects and adding new ones.
 
-use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
+use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px};
 
 use crate::projects::Project;
 use crate::state::AppState;
+use crate::theme;
 use crate::views::MainView;
 
 /// Render the project selector dropdown.
@@ -22,11 +23,11 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
         // No projects - show Add Project button
         return div()
             .id("project-selector-empty")
-            .px_3()
-            .py_1()
-            .bg(rgb(0x444444))
-            .hover(|style| style.bg(rgb(0x555555)))
-            .rounded_md()
+            .px(px(theme::SPACE_3))
+            .py(px(theme::SPACE_1))
+            .bg(theme::blade())
+            .hover(|style| style.bg(theme::blade_bright()))
+            .rounded(px(theme::RADIUS_MD))
             .cursor_pointer()
             .on_mouse_up(
                 gpui::MouseButton::Left,
@@ -38,9 +39,9 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                 div()
                     .flex()
                     .items_center()
-                    .gap_1()
-                    .child(div().text_color(rgb(0xffffff)).child("+"))
-                    .child(div().text_color(rgb(0xffffff)).child("Add Project")),
+                    .gap(px(theme::SPACE_1))
+                    .child(div().text_color(theme::text_white()).child("+"))
+                    .child(div().text_color(theme::text_white()).child("Add Project")),
             )
             .into_any_element();
     }
@@ -48,8 +49,8 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
     let active_name = match active_project {
         Some(path) => projects
             .iter()
-            .find(|p| &p.path == path)
-            .map(|p| p.name.clone())
+            .find(|p| p.path() == path)
+            .map(|p| p.name().to_string())
             .unwrap_or_else(|| "Select Project".to_string()),
         None => "All Projects".to_string(),
     };
@@ -64,11 +65,11 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
             // Trigger button
             div()
                 .id("project-selector-trigger")
-                .px_3()
-                .py_1()
-                .bg(rgb(0x444444))
-                .hover(|style| style.bg(rgb(0x555555)))
-                .rounded_md()
+                .px(px(theme::SPACE_3))
+                .py(px(theme::SPACE_1))
+                .bg(theme::blade())
+                .hover(|style| style.bg(theme::blade_bright()))
+                .rounded(px(theme::RADIUS_MD))
                 .cursor_pointer()
                 .on_mouse_up(
                     gpui::MouseButton::Left,
@@ -80,10 +81,10 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                     div()
                         .flex()
                         .items_center()
-                        .gap_2()
+                        .gap(px(theme::SPACE_2))
                         .child(
                             div()
-                                .text_color(rgb(0xffffff))
+                                .text_color(theme::text_white())
                                 .max_w(px(150.0))
                                 .overflow_hidden()
                                 .text_ellipsis()
@@ -91,8 +92,8 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                         )
                         .child(
                             div()
-                                .text_color(rgb(0x888888))
-                                .text_sm()
+                                .text_color(theme::text_subtle())
+                                .text_size(px(theme::TEXT_SM))
                                 .child(if show_dropdown { "▲" } else { "▼" }),
                         ),
                 ),
@@ -107,10 +108,10 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                     .left_0()
                     .min_w(px(200.0))
                     .max_w(px(300.0))
-                    .bg(rgb(0x2d2d2d))
+                    .bg(theme::elevated())
                     .border_1()
-                    .border_color(rgb(0x444444))
-                    .rounded_md()
+                    .border_color(theme::border())
+                    .rounded(px(theme::RADIUS_MD))
                     .shadow_lg()
                     .flex()
                     .flex_col()
@@ -118,9 +119,9 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                     .child(
                         div()
                             .id("project-all")
-                            .px_3()
-                            .py_2()
-                            .hover(|style| style.bg(rgb(0x3d3d3d)))
+                            .px(px(theme::SPACE_3))
+                            .py(px(theme::SPACE_2))
+                            .hover(|style| style.bg(theme::surface()))
                             .cursor_pointer()
                             .on_mouse_up(
                                 gpui::MouseButton::Left,
@@ -128,50 +129,53 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                     view.on_project_select_all(cx);
                                 }),
                             )
-                            .child(
+                            .child({
+                                let is_active = active_for_dropdown.is_none();
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_2()
+                                    .gap(px(theme::SPACE_2))
                                     .child(
                                         div()
                                             .w(px(16.0))
-                                            .text_color(if active_for_dropdown.is_none() {
-                                                rgb(0x4a9eff)
+                                            .text_color(if is_active {
+                                                theme::ice()
                                             } else {
-                                                rgb(0x444444)
+                                                theme::border()
                                             })
-                                            .child(if active_for_dropdown.is_none() {
-                                                "●"
-                                            } else {
-                                                "○"
-                                            }),
+                                            .child(if is_active { "●" } else { "○" }),
                                     )
                                     .child(
                                         div()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(theme::text_white())
                                             .font_weight(FontWeight::MEDIUM)
                                             .child("All Projects"),
-                                    ),
-                            ),
+                                    )
+                            }),
                     )
                     // Divider after "All Projects"
-                    .child(div().h(px(1.0)).bg(rgb(0x444444)).mx_2().my_1())
+                    .child(
+                        div()
+                            .h(px(1.0))
+                            .bg(theme::border_subtle())
+                            .mx(px(theme::SPACE_2))
+                            .my(px(theme::SPACE_1)),
+                    )
                     // Project list
                     .children(
                         projects_for_dropdown
                             .iter()
                             .enumerate()
                             .map(|(idx, project)| {
-                                let path = project.path.clone();
-                                let is_active = active_for_dropdown.as_ref() == Some(&project.path);
-                                let name = project.name.clone();
+                                let path = project.path().to_path_buf();
+                                let is_active = active_for_dropdown.as_ref() == Some(&path);
+                                let name = project.name().to_string();
 
                                 div()
                                     .id(("project-item", idx))
-                                    .px_3()
-                                    .py_2()
-                                    .hover(|style| style.bg(rgb(0x3d3d3d)))
+                                    .px(px(theme::SPACE_3))
+                                    .py(px(theme::SPACE_2))
+                                    .hover(|style| style.bg(theme::surface()))
                                     .cursor_pointer()
                                     .on_mouse_up(gpui::MouseButton::Left, {
                                         let path = path.clone();
@@ -183,20 +187,20 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap_2()
+                                            .gap(px(theme::SPACE_2))
                                             .child(
                                                 div()
                                                     .w(px(16.0))
                                                     .text_color(if is_active {
-                                                        rgb(0x4a9eff)
+                                                        theme::ice()
                                                     } else {
-                                                        rgb(0x444444)
+                                                        theme::border()
                                                     })
                                                     .child(if is_active { "●" } else { "○" }),
                                             )
                                             .child(
                                                 div()
-                                                    .text_color(rgb(0xffffff))
+                                                    .text_color(theme::text_white())
                                                     .overflow_hidden()
                                                     .text_ellipsis()
                                                     .child(name),
@@ -205,14 +209,20 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                             }),
                     )
                     // Divider
-                    .child(div().h(px(1.0)).bg(rgb(0x444444)).mx_2().my_1())
+                    .child(
+                        div()
+                            .h(px(1.0))
+                            .bg(theme::border_subtle())
+                            .mx(px(theme::SPACE_2))
+                            .my(px(theme::SPACE_1)),
+                    )
                     // Add Project option
                     .child(
                         div()
                             .id("project-add-option")
-                            .px_3()
-                            .py_2()
-                            .hover(|style| style.bg(rgb(0x3d3d3d)))
+                            .px(px(theme::SPACE_3))
+                            .py(px(theme::SPACE_2))
+                            .hover(|style| style.bg(theme::surface()))
                             .cursor_pointer()
                             .on_mouse_up(
                                 gpui::MouseButton::Left,
@@ -224,9 +234,11 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_2()
-                                    .child(div().w(px(16.0)).text_color(rgb(0x4a9eff)).child("+"))
-                                    .child(div().text_color(rgb(0xffffff)).child("Add Project")),
+                                    .gap(px(theme::SPACE_2))
+                                    .child(div().w(px(16.0)).text_color(theme::ice()).child("+"))
+                                    .child(
+                                        div().text_color(theme::text_white()).child("Add Project"),
+                                    ),
                             ),
                     )
                     // Remove current option (only if there's an active project)
@@ -235,9 +247,9 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                         this.child(
                             div()
                                 .id("project-remove-option")
-                                .px_3()
-                                .py_2()
-                                .hover(|style| style.bg(rgb(0x3d3d3d)))
+                                .px(px(theme::SPACE_3))
+                                .py(px(theme::SPACE_2))
+                                .hover(|style| style.bg(theme::surface()))
                                 .cursor_pointer()
                                 .on_mouse_up(gpui::MouseButton::Left, {
                                     cx.listener(move |view, _, _, cx| {
@@ -248,12 +260,14 @@ pub fn render_project_selector(state: &AppState, cx: &mut Context<MainView>) -> 
                                     div()
                                         .flex()
                                         .items_center()
-                                        .gap_2()
+                                        .gap(px(theme::SPACE_2))
                                         .child(
-                                            div().w(px(16.0)).text_color(rgb(0xff6b6b)).child("−"),
+                                            div().w(px(16.0)).text_color(theme::ember()).child("−"),
                                         )
                                         .child(
-                                            div().text_color(rgb(0xff6b6b)).child("Remove current"),
+                                            div()
+                                                .text_color(theme::ember())
+                                                .child("Remove current"),
                                         ),
                                 ),
                         )

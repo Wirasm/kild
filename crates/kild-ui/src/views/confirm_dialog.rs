@@ -2,9 +2,11 @@
 //!
 //! Modal dialog that asks the user to confirm before destroying a kild.
 
-use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
+use gpui::{Context, IntoElement, div, prelude::*, px};
 
+use crate::components::{Button, ButtonVariant, Modal};
 use crate::state::AppState;
+use crate::theme;
 use crate::views::MainView;
 
 /// Render the confirmation dialog for destroying a kild.
@@ -24,122 +26,68 @@ pub fn render_confirm_dialog(state: &AppState, cx: &mut Context<MainView>) -> im
     });
     let confirm_error = state.confirm_error.clone();
 
-    // Overlay background
-    div()
-        .id("confirm-dialog-overlay")
-        .absolute()
-        .inset_0()
-        .bg(gpui::rgba(0x000000aa))
-        .flex()
-        .justify_center()
-        .items_center()
-        // Dialog box
-        .child(
+    Modal::new("confirm-dialog", "Destroy KILD?")
+        .body(
             div()
-                .id("confirm-dialog-box")
-                .w(px(400.0))
-                .bg(rgb(0x2d2d2d))
-                .rounded_lg()
-                .border_1()
-                .border_color(rgb(0x444444))
                 .flex()
                 .flex_col()
-                // Title bar
+                .gap(px(theme::SPACE_3))
                 .child(
                     div()
-                        .px_4()
-                        .py_3()
-                        .border_b_1()
-                        .border_color(rgb(0x444444))
-                        .child(
-                            div()
-                                .text_lg()
-                                .text_color(rgb(0xffffff))
-                                .child("Destroy KILD?"),
-                        ),
+                        .text_color(theme::text_bright())
+                        .child(format!("Destroy '{branch}'?")),
                 )
-                // Warning message
                 .child(
                     div()
-                        .px_4()
-                        .py_4()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
+                        .text_color(theme::text_subtle())
+                        .text_size(px(theme::TEXT_SM))
                         .child(
-                            div()
-                                .text_color(rgb(0xffffff))
-                                .child(format!("Destroy '{branch}'?")),
-                        )
-                        .child(div().text_color(rgb(0xaaaaaa)).text_sm().child(
                             "This will delete the working directory and stop any running agent.",
-                        ))
-                        .child(
-                            div()
-                                .text_color(rgb(0xff6b6b))
-                                .text_sm()
-                                .child("This cannot be undone."),
-                        )
-                        // Error message (if any)
-                        .when_some(confirm_error, |this, error| {
-                            this.child(
-                                div()
-                                    .px_3()
-                                    .py_2()
-                                    .bg(rgb(0x3d1e1e))
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgb(0x662222))
-                                    .child(div().text_sm().text_color(rgb(0xff6b6b)).child(error)),
-                            )
-                        }),
+                        ),
                 )
-                // Button row
                 .child(
                     div()
-                        .px_4()
-                        .py_3()
-                        .border_t_1()
-                        .border_color(rgb(0x444444))
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        // Cancel button (gray)
-                        .child(
-                            div()
-                                .id("confirm-cancel-btn")
-                                .px_4()
-                                .py_2()
-                                .bg(rgb(0x444444))
-                                .hover(|style| style.bg(rgb(0x555555)))
-                                .rounded_md()
-                                .cursor_pointer()
-                                .on_mouse_up(
-                                    gpui::MouseButton::Left,
-                                    cx.listener(|view, _, _, cx| {
-                                        view.on_confirm_cancel(cx);
-                                    }),
-                                )
-                                .child(div().text_color(rgb(0xffffff)).child("Cancel")),
-                        )
-                        // Destroy button (red/danger)
-                        .child(
-                            div()
-                                .id("confirm-destroy-btn")
-                                .px_4()
-                                .py_2()
-                                .bg(rgb(0xcc4444))
-                                .hover(|style| style.bg(rgb(0xdd5555)))
-                                .rounded_md()
-                                .cursor_pointer()
-                                .on_mouse_up(
-                                    gpui::MouseButton::Left,
-                                    cx.listener(|view, _, _, cx| {
-                                        view.on_confirm_destroy(cx);
-                                    }),
-                                )
-                                .child(div().text_color(rgb(0xffffff)).child("Destroy")),
-                        ),
+                        .text_color(theme::ember())
+                        .text_size(px(theme::TEXT_SM))
+                        .child("This cannot be undone."),
+                )
+                // Error message (if any)
+                .when_some(confirm_error, |this, error| {
+                    this.child(
+                        div()
+                            .px(px(theme::SPACE_3))
+                            .py(px(theme::SPACE_2))
+                            .bg(theme::with_alpha(theme::ember(), 0.2))
+                            .rounded(px(theme::RADIUS_MD))
+                            .border_1()
+                            .border_color(theme::ember())
+                            .child(
+                                div()
+                                    .text_size(px(theme::TEXT_SM))
+                                    .text_color(theme::ember())
+                                    .child(error),
+                            ),
+                    )
+                }),
+        )
+        .footer(
+            div()
+                .flex()
+                .justify_end()
+                .gap(px(theme::SPACE_2))
+                .child(
+                    Button::new("confirm-cancel-btn", "Cancel")
+                        .variant(ButtonVariant::Secondary)
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.on_confirm_cancel(cx);
+                        })),
+                )
+                .child(
+                    Button::new("confirm-destroy-btn", "Destroy")
+                        .variant(ButtonVariant::Danger)
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.on_confirm_destroy(cx);
+                        })),
                 ),
         )
 }

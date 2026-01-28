@@ -39,10 +39,10 @@ impl ButtonVariant {
         match self {
             ButtonVariant::Primary => theme::ice(),
             ButtonVariant::Secondary => theme::surface(),
-            ButtonVariant::Ghost => theme::with_alpha(theme::void(), 0.0),
+            ButtonVariant::Ghost => theme::transparent(),
             ButtonVariant::Success => theme::aurora(),
             ButtonVariant::Warning => theme::copper(),
-            ButtonVariant::Danger => theme::with_alpha(theme::void(), 0.0),
+            ButtonVariant::Danger => theme::transparent(),
         }
     }
 
@@ -54,7 +54,7 @@ impl ButtonVariant {
             ButtonVariant::Ghost => theme::surface(),
             ButtonVariant::Success => theme::aurora_dim(),
             ButtonVariant::Warning => theme::copper_dim(),
-            ButtonVariant::Danger => theme::with_alpha(theme::ember(), 0.15),
+            ButtonVariant::Danger => theme::with_alpha(theme::ember(), theme::GLOW_ALPHA),
         }
     }
 
@@ -75,13 +75,14 @@ impl ButtonVariant {
 
     /// Get the border color for this variant.
     ///
-    /// Returns transparent for variants without borders (Primary, Ghost, Success, Warning).
+    /// All buttons have a 1px border applied. This method returns transparent
+    /// for variants that should appear borderless (Primary, Ghost, Success, Warning).
     /// Secondary and Danger variants have visible borders.
     fn border_color(&self) -> Rgba {
         match self {
             ButtonVariant::Secondary => theme::border(),
             ButtonVariant::Danger => theme::ember(),
-            _ => theme::with_alpha(theme::void(), 0.0),
+            _ => theme::transparent(),
         }
     }
 }
