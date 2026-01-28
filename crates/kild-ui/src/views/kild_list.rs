@@ -479,8 +479,6 @@ mod tests {
             add_project_error: None,
         };
 
-        assert!(state.projects.is_empty());
-        assert!(state.displays.is_empty());
         assert!(should_show_welcome(&state));
     }
 
@@ -542,9 +540,6 @@ mod tests {
             add_project_error: None,
         };
 
-        assert!(state.projects.is_empty());
-        assert!(!state.displays.is_empty());
-        // This is the bug fix: welcome should NOT show when kilds exist
         assert!(!should_show_welcome(&state));
     }
 }
