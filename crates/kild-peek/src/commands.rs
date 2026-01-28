@@ -150,7 +150,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
                 let path = PathBuf::from(path);
                 save_to_file(&result, &path)?;
                 println!("Screenshot saved: {}", path.display());
-                println!("  Size: {}x{}", result.width, result.height);
+                println!("  Size: {}x{}", result.width(), result.height());
                 println!("  Format: {}", format_str);
             } else if use_base64 {
                 // Output base64 to stdout
@@ -159,8 +159,8 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
 
             info!(
                 event = "cli.screenshot_completed",
-                width = result.width,
-                height = result.height
+                width = result.width(),
+                height = result.height()
             );
             Ok(())
         }
@@ -195,7 +195,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
-                let status = if result.is_similar {
+                let status = if result.is_similar() {
                     "SIMILAR"
                 } else {
                     "DIFFERENT"
@@ -203,18 +203,18 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 println!("Image comparison: {}", status);
                 println!("  Similarity: {}", result.similarity_percent());
                 println!("  Threshold: {}%", threshold_percent);
-                println!("  Image 1: {}x{}", result.width1, result.height1);
-                println!("  Image 2: {}x{}", result.width2, result.height2);
+                println!("  Image 1: {}x{}", result.width1(), result.height1());
+                println!("  Image 2: {}x{}", result.width2(), result.height2());
             }
 
             info!(
                 event = "cli.diff_completed",
-                similarity = result.similarity,
-                is_similar = result.is_similar
+                similarity = result.similarity(),
+                is_similar = result.is_similar()
             );
 
             // Exit with code 1 if images are different (for CI/scripting)
-            if !result.is_similar {
+            if !result.is_similar() {
                 std::process::exit(1);
             }
 
@@ -290,7 +290,7 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             eprintln!("Assertion error: {}", e);
             error!(event = "cli.assert_failed", error = %e);
             events::log_app_error(&e);
-            std::process::exit(1);
+            Err(e.into())
         }
     }
 }

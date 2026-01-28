@@ -17,7 +17,7 @@ pub fn run_assertion(assertion: &Assertion) -> Result<AssertionResult, AssertErr
             query: _,
         } => {
             // Element inspection requires accessibility APIs which we're deferring
-            // For now, return a meaningful error
+            // For now, return a failed assertion result explaining the limitation
             Ok(AssertionResult::fail(
                 "Element assertions require accessibility APIs (not yet implemented)",
             ))
@@ -48,25 +48,42 @@ fn assert_window_exists(title: &str) -> Result<AssertionResult, AssertError> {
     match find_window_by_title(title) {
         Ok(window) => Ok(AssertionResult::pass(format!(
             "Window '{}' exists (id: {}, {}x{})",
-            window.title, window.id, window.width, window.height
+            window.title(),
+            window.id(),
+            window.width(),
+            window.height()
         ))
         .with_details(serde_json::json!({
-            "window_id": window.id,
-            "window_title": window.title,
-            "width": window.width,
-            "height": window.height,
+            "window_id": window.id(),
+            "window_title": window.title(),
+            "width": window.width(),
+            "height": window.height(),
         }))),
         Err(_) => {
             // List available windows for debugging
-            let available = list_windows()
-                .map(|windows| windows.iter().map(|w| w.title.clone()).collect::<Vec<_>>())
-                .unwrap_or_default();
+            let available = match list_windows() {
+                Ok(windows) => {
+                    let titles: Vec<_> = windows
+                        .iter()
+                        .map(|w| w.title().to_string())
+                        .take(10)
+                        .collect();
+                    serde_json::json!(titles)
+                }
+                Err(e) => {
+                    warn!(
+                        event = "core.assert.list_windows_failed_during_error_reporting",
+                        error = %e
+                    );
+                    serde_json::json!("enumeration_failed")
+                }
+            };
 
             Ok(
                 AssertionResult::fail(format!("Window '{}' not found", title)).with_details(
                     serde_json::json!({
                         "searched_title": title,
-                        "available_windows": available.into_iter().take(10).collect::<Vec<_>>(),
+                        "available_windows": available,
                     }),
                 ),
             )
@@ -77,25 +94,28 @@ fn assert_window_exists(title: &str) -> Result<AssertionResult, AssertError> {
 fn assert_window_visible(title: &str) -> Result<AssertionResult, AssertError> {
     match find_window_by_title(title) {
         Ok(window) => {
-            if window.is_minimized {
+            if window.is_minimized() {
                 Ok(
                     AssertionResult::fail(format!("Window '{}' exists but is minimized", title))
                         .with_details(serde_json::json!({
-                            "window_id": window.id,
-                            "window_title": window.title,
+                            "window_id": window.id(),
+                            "window_title": window.title(),
                             "is_minimized": true,
                         })),
                 )
             } else {
                 Ok(AssertionResult::pass(format!(
                     "Window '{}' is visible (id: {}, {}x{})",
-                    window.title, window.id, window.width, window.height
+                    window.title(),
+                    window.id(),
+                    window.width(),
+                    window.height()
                 ))
                 .with_details(serde_json::json!({
-                    "window_id": window.id,
-                    "window_title": window.title,
-                    "width": window.width,
-                    "height": window.height,
+                    "window_id": window.id(),
+                    "window_title": window.title(),
+                    "width": window.width(),
+                    "height": window.height(),
                     "is_minimized": false,
                 })))
             }
@@ -119,25 +139,25 @@ fn assert_image_similar(
 
     match compare_images(&request) {
         Ok(diff_result) => {
-            if diff_result.is_similar {
+            if diff_result.is_similar() {
                 Ok(AssertionResult::pass(format!(
                     "Images are similar ({}% similarity, threshold: {}%)",
-                    (diff_result.similarity * 100.0).round(),
+                    (diff_result.similarity() * 100.0).round(),
                     (threshold * 100.0).round()
                 ))
                 .with_details(serde_json::json!({
-                    "similarity": diff_result.similarity,
+                    "similarity": diff_result.similarity(),
                     "threshold": threshold,
                     "is_similar": true,
                 })))
             } else {
                 Ok(AssertionResult::fail(format!(
                     "Images are not similar enough ({}% similarity, threshold: {}%)",
-                    (diff_result.similarity * 100.0).round(),
+                    (diff_result.similarity() * 100.0).round(),
                     (threshold * 100.0).round()
                 ))
                 .with_details(serde_json::json!({
-                    "similarity": diff_result.similarity,
+                    "similarity": diff_result.similarity(),
                     "threshold": threshold,
                     "is_similar": false,
                 })))

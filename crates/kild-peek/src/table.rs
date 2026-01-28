@@ -6,13 +6,13 @@ pub fn print_windows_table(windows: &[WindowInfo]) {
     let id_width = 6;
     let title_width = windows
         .iter()
-        .map(|w| w.title.chars().count())
+        .map(|w| w.title().chars().count())
         .max()
         .unwrap_or(5)
         .clamp(5, 40);
     let app_width = windows
         .iter()
-        .map(|w| w.app_name.chars().count())
+        .map(|w| w.app_name().chars().count())
         .max()
         .unwrap_or(3)
         .clamp(3, 20);
@@ -57,9 +57,9 @@ pub fn print_windows_table(windows: &[WindowInfo]) {
 
     // Rows
     for window in windows {
-        let size = format!("{}x{}", window.width, window.height);
-        let pos = format!("x:{} y:{}", window.x, window.y);
-        let status = if window.is_minimized {
+        let size = format!("{}x{}", window.width(), window.height());
+        let pos = format!("x:{} y:{}", window.x(), window.y());
+        let status = if window.is_minimized() {
             "Minimized"
         } else {
             "Visible"
@@ -67,9 +67,9 @@ pub fn print_windows_table(windows: &[WindowInfo]) {
 
         println!(
             "│ {:<id_width$} │ {:<title_width$} │ {:<app_width$} │ {:<size_width$} │ {:<pos_width$} │ {:<status_width$} │",
-            window.id,
-            truncate(&window.title, title_width),
-            truncate(&window.app_name, app_width),
+            window.id(),
+            truncate(window.title(), title_width),
+            truncate(window.app_name(), app_width),
             truncate(&size, size_width),
             truncate(&pos, pos_width),
             status,
@@ -101,7 +101,7 @@ pub fn print_monitors_table(monitors: &[MonitorInfo]) {
     let id_width = 5;
     let name_width = monitors
         .iter()
-        .map(|m| m.name.chars().count())
+        .map(|m| m.name().chars().count())
         .max()
         .unwrap_or(4)
         .clamp(4, 30);
@@ -142,14 +142,14 @@ pub fn print_monitors_table(monitors: &[MonitorInfo]) {
 
     // Rows
     for monitor in monitors {
-        let size = format!("{}x{}", monitor.width, monitor.height);
-        let pos = format!("x:{} y:{}", monitor.x, monitor.y);
-        let primary = if monitor.is_primary { "Yes" } else { "No" };
+        let size = format!("{}x{}", monitor.width(), monitor.height());
+        let pos = format!("x:{} y:{}", monitor.x(), monitor.y());
+        let primary = if monitor.is_primary() { "Yes" } else { "No" };
 
         println!(
             "│ {:<id_width$} │ {:<name_width$} │ {:<size_width$} │ {:<pos_width$} │ {:<primary_width$} │",
-            monitor.id,
-            truncate(&monitor.name, name_width),
+            monitor.id(),
+            truncate(monitor.name(), name_width),
             truncate(&size, size_width),
             truncate(&pos, pos_width),
             primary,

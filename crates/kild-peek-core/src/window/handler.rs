@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use super::errors::WindowError;
 use super::types::{MonitorInfo, WindowInfo};
@@ -11,17 +11,85 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
         message: e.to_string(),
     })?;
 
+    let mut skipped_count = 0;
+    let mut tiny_count = 0;
+
     let result: Vec<WindowInfo> = windows
         .into_iter()
         .filter_map(|w| {
-            let id = w.id().ok()?;
-            let x = w.x().ok()?;
-            let y = w.y().ok()?;
-            let width = w.width().ok()?;
-            let height = w.height().ok()?;
+            // Get required properties, tracking failures
+            let id = match w.id() {
+                Ok(id) => id,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.property_access_failed",
+                        property = "id",
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let x = match w.x() {
+                Ok(x) => x,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.property_access_failed",
+                        property = "x",
+                        window_id = id,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let y = match w.y() {
+                Ok(y) => y,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.property_access_failed",
+                        property = "y",
+                        window_id = id,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let width = match w.width() {
+                Ok(w) => w,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.property_access_failed",
+                        property = "width",
+                        window_id = id,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let height = match w.height() {
+                Ok(h) => h,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.property_access_failed",
+                        property = "height",
+                        window_id = id,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
 
             // Skip tiny windows (likely invisible/system windows)
             if width < 10 || height < 10 {
+                tiny_count += 1;
                 return None;
             }
 
@@ -39,20 +107,39 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
                 title
             };
 
-            let is_minimized = w.is_minimized().ok().unwrap_or(false);
+            let is_minimized = match w.is_minimized() {
+                Ok(minimized) => minimized,
+                Err(e) => {
+                    debug!(
+                        event = "core.window.is_minimized_check_failed",
+                        window_id = id,
+                        error = %e
+                    );
+                    false
+                }
+            };
 
-            Some(WindowInfo {
+            Some(WindowInfo::new(
                 id,
-                title: display_title,
+                display_title,
                 app_name,
                 x,
                 y,
                 width,
                 height,
                 is_minimized,
-            })
+            ))
         })
         .collect();
+
+    if skipped_count > 0 {
+        warn!(
+            event = "core.window.list_incomplete",
+            skipped_count = skipped_count,
+            tiny_count = tiny_count,
+            returned_count = result.len()
+        );
+    }
 
     info!(event = "core.window.list_completed", count = result.len());
     Ok(result)
@@ -66,28 +153,95 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, WindowError> {
         message: e.to_string(),
     })?;
 
+    let mut skipped_count = 0;
+
     let result: Vec<MonitorInfo> = monitors
         .into_iter()
         .enumerate()
         .filter_map(|(idx, m)| {
             let name = m.name().unwrap_or_else(|_| format!("Monitor {}", idx));
-            let x = m.x().ok()?;
-            let y = m.y().ok()?;
-            let width = m.width().ok()?;
-            let height = m.height().ok()?;
-            let is_primary = m.is_primary().unwrap_or(false);
 
-            Some(MonitorInfo {
-                id: idx as u32,
-                name,
-                x,
-                y,
-                width,
-                height,
-                is_primary,
-            })
+            let x = match m.x() {
+                Ok(x) => x,
+                Err(e) => {
+                    debug!(
+                        event = "core.monitor.property_access_failed",
+                        property = "x",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let y = match m.y() {
+                Ok(y) => y,
+                Err(e) => {
+                    debug!(
+                        event = "core.monitor.property_access_failed",
+                        property = "y",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let width = match m.width() {
+                Ok(w) => w,
+                Err(e) => {
+                    debug!(
+                        event = "core.monitor.property_access_failed",
+                        property = "width",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let height = match m.height() {
+                Ok(h) => h,
+                Err(e) => {
+                    debug!(
+                        event = "core.monitor.property_access_failed",
+                        property = "height",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    skipped_count += 1;
+                    return None;
+                }
+            };
+
+            let is_primary = match m.is_primary() {
+                Ok(primary) => primary,
+                Err(e) => {
+                    debug!(
+                        event = "core.monitor.is_primary_check_failed",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    false
+                }
+            };
+
+            Some(MonitorInfo::new(
+                idx as u32, name, x, y, width, height, is_primary,
+            ))
         })
         .collect();
+
+    if skipped_count > 0 {
+        warn!(
+            event = "core.monitor.list_incomplete",
+            skipped_count = skipped_count,
+            returned_count = result.len()
+        );
+    }
 
     info!(event = "core.monitor.list_completed", count = result.len());
     Ok(result)
@@ -139,16 +293,17 @@ pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
                 found_id = id
             );
 
-            return Ok(WindowInfo {
+            // Use max(1, value) to ensure non-zero dimensions for the constructor
+            return Ok(WindowInfo::new(
                 id,
-                title: display_title,
+                display_title,
                 app_name,
                 x,
                 y,
-                width,
-                height,
+                width.max(1),
+                height.max(1),
                 is_minimized,
-            });
+            ));
         }
     }
 
@@ -165,13 +320,13 @@ pub fn find_window_by_id(id: u32) -> Result<WindowInfo, WindowError> {
 
     let window = windows
         .into_iter()
-        .find(|w| w.id == id)
+        .find(|w| w.id() == id)
         .ok_or(WindowError::WindowNotFoundById { id })?;
 
     info!(
         event = "core.window.find_by_id_completed",
         id = id,
-        title = window.title
+        title = window.title()
     );
     Ok(window)
 }
@@ -190,7 +345,7 @@ pub fn get_monitor(index: usize) -> Result<MonitorInfo, WindowError> {
     info!(
         event = "core.monitor.get_completed",
         index = index,
-        name = monitor.name
+        name = monitor.name()
     );
     Ok(monitor)
 }
@@ -201,18 +356,21 @@ pub fn get_primary_monitor() -> Result<MonitorInfo, WindowError> {
 
     let monitors = list_monitors()?;
 
-    let monitor = monitors
-        .into_iter()
-        .find(|m| m.is_primary)
-        .or_else(|| {
-            // Fall back to first monitor if no primary is set
-            list_monitors().ok().and_then(|m| m.into_iter().next())
-        })
-        .ok_or(WindowError::MonitorNotFound { index: 0 })?;
+    // First try to find primary monitor
+    let monitor = if let Some(primary) = monitors.iter().find(|m| m.is_primary()).cloned() {
+        primary
+    } else {
+        // Fall back to first monitor if no primary is set
+        warn!(event = "core.monitor.no_primary_found_using_fallback");
+        monitors
+            .into_iter()
+            .next()
+            .ok_or(WindowError::MonitorNotFound { index: 0 })?
+    };
 
     info!(
         event = "core.monitor.get_primary_completed",
-        name = monitor.name
+        name = monitor.name()
     );
     Ok(monitor)
 }
@@ -254,5 +412,50 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.error_code(), "WINDOW_NOT_FOUND_BY_ID");
         }
+    }
+
+    #[test]
+    fn test_get_monitor_not_found() {
+        let result = get_monitor(999);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "MONITOR_NOT_FOUND");
+        }
+    }
+
+    #[test]
+    fn test_window_info_getters() {
+        let window = WindowInfo::new(
+            123,
+            "Test Title".to_string(),
+            "TestApp".to_string(),
+            100,
+            200,
+            800,
+            600,
+            false,
+        );
+
+        assert_eq!(window.id(), 123);
+        assert_eq!(window.title(), "Test Title");
+        assert_eq!(window.app_name(), "TestApp");
+        assert_eq!(window.x(), 100);
+        assert_eq!(window.y(), 200);
+        assert_eq!(window.width(), 800);
+        assert_eq!(window.height(), 600);
+        assert!(!window.is_minimized());
+    }
+
+    #[test]
+    fn test_monitor_info_getters() {
+        let monitor = MonitorInfo::new(0, "Main Display".to_string(), 0, 0, 2560, 1440, true);
+
+        assert_eq!(monitor.id(), 0);
+        assert_eq!(monitor.name(), "Main Display");
+        assert_eq!(monitor.x(), 0);
+        assert_eq!(monitor.y(), 0);
+        assert_eq!(monitor.width(), 2560);
+        assert_eq!(monitor.height(), 1440);
+        assert!(monitor.is_primary());
     }
 }

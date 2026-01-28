@@ -5,7 +5,16 @@ use tracing::info;
 use super::errors::DiffError;
 use super::types::{DiffRequest, DiffResult};
 
-/// Compare two images and calculate their similarity
+/// Compare two images and calculate their similarity using SSIM (Structural Similarity Index)
+///
+/// # Errors
+///
+/// Returns [`DiffError::ImageLoadFailed`] if either image cannot be loaded (file not found,
+/// invalid format, or permission denied).
+///
+/// Returns [`DiffError::DimensionMismatch`] if the images have different dimensions.
+///
+/// Returns [`DiffError::ComparisonFailed`] if the SSIM calculation fails.
 pub fn compare_images(request: &DiffRequest) -> Result<DiffResult, DiffError> {
     info!(
         event = "core.diff.compare_started",
@@ -47,23 +56,23 @@ pub fn compare_images(request: &DiffRequest) -> Result<DiffResult, DiffError> {
         .map_err(|e| DiffError::ComparisonFailed(e.to_string()))?;
 
     let similarity = result.score;
-    let is_similar = similarity >= request.threshold;
 
-    info!(
-        event = "core.diff.compare_completed",
-        similarity = similarity,
-        is_similar = is_similar
-    );
-
-    Ok(DiffResult {
+    let diff_result = DiffResult::new(
         similarity,
-        is_similar,
         width1,
         height1,
         width2,
         height2,
-        threshold: request.threshold,
-    })
+        request.threshold,
+    );
+
+    info!(
+        event = "core.diff.compare_completed",
+        similarity = similarity,
+        is_similar = diff_result.is_similar()
+    );
+
+    Ok(diff_result)
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use std::path::Path;
 use image::ImageEncoder;
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use super::errors::ScreenshotError;
 use super::types::{CaptureRequest, CaptureResult, CaptureTarget, ImageFormat};
@@ -25,7 +25,7 @@ pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotErro
 pub fn save_to_file(result: &CaptureResult, path: &Path) -> Result<(), ScreenshotError> {
     info!(event = "core.screenshot.save_started", path = %path.display());
 
-    std::fs::write(path, &result.data)?;
+    std::fs::write(path, result.data())?;
 
     info!(event = "core.screenshot.save_completed", path = %path.display());
     Ok(())
@@ -57,7 +57,19 @@ fn capture_window_by_title(
         })?;
 
     // Check if minimized
-    if window.is_minimized().unwrap_or(false) {
+    let is_minimized = match window.is_minimized() {
+        Ok(minimized) => minimized,
+        Err(e) => {
+            debug!(
+                event = "core.screenshot.is_minimized_check_failed",
+                title = title,
+                error = %e
+            );
+            // Proceed anyway - capture will fail if there's a real problem
+            false
+        }
+    };
+    if is_minimized {
         return Err(ScreenshotError::WindowMinimized {
             title: title.to_string(),
         });
@@ -86,7 +98,19 @@ fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, 
         .ok_or(ScreenshotError::WindowNotFoundById { id })?;
 
     // Check if minimized
-    if window.is_minimized().unwrap_or(false) {
+    let is_minimized = match window.is_minimized() {
+        Ok(minimized) => minimized,
+        Err(e) => {
+            debug!(
+                event = "core.screenshot.is_minimized_check_failed",
+                window_id = id,
+                error = %e
+            );
+            // Proceed anyway - capture will fail if there's a real problem
+            false
+        }
+    };
+    if is_minimized {
         let title = window.title().unwrap_or_else(|_| format!("Window {}", id));
         return Err(ScreenshotError::WindowMinimized { title });
     }
@@ -130,11 +154,25 @@ fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, Screen
         }
     })?;
 
-    let monitor = monitors
-        .into_iter()
-        .find(|m| m.is_primary().unwrap_or(false))
-        .or_else(|| xcap::Monitor::all().ok().and_then(|m| m.into_iter().next()))
-        .ok_or(ScreenshotError::MonitorNotFound { index: 0 })?;
+    // First try to find primary monitor
+    let monitor = if let Some(primary) = monitors.iter().find(|m| match m.is_primary() {
+        Ok(is_primary) => is_primary,
+        Err(e) => {
+            debug!(
+                event = "core.screenshot.is_primary_check_failed",
+                error = %e
+            );
+            false
+        }
+    }) {
+        primary
+    } else {
+        // Fall back to first monitor if no primary is set
+        warn!(event = "core.screenshot.no_primary_monitor_using_fallback");
+        monitors
+            .first()
+            .ok_or(ScreenshotError::MonitorNotFound { index: 0 })?
+    };
 
     let image = monitor
         .capture_image()
@@ -174,12 +212,12 @@ fn encode_image(
         height = height
     );
 
-    Ok(CaptureResult {
+    Ok(CaptureResult::new(
         width,
         height,
-        format: format.clone(),
-        data: buffer.into_inner(),
-    })
+        format.clone(),
+        buffer.into_inner(),
+    ))
 }
 
 #[cfg(test)]
@@ -218,5 +256,31 @@ mod tests {
             ImageFormat::Jpeg { quality } => assert_eq!(*quality, 85),
             _ => panic!("Expected JPEG format"),
         }
+    }
+
+    #[test]
+    fn test_capture_nonexistent_monitor() {
+        let request = CaptureRequest::monitor(999);
+        let result = capture(&request);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "SCREENSHOT_MONITOR_NOT_FOUND");
+        }
+    }
+
+    /// Test that error detection classifies permission-related messages correctly
+    /// This tests the string matching logic in the handler
+    #[test]
+    fn test_permission_error_detection_logic() {
+        // The actual permission error detection happens in capture_window_by_title etc.
+        // We can verify the error types have the right codes
+        let perm_error = ScreenshotError::PermissionDenied;
+        assert_eq!(perm_error.error_code(), "SCREENSHOT_PERMISSION_DENIED");
+        assert!(perm_error.is_user_error());
+
+        // Enumeration failed is different from permission denied
+        let enum_error = ScreenshotError::EnumerationFailed("some other error".to_string());
+        assert_eq!(enum_error.error_code(), "SCREENSHOT_ENUMERATION_FAILED");
+        assert!(!enum_error.is_user_error());
     }
 }

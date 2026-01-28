@@ -196,4 +196,34 @@ mod tests {
         assert!(!result.passed);
         assert!(result.details.is_some());
     }
+
+    #[test]
+    fn test_assertion_image_similar_threshold_clamped() {
+        // Threshold > 1.0 should be clamped to 1.0
+        let assertion_high = Assertion::image_similar("/path/a.png", "/path/b.png", 1.5);
+        match assertion_high {
+            Assertion::ImageSimilar { threshold, .. } => {
+                assert!((threshold - 1.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected ImageSimilar"),
+        }
+
+        // Threshold < 0.0 should be clamped to 0.0
+        let assertion_low = Assertion::image_similar("/path/a.png", "/path/b.png", -0.5);
+        match assertion_low {
+            Assertion::ImageSimilar { threshold, .. } => {
+                assert!(threshold.abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected ImageSimilar"),
+        }
+
+        // Normal threshold should be preserved
+        let assertion_normal = Assertion::image_similar("/path/a.png", "/path/b.png", 0.85);
+        match assertion_normal {
+            Assertion::ImageSimilar { threshold, .. } => {
+                assert!((threshold - 0.85).abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected ImageSimilar"),
+        }
+    }
 }

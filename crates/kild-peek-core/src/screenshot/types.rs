@@ -73,22 +73,60 @@ impl CaptureRequest {
         self.format = format;
         self
     }
+
+    /// Set JPEG format with quality clamped to valid range (0-100)
+    pub fn with_jpeg_quality(mut self, quality: u8) -> Self {
+        self.format = ImageFormat::Jpeg {
+            quality: quality.min(100),
+        };
+        self
+    }
 }
 
 /// Result of a screenshot capture
 #[derive(Debug)]
 pub struct CaptureResult {
-    /// Image width in pixels
-    pub width: u32,
-    /// Image height in pixels
-    pub height: u32,
-    /// Output format
-    pub format: ImageFormat,
-    /// Encoded image bytes (PNG or JPEG)
-    pub data: Vec<u8>,
+    width: u32,
+    height: u32,
+    format: ImageFormat,
+    data: Vec<u8>,
 }
 
 impl CaptureResult {
+    /// Create a new capture result. Internal use only.
+    pub(crate) fn new(width: u32, height: u32, format: ImageFormat, data: Vec<u8>) -> Self {
+        debug_assert!(width > 0, "Width must be positive");
+        debug_assert!(height > 0, "Height must be positive");
+        debug_assert!(!data.is_empty(), "Data must not be empty");
+
+        Self {
+            width,
+            height,
+            format,
+            data,
+        }
+    }
+
+    /// Image width in pixels
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Image height in pixels
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Output format
+    pub fn format(&self) -> &ImageFormat {
+        &self.format
+    }
+
+    /// Encoded image bytes (PNG or JPEG)
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     /// Convert the captured image to a base64 string
     pub fn to_base64(&self) -> String {
         STANDARD.encode(&self.data)
@@ -132,44 +170,63 @@ mod tests {
 
     #[test]
     fn test_capture_result_mime_type() {
-        let png_result = CaptureResult {
-            width: 100,
-            height: 100,
-            format: ImageFormat::Png,
-            data: vec![],
-        };
+        let png_result = CaptureResult::new(100, 100, ImageFormat::Png, vec![0x89]);
         assert_eq!(png_result.mime_type(), "image/png");
 
-        let jpg_result = CaptureResult {
-            width: 100,
-            height: 100,
-            format: ImageFormat::Jpeg { quality: 85 },
-            data: vec![],
-        };
+        let jpg_result =
+            CaptureResult::new(100, 100, ImageFormat::Jpeg { quality: 85 }, vec![0xFF]);
         assert_eq!(jpg_result.mime_type(), "image/jpeg");
     }
 
     #[test]
     fn test_capture_result_to_base64() {
-        let result = CaptureResult {
-            width: 1,
-            height: 1,
-            format: ImageFormat::Png,
-            data: vec![0x89, 0x50, 0x4E, 0x47], // PNG magic bytes
-        };
+        let result = CaptureResult::new(
+            1,
+            1,
+            ImageFormat::Png,
+            vec![0x89, 0x50, 0x4E, 0x47], // PNG magic bytes
+        );
         let base64 = result.to_base64();
         assert!(!base64.is_empty());
     }
 
     #[test]
     fn test_capture_result_to_data_uri() {
-        let result = CaptureResult {
-            width: 1,
-            height: 1,
-            format: ImageFormat::Png,
-            data: vec![0x89, 0x50, 0x4E, 0x47],
-        };
+        let result = CaptureResult::new(1, 1, ImageFormat::Png, vec![0x89, 0x50, 0x4E, 0x47]);
         let uri = result.to_data_uri();
         assert!(uri.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn test_capture_result_getters() {
+        let result = CaptureResult::new(800, 600, ImageFormat::Png, vec![0x89, 0x50, 0x4E, 0x47]);
+        assert_eq!(result.width(), 800);
+        assert_eq!(result.height(), 600);
+        assert_eq!(result.data().len(), 4);
+        assert!(matches!(result.format(), ImageFormat::Png));
+    }
+
+    #[test]
+    fn test_capture_request_jpeg_quality_clamped() {
+        // Normal quality
+        let req = CaptureRequest::window("Test").with_jpeg_quality(85);
+        match req.format {
+            ImageFormat::Jpeg { quality } => assert_eq!(quality, 85),
+            _ => panic!("Expected JPEG format"),
+        }
+
+        // Quality > 100 should be clamped to 100
+        let req_high = CaptureRequest::window("Test").with_jpeg_quality(150);
+        match req_high.format {
+            ImageFormat::Jpeg { quality } => assert_eq!(quality, 100),
+            _ => panic!("Expected JPEG format"),
+        }
+
+        // Quality 0 is valid
+        let req_zero = CaptureRequest::window("Test").with_jpeg_quality(0);
+        match req_zero.format {
+            ImageFormat::Jpeg { quality } => assert_eq!(quality, 0),
+            _ => panic!("Expected JPEG format"),
+        }
     }
 }
