@@ -356,8 +356,8 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_validate_cleanup_request_not_in_repo() {
@@ -379,19 +379,17 @@ mod tests {
 
     #[test]
     fn test_detect_stale_sessions_empty_dir() {
-        let temp_dir = std::env::temp_dir().join("kild_test_empty_sessions");
-        let _ = std::fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
 
-        let result = detect_stale_sessions(&temp_dir);
+        let result = detect_stale_sessions(temp_dir.path());
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 0);
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_detect_stale_sessions_nonexistent_dir() {
-        let nonexistent_dir = std::env::temp_dir().join("kild_test_nonexistent");
+        let temp_dir = TempDir::new().unwrap();
+        let nonexistent_dir = temp_dir.path().join("nonexistent");
 
         let result = detect_stale_sessions(&nonexistent_dir);
         assert!(result.is_ok());
@@ -400,35 +398,33 @@ mod tests {
 
     #[test]
     fn test_detect_stale_sessions_with_valid_session() {
-        let temp_dir = env::temp_dir().join("kild_test_valid_session");
-        let _ = fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
 
         // Create a valid session file with existing worktree path
         let session_content = serde_json::json!({
             "id": "test-session",
-            "worktree_path": temp_dir.to_str().unwrap(), // Use temp_dir as worktree path (exists)
+            "worktree_path": test_path.to_str().unwrap(), // Use temp_dir as worktree path (exists)
             "branch": "test-branch",
             "agent": "test-agent"
         });
 
-        let session_file = temp_dir.join("test-session.json");
+        let session_file = test_path.join("test-session.json");
         fs::write(&session_file, session_content.to_string()).unwrap();
 
-        let result = detect_stale_sessions(&temp_dir);
+        let result = detect_stale_sessions(test_path);
         assert!(result.is_ok());
         // Should not detect as stale since worktree path exists
         assert_eq!(result.unwrap().len(), 0);
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_detect_stale_sessions_with_stale_session() {
-        let temp_dir = env::temp_dir().join("kild_test_stale_session");
-        let _ = fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
 
         // Create a stale session file with non-existent worktree path
-        let nonexistent_path = temp_dir.join("nonexistent_worktree");
+        let nonexistent_path = test_path.join("nonexistent_worktree");
         let session_content = serde_json::json!({
             "id": "stale-session",
             "worktree_path": nonexistent_path.to_str().unwrap(),
@@ -436,50 +432,46 @@ mod tests {
             "agent": "test-agent"
         });
 
-        let session_file = temp_dir.join("stale-session.json");
+        let session_file = test_path.join("stale-session.json");
         fs::write(&session_file, session_content.to_string()).unwrap();
 
-        let result = detect_stale_sessions(&temp_dir);
+        let result = detect_stale_sessions(test_path);
         assert!(result.is_ok());
         let stale_sessions = result.unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "stale-session");
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_detect_stale_sessions_with_invalid_json() {
-        let temp_dir = env::temp_dir().join("kild_test_invalid_json");
-        let _ = fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
 
         // Create an invalid JSON file
-        let session_file = temp_dir.join("invalid-session.json");
+        let session_file = test_path.join("invalid-session.json");
         fs::write(&session_file, "invalid json content").unwrap();
 
-        let result = detect_stale_sessions(&temp_dir);
+        let result = detect_stale_sessions(test_path);
         assert!(result.is_ok());
         let stale_sessions = result.unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "invalid-session");
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_detect_stale_sessions_mixed_files() {
-        let temp_dir = env::temp_dir().join("kild_test_mixed_files");
-        let _ = fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
 
         // Create a valid session
         let valid_session = serde_json::json!({
             "id": "valid-session",
-            "worktree_path": temp_dir.to_str().unwrap(),
+            "worktree_path": test_path.to_str().unwrap(),
             "branch": "valid-branch",
             "agent": "test-agent"
         });
         fs::write(
-            &temp_dir.join("valid-session.json"),
+            test_path.join("valid-session.json"),
             valid_session.to_string(),
         )
         .unwrap();
@@ -487,26 +479,24 @@ mod tests {
         // Create a stale session
         let stale_session = serde_json::json!({
             "id": "stale-session",
-            "worktree_path": temp_dir.join("nonexistent").to_str().unwrap(),
+            "worktree_path": test_path.join("nonexistent").to_str().unwrap(),
             "branch": "stale-branch",
             "agent": "test-agent"
         });
         fs::write(
-            &temp_dir.join("stale-session.json"),
+            test_path.join("stale-session.json"),
             stale_session.to_string(),
         )
         .unwrap();
 
         // Create a non-JSON file (should be ignored)
-        fs::write(&temp_dir.join("not-a-session.txt"), "not json").unwrap();
+        fs::write(test_path.join("not-a-session.txt"), "not json").unwrap();
 
-        let result = detect_stale_sessions(&temp_dir);
+        let result = detect_stale_sessions(test_path);
         assert!(result.is_ok());
         let stale_sessions = result.unwrap();
         assert_eq!(stale_sessions.len(), 1);
         assert_eq!(stale_sessions[0], "stale-session");
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -544,22 +534,18 @@ mod tests {
 
     #[test]
     fn test_cleanup_workflow_integration() {
-        use std::env;
-        use std::fs;
-
-        // Create a temporary directory for testing
-        let temp_dir = env::temp_dir().join("kild_cleanup_integration_test");
-        let _ = fs::create_dir_all(&temp_dir);
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path();
 
         // Test that all detection functions work together
-        let stale_result = detect_stale_sessions(&temp_dir);
+        let stale_result = detect_stale_sessions(test_path);
         assert!(stale_result.is_ok());
 
         // Test with a malformed session file
         let malformed_content = "{ invalid json }";
-        fs::write(&temp_dir.join("malformed.json"), malformed_content).unwrap();
+        fs::write(test_path.join("malformed.json"), malformed_content).unwrap();
 
-        let stale_result = detect_stale_sessions(&temp_dir);
+        let stale_result = detect_stale_sessions(test_path);
         assert!(stale_result.is_ok());
         let stale_sessions = stale_result.unwrap();
         assert_eq!(stale_sessions.len(), 1);
@@ -571,32 +557,21 @@ mod tests {
             "worktree_path": "/non/existent/path",
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
-        fs::write(&temp_dir.join("valid.json"), valid_session.to_string()).unwrap();
+        fs::write(test_path.join("valid.json"), valid_session.to_string()).unwrap();
 
-        let stale_result = detect_stale_sessions(&temp_dir);
+        let stale_result = detect_stale_sessions(test_path);
         assert!(stale_result.is_ok());
         let stale_sessions = stale_result.unwrap();
         assert_eq!(stale_sessions.len(), 2); // malformed + valid with missing worktree
-
-        // Cleanup
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_cleanup_workflow_empty_directory() {
-        use std::env;
-        use std::fs;
+        let temp_dir = TempDir::new().unwrap();
 
-        // Test cleanup workflow with empty directory
-        let temp_dir = env::temp_dir().join("kild_cleanup_empty_test");
-        let _ = fs::create_dir_all(&temp_dir);
-
-        let stale_result = detect_stale_sessions(&temp_dir);
+        let stale_result = detect_stale_sessions(temp_dir.path());
         assert!(stale_result.is_ok());
         let stale_sessions = stale_result.unwrap();
         assert_eq!(stale_sessions.len(), 0);
-
-        // Cleanup
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
