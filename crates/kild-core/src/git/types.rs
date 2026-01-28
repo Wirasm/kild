@@ -83,6 +83,25 @@ mod tests {
     }
 
     #[test]
+    fn test_worktree_info_preserves_original_branch_name() {
+        // WorktreeInfo stores the original branch name (with slashes),
+        // not the sanitized version used for the worktree path/directory.
+        // This ensures git operations use the correct branch name.
+        let original_branch = "feature/auth";
+        let sanitized_path = PathBuf::from("/tmp/worktrees/project/feature-auth");
+
+        let info = WorktreeInfo::new(
+            sanitized_path,
+            original_branch.to_string(),
+            "test-project".to_string(),
+        );
+
+        // Original branch name with slash is preserved
+        assert_eq!(info.branch, "feature/auth");
+        assert_ne!(info.branch, "feature-auth");
+    }
+
+    #[test]
     fn test_project_info() {
         let project = ProjectInfo::new(
             "test-id".to_string(),

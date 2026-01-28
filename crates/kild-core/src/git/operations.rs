@@ -4,10 +4,14 @@ use git2::Repository;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-/// Sanitize a string for safe use in filesystem paths.
+/// Sanitize a string for safe use in filesystem paths and git2 worktree names.
 ///
-/// Replaces `/` with `-` to prevent nested directory creation
-/// when branch names like `feature/foo` are used.
+/// Replaces `/` with `-` to prevent nested directory creation. Git branch names
+/// like `feature/foo` are valid, but git2's `repo.worktree()` treats the name
+/// parameter as a directory name under `.git/worktrees/`, interpreting slashes
+/// as path separators and attempting to create nested directories.
+///
+/// The `-` replacement matches the pattern in `process/pid_file.rs`.
 pub fn sanitize_for_path(s: &str) -> String {
     s.replace('/', "-")
 }
@@ -148,6 +152,36 @@ mod tests {
         assert_eq!(sanitize_for_path("bugfix/auth/login"), "bugfix-auth-login");
         assert_eq!(sanitize_for_path("simple-branch"), "simple-branch");
         assert_eq!(sanitize_for_path("no_slashes_here"), "no_slashes_here");
+    }
+
+    #[test]
+    fn test_sanitize_for_path_edge_cases() {
+        // Multiple consecutive slashes
+        assert_eq!(sanitize_for_path("feature//auth"), "feature--auth");
+
+        // Leading slash (invalid git branch, but document behavior)
+        assert_eq!(sanitize_for_path("/feature"), "-feature");
+
+        // Trailing slash (invalid git branch, but document behavior)
+        assert_eq!(sanitize_for_path("feature/"), "feature-");
+
+        // Mixed valid characters preserved
+        assert_eq!(sanitize_for_path("feat/bug_fix-123"), "feat-bug_fix-123");
+    }
+
+    #[test]
+    fn test_sanitize_collision_awareness() {
+        // Document that different branches can sanitize to the same name.
+        // Git2 will reject duplicate worktree names at creation time.
+        let branch1 = "feature/foo";
+        let branch2 = "feature-foo";
+
+        let safe1 = sanitize_for_path(branch1);
+        let safe2 = sanitize_for_path(branch2);
+
+        // Both sanitize to the same filesystem-safe name
+        assert_eq!(safe1, safe2);
+        assert_eq!(safe1, "feature-foo");
     }
 
     #[test]

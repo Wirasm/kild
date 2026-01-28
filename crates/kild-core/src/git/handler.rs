@@ -199,7 +199,7 @@ pub fn create_worktree(
     }
 
     // Create worktree - use smart naming based on current branch
-    // Sanitize branch name for worktree name (git worktree names cannot contain /)
+    // Sanitize branch name for worktree directory (.git/worktrees/<name> treats / as path separator)
     let worktree_name = if use_current {
         operations::sanitize_for_path(&validated_branch)
     } else {
