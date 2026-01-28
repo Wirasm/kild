@@ -5,7 +5,7 @@ use tracing::{debug, warn};
 use crate::terminal::{
     common::{
         detection::app_exists_macos,
-        escape::{build_cd_command, escape_regex, shell_escape},
+        escape::{applescript_escape, build_cd_command, escape_regex, shell_escape},
     },
     errors::TerminalError,
     traits::TerminalBackend,
@@ -497,7 +497,8 @@ impl TerminalBackend for GhosttyBackend {
         );
 
         // Use System Events to check if a Ghostty window with our title exists.
-        // This mirrors the approach in focus_window but only checks existence.
+        // Similar to focus_window, but adds upfront check for Ghostty process to avoid errors.
+        let escaped_id = applescript_escape(window_id);
         let check_script = format!(
             r#"tell application "System Events"
             if not (exists process "Ghostty") then
@@ -512,7 +513,7 @@ impl TerminalBackend for GhosttyBackend {
                 return "not_found"
             end tell
         end tell"#,
-            window_id
+            escaped_id
         );
 
         match std::process::Command::new("osascript")
@@ -574,7 +575,7 @@ impl TerminalBackend for GhosttyBackend {
 
     #[cfg(not(target_os = "macos"))]
     fn is_window_open(&self, _window_id: &str) -> Result<Option<bool>, TerminalError> {
-        // Non-macOS: cannot determine
+        // Non-macOS: window detection not supported, use PID-based detection instead
         Ok(None)
     }
 }

@@ -87,35 +87,53 @@ fn check_git_status(worktree_path: &std::path::Path) -> GitStatus {
     }
 }
 
+/// Determine process status from session data.
+///
+/// Uses PID-based detection as primary method, falling back to window-based
+/// detection for terminals like Ghostty where PID is unavailable.
+fn determine_process_status(session: &Session) -> ProcessStatus {
+    if let Some(pid) = session.process_id {
+        // Primary: PID-based detection
+        match kild_core::process::is_process_running(pid) {
+            Ok(true) => ProcessStatus::Running,
+            Ok(false) => ProcessStatus::Stopped,
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.kild_list.process_check_failed",
+                    pid = pid,
+                    branch = session.branch,
+                    error = %e
+                );
+                ProcessStatus::Unknown
+            }
+        }
+    } else if let (Some(terminal_type), Some(window_id)) =
+        (&session.terminal_type, &session.terminal_window_id)
+    {
+        // Fallback: Window-based detection for Ghostty (open -na doesn't return PID)
+        match kild_core::terminal::is_terminal_window_open(terminal_type, window_id) {
+            Ok(Some(true)) => ProcessStatus::Running,
+            Ok(Some(false)) => ProcessStatus::Stopped,
+            Ok(None) => ProcessStatus::Stopped, // Backend doesn't support window detection
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.kild_list.window_check_failed",
+                    terminal_type = ?terminal_type,
+                    window_id = %window_id,
+                    branch = session.branch,
+                    error = %e
+                );
+                ProcessStatus::Stopped
+            }
+        }
+    } else {
+        ProcessStatus::Stopped
+    }
+}
+
 impl KildDisplay {
     pub fn from_session(session: Session) -> Self {
-        let status = if let Some(pid) = session.process_id {
-            // Primary: PID-based detection
-            match kild_core::process::is_process_running(pid) {
-                Ok(true) => ProcessStatus::Running,
-                Ok(false) => ProcessStatus::Stopped,
-                Err(e) => {
-                    tracing::warn!(
-                        event = "ui.kild_list.process_check_failed",
-                        pid = pid,
-                        branch = session.branch,
-                        error = %e
-                    );
-                    ProcessStatus::Unknown
-                }
-            }
-        } else if let (Some(terminal_type), Some(window_id)) =
-            (&session.terminal_type, &session.terminal_window_id)
-        {
-            // Fallback: Window-based detection for Ghostty (no PID available)
-            match kild_core::terminal::is_terminal_window_open(terminal_type, window_id) {
-                Ok(Some(true)) => ProcessStatus::Running,
-                Ok(Some(false)) => ProcessStatus::Stopped,
-                Ok(None) | Err(_) => ProcessStatus::Stopped, // Cannot determine, assume stopped
-            }
-        } else {
-            ProcessStatus::Stopped
-        };
+        let status = determine_process_status(&session);
 
         let git_status = if session.worktree_path.exists() {
             check_git_status(&session.worktree_path)
@@ -349,34 +367,7 @@ impl AppState {
     /// for a full refresh that includes git information.
     pub fn update_statuses_only(&mut self) {
         for kild_display in &mut self.displays {
-            kild_display.status = if let Some(pid) = kild_display.session.process_id {
-                // Primary: PID-based detection
-                match kild_core::process::is_process_running(pid) {
-                    Ok(true) => ProcessStatus::Running,
-                    Ok(false) => ProcessStatus::Stopped,
-                    Err(e) => {
-                        tracing::warn!(
-                            event = "ui.kild_list.process_check_failed",
-                            pid = pid,
-                            branch = kild_display.session.branch,
-                            error = %e
-                        );
-                        ProcessStatus::Unknown
-                    }
-                }
-            } else if let (Some(terminal_type), Some(window_id)) = (
-                &kild_display.session.terminal_type,
-                &kild_display.session.terminal_window_id,
-            ) {
-                // Fallback: Window-based detection for Ghostty (no PID available)
-                match kild_core::terminal::is_terminal_window_open(terminal_type, window_id) {
-                    Ok(Some(true)) => ProcessStatus::Running,
-                    Ok(Some(false)) => ProcessStatus::Stopped,
-                    Ok(None) | Err(_) => ProcessStatus::Stopped,
-                }
-            } else {
-                ProcessStatus::Stopped
-            };
+            kild_display.status = determine_process_status(&kild_display.session);
         }
         self.last_refresh = std::time::Instant::now();
     }

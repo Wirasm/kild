@@ -287,7 +287,7 @@ pub fn is_terminal_window_open(
     _terminal_type: &TerminalType,
     _window_id: &str,
 ) -> Result<Option<bool>, TerminalError> {
-    // Window detection not supported on non-macOS platforms
+    // Window detection not supported on non-macOS platforms - use PID-based detection instead
     Ok(None)
 }
 
