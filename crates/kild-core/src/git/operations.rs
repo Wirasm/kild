@@ -173,15 +173,12 @@ mod tests {
     fn test_sanitize_collision_awareness() {
         // Document that different branches can sanitize to the same name.
         // Git2 will reject duplicate worktree names at creation time.
-        let branch1 = "feature/foo";
-        let branch2 = "feature-foo";
-
-        let safe1 = sanitize_for_path(branch1);
-        let safe2 = sanitize_for_path(branch2);
+        let sanitized_with_slash = sanitize_for_path("feature/foo");
+        let sanitized_with_hyphen = sanitize_for_path("feature-foo");
 
         // Both sanitize to the same filesystem-safe name
-        assert_eq!(safe1, safe2);
-        assert_eq!(safe1, "feature-foo");
+        assert_eq!(sanitized_with_slash, sanitized_with_hyphen);
+        assert_eq!(sanitized_with_slash, "feature-foo");
     }
 
     #[test]
