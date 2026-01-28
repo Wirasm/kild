@@ -55,24 +55,24 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
         candidate_count = pids.len()
     );
 
-    // Find the Ghostty process among candidates by checking each process's
+    // Find the first Ghostty process among candidates by checking each process's
     // executable name (via ps -o comm=) for "ghostty"
-    for pid in pids {
-        if is_ghostty_process(pid) {
-            debug!(
-                event = "core.terminal.ghostty_pid_found",
-                session_id = %session_id,
-                pid = pid
-            );
-            return Some(pid);
-        }
+    let found_pid = pids.into_iter().find(|&pid| is_ghostty_process(pid));
+
+    if let Some(pid) = found_pid {
+        debug!(
+            event = "core.terminal.ghostty_pid_found",
+            session_id = %session_id,
+            pid = pid
+        );
+    } else {
+        debug!(
+            event = "core.terminal.ghostty_pid_not_found",
+            session_id = %session_id
+        );
     }
 
-    debug!(
-        event = "core.terminal.ghostty_pid_not_found",
-        session_id = %session_id
-    );
-    None
+    found_pid
 }
 
 /// Check if a process is a Ghostty process by examining its executable name.
@@ -131,9 +131,8 @@ fn focus_by_pid(pid: u32) -> Result<(), TerminalError> {
         .output()
     {
         Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout);
-            let result_trimmed = result.trim();
-            if result_trimmed == "focused" {
+            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if result == "focused" {
                 info!(
                     event = "core.terminal.focus_completed",
                     terminal = "Ghostty",
@@ -145,7 +144,7 @@ fn focus_by_pid(pid: u32) -> Result<(), TerminalError> {
                 debug!(
                     event = "core.terminal.focus_ghostty_by_pid_no_windows",
                     pid = pid,
-                    result = %result_trimmed
+                    result = %result
                 );
                 Err(TerminalError::FocusFailed {
                     message: format!("Ghostty process {} has no windows", pid),
@@ -153,14 +152,14 @@ fn focus_by_pid(pid: u32) -> Result<(), TerminalError> {
             }
         }
         Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             debug!(
                 event = "core.terminal.focus_ghostty_by_pid_failed",
                 pid = pid,
-                stderr = %stderr.trim()
+                stderr = %stderr
             );
             Err(TerminalError::FocusFailed {
-                message: format!("Failed to focus Ghostty by PID {}: {}", pid, stderr.trim()),
+                message: format!("Failed to focus Ghostty by PID {}: {}", pid, stderr),
             })
         }
         Err(e) => {
@@ -350,11 +349,12 @@ impl TerminalBackend for GhosttyBackend {
 
         // Step 1: Activate Ghostty app to bring it to the foreground
         let activate_script = r#"tell application "Ghostty" to activate"#;
-        match std::process::Command::new("osascript")
+        let activation_result = std::process::Command::new("osascript")
             .arg("-e")
             .arg(activate_script)
-            .output()
-        {
+            .output();
+
+        match activation_result {
             Ok(output) if output.status.success() => {
                 debug!(
                     event = "core.terminal.focus_ghostty_activated",
@@ -362,11 +362,11 @@ impl TerminalBackend for GhosttyBackend {
                 );
             }
             Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 warn!(
                     event = "core.terminal.focus_ghostty_activate_failed",
                     window_id = %window_id,
-                    stderr = %stderr.trim(),
+                    stderr = %stderr,
                     message = "Ghostty activation failed - continuing with focus attempt"
                 );
             }
@@ -459,16 +459,14 @@ impl TerminalBackend for GhosttyBackend {
                 }
             }
             Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 warn!(
                     event = "core.terminal.focus_failed",
                     terminal = "Ghostty",
                     window_id = %window_id,
-                    stderr = %stderr.trim()
+                    stderr = %stderr
                 );
-                Err(TerminalError::FocusFailed {
-                    message: stderr.trim().to_string(),
-                })
+                Err(TerminalError::FocusFailed { message: stderr })
             }
             Err(e) => {
                 error!(
