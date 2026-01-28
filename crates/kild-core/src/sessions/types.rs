@@ -2,6 +2,17 @@ use crate::terminal::types::TerminalType;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Result of the `complete_session` operation, distinguishing between different outcomes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompleteResult {
+    /// PR was merged and remote branch was successfully deleted
+    RemoteDeleted,
+    /// PR was merged but remote branch deletion failed (logged as warning, non-fatal)
+    RemoteDeleteFailed,
+    /// PR was not merged (or couldn't be checked), remote branch preserved for future merge
+    PrNotMerged,
+}
+
 fn default_port_start() -> u16 {
     0
 }

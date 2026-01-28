@@ -83,6 +83,8 @@ cargo run -p kild -- destroy my-branch           # Destroy kild
 cargo run -p kild -- destroy my-branch --force   # Force destroy (bypass git checks)
 cargo run -p kild -- destroy --all               # Destroy all kilds (with confirmation)
 cargo run -p kild -- destroy --all --force       # Force destroy all (skip confirmation)
+cargo run -p kild -- complete my-branch          # Complete kild (check PR, cleanup)
+cargo run -p kild -- complete my-branch --force  # Force complete (bypass git checks)
 
 # kild-peek - Native app inspection
 cargo run -p kild-peek -- list windows           # List all visible windows
@@ -105,7 +107,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
 
 **Key modules in kild-core:**
-- `sessions/` - Session lifecycle (create, open, stop, destroy, list)
+- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex)
 - `git/` - Git worktree operations via git2

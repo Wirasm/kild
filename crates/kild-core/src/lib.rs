@@ -26,7 +26,7 @@ pub mod terminal;
 
 // Re-export commonly used types at crate root for convenience
 pub use config::KildConfig;
-pub use sessions::types::{CreateSessionRequest, Session, SessionStatus};
+pub use sessions::types::{CompleteResult, CreateSessionRequest, Session, SessionStatus};
 
 // Re-export handler modules as the primary API
 pub use cleanup::handler as cleanup_ops;

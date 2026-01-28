@@ -8,7 +8,7 @@ description: |
   - Listing: "list kilds", "show kilds", "active kilds", "kilds list"
   - Status: "kild status", "check kild", "kild health", "how are my kilds"
   - Navigation: "cd to kild", "go to kild", "path to kild", "open in editor", "edit kild", "code kild"
-  - Lifecycle: "stop kild", "open kild", "destroy kild", "clean up kilds"
+  - Lifecycle: "stop kild", "open kild", "destroy kild", "complete kild", "clean up kilds"
   - Output: "list as json", "json output", "verbose mode"
 
   KILD creates isolated Git worktrees where AI agents work independently without
@@ -236,6 +236,34 @@ kild destroy feature-auth
 # Force destroy (bypasses git checks)
 kild destroy feature-auth --force
 # Result: Removes kild regardless of uncommitted changes
+```
+
+### Complete a Kild (PR Cleanup)
+```bash
+kild complete <branch> [--force]
+```
+
+Completes a kild by destroying it and cleaning up the remote branch if the PR was merged.
+
+Use this when finishing work on a PR. The command adapts to your workflow:
+- If PR was already merged (you ran `gh pr merge` first), it also deletes the orphaned remote branch
+- If PR hasn't been merged yet, it just destroys the kild so `gh pr merge --delete-branch` can work
+
+**Flags**
+- `--force` / `-f` - Force complete even with uncommitted changes
+
+**Note:** Requires `gh` CLI to detect merged PRs. If `gh` is not installed, the command still works but won't auto-delete remote branches.
+
+**Workflow A: Complete first, then merge**
+```bash
+kild complete my-feature    # Destroys kild
+gh pr merge 123 --delete-branch  # Merges PR, deletes remote (now works!)
+```
+
+**Workflow B: Merge first, then complete**
+```bash
+gh pr merge 123 --squash    # Merges PR (can't delete remote due to worktree)
+kild complete my-feature    # Destroys kild AND deletes orphaned remote
 ```
 
 ### Health Monitoring

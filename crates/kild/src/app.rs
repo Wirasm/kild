@@ -101,6 +101,32 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("complete")
+                .about("Complete a kild: destroy and clean up remote branch if PR was merged")
+                .long_about(
+                    "Completes a kild by destroying the worktree and optionally deleting the remote branch.\n\n\
+                    If the PR was already merged (user ran 'gh pr merge' first), this command also deletes\n\
+                    the orphaned remote branch. If the PR hasn't been merged yet, it just destroys the kild\n\
+                    so that 'gh pr merge --delete-branch' can work afterwards.\n\n\
+                    Works with either workflow:\n\
+                    - Complete first, then merge: kild complete → gh pr merge --delete-branch\n\
+                    - Merge first, then complete: gh pr merge → kild complete (deletes remote)"
+                )
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild to complete")
+                        .required(true)
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("force")
+                        .long("force")
+                        .short('f')
+                        .help("Force completion, bypassing git uncommitted changes check")
+                        .action(ArgAction::SetTrue)
+                )
+        )
+        .subcommand(
             Command::new("open")
                 .about("Open a new agent terminal in an existing kild (additive)")
                 .arg(
@@ -898,6 +924,50 @@ mod tests {
     fn test_cli_destroy_requires_branch_or_all() {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "destroy"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_complete_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "complete", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let complete_matches = matches.subcommand_matches("complete").unwrap();
+        assert_eq!(
+            complete_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert!(!complete_matches.get_flag("force"));
+    }
+
+    #[test]
+    fn test_cli_complete_command_with_force() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "complete", "test-branch", "--force"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let complete_matches = matches.subcommand_matches("complete").unwrap();
+        assert!(complete_matches.get_flag("force"));
+    }
+
+    #[test]
+    fn test_cli_complete_command_force_short() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "complete", "test-branch", "-f"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let complete_matches = matches.subcommand_matches("complete").unwrap();
+        assert!(complete_matches.get_flag("force"));
+    }
+
+    #[test]
+    fn test_cli_complete_requires_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "complete"]);
         assert!(matches.is_err());
     }
 }
