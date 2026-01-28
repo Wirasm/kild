@@ -300,11 +300,12 @@ const TERMINAL_FOCUS_SCRIPT: &str = r#"tell application "Terminal"
 
 **4c. Ghostty Backend**
 - **FILE**: `crates/shards-core/src/terminal/backends/ghostty.rs`
-- **IMPLEMENT** (Ghostty uses window title, not ID):
+- **NOTE**: Original implementation used window title matching, but this was unreliable due to dynamic title changes. Updated in issue #95 to use PID-based lookup with title fallback.
+- **IMPLEMENT** (Original approach - see issue #95 for PID-based implementation):
 ```rust
 #[cfg(target_os = "macos")]
 fn focus_window(&self, window_id: &str) -> Result<(), TerminalError> {
-    // Ghostty uses window title, not numeric ID
+    // Original approach used window title matching
     let activate_script = r#"tell application "Ghostty" to activate"#;
     let _ = std::process::Command::new("osascript").arg("-e").arg(activate_script).output();
 
