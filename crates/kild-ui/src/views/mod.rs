@@ -11,6 +11,7 @@
 pub mod add_project_dialog;
 pub mod confirm_dialog;
 pub mod create_dialog;
+pub mod detail_panel;
 pub mod kild_list;
 pub mod main_view;
 pub mod project_selector;

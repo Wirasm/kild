@@ -120,6 +120,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
             let stop_error = state.stop_error.clone();
             let editor_error = state.editor_error.clone();
             let focus_error = state.focus_error.clone();
+            let selected_kild_id = state.selected_kild_id.clone();
 
             div().flex_1().child(
                 uniform_list(
@@ -167,11 +168,26 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                     display.session.terminal_window_id.clone();
                                 let branch_for_focus = branch.clone();
 
+                                // Selection state
+                                let session_id = display.session.id.clone();
+                                let is_selected = selected_kild_id.as_ref() == Some(&session_id);
+                                let session_id_for_click = session_id.clone();
+
                                 div()
                                     .id(ix)
                                     .w_full()
                                     .flex()
                                     .flex_col()
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                        view.on_kild_select(&session_id_for_click, cx);
+                                    }))
+                                    // Selected state styling (ice left border)
+                                    .when(is_selected, |row| {
+                                        row.border_l_2()
+                                            .border_color(theme::ice())
+                                            .bg(theme::surface())
+                                    })
                                     // Main row
                                     .child(
                                         div()

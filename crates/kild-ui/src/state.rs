@@ -264,6 +264,9 @@ pub struct AppState {
     // Focus terminal error state (shown inline per-row)
     pub focus_error: Option<OperationError>,
 
+    /// ID of the currently selected kild (for detail panel)
+    pub selected_kild_id: Option<String>,
+
     /// Timestamp of last successful status refresh
     pub last_refresh: std::time::Instant,
 
@@ -307,6 +310,7 @@ impl AppState {
             bulk_errors: Vec::new(),
             editor_error: None,
             focus_error: None,
+            selected_kild_id: None,
             last_refresh: std::time::Instant::now(),
             projects: projects_data.projects,
             active_project: projects_data.active,
@@ -436,6 +440,18 @@ impl AppState {
             .filter(|d| d.status == ProcessStatus::Running)
             .count()
     }
+
+    /// Get the selected kild display, if any.
+    pub fn selected_kild(&self) -> Option<&KildDisplay> {
+        self.selected_kild_id
+            .as_ref()
+            .and_then(|id| self.displays.iter().find(|d| d.session.id == *id))
+    }
+
+    /// Clear selection (e.g., when kild is destroyed).
+    pub fn clear_selection(&mut self) {
+        self.selected_kild_id = None;
+    }
 }
 
 impl Default for AppState {
@@ -464,6 +480,7 @@ mod tests {
             bulk_errors: Vec::new(),
             editor_error: None,
             focus_error: None,
+            selected_kild_id: None,
             last_refresh: std::time::Instant::now(),
             projects: Vec::new(),
             active_project: None,

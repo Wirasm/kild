@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use crate::actions;
 use crate::state::{AddProjectDialogField, AppState, CreateDialogField};
 use crate::views::{
-    add_project_dialog, confirm_dialog, create_dialog, kild_list, project_selector,
+    add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, project_selector,
 };
 
 /// Normalize user-entered path for project addition.
@@ -260,6 +260,14 @@ impl MainView {
 
         match actions::destroy_kild(&branch) {
             Ok(()) => {
+                // Clear selection if the destroyed kild was selected
+                // After refresh, the selected kild won't exist in the list anyway,
+                // but clearing explicitly ensures the panel disappears immediately
+                if let Some(selected) = self.state.selected_kild()
+                    && selected.session.branch == branch
+                {
+                    self.state.clear_selection();
+                }
                 self.state.reset_confirm_dialog();
                 self.state.refresh_sessions();
             }
@@ -279,6 +287,13 @@ impl MainView {
     pub fn on_confirm_cancel(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.confirm_dialog.cancelled");
         self.state.reset_confirm_dialog();
+        cx.notify();
+    }
+
+    /// Handle kild row click - select for detail panel.
+    pub fn on_kild_select(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        tracing::debug!(event = "ui.kild.selected", session_id = session_id);
+        self.state.selected_kild_id = Some(session_id.to_string());
         cx.notify();
     }
 
@@ -910,8 +925,24 @@ impl Render for MainView {
                         })),
                 )
             })
-            // KILD list
-            .child(kild_list::render_kild_list(&self.state, cx))
+            // KILD list and detail panel (2-column layout when kild selected)
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .overflow_hidden()
+                    // Kild list (flexible width)
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(kild_list::render_kild_list(&self.state, cx)),
+                    )
+                    // Detail panel (fixed 320px, conditional)
+                    .when(self.state.selected_kild_id.is_some(), |this| {
+                        this.child(detail_panel::render_detail_panel(&self.state, cx))
+                    }),
+            )
             // Create dialog (conditional)
             .when(self.state.show_create_dialog, |this| {
                 this.child(create_dialog::render_create_dialog(&self.state, cx))
