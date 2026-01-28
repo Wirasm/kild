@@ -12,7 +12,7 @@ KILD eliminates context switching between scattered terminals when working with 
 
 ## Features
 
-- **Isolated Worktrees**: Each kild gets its own Git worktree with unique `kild_<hash>` branch
+- **Isolated Worktrees**: Each kild gets its own Git worktree with unique `kild_<branch>` branch
 - **Native Terminal Integration**: Launches AI agents in native terminal windows
 - **Session Tracking**: Persistent registry tracks all active kilds
 - **Cross-Platform**: Works on macOS, Linux, and Windows
@@ -64,6 +64,10 @@ kild create <branch> --agent <agent>
 kild create kiro-session --agent kiro
 kild create claude-work --agent claude
 kild create gemini-task --agent gemini
+
+# Branch names with slashes are supported
+kild create feature/auth --agent claude
+kild create bugfix/login-error --agent kiro
 
 # Add a description with --note
 kild create feature-auth --agent claude --note "Implementing JWT authentication"
