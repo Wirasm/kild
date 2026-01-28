@@ -252,6 +252,8 @@ Use this when finishing work on a PR. The command adapts to your workflow:
 **Flags**
 - `--force` / `-f` - Force complete even with uncommitted changes
 
+**Note:** Requires `gh` CLI to detect merged PRs. If `gh` is not installed, the command still works but won't auto-delete remote branches.
+
 **Workflow A: Complete first, then merge**
 ```bash
 kild complete my-feature    # Destroys kild

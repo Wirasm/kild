@@ -107,7 +107,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
 
 **Key modules in kild-core:**
-- `sessions/` - Session lifecycle (create, open, stop, destroy, list)
+- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex)
 - `git/` - Git worktree operations via git2
