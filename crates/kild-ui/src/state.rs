@@ -277,7 +277,6 @@ pub struct AppState {
     pub show_add_project_dialog: bool,
     pub add_project_form: AddProjectFormState,
     pub add_project_error: Option<String>,
-    pub show_project_dropdown: bool,
 }
 
 impl AppState {
@@ -318,7 +317,6 @@ impl AppState {
             show_add_project_dialog: false,
             add_project_form: AddProjectFormState::default(),
             add_project_error: None,
-            show_project_dropdown: false,
         }
     }
 
@@ -445,6 +443,20 @@ impl AppState {
             .count()
     }
 
+    /// Count kilds for a specific project (by project path).
+    pub fn kild_count_for_project(&self, project_path: &std::path::Path) -> usize {
+        let project_id = crate::projects::derive_project_id(project_path);
+        self.displays
+            .iter()
+            .filter(|d| d.session.project_id == project_id)
+            .count()
+    }
+
+    /// Count total kilds across all projects.
+    pub fn total_kild_count(&self) -> usize {
+        self.displays.len()
+    }
+
     /// Get the selected kild display, if any.
     ///
     /// Returns `None` if no kild is selected or if the selected kild no longer
@@ -504,7 +516,6 @@ mod tests {
             show_add_project_dialog: false,
             add_project_form: AddProjectFormState::default(),
             add_project_error: None,
-            show_project_dropdown: false,
         }
     }
 

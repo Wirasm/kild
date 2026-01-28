@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use crate::actions;
 use crate::state::{AddProjectDialogField, AppState, CreateDialogField};
 use crate::views::{
-    add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, project_selector,
+    add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, sidebar,
 };
 
 /// Normalize user-entered path for project addition.
@@ -501,7 +501,6 @@ impl MainView {
     pub fn on_add_project_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.add_project_dialog.opened");
         self.state.show_add_project_dialog = true;
-        self.state.show_project_dropdown = false;
         cx.notify();
     }
 
@@ -567,7 +566,7 @@ impl MainView {
         cx.notify();
     }
 
-    /// Handle project selection from dropdown.
+    /// Handle project selection from sidebar.
     pub fn on_project_select(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         tracing::info!(
             event = "ui.project_selected",
@@ -582,11 +581,10 @@ impl MainView {
         }
 
         self.state.active_project = Some(path);
-        self.state.show_project_dropdown = false;
         cx.notify();
     }
 
-    /// Handle "All Projects" selection from dropdown.
+    /// Handle "All Projects" selection from sidebar.
     pub fn on_project_select_all(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.project_selected_all");
 
@@ -599,7 +597,6 @@ impl MainView {
         }
 
         self.state.active_project = None;
-        self.state.show_project_dropdown = false;
         cx.notify();
     }
 
@@ -622,13 +619,6 @@ impl MainView {
         if self.state.active_project.as_ref() == Some(&path) {
             self.state.active_project = self.state.projects.first().map(|p| p.path().to_path_buf());
         }
-        self.state.show_project_dropdown = false;
-        cx.notify();
-    }
-
-    /// Toggle project dropdown open/closed.
-    pub fn on_toggle_project_dropdown(&mut self, cx: &mut Context<Self>) {
-        self.state.show_project_dropdown = !self.state.show_project_dropdown;
         cx.notify();
     }
 
@@ -808,7 +798,7 @@ impl Render for MainView {
             .flex()
             .flex_col()
             .bg(theme::void())
-            // Header with title, Refresh button, and Create button
+            // Header with title and action buttons (NO project dropdown)
             .child(
                 div()
                     .px(px(theme::SPACE_4))
@@ -818,18 +808,10 @@ impl Render for MainView {
                     .justify_between()
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(theme::SPACE_3))
-                            .child(
-                                div()
-                                    .text_size(px(theme::TEXT_XL))
-                                    .text_color(theme::text_white())
-                                    .font_weight(FontWeight::BOLD)
-                                    .child("KILD"),
-                            )
-                            // Project selector dropdown
-                            .child(project_selector::render_project_selector(&self.state, cx)),
+                            .text_size(px(theme::TEXT_XL))
+                            .text_color(theme::text_white())
+                            .font_weight(FontWeight::BOLD)
+                            .child("KILD"),
                     )
                     .child(
                         div()
@@ -929,20 +911,22 @@ impl Render for MainView {
                         })),
                 )
             })
-            // KILD list and detail panel (2-column layout when kild selected)
+            // Main content: 3-column layout (sidebar | kild list | detail panel)
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .overflow_hidden()
-                    // Kild list (flexible width)
+                    // Sidebar (200px fixed)
+                    .child(sidebar::render_sidebar(&self.state, cx))
+                    // Kild list (flex:1)
                     .child(
                         div()
                             .flex_1()
                             .overflow_hidden()
                             .child(kild_list::render_kild_list(&self.state, cx)),
                     )
-                    // Detail panel (fixed 320px, conditional)
+                    // Detail panel (320px, conditional)
                     .when(self.state.selected_kild_id.is_some(), |this| {
                         this.child(detail_panel::render_detail_panel(&self.state, cx))
                     }),

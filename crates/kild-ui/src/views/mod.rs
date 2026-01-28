@@ -6,7 +6,7 @@
 //! - `create_dialog` - Modal dialog for creating new kilds
 //! - `confirm_dialog` - Modal dialog for confirming destructive actions
 //! - `add_project_dialog` - Modal dialog for adding new projects
-//! - `project_selector` - Dropdown for switching between projects
+//! - `sidebar` - Fixed left sidebar for project navigation
 
 pub mod add_project_dialog;
 pub mod confirm_dialog;
@@ -14,6 +14,6 @@ pub mod create_dialog;
 pub mod detail_panel;
 pub mod kild_list;
 pub mod main_view;
-pub mod project_selector;
+pub mod sidebar;
 
 pub use main_view::MainView;
