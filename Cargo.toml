@@ -24,6 +24,7 @@ ignore = "0.4"
 glob = "0.3"
 walkdir = "2"
 tempfile = "3"
+notify = "8.0"
 which = "7"
 uuid = { version = "1", features = ["v4"] }
 

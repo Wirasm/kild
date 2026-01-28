@@ -19,6 +19,7 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
+notify.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

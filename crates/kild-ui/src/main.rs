@@ -14,6 +14,7 @@ mod refresh;
 mod state;
 mod theme;
 mod views;
+mod watcher;
 
 pub use components::{Button, ButtonVariant};
 

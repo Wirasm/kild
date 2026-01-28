@@ -19,6 +19,7 @@ use crate::state::{AddProjectDialogField, AppState, CreateDialogField};
 use crate::views::{
     add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, sidebar,
 };
+use crate::watcher::SessionWatcher;
 
 /// Normalize user-entered path for project addition.
 ///
@@ -127,17 +128,47 @@ pub struct MainView {
     focus_handle: FocusHandle,
     /// Handle to the background refresh task. Must be stored to prevent cancellation.
     _refresh_task: Task<()>,
+    /// Handle to the file watcher task. Must be stored to prevent cancellation.
+    _watcher_task: Task<()>,
 }
 
 impl MainView {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        // Get sessions directory for file watcher
+        let config = kild_core::config::Config::new();
+        let sessions_dir = config.sessions_dir();
+
+        // Ensure sessions directory exists (create if needed for watcher)
+        if !sessions_dir.exists()
+            && let Err(e) = std::fs::create_dir_all(&sessions_dir)
+        {
+            tracing::warn!(
+                event = "ui.sessions_dir.create_failed",
+                path = %sessions_dir.display(),
+                error = %e
+            );
+        }
+
+        // Try to create file watcher
+        let watcher = SessionWatcher::new(&sessions_dir);
+        let has_watcher = watcher.is_some();
+
+        // Determine poll interval based on watcher availability
+        let poll_interval = if has_watcher {
+            crate::refresh::POLL_INTERVAL // 60s with watcher
+        } else {
+            crate::refresh::FAST_POLL_INTERVAL // 5s fallback
+        };
+
+        // Slow poll task (60s with watcher, 5s without)
         let refresh_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            tracing::debug!(event = "ui.auto_refresh.started");
+            tracing::debug!(
+                event = "ui.auto_refresh.started",
+                interval_secs = poll_interval.as_secs()
+            );
 
             loop {
-                cx.background_executor()
-                    .timer(crate::refresh::REFRESH_INTERVAL)
-                    .await;
+                cx.background_executor().timer(poll_interval).await;
 
                 if let Err(e) = this.update(cx, |view, cx| {
                     tracing::debug!(event = "ui.auto_refresh.tick");
@@ -154,10 +185,48 @@ impl MainView {
             }
         });
 
+        // File watcher task (checks for events frequently, cheap when no events)
+        let watcher_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let Some(watcher) = watcher else {
+                tracing::debug!(event = "ui.watcher_task.skipped", reason = "no watcher");
+                return;
+            };
+
+            tracing::debug!(event = "ui.watcher_task.started");
+            let mut last_refresh = std::time::Instant::now();
+
+            loop {
+                // Check for events every 50ms (cheap - just channel poll)
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(50))
+                    .await;
+
+                if let Err(e) = this.update(cx, |view, cx| {
+                    if watcher.has_pending_events() {
+                        // Debounce: only refresh if enough time has passed
+                        if last_refresh.elapsed() > crate::refresh::DEBOUNCE_INTERVAL {
+                            tracing::info!(event = "ui.watcher.refresh_triggered");
+                            view.state.refresh_sessions();
+                            last_refresh = std::time::Instant::now();
+                            cx.notify();
+                        }
+                    }
+                }) {
+                    tracing::debug!(
+                        event = "ui.watcher_task.stopped",
+                        reason = "view_dropped",
+                        error = ?e
+                    );
+                    break;
+                }
+            }
+        });
+
         Self {
             state: AppState::new(),
             focus_handle: cx.focus_handle(),
             _refresh_task: refresh_task,
+            _watcher_task: watcher_task,
         }
     }
 
