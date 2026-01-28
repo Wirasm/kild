@@ -694,4 +694,115 @@ mod tests {
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    /// Test loading sessions with mixed worktree states (valid and invalid together).
+    ///
+    /// Verifies that `load_sessions_from_files` correctly handles a directory containing
+    /// both sessions with valid worktrees and sessions with missing worktrees.
+    #[test]
+    fn test_load_sessions_mixed_valid_and_missing_worktrees() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_mixed_worktrees");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create a valid worktree directory
+        let valid_worktree = temp_dir.join("valid_worktree");
+        std::fs::create_dir_all(&valid_worktree).unwrap();
+
+        // Missing worktree path (not created)
+        let missing_worktree = temp_dir.join("missing_worktree");
+
+        // Session 1: valid worktree
+        let session_valid = Session {
+            id: "test/valid-session".to_string(),
+            project_id: "test".to_string(),
+            branch: "valid-session".to_string(),
+            worktree_path: valid_worktree.clone(),
+            agent: "claude".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 3000,
+            port_range_end: 3009,
+            port_count: 10,
+            process_id: Some(12345),
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "claude".to_string(),
+            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
+            note: None,
+        };
+
+        // Session 2: missing worktree
+        let session_missing = Session {
+            id: "test/missing-session".to_string(),
+            project_id: "test".to_string(),
+            branch: "missing-session".to_string(),
+            worktree_path: missing_worktree.clone(),
+            agent: "claude".to_string(),
+            status: SessionStatus::Stopped,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 3010,
+            port_range_end: 3019,
+            port_count: 10,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: "claude".to_string(),
+            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
+            note: None,
+        };
+
+        // Save both sessions
+        let valid_file = temp_dir.join("test_valid-session.json");
+        let missing_file = temp_dir.join("test_missing-session.json");
+        std::fs::write(
+            &valid_file,
+            serde_json::to_string_pretty(&session_valid).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            &missing_file,
+            serde_json::to_string_pretty(&session_missing).unwrap(),
+        )
+        .unwrap();
+
+        // Verify preconditions
+        assert!(valid_worktree.exists());
+        assert!(!missing_worktree.exists());
+
+        // Load all sessions
+        let (sessions, skipped) = load_sessions_from_files(&temp_dir).unwrap();
+
+        // Both sessions should be loaded
+        assert_eq!(sessions.len(), 2, "Both sessions should be loaded");
+        assert_eq!(skipped, 0, "No sessions should be skipped");
+
+        // Find each session and verify is_worktree_valid()
+        let valid = sessions
+            .iter()
+            .find(|s| s.branch == "valid-session")
+            .expect("Valid session should be loaded");
+        let missing = sessions
+            .iter()
+            .find(|s| s.branch == "missing-session")
+            .expect("Missing session should be loaded");
+
+        assert!(
+            valid.is_worktree_valid(),
+            "Valid session should have valid worktree"
+        );
+        assert!(
+            !missing.is_worktree_valid(),
+            "Missing session should have invalid worktree"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
