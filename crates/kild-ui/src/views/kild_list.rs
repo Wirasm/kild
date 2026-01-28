@@ -67,8 +67,8 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                     .text_size(px(theme::TEXT_SM))
                     .child(error_msg.clone()),
             )
-    } else if state.projects.is_empty() {
-        // No projects state - show welcome message
+    } else if state.projects.is_empty() && state.displays.is_empty() {
+        // No projects AND no kilds - show welcome message
         div()
             .flex()
             .flex_1()
