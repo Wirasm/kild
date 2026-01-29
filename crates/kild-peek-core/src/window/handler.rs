@@ -486,10 +486,27 @@ pub fn find_window_by_app(app: &str) -> Result<WindowInfo, WindowError> {
 
     let windows_with_props: Vec<_> = xcap_windows
         .into_iter()
-        .map(|w| {
-            let window_title = w.title().ok().unwrap_or_default();
-            let app_name = w.app_name().ok().unwrap_or_default();
-            (w, window_title, app_name)
+        .filter_map(|w| {
+            let id = w.id().ok()?;
+            let window_title = w.title().unwrap_or_else(|e| {
+                debug!(
+                    event = "core.window.property_access_failed",
+                    property = "title",
+                    window_id = id,
+                    error = %e
+                );
+                String::new()
+            });
+            let app_name = w.app_name().unwrap_or_else(|e| {
+                debug!(
+                    event = "core.window.property_access_failed",
+                    property = "app_name",
+                    window_id = id,
+                    error = %e
+                );
+                String::new()
+            });
+            Some((w, window_title, app_name))
         })
         .collect();
 
@@ -556,8 +573,25 @@ pub fn find_window_by_app_and_title(app: &str, title: &str) -> Result<WindowInfo
     let app_windows: Vec<_> = xcap_windows
         .into_iter()
         .filter_map(|w| {
-            let window_title = w.title().ok().unwrap_or_default();
-            let app_name = w.app_name().ok().unwrap_or_default();
+            let id = w.id().ok()?;
+            let window_title = w.title().unwrap_or_else(|e| {
+                debug!(
+                    event = "core.window.property_access_failed",
+                    property = "title",
+                    window_id = id,
+                    error = %e
+                );
+                String::new()
+            });
+            let app_name = w.app_name().unwrap_or_else(|e| {
+                debug!(
+                    event = "core.window.property_access_failed",
+                    property = "app_name",
+                    window_id = id,
+                    error = %e
+                );
+                String::new()
+            });
             // Include if app matches (exact or partial)
             let app_name_lower = app_name.to_lowercase();
             if app_name_lower == app_lower || app_name_lower.contains(&app_lower) {

@@ -445,8 +445,7 @@ mod tests {
     #[test]
     fn test_cli_screenshot_app() {
         let app = build_cli();
-        let matches =
-            app.try_get_matches_from(vec!["kild-peek", "screenshot", "--app", "Ghostty"]);
+        let matches = app.try_get_matches_from(vec!["kild-peek", "screenshot", "--app", "Ghostty"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
@@ -513,41 +512,25 @@ mod tests {
     #[test]
     fn test_cli_assert_app() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec![
-            "kild-peek",
-            "assert",
-            "--app",
-            "Ghostty",
-            "--exists",
-        ]);
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "assert", "--app", "Ghostty", "--exists"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
         let assert_matches = matches.subcommand_matches("assert").unwrap();
-        assert_eq!(
-            assert_matches.get_one::<String>("app").unwrap(),
-            "Ghostty"
-        );
+        assert_eq!(assert_matches.get_one::<String>("app").unwrap(), "Ghostty");
     }
 
     #[test]
     fn test_cli_list_windows_app_filter() {
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec![
-            "kild-peek",
-            "list",
-            "windows",
-            "--app",
-            "Ghostty",
-        ]);
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "list", "windows", "--app", "Ghostty"]);
         assert!(matches.is_ok());
 
         let matches = matches.unwrap();
         let list_matches = matches.subcommand_matches("list").unwrap();
         let windows_matches = list_matches.subcommand_matches("windows").unwrap();
-        assert_eq!(
-            windows_matches.get_one::<String>("app").unwrap(),
-            "Ghostty"
-        );
+        assert_eq!(windows_matches.get_one::<String>("app").unwrap(), "Ghostty");
     }
 }

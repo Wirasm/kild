@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::ArgMatches;
+use kild_peek_core::errors::PeekError;
 use tracing::{error, info};
 
 use kild_peek_core::assert::{Assertion, run_assertion};
@@ -68,7 +69,8 @@ fn handle_list_windows(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&filtered)?);
             } else if filtered.is_empty() {
-                if app_filter.is_some() {
+                if let Some(app) = app_filter {
+                    info!(event = "cli.list_windows_app_filter_empty", app = app);
                     println!("No windows found for app filter.");
                 } else {
                     println!("No visible windows found.");
@@ -280,6 +282,14 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         if let Some(title) = window_title {
             // Both --app and --window: find by app+title and return actual window title
             let window = find_window_by_app_and_title(app, title).map_err(|e| {
+                error!(
+                    event = "cli.assert_window_resolution_failed",
+                    app = app,
+                    title = title,
+                    error = %e,
+                    error_code = e.error_code()
+                );
+                events::log_app_error(&e);
                 format!(
                     "Window not found for app '{}' with title '{}': {}",
                     app, title, e
@@ -288,8 +298,16 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             window.title().to_string()
         } else {
             // Just --app: find by app and return actual window title
-            let window = find_window_by_app(app)
-                .map_err(|e| format!("Window not found for app '{}': {}", app, e))?;
+            let window = find_window_by_app(app).map_err(|e| {
+                error!(
+                    event = "cli.assert_window_resolution_failed",
+                    app = app,
+                    error = %e,
+                    error_code = e.error_code()
+                );
+                events::log_app_error(&e);
+                format!("Window not found for app '{}': {}", app, e)
+            })?;
             window.title().to_string()
         }
     } else if let Some(title) = window_title {

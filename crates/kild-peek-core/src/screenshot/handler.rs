@@ -216,7 +216,7 @@ fn capture_window_by_app(
 ) -> Result<CaptureResult, ScreenshotError> {
     let window_info = find_window_by_app(app).map_err(|e| {
         debug!(
-            event = "core.screenshot.window_by_app_error",
+            event = "core.screenshot.window_by_app_lookup_failed",
             original_error = %e
         );
         map_window_error_to_screenshot_error(e)
@@ -235,8 +235,16 @@ fn capture_window_by_app(
     let window = windows
         .into_iter()
         .find(|w| w.id().ok() == Some(window_info.id()))
-        .ok_or_else(|| ScreenshotError::WindowNotFoundByApp {
-            app: app.to_string(),
+        .ok_or_else(|| {
+            warn!(
+                event = "core.screenshot.window_disappeared",
+                app = app,
+                window_id = window_info.id(),
+                "Window was found but disappeared before capture"
+            );
+            ScreenshotError::WindowNotFoundByApp {
+                app: app.to_string(),
+            }
         })?;
 
     let title = window.title().unwrap_or_else(|_| app.to_string());
@@ -256,7 +264,7 @@ fn capture_window_by_app_and_title(
 ) -> Result<CaptureResult, ScreenshotError> {
     let window_info = find_window_by_app_and_title(app, title).map_err(|e| {
         debug!(
-            event = "core.screenshot.window_by_app_and_title_error",
+            event = "core.screenshot.window_by_app_and_title_lookup_failed",
             original_error = %e
         );
         map_window_error_to_screenshot_error(e)
@@ -274,8 +282,17 @@ fn capture_window_by_app_and_title(
     let window = windows
         .into_iter()
         .find(|w| w.id().ok() == Some(window_info.id()))
-        .ok_or_else(|| ScreenshotError::WindowNotFound {
-            title: title.to_string(),
+        .ok_or_else(|| {
+            warn!(
+                event = "core.screenshot.window_disappeared",
+                app = app,
+                title = title,
+                window_id = window_info.id(),
+                "Window was found but disappeared before capture"
+            );
+            ScreenshotError::WindowNotFound {
+                title: title.to_string(),
+            }
         })?;
 
     check_window_not_minimized(&window, title)?;
