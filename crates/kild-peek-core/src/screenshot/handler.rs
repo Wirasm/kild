@@ -7,7 +7,7 @@ use image::codecs::png::PngEncoder;
 use tracing::{debug, error, info, warn};
 
 use super::errors::ScreenshotError;
-use super::types::{CaptureRequest, CaptureResult, CaptureTarget, ImageFormat};
+use super::types::{CaptureRequest, CaptureResult, CaptureTarget, CropArea, ImageFormat};
 use crate::window::{
     WindowError, find_window_by_app, find_window_by_app_and_title, find_window_by_title,
 };
@@ -16,15 +16,17 @@ use crate::window::{
 pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotError> {
     info!(event = "core.screenshot.capture_started", target = ?request.target);
 
+    let crop = request.crop;
+
     match &request.target {
-        CaptureTarget::Window { title } => capture_window_by_title(title, &request.format),
-        CaptureTarget::WindowId { id } => capture_window_by_id(*id, &request.format),
-        CaptureTarget::WindowApp { app } => capture_window_by_app(app, &request.format),
+        CaptureTarget::Window { title } => capture_window_by_title(title, &request.format, crop),
+        CaptureTarget::WindowId { id } => capture_window_by_id(*id, &request.format, crop),
+        CaptureTarget::WindowApp { app } => capture_window_by_app(app, &request.format, crop),
         CaptureTarget::WindowAppAndTitle { app, title } => {
-            capture_window_by_app_and_title(app, title, &request.format)
+            capture_window_by_app_and_title(app, title, &request.format, crop)
         }
-        CaptureTarget::Monitor { index } => capture_monitor(*index, &request.format),
-        CaptureTarget::PrimaryMonitor => capture_primary_monitor(&request.format),
+        CaptureTarget::Monitor { index } => capture_monitor(*index, &request.format, crop),
+        CaptureTarget::PrimaryMonitor => capture_primary_monitor(&request.format, crop),
     }
 }
 
@@ -166,6 +168,7 @@ fn check_window_not_minimized(window: &xcap::Window, title: &str) -> Result<(), 
 fn capture_window_by_title(
     title: &str,
     format: &ImageFormat,
+    crop: Option<CropArea>,
 ) -> Result<CaptureResult, ScreenshotError> {
     // Use shared find_window_by_title for consistent matching behavior across modules
     let window_info = find_window_by_title(title).map_err(|e| {
@@ -202,10 +205,14 @@ fn capture_window_by_title(
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
-fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
+fn capture_window_by_id(
+    id: u32,
+    format: &ImageFormat,
+    crop: Option<CropArea>,
+) -> Result<CaptureResult, ScreenshotError> {
     let windows = enumerate_windows()?;
 
     let window = windows
@@ -220,12 +227,13 @@ fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, 
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
 fn capture_window_by_app(
     app: &str,
     format: &ImageFormat,
+    crop: Option<CropArea>,
 ) -> Result<CaptureResult, ScreenshotError> {
     let window_info = find_window_by_app(app).map_err(|e| {
         debug!(
@@ -260,13 +268,14 @@ fn capture_window_by_app(
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
 fn capture_window_by_app_and_title(
     app: &str,
     title: &str,
     format: &ImageFormat,
+    crop: Option<CropArea>,
 ) -> Result<CaptureResult, ScreenshotError> {
     let window_info = find_window_by_app_and_title(app, title).map_err(|e| {
         debug!(
@@ -300,10 +309,14 @@ fn capture_window_by_app_and_title(
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
-fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
+fn capture_monitor(
+    index: usize,
+    format: &ImageFormat,
+    crop: Option<CropArea>,
+) -> Result<CaptureResult, ScreenshotError> {
     let monitors = enumerate_monitors()?;
 
     let monitor = monitors
@@ -315,10 +328,13 @@ fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, 
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
-fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
+fn capture_primary_monitor(
+    format: &ImageFormat,
+    crop: Option<CropArea>,
+) -> Result<CaptureResult, ScreenshotError> {
     let monitors = enumerate_monitors()?;
 
     // First try to find primary monitor
@@ -348,7 +364,7 @@ fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, Screen
         .capture_image()
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
-    encode_image(image, format)
+    encode_image(image, format, crop)
 }
 
 /// Enumerate all monitors with consistent permission error handling
@@ -366,7 +382,49 @@ fn enumerate_monitors() -> Result<Vec<xcap::Monitor>, ScreenshotError> {
 fn encode_image(
     image: image::RgbaImage,
     format: &ImageFormat,
+    crop: Option<CropArea>,
 ) -> Result<CaptureResult, ScreenshotError> {
+    let original_width = image.width();
+    let original_height = image.height();
+
+    // Apply crop if specified
+    let image = if let Some(crop) = crop {
+        // Validate crop bounds
+        if crop.x + crop.width > original_width || crop.y + crop.height > original_height {
+            return Err(ScreenshotError::InvalidCropBounds {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height,
+                image_width: original_width,
+                image_height: original_height,
+            });
+        }
+
+        info!(
+            event = "core.screenshot.crop_started",
+            x = crop.x,
+            y = crop.y,
+            width = crop.width,
+            height = crop.height
+        );
+
+        // Use crop_imm to create a new cropped image without mutating
+        let cropped = image::DynamicImage::ImageRgba8(image)
+            .crop_imm(crop.x, crop.y, crop.width, crop.height)
+            .to_rgba8();
+
+        info!(
+            event = "core.screenshot.crop_completed",
+            cropped_width = cropped.width(),
+            cropped_height = cropped.height()
+        );
+
+        cropped
+    } else {
+        image
+    };
+
     let width = image.width();
     let height = image.height();
 
