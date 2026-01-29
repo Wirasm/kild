@@ -53,6 +53,55 @@ pub fn save_to_file(result: &CaptureResult, path: &Path) -> Result<(), Screensho
     Ok(())
 }
 
+/// Map WindowError to ScreenshotError with appropriate handling
+fn map_window_error_to_screenshot_error(error: WindowError) -> ScreenshotError {
+    match error {
+        WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
+        WindowError::EnumerationFailed { message } => {
+            if is_permission_error(&message) {
+                debug!(
+                    event = "core.screenshot.permission_error_detected",
+                    message = &message
+                );
+                ScreenshotError::PermissionDenied
+            } else {
+                ScreenshotError::EnumerationFailed(message)
+            }
+        }
+        WindowError::WindowNotFoundById { id } => {
+            warn!(
+                event = "core.screenshot.unexpected_window_error",
+                error_type = "WindowNotFoundById",
+                id = id
+            );
+            ScreenshotError::EnumerationFailed(format!("Unexpected: window not found by id {}", id))
+        }
+        WindowError::MonitorEnumerationFailed { message } => {
+            warn!(
+                event = "core.screenshot.unexpected_window_error",
+                error_type = "MonitorEnumerationFailed"
+            );
+            ScreenshotError::EnumerationFailed(message)
+        }
+        WindowError::MonitorNotFound { index } => {
+            warn!(
+                event = "core.screenshot.unexpected_window_error",
+                error_type = "MonitorNotFound",
+                index = index
+            );
+            ScreenshotError::EnumerationFailed(format!(
+                "Unexpected: monitor not found at index {}",
+                index
+            ))
+        }
+    }
+}
+
+/// Check if an error message indicates a permission error
+fn is_permission_error(message: &str) -> bool {
+    message.contains("permission") || message.contains("denied")
+}
+
 /// Check if a window is minimized and return an error if so.
 ///
 /// Returns Ok(()) if the window is not minimized or if the check fails
@@ -90,58 +139,13 @@ fn capture_window_by_title(
             event = "core.screenshot.window_error_mapping",
             original_error = %e
         );
-        match e {
-            WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
-            WindowError::EnumerationFailed { message } => {
-                // Heuristic: detect permission errors from error message content
-                if message.contains("permission") || message.contains("denied") {
-                    debug!(
-                        event = "core.screenshot.permission_error_detected",
-                        message = &message
-                    );
-                    ScreenshotError::PermissionDenied
-                } else {
-                    ScreenshotError::EnumerationFailed(message)
-                }
-            }
-            // These variants should not occur from find_window_by_title, but handle explicitly
-            // to avoid silent absorption of future WindowError variants
-            WindowError::WindowNotFoundById { id } => {
-                warn!(
-                    event = "core.screenshot.unexpected_window_error",
-                    error_type = "WindowNotFoundById",
-                    id = id
-                );
-                ScreenshotError::EnumerationFailed(format!(
-                    "Unexpected: window not found by id {}",
-                    id
-                ))
-            }
-            WindowError::MonitorEnumerationFailed { message } => {
-                warn!(
-                    event = "core.screenshot.unexpected_window_error",
-                    error_type = "MonitorEnumerationFailed"
-                );
-                ScreenshotError::EnumerationFailed(message)
-            }
-            WindowError::MonitorNotFound { index } => {
-                warn!(
-                    event = "core.screenshot.unexpected_window_error",
-                    error_type = "MonitorNotFound",
-                    index = index
-                );
-                ScreenshotError::EnumerationFailed(format!(
-                    "Unexpected: monitor not found at index {}",
-                    index
-                ))
-            }
-        }
+        map_window_error_to_screenshot_error(e)
     })?;
 
     // Now find the actual xcap window by ID to capture
     let windows = xcap::Window::all().map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("permission") || msg.contains("denied") {
+        if is_permission_error(&msg) {
             ScreenshotError::PermissionDenied
         } else {
             ScreenshotError::EnumerationFailed(msg)
@@ -177,7 +181,7 @@ fn capture_window_by_title(
 fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
     let windows = xcap::Window::all().map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("permission") || msg.contains("denied") {
+        if is_permission_error(&msg) {
             ScreenshotError::PermissionDenied
         } else {
             ScreenshotError::EnumerationFailed(msg)
@@ -202,7 +206,7 @@ fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, 
 fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
     let monitors = xcap::Monitor::all().map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("permission") || msg.contains("denied") {
+        if is_permission_error(&msg) {
             ScreenshotError::PermissionDenied
         } else {
             ScreenshotError::EnumerationFailed(msg)
@@ -224,7 +228,7 @@ fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, 
 fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
     let monitors = xcap::Monitor::all().map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("permission") || msg.contains("denied") {
+        if is_permission_error(&msg) {
             ScreenshotError::PermissionDenied
         } else {
             ScreenshotError::EnumerationFailed(msg)
