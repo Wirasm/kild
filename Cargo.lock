@@ -3217,6 +3217,7 @@ name = "kild-peek-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "core-graphics 0.24.0",
  "image",
  "image-compare",
  "serde",

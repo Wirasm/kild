@@ -165,6 +165,93 @@ pub fn build_cli() -> Command {
                         .help("Save visual diff image highlighting differences"),
                 ),
         )
+        // Click subcommand
+        .subcommand(
+            Command::new("click")
+                .about("Click at coordinates within a window")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .required(true)
+                        .help("Coordinates to click: x,y (relative to window top-left)"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        // Type subcommand
+        .subcommand(
+            Command::new("type")
+                .about("Type text into the focused element of a window")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("text")
+                        .required(true)
+                        .index(1)
+                        .help("Text to type"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        // Key subcommand
+        .subcommand(
+            Command::new("key")
+                .about("Send a key combination to a window")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("combo")
+                        .required(true)
+                        .index(1)
+                        .help("Key combination (e.g., \"enter\", \"tab\", \"cmd+s\", \"cmd+shift+p\")"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
         // Assert subcommand
         .subcommand(
             Command::new("assert")
@@ -720,6 +807,208 @@ mod tests {
             screenshot_matches.get_one::<String>("output").unwrap(),
             "/tmp/cropped.png"
         );
+    }
+
+    #[test]
+    fn test_cli_click_with_window() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--window",
+            "Terminal",
+            "--at",
+            "100,50",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert_eq!(
+            click_matches.get_one::<String>("window").unwrap(),
+            "Terminal"
+        );
+        assert_eq!(click_matches.get_one::<String>("at").unwrap(), "100,50");
+    }
+
+    #[test]
+    fn test_cli_click_with_app() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "50,25",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert_eq!(click_matches.get_one::<String>("app").unwrap(), "Finder");
+    }
+
+    #[test]
+    fn test_cli_click_with_app_and_window() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Ghostty",
+            "--window",
+            "Terminal",
+            "--at",
+            "200,100",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert_eq!(click_matches.get_one::<String>("app").unwrap(), "Ghostty");
+        assert_eq!(
+            click_matches.get_one::<String>("window").unwrap(),
+            "Terminal"
+        );
+    }
+
+    #[test]
+    fn test_cli_click_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert!(click_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_click_requires_at() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild-peek", "click", "--window", "Terminal"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_type_with_window() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "type",
+            "--window",
+            "TextEdit",
+            "hello world",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let type_matches = matches.subcommand_matches("type").unwrap();
+        assert_eq!(
+            type_matches.get_one::<String>("window").unwrap(),
+            "TextEdit"
+        );
+        assert_eq!(
+            type_matches.get_one::<String>("text").unwrap(),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn test_cli_type_with_app() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "type", "--app", "TextEdit", "some text"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let type_matches = matches.subcommand_matches("type").unwrap();
+        assert_eq!(type_matches.get_one::<String>("app").unwrap(), "TextEdit");
+    }
+
+    #[test]
+    fn test_cli_type_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "type",
+            "--app",
+            "TextEdit",
+            "text",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let type_matches = matches.subcommand_matches("type").unwrap();
+        assert!(type_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_type_requires_text() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild-peek", "type", "--window", "TextEdit"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_key_with_window() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "key", "--window", "Terminal", "cmd+s"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let key_matches = matches.subcommand_matches("key").unwrap();
+        assert_eq!(key_matches.get_one::<String>("window").unwrap(), "Terminal");
+        assert_eq!(key_matches.get_one::<String>("combo").unwrap(), "cmd+s");
+    }
+
+    #[test]
+    fn test_cli_key_with_app() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "key", "--app", "TextEdit", "enter"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let key_matches = matches.subcommand_matches("key").unwrap();
+        assert_eq!(key_matches.get_one::<String>("app").unwrap(), "TextEdit");
+        assert_eq!(key_matches.get_one::<String>("combo").unwrap(), "enter");
+    }
+
+    #[test]
+    fn test_cli_key_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "key",
+            "--app",
+            "TextEdit",
+            "tab",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let key_matches = matches.subcommand_matches("key").unwrap();
+        assert!(key_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_key_requires_combo() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild-peek", "key", "--window", "Terminal"]);
+        assert!(matches.is_err());
     }
 
     #[test]

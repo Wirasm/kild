@@ -15,3 +15,4 @@ xcap.workspace = true
 image.workspace = true
 image-compare.workspace = true
 base64.workspace = true
+core-graphics.workspace = true

@@ -7,6 +7,9 @@ use tracing::{error, info, warn};
 use kild_peek_core::assert::{Assertion, run_assertion};
 use kild_peek_core::diff::{DiffRequest, compare_images};
 use kild_peek_core::events;
+use kild_peek_core::interact::{
+    ClickRequest, InteractionTarget, KeyComboRequest, TypeRequest, click, send_key_combo, type_text,
+};
 use kild_peek_core::screenshot::{CaptureRequest, CropArea, ImageFormat, capture, save_to_file};
 use kild_peek_core::window::{
     find_window_by_app, find_window_by_app_and_title, find_window_by_app_and_title_with_wait,
@@ -22,6 +25,9 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("list", sub_matches)) => handle_list_command(sub_matches),
         Some(("screenshot", sub_matches)) => handle_screenshot_command(sub_matches),
         Some(("diff", sub_matches)) => handle_diff_command(sub_matches),
+        Some(("click", sub_matches)) => handle_click_command(sub_matches),
+        Some(("type", sub_matches)) => handle_type_command(sub_matches),
+        Some(("key", sub_matches)) => handle_key_command(sub_matches),
         Some(("assert", sub_matches)) => handle_assert_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");
@@ -230,6 +236,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
 }
 
 /// Build a capture request from command-line arguments, with optional wait support
+#[allow(clippy::too_many_arguments)]
 fn build_capture_request_with_wait(
     app_name: Option<&String>,
     window_title: Option<&String>,
@@ -379,6 +386,154 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         Err(e) => {
             eprintln!("Failed to compare images: {}", e);
             error!(event = "cli.diff_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Parse an InteractionTarget from --window and --app arguments
+fn parse_interaction_target(
+    matches: &ArgMatches,
+) -> Result<InteractionTarget, Box<dyn std::error::Error>> {
+    let window_title = matches.get_one::<String>("window");
+    let app_name = matches.get_one::<String>("app");
+
+    match (app_name, window_title) {
+        (Some(app), Some(title)) => Ok(InteractionTarget::AppAndWindow {
+            app: app.clone(),
+            title: title.clone(),
+        }),
+        (Some(app), None) => Ok(InteractionTarget::App { app: app.clone() }),
+        (None, Some(title)) => Ok(InteractionTarget::Window {
+            title: title.clone(),
+        }),
+        (None, None) => Err("At least one of --window or --app is required".into()),
+    }
+}
+
+fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let at_str = matches.get_one::<String>("at").unwrap();
+    let json_output = matches.get_flag("json");
+
+    // Parse "x,y" coordinates
+    let parts: Vec<&str> = at_str.split(',').collect();
+    if parts.len() != 2 {
+        return Err("--at format must be x,y (e.g., \"100,50\")".into());
+    }
+    let x: i32 = parts[0].trim().parse()?;
+    let y: i32 = parts[1].trim().parse()?;
+
+    info!(
+        event = "cli.click_started",
+        x = x,
+        y = y,
+        target = ?target
+    );
+
+    let request = ClickRequest::new(target, x, y);
+
+    match click(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Clicked at ({}, {})", x, y);
+                if let Some(details) = &result.details {
+                    if let Some(window) = details.get("window") {
+                        println!("  Window: {}", window.as_str().unwrap_or("unknown"));
+                    }
+                    if let Some(sx) = details.get("screen_x")
+                        && let Some(sy) = details.get("screen_y")
+                    {
+                        println!("  Screen: ({}, {})", sx, sy);
+                    }
+                }
+            }
+
+            info!(event = "cli.click_completed", x = x, y = y);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Click failed: {}", e);
+            error!(event = "cli.click_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_type_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let text = matches.get_one::<String>("text").unwrap();
+    let json_output = matches.get_flag("json");
+
+    info!(
+        event = "cli.type_started",
+        text_len = text.len(),
+        target = ?target
+    );
+
+    let request = TypeRequest::new(target, text);
+
+    match type_text(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Typed {} characters", text.len());
+                if let Some(details) = &result.details
+                    && let Some(window) = details.get("window")
+                {
+                    println!("  Window: {}", window.as_str().unwrap_or("unknown"));
+                }
+            }
+
+            info!(event = "cli.type_completed", text_len = text.len());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Type failed: {}", e);
+            error!(event = "cli.type_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_key_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let combo = matches.get_one::<String>("combo").unwrap();
+    let json_output = matches.get_flag("json");
+
+    info!(
+        event = "cli.key_started",
+        combo = combo.as_str(),
+        target = ?target
+    );
+
+    let request = KeyComboRequest::new(target, combo);
+
+    match send_key_combo(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Sent key: {}", combo);
+                if let Some(details) = &result.details
+                    && let Some(window) = details.get("window")
+                {
+                    println!("  Window: {}", window.as_str().unwrap_or("unknown"));
+                }
+            }
+
+            info!(event = "cli.key_completed", combo = combo.as_str());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Key failed: {}", e);
+            error!(event = "cli.key_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }

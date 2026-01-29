@@ -36,6 +36,7 @@ xcap = "0.8"
 image = "0.25"
 image-compare = "0.5"
 base64 = "0.22"
+core-graphics = "0.24"
 
 # Internal workspace dependencies
 kild-core = { path = "crates/kild-core" }

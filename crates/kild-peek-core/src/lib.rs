@@ -13,6 +13,7 @@ pub mod assert;
 pub mod diff;
 pub mod errors;
 pub mod events;
+pub mod interact;
 pub mod logging;
 pub mod screenshot;
 pub mod window;
@@ -32,3 +33,8 @@ pub use diff::{DiffRequest, DiffResult};
 
 // Re-export assert types
 pub use assert::{Assertion, AssertionResult, ElementQuery};
+
+// Re-export interact types
+pub use interact::{
+    ClickRequest, InteractionResult, InteractionTarget, KeyComboRequest, TypeRequest,
+};
