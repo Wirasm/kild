@@ -1,25 +1,30 @@
 ---
 description: Implement fix from RCA document for GitHub issue
-argument-hint: [github-issue-id]
 allowed-tools: Read, Write, Edit, Bash(ruff:*), Bash(mypy:*), Bash(pytest:*), Bash(npm:*), Bash(bun:*)
 ---
 
-# Implement Fix: GitHub Issue #$ARGUMENTS
+# Implement Fix: GitHub Issue
+
+## First Step: Get GitHub Issue ID
+
+Ask the user: "Which GitHub issue ID should I implement a fix for?"
+
+## GitHub Issue #[User's response]
 
 ## Prerequisites
 
 **This command implements fixes for GitHub issues based on RCA documents:**
 - Working in a local Git repository with GitHub origin
-- RCA document exists at `docs/rca/issue-$ARGUMENTS.md`
+- RCA document exists at `docs/rca/issue-[User's GitHub issue ID].md`
 - GitHub CLI installed and authenticated (optional, for status updates)
 
 ## RCA Document to Reference
 
-Read RCA: `docs/rca/issue-$ARGUMENTS.md`
+Read RCA: `docs/rca/issue-[User's GitHub issue ID].md`
 
 **Optional - View GitHub issue for context:**
 ```bash
-gh issue view $ARGUMENTS
+gh issue view [User's GitHub issue ID]
 ```
 
 ## Implementation Instructions
@@ -27,7 +32,7 @@ gh issue view $ARGUMENTS
 ### 1. Read and Understand RCA
 
 - Read the ENTIRE RCA document thoroughly
-- Review the GitHub issue details (issue #$ARGUMENTS)
+- Review the GitHub issue details (issue #[User's GitHub issue ID])
 - Understand the root cause
 - Review the proposed fix strategy
 - Note all files to modify
@@ -78,8 +83,8 @@ Following the "Testing Requirements" from RCA:
 
 **Test implementation:**
 ```python
-def test_issue_$ARGUMENTS_fix():
-    """Test that issue #$ARGUMENTS is fixed."""
+def test_issue_[User's GitHub issue ID]_fix():
+    """Test that issue #[User's GitHub issue ID] is fixed."""
     # Arrange - set up the scenario that caused the bug
     # Act - execute the code that previously failed
     # Assert - verify it now works correctly
@@ -125,7 +130,7 @@ If needed:
 
 ### Fix Implementation Summary
 
-**GitHub Issue #$ARGUMENTS**: [Brief title]
+**GitHub Issue #[User's GitHub issue ID]**: [Brief title]
 
 **Issue URL**: [GitHub issue URL]
 
@@ -192,35 +197,35 @@ All changes complete and validated. Ready for:
 
 **Suggested commit message:**
 ```
-fix(scope): resolve GitHub issue #$ARGUMENTS - [brief description]
+fix(scope): resolve GitHub issue #[User's GitHub issue ID] - [brief description]
 
 [Summary of what was fixed and how]
 
-Fixes #$ARGUMENTS
+Fixes #[User's GitHub issue ID]
 ```
 
-**Note:** Using `Fixes #$ARGUMENTS` in the commit message will automatically close the GitHub issue when merged to the default branch.
+**Note:** Using `Fixes #[User's GitHub issue ID]` in the commit message will automatically close the GitHub issue when merged to the default branch.
 
 ### Optional: Update GitHub Issue
 
 **Add implementation comment to issue:**
 ```bash
-gh issue comment $ARGUMENTS --body "Fix implemented in commit [commit-hash]. Ready for review."
+gh issue comment [User's GitHub issue ID] --body "Fix implemented in commit [commit-hash]. Ready for review."
 ```
 
 **Update issue labels (if needed):**
 ```bash
-gh issue edit $ARGUMENTS --add-label "fixed" --remove-label "bug"
+gh issue edit [User's GitHub issue ID] --add-label "fixed" --remove-label "bug"
 ```
 
 **Close the issue (if not using auto-close via commit message):**
 ```bash
-gh issue close $ARGUMENTS --comment "Fixed and merged."
+gh issue close [User's GitHub issue ID] --comment "Fixed and merged."
 ```
 
 ## Notes
 
-- If the RCA document is missing or incomplete, request it be created first with `/rca $ARGUMENTS`
+- If the RCA document is missing or incomplete, request it be created first with `/rca [User's GitHub issue ID]`
 - If you discover the RCA analysis was incorrect, document findings and update the RCA
 - If additional issues are found during implementation, note them for separate GitHub issues and RCAs
 - Follow project coding standards exactly

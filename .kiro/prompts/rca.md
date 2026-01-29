@@ -1,9 +1,14 @@
 ---
 description: Analyze and document root cause for a GitHub issue
-argument-hint: [github-issue-id]
 ---
 
-# Root Cause Analysis: GitHub Issue #$ARGUMENTS
+# Root Cause Analysis: GitHub Issue
+
+## First Step: Get GitHub Issue ID
+
+Ask the user: "Which GitHub issue ID should I analyze?"
+
+## GitHub Issue #[User's response]
 
 ## Objective
 
@@ -21,7 +26,7 @@ Investigate GitHub issue #$ARGUMENTS from this repository, identify the root cau
 **Use GitHub CLI to retrieve issue information:**
 
 ```bash
-gh issue view $ARGUMENTS
+gh issue view [User's GitHub issue ID]
 ```
 
 This fetches:
@@ -91,16 +96,16 @@ Look for:
 
 ## Output: Create RCA Document
 
-Save analysis as: `docs/rca/issue-$ARGUMENTS.md`
+Save analysis as: `docs/rca/issue-[User's GitHub issue ID].md`
 
 ### Required RCA Document Structure
 
 ```markdown
-# Root Cause Analysis: GitHub Issue #$ARGUMENTS
+# Root Cause Analysis: GitHub Issue #[User's GitHub issue ID]
 
 ## Issue Summary
 
-- **GitHub Issue ID**: #$ARGUMENTS
+- **GitHub Issue ID**: #[User's GitHub issue ID]
 - **Issue URL**: [Link to GitHub issue]
 - **Title**: [Issue title from GitHub]
 - **Reporter**: [GitHub username]
@@ -215,6 +220,6 @@ This RCA document should be used by `/implement-fix` command.
 ## Next Steps
 
 1. Review this RCA document
-2. Run: `/implement-fix $ARGUMENTS` to implement the fix
+2. Run: `/implement-fix [User's GitHub issue ID]` to implement the fix
 3. Run: `/commit` after implementation complete
 ```

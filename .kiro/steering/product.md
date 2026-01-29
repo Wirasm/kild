@@ -21,11 +21,11 @@ Developers who work with multiple AI coding assistants simultaneously and need t
 
 ## User Journey
 1. Developer starts working on a project with an AI agent
-2. AI agent or developer runs `shards start <name> <agent-command>` to create isolated workspace
+2. AI agent or developer runs `shards create <branch> --agent <agent>` to create isolated workspace
 3. New Git worktree is created with unique branch, agent launches in native terminal
 4. Developer can continue working while agent operates in background
-5. Use `shards list` to see all active sessions, `shards info <name>` for details
-6. Clean up with `shards stop <name>` or `shards cleanup` for orphaned sessions
+5. Use `shards list` to see all active sessions
+6. Clean up with `shards destroy <branch>` when done
 
 ## Success Criteria
 - Seamless creation and management of isolated AI agent sessions

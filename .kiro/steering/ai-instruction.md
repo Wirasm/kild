@@ -22,9 +22,9 @@ Shards is a CLI tool that manages multiple AI coding agents in isolated Git work
 
 ### **Basic Workflow**
 
-1. **Start a new shard** (creates worktree + launches agent):
+1. **Create a new shard** (creates worktree + launches agent):
    ```bash
-   shards start <shard-name> <agent-command>
+   shards create <branch> --agent <agent>
    ```
 
 2. **Check what's running**:
@@ -32,41 +32,36 @@ Shards is a CLI tool that manages multiple AI coding agents in isolated Git work
    shards list
    ```
 
-3. **Get details about a shard**:
+3. **Remove shard when done**:
    ```bash
-   shards info <shard-name>
-   ```
-
-4. **Stop and cleanup when done**:
-   ```bash
-   shards stop <shard-name>
+   shards destroy <branch>
    ```
 
 ### **Common Commands for AI Agents**
 
 ```bash
-# Start Kiro CLI for bug fixing
-shards start bug-fix-123 "kiro-cli chat"
+# Create Kiro CLI shard for bug fixing
+shards create bug-fix-123 --agent kiro
 
-# Start Claude for feature development
-shards start feature-auth "claude-code"
+# Create Claude shard for feature development
+shards create feature-auth --agent claude
 
-# Start Gemini for refactoring
-shards start refactor-api "gemini-cli"
+# Create Gemini shard for refactoring
+shards create refactor-api --agent gemini
 
 # Check all active sessions
 shards list
 
 # Clean up finished work
-shards stop bug-fix-123
+shards destroy bug-fix-123
 ```
 
-## What Happens When You Start a Shard
+## What Happens When You Create a Shard
 
-1. **Git worktree created** in `.shards/<shard-name>/`
-2. **New branch created** with format `shard_<uuid>`
+1. **Git worktree created** in `~/.shards/worktrees/<project>/<branch>/`
+2. **New branch created** with user-specified branch name
 3. **Agent launched** in native terminal window in the worktree directory
-4. **Session tracked** in `~/.shards/registry.json`
+4. **Session tracked** (persistence planned)
 
 ## AI Agent Integration
 
@@ -76,7 +71,7 @@ You can use Shards to create isolated workspaces for yourself:
 
 ```bash
 # Create a new workspace for a specific task
-shards start my-task "kiro-cli chat"
+shards create my-task --agent kiro
 
 # This will:
 # - Create a new Git worktree
@@ -88,13 +83,13 @@ shards start my-task "kiro-cli chat"
 
 ```bash
 # Agent A creates workspace for Agent B
-shards start claude-review "claude-code --review"
+shards create claude-review --agent claude
 
 # Agent B can later check what's running
 shards list
 
 # Agent A can clean up when done
-shards stop claude-review
+shards destroy claude-review
 ```
 
 ## Best Practices
@@ -105,14 +100,14 @@ shards stop claude-review
 - Use agent prefixes: `kiro-debugging`, `claude-testing`
 
 ### **Lifecycle Management**
-- Always `shards stop <name>` when done to clean up worktrees
-- Use `shards cleanup` periodically to remove orphaned sessions
+- Always `shards destroy <branch>` when done to clean up worktrees
 - Use `shards list` to see what's currently active
+- Session persistence and cleanup commands are planned
 
 ### **Command Structure**
-- Simple commands: `shards start test "echo hello"`
-- Complex commands: `shards start kiro "kiro-cli chat --model gpt-4"`
-- Commands with flags: `shards start debug "node --inspect app.js"`
+- Simple commands: `shards create test --agent claude`
+- Different agents: `shards create kiro-task --agent kiro`
+- Custom branches: `shards create feature-auth --agent gemini`
 
 ## Troubleshooting
 
@@ -123,14 +118,11 @@ shards stop claude-review
 
 ### **Recovery Commands**
 ```bash
-# Clean up all orphaned sessions
-shards cleanup
-
 # Check what's actually running
 shards list
 
-# Get detailed info about a problematic shard
-shards info <shard-name>
+# Clean up when destroy is implemented
+shards destroy <branch-name>
 ```
 
 ## Requirements

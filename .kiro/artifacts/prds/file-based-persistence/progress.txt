@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: 2026-01-09
+Feature: file-based-persistence
+
+## Codebase Patterns
+- Vertical slice architecture with handler/operations separation
+- Structured logging with event naming: {domain}.{action}.{state}
+- Feature-specific error types using thiserror
+- Pure business logic in operations.rs, I/O in handler.rs
+
+## Key Files
+- src/sessions/handler.rs - Session I/O orchestration
+- src/sessions/operations.rs - Pure session business logic
+- src/sessions/types.rs - Session data structures
+- src/core/config.rs - Application configuration
+---

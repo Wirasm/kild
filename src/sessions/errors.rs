@@ -1,0 +1,93 @@
+use crate::core::errors::ShardsError;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    #[error("Session '{name}' already exists")]
+    AlreadyExists { name: String },
+
+    #[error("Session '{name}' not found")]
+    NotFound { name: String },
+
+    #[error("Invalid session name: cannot be empty")]
+    InvalidName,
+
+    #[error("Invalid command: cannot be empty")]
+    InvalidCommand,
+
+    #[error("Git operation failed: {source}")]
+    GitError {
+        #[from]
+        source: crate::git::errors::GitError,
+    },
+
+    #[error("Terminal operation failed: {source}")]
+    TerminalError {
+        #[from]
+        source: crate::terminal::errors::TerminalError,
+    },
+
+    #[error("Database operation failed: {message}")]
+    DatabaseError { message: String },
+}
+
+impl ShardsError for SessionError {
+    fn error_code(&self) -> &'static str {
+        match self {
+            SessionError::AlreadyExists { .. } => "SESSION_ALREADY_EXISTS",
+            SessionError::NotFound { .. } => "SESSION_NOT_FOUND",
+            SessionError::InvalidName => "INVALID_SESSION_NAME",
+            SessionError::InvalidCommand => "INVALID_COMMAND",
+            SessionError::GitError { .. } => "GIT_ERROR",
+            SessionError::TerminalError { .. } => "TERMINAL_ERROR",
+            SessionError::DatabaseError { .. } => "DATABASE_ERROR",
+        }
+    }
+
+    fn is_user_error(&self) -> bool {
+        matches!(
+            self,
+            SessionError::AlreadyExists { .. }
+                | SessionError::NotFound { .. }
+                | SessionError::InvalidName
+                | SessionError::InvalidCommand
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_error_display() {
+        let error = SessionError::AlreadyExists {
+            name: "test".to_string(),
+        };
+        assert_eq!(error.to_string(), "Session 'test' already exists");
+        assert_eq!(error.error_code(), "SESSION_ALREADY_EXISTS");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_session_error_not_found() {
+        let error = SessionError::NotFound {
+            name: "missing".to_string(),
+        };
+        assert_eq!(error.to_string(), "Session 'missing' not found");
+        assert_eq!(error.error_code(), "SESSION_NOT_FOUND");
+    }
+
+    #[test]
+    fn test_validation_errors() {
+        let name_error = SessionError::InvalidName;
+        assert_eq!(
+            name_error.to_string(),
+            "Invalid session name: cannot be empty"
+        );
+        assert!(name_error.is_user_error());
+
+        let cmd_error = SessionError::InvalidCommand;
+        assert_eq!(cmd_error.to_string(), "Invalid command: cannot be empty");
+        assert!(cmd_error.is_user_error());
+    }
+}

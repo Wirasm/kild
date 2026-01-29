@@ -1,0 +1,130 @@
+use crate::sessions::{errors::SessionError, types::*};
+
+pub fn validate_session_request(
+    name: &str,
+    command: &str,
+    agent: &str,
+) -> Result<ValidatedRequest, SessionError> {
+    if name.trim().is_empty() {
+        return Err(SessionError::InvalidName);
+    }
+
+    if command.trim().is_empty() {
+        return Err(SessionError::InvalidCommand);
+    }
+
+    Ok(ValidatedRequest {
+        name: name.trim().to_string(),
+        command: command.trim().to_string(),
+        agent: agent.to_string(),
+    })
+}
+
+pub fn generate_session_id(project_id: &str, branch: &str) -> String {
+    format!("{}/{}", project_id, branch)
+}
+
+pub fn calculate_port_range(session_index: u32) -> (u16, u16) {
+    let base_port = 3000u16 + (session_index as u16 * 100);
+    (base_port, base_port + 99)
+}
+
+pub fn get_agent_command(agent: &str) -> String {
+    match agent {
+        "claude" => "cc".to_string(),
+        "kiro" => "kiro-cli".to_string(),
+        "gemini" => "gemini --yolo".to_string(),
+        "codex" => "codex --dangerously-bypass-approvals-and-sandbox".to_string(),
+        _ => agent.to_string(), // Use as-is for custom agents
+    }
+}
+
+pub fn validate_branch_name(branch: &str) -> Result<String, SessionError> {
+    let trimmed = branch.trim();
+
+    if trimmed.is_empty() {
+        return Err(SessionError::InvalidName);
+    }
+
+    // Basic git branch name validation
+    if trimmed.contains("..") || trimmed.starts_with('-') || trimmed.contains(' ') {
+        return Err(SessionError::InvalidName);
+    }
+
+    Ok(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_session_request_success() {
+        let result = validate_session_request("test", "echo hello", "claude");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert_eq!(validated.name, "test");
+        assert_eq!(validated.command, "echo hello");
+        assert_eq!(validated.agent, "claude");
+    }
+
+    #[test]
+    fn test_validate_session_request_empty_name() {
+        let result = validate_session_request("", "echo hello", "claude");
+        assert!(matches!(result, Err(SessionError::InvalidName)));
+    }
+
+    #[test]
+    fn test_validate_session_request_empty_command() {
+        let result = validate_session_request("test", "", "claude");
+        assert!(matches!(result, Err(SessionError::InvalidCommand)));
+    }
+
+    #[test]
+    fn test_validate_session_request_whitespace() {
+        let result = validate_session_request("  test  ", "  echo hello  ", "claude");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert_eq!(validated.name, "test");
+        assert_eq!(validated.command, "echo hello");
+    }
+
+    #[test]
+    fn test_generate_session_id() {
+        let id = generate_session_id("my-project", "feature-branch");
+        assert_eq!(id, "my-project/feature-branch");
+    }
+
+    #[test]
+    fn test_calculate_port_range() {
+        assert_eq!(calculate_port_range(0), (3000, 3099));
+        assert_eq!(calculate_port_range(1), (3100, 3199));
+        assert_eq!(calculate_port_range(5), (3500, 3599));
+    }
+
+    #[test]
+    fn test_get_agent_command() {
+        assert_eq!(get_agent_command("claude"), "cc");
+        assert_eq!(get_agent_command("kiro"), "kiro-cli");
+        assert_eq!(get_agent_command("gemini"), "gemini --yolo");
+        assert_eq!(
+            get_agent_command("codex"),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+        assert_eq!(get_agent_command("custom"), "custom");
+    }
+
+    #[test]
+    fn test_validate_branch_name() {
+        assert!(validate_branch_name("feature-branch").is_ok());
+        assert!(validate_branch_name("feat/auth").is_ok());
+
+        assert!(validate_branch_name("").is_err());
+        assert!(validate_branch_name("  ").is_err());
+        assert!(validate_branch_name("branch..name").is_err());
+        assert!(validate_branch_name("-branch").is_err());
+        assert!(validate_branch_name("branch name").is_err());
+    }
+}

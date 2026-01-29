@@ -4,6 +4,17 @@ description: Analyze implementation against plan for process improvements
 
 # System Review
 
+## First Step: Get Input Files
+
+Ask the user these questions:
+1. "Which plan file should I review?"
+2. "Which execution report should I analyze?"
+
+## Analysis Inputs
+
+**Plan file:** [User's response to question 1]
+**Execution report:** [User's response to question 2]
+
 Perform a meta-level analysis of how well the implementation followed the plan and identify process improvements.
 
 ## Purpose
@@ -33,7 +44,7 @@ Read this to understand the planning process and what instructions guide plan cr
 
 **Generated Plan:**
 Read this to understand what the agent was SUPPOSED to do.
-Plan file: $1
+Plan file: [User's plan file]
 
 **Execute Command:**
 Read this to understand the execution process and what instructions guide implementation.
@@ -41,13 +52,13 @@ Read this to understand the execution process and what instructions guide implem
 
 **Execution Report:**
 Read this to understand what the agent ACTUALLY did and why.
-Execution report: $2
+Execution report: [User's execution report]
 
 ## Analysis Workflow
 
 ### Step 1: Understand the Planned Approach
 
-Read the generated plan ($1) and extract:
+Read the generated plan ([User's plan file]) and extract:
 
 - What features were planned?
 - What architecture was specified?
@@ -56,7 +67,7 @@ Read the generated plan ($1) and extract:
 
 ### Step 2: Understand the Actual Implementation
 
-Read the execution report ($2) and extract:
+Read the execution report ([User's execution report]) and extract:
 
 - What was implemented?
 - What diverged from the plan?
@@ -107,8 +118,8 @@ Save your analysis to: `.agents/system-reviews/[feature-name]-review.md`
 
 #### Meta Information
 
-- Plan reviewed: [path to $1]
-- Execution report: [path to $2]
+- Plan reviewed: [User's plan file]
+- Execution report: [User's execution report]
 - Date: [current date]
 
 #### Overall Alignment Score: \_\_/10
@@ -153,7 +164,7 @@ Based on analysis, recommend specific actions:
 - [ ] Add anti-pattern warning for [Y]
 - [ ] Clarify [technology constraint Z]
 
-**Update Plan Command ($1):**
+**Update Plan Command ([User's plan file]):**
 
 - [ ] Add instruction for [missing step]
 - [ ] Clarify [ambiguous instruction]
@@ -163,7 +174,7 @@ Based on analysis, recommend specific actions:
 
 - [ ] `/[command-name]` for [manual process repeated 3+ times]
 
-**Update Execute Command ($3):**
+**Update Execute Command ([User's execution report]):**
 
 - [ ] Add [validation step] to execution checklist
 

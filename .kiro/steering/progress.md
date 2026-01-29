@@ -3,36 +3,34 @@
 ## ✅ **What We CAN Do Right Now**
 
 ### **Core Functionality**
-- **Create isolated AI agent workspaces**: `shards start <name> <agent-command>`
-- **List all active sessions**: `shards list` with status indicators (🟢 Active/🔴 Stopped)
-- **Get detailed session info**: `shards info <name>` shows command, path, creation time, status
-- **Stop and cleanup sessions**: `shards stop <name>` removes worktree and registry entry
-- **Clean up orphaned sessions**: `shards cleanup` finds and removes stale worktrees/registry entries
+- **Create isolated AI agent workspaces**: `shards create <branch> --agent <agent>`
+- **List all active sessions**: `shards list` (currently shows empty due to missing persistence)
+- **Cross-platform terminal launching**: Launches agents in native terminals with proper working directory
+- **Git worktree management**: Creates isolated worktrees with unique branches
+- **Structured logging**: JSON-formatted logs with event-based naming for debugging
 
 ### **Git Integration**
-- **Automatic worktree creation** in `.shards/<name>/` directory
-- **Unique branch generation** with `shard_<uuid>` naming (e.g., `shard_a7c00fb4a4dc4686876f84f69ac837cf`)
+- **Automatic worktree creation** in `~/.shards/worktrees/<project>/<branch>/` directory
+- **Unique branch generation** with user-specified branch names
 - **Proper Git repository detection** - must be run from within a Git repo
-- **Clean worktree removal** with proper Git cleanup
+- **Project identification** - generates project IDs from git remote URLs
+- **Clean error handling** for duplicate branches and invalid repositories
 
 ### **Terminal Integration**
 - **Cross-platform terminal launching**:
-  - **macOS**: Uses AppleScript to launch Terminal.app
-  - **Linux**: Supports gnome-terminal, konsole, xterm, alacritty, kitty
-  - **Windows**: Uses Windows Terminal or cmd fallback
+  - **macOS**: Detects and uses Ghostty, iTerm, or Terminal.app with AppleScript automation
+  - **Linux**: Supports gnome-terminal, konsole, xterm, alacritty, kitty (planned)
+  - **Windows**: Uses Windows Terminal or cmd fallback (planned)
 - **Proper working directory setup** - agents launch in their worktree directory
-- **Command execution** - runs the specified agent command in the new terminal
+- **Async terminal spawning** - doesn't block CLI while terminal launches
+- **Agent command mapping** - Maps agent names (claude, kiro, gemini, codex) to commands
 
-### **Session Management**
-- **Persistent registry** stored in `~/.shards/registry.json`
-- **Session metadata tracking**: name, path, command, creation time, status
-- **Duplicate prevention** - won't create shards with existing names
-- **Status tracking** - Active/Stopped states
-
-### **Agent-Friendly Design**
-- **Programmatic usage** - designed for AI agents to call via bash
-- **Trailing arguments support** - handles complex commands with flags
-- **Error handling** - clear error messages for common issues
+### **Architecture & Code Quality**
+- **Vertical slice architecture** with feature-based organization
+- **Handler/Operations pattern** - I/O separate from pure business logic
+- **Structured logging** with tracing and JSON output
+- **Feature-specific error types** with thiserror
+- **Comprehensive testing** - Unit tests collocated with operations code
 
 ## ❌ **What We CANNOT Do Yet**
 
@@ -83,14 +81,17 @@
 - ✅ CLI framework with clap
 - ✅ Git worktree management
 - ✅ Cross-platform terminal launching
-- ✅ Session registry and tracking
-- ✅ Basic lifecycle management
+- ✅ Vertical slice architecture implementation
+- ✅ Structured logging with tracing
+- ✅ Feature-specific error handling
+- ✅ Handler/Operations pattern
 - ✅ Documentation and project structure
 
 ### **In Progress**
-- 🚧 None currently
+- 🚧 File-based session persistence (Ralph PRD created)
 
 ### **Planned**
+- 📋 Session list and destroy commands (depends on persistence)
 - 📋 Process monitoring and health checks
 - 📋 PTY output parsing and event extraction
 - 📋 GPUI native frontend

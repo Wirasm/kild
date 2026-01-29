@@ -1,0 +1,94 @@
+{
+  "branchName": "ralph/file-based-persistence",
+  "feature": "file-based-persistence",
+  "description": "Implement file-based session persistence in .shards directory to enable list and destroy commands",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create session registry directory structure",
+      "acceptanceCriteria": [
+        "Create .shards/sessions/ directory when first session is created",
+        "Directory is created relative to git repository root",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002", 
+      "title": "Save session to file when created",
+      "acceptanceCriteria": [
+        "Session data saved as JSON file in .shards/sessions/{session_id}.json",
+        "File contains all Session struct fields (id, project_id, branch, worktree_path, agent, status, created_at)",
+        "File is written atomically to prevent corruption",
+        "create command still works as before",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Load sessions from files for list command",
+      "acceptanceCriteria": [
+        "list command reads all .json files from .shards/sessions/",
+        "Displays sessions in table format as currently implemented",
+        "Shows correct session data (branch, agent, status, created_at)",
+        "Handles empty sessions directory gracefully",
+        "typecheck passes", 
+        "tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement destroy command with file cleanup",
+      "acceptanceCriteria": [
+        "destroy command removes session file from .shards/sessions/",
+        "destroy command removes git worktree",
+        "Proper error handling for non-existent sessions",
+        "Success message shows session was destroyed",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add session file validation and error handling",
+      "acceptanceCriteria": [
+        "Handle corrupted JSON files gracefully",
+        "Skip invalid session files with warning log",
+        "Validate session file structure matches Session struct",
+        "Handle file system permission errors",
+        "typecheck passes",
+        "tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Remove SQLite dependency",
+      "acceptanceCriteria": [
+        "Remove rusqlite from Cargo.toml dependencies",
+        "Remove any unused database-related imports",
+        "Project builds without SQLite",
+        "All tests pass",
+        "typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
