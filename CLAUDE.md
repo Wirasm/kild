@@ -95,6 +95,7 @@ cargo run -p kild-peek -- screenshot --app Ghostty -o /tmp/ghostty.png
 cargo run -p kild-peek -- screenshot --app Ghostty --window "Terminal" -o /tmp/precise.png
 cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
 cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
+cargo run -p kild-peek -- diff img1.png img2.png --diff-output /tmp/diff.png
 cargo run -p kild-peek -- assert --app "KILD" --exists
 cargo run -p kild-peek -- assert --window "KILD" --visible
 cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
