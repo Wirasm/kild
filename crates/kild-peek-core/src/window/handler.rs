@@ -250,11 +250,14 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, WindowError> {
 /// Find a window by title (exact match preferred, falls back to partial match)
 /// Searches both window title and app name
 ///
-/// Matching priority:
+/// Matching priority (returns first match at highest priority level):
 /// 1. Exact case-insensitive match on window title
 /// 2. Exact case-insensitive match on app name
 /// 3. Partial case-insensitive match on window title
 /// 4. Partial case-insensitive match on app name
+///
+/// When multiple windows match at the same priority level, the first one
+/// encountered in the system's window enumeration order is returned.
 pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
     info!(event = "core.window.find_started", title = title);
 
@@ -329,6 +332,9 @@ pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
 }
 
 /// Helper to build WindowInfo from xcap window and pre-fetched properties
+///
+/// Returns WindowNotFound error if the window ID cannot be retrieved.
+/// Falls back to 0 for position and 1 for dimensions if properties are unavailable.
 fn build_window_info(
     w: &xcap::Window,
     window_title: &str,
@@ -338,11 +344,50 @@ fn build_window_info(
     let id = w.id().ok().ok_or_else(|| WindowError::WindowNotFound {
         title: search_title.to_string(),
     })?;
-    let x = w.x().ok().unwrap_or(0);
-    let y = w.y().ok().unwrap_or(0);
-    let width = w.width().ok().unwrap_or(0);
-    let height = w.height().ok().unwrap_or(0);
-    let is_minimized = w.is_minimized().ok().unwrap_or(false);
+    let x = w.x().unwrap_or_else(|e| {
+        debug!(
+            event = "core.window.property_access_failed",
+            property = "x",
+            window_id = id,
+            error = %e
+        );
+        0
+    });
+    let y = w.y().unwrap_or_else(|e| {
+        debug!(
+            event = "core.window.property_access_failed",
+            property = "y",
+            window_id = id,
+            error = %e
+        );
+        0
+    });
+    let width = w.width().unwrap_or_else(|e| {
+        debug!(
+            event = "core.window.property_access_failed",
+            property = "width",
+            window_id = id,
+            error = %e
+        );
+        0
+    });
+    let height = w.height().unwrap_or_else(|e| {
+        debug!(
+            event = "core.window.property_access_failed",
+            property = "height",
+            window_id = id,
+            error = %e
+        );
+        0
+    });
+    let is_minimized = w.is_minimized().unwrap_or_else(|e| {
+        debug!(
+            event = "core.window.is_minimized_check_failed",
+            window_id = id,
+            error = %e
+        );
+        false
+    });
 
     let display_title = if window_title.is_empty() {
         if app_name.is_empty() {

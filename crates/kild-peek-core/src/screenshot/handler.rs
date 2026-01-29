@@ -84,18 +84,58 @@ fn capture_window_by_title(
     title: &str,
     format: &ImageFormat,
 ) -> Result<CaptureResult, ScreenshotError> {
-    // Use shared find_window_by_title for consistent matching behavior
-    // (exact match preferred, falls back to partial match)
-    let window_info = find_window_by_title(title).map_err(|e| match e {
-        WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
-        WindowError::EnumerationFailed { message } => {
-            if message.contains("permission") || message.contains("denied") {
-                ScreenshotError::PermissionDenied
-            } else {
+    // Use shared find_window_by_title for consistent matching behavior across modules
+    let window_info = find_window_by_title(title).map_err(|e| {
+        debug!(
+            event = "core.screenshot.window_error_mapping",
+            original_error = %e
+        );
+        match e {
+            WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
+            WindowError::EnumerationFailed { message } => {
+                // Heuristic: detect permission errors from error message content
+                if message.contains("permission") || message.contains("denied") {
+                    debug!(
+                        event = "core.screenshot.permission_error_detected",
+                        message = &message
+                    );
+                    ScreenshotError::PermissionDenied
+                } else {
+                    ScreenshotError::EnumerationFailed(message)
+                }
+            }
+            // These variants should not occur from find_window_by_title, but handle explicitly
+            // to avoid silent absorption of future WindowError variants
+            WindowError::WindowNotFoundById { id } => {
+                warn!(
+                    event = "core.screenshot.unexpected_window_error",
+                    error_type = "WindowNotFoundById",
+                    id = id
+                );
+                ScreenshotError::EnumerationFailed(format!(
+                    "Unexpected: window not found by id {}",
+                    id
+                ))
+            }
+            WindowError::MonitorEnumerationFailed { message } => {
+                warn!(
+                    event = "core.screenshot.unexpected_window_error",
+                    error_type = "MonitorEnumerationFailed"
+                );
                 ScreenshotError::EnumerationFailed(message)
             }
+            WindowError::MonitorNotFound { index } => {
+                warn!(
+                    event = "core.screenshot.unexpected_window_error",
+                    error_type = "MonitorNotFound",
+                    index = index
+                );
+                ScreenshotError::EnumerationFailed(format!(
+                    "Unexpected: monitor not found at index {}",
+                    index
+                ))
+            }
         }
-        _ => ScreenshotError::EnumerationFailed(e.to_string()),
     })?;
 
     // Now find the actual xcap window by ID to capture
@@ -111,8 +151,18 @@ fn capture_window_by_title(
     let window = windows
         .into_iter()
         .find(|w| w.id().ok() == Some(window_info.id()))
-        .ok_or_else(|| ScreenshotError::WindowNotFound {
-            title: title.to_string(),
+        .ok_or_else(|| {
+            // Window was found by title but disappeared before we could capture it
+            // This can happen if the window closes between find and capture
+            warn!(
+                event = "core.screenshot.window_disappeared",
+                title = title,
+                window_id = window_info.id(),
+                "Window was found but disappeared before capture"
+            );
+            ScreenshotError::WindowNotFound {
+                title: title.to_string(),
+            }
         })?;
 
     check_window_not_minimized(&window, title)?;
