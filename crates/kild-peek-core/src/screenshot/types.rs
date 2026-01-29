@@ -8,6 +8,10 @@ pub enum CaptureTarget {
     Window { title: String },
     /// Capture a window by ID
     WindowId { id: u32 },
+    /// Capture a window by app name
+    WindowApp { app: String },
+    /// Capture a window by app name and title (for precision)
+    WindowAppAndTitle { app: String, title: String },
     /// Capture a specific monitor by index
     Monitor { index: usize },
     /// Capture the primary monitor
@@ -48,6 +52,25 @@ impl CaptureRequest {
     pub fn window_id(id: u32) -> Self {
         Self {
             target: CaptureTarget::WindowId { id },
+            format: ImageFormat::default(),
+        }
+    }
+
+    /// Create a new capture request for a window by app name
+    pub fn window_app(app: impl Into<String>) -> Self {
+        Self {
+            target: CaptureTarget::WindowApp { app: app.into() },
+            format: ImageFormat::default(),
+        }
+    }
+
+    /// Create a new capture request for a window by app name and title
+    pub fn window_app_and_title(app: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            target: CaptureTarget::WindowAppAndTitle {
+                app: app.into(),
+                title: title.into(),
+            },
             format: ImageFormat::default(),
         }
     }

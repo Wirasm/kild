@@ -11,6 +11,9 @@ pub enum WindowError {
     #[error("Window not found with id: {id}")]
     WindowNotFoundById { id: u32 },
 
+    #[error("Window not found for app: '{app}'")]
+    WindowNotFoundByApp { app: String },
+
     #[error("Failed to enumerate monitors: {message}")]
     MonitorEnumerationFailed { message: String },
 
@@ -24,6 +27,7 @@ impl PeekError for WindowError {
             WindowError::EnumerationFailed { .. } => "WINDOW_ENUMERATION_FAILED",
             WindowError::WindowNotFound { .. } => "WINDOW_NOT_FOUND",
             WindowError::WindowNotFoundById { .. } => "WINDOW_NOT_FOUND_BY_ID",
+            WindowError::WindowNotFoundByApp { .. } => "WINDOW_NOT_FOUND_BY_APP",
             WindowError::MonitorEnumerationFailed { .. } => "MONITOR_ENUMERATION_FAILED",
             WindowError::MonitorNotFound { .. } => "MONITOR_NOT_FOUND",
         }
@@ -34,6 +38,7 @@ impl PeekError for WindowError {
             self,
             WindowError::WindowNotFound { .. }
                 | WindowError::WindowNotFoundById { .. }
+                | WindowError::WindowNotFoundByApp { .. }
                 | WindowError::MonitorNotFound { .. }
         )
     }

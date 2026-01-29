@@ -470,6 +470,136 @@ pub fn find_window_by_id(id: u32) -> Result<WindowInfo, WindowError> {
     Ok(window)
 }
 
+/// Find a window by app name (exact match preferred, falls back to partial match)
+///
+/// Matching priority (returns first match at highest priority level):
+/// 1. Exact case-insensitive match on app name
+/// 2. Partial case-insensitive match on app name
+pub fn find_window_by_app(app: &str) -> Result<WindowInfo, WindowError> {
+    info!(event = "core.window.find_by_app_started", app = app);
+
+    let app_lower = app.to_lowercase();
+
+    let xcap_windows = xcap::Window::all().map_err(|e| WindowError::EnumerationFailed {
+        message: e.to_string(),
+    })?;
+
+    let windows_with_props: Vec<_> = xcap_windows
+        .into_iter()
+        .map(|w| {
+            let window_title = w.title().ok().unwrap_or_default();
+            let app_name = w.app_name().ok().unwrap_or_default();
+            (w, window_title, app_name)
+        })
+        .collect();
+
+    // Try exact app match first
+    if let Some(result) = try_match_app(&windows_with_props, &app_lower, true, app) {
+        return result;
+    }
+    // Fall back to partial app match
+    if let Some(result) = try_match_app(&windows_with_props, &app_lower, false, app) {
+        return result;
+    }
+
+    Err(WindowError::WindowNotFoundByApp {
+        app: app.to_string(),
+    })
+}
+
+/// Helper for app matching
+fn try_match_app(
+    windows: &[(xcap::Window, String, String)],
+    app_lower: &str,
+    exact: bool,
+    original_app: &str,
+) -> Option<Result<WindowInfo, WindowError>> {
+    for (w, window_title, app_name) in windows {
+        let matches = if exact {
+            app_name.to_lowercase() == app_lower
+        } else {
+            app_name.to_lowercase().contains(app_lower)
+        };
+
+        if matches {
+            let match_type = if exact { "exact_app" } else { "partial_app" };
+            info!(
+                event = "core.window.find_by_app_completed",
+                app = original_app,
+                match_type = match_type
+            );
+            return Some(build_window_info(w, window_title, app_name, original_app));
+        }
+    }
+    None
+}
+
+/// Find a window by app name and title (for precise matching)
+///
+/// First filters windows to those matching the app, then applies title matching
+/// within that filtered set. Returns error if app has no windows or no window matches title.
+pub fn find_window_by_app_and_title(app: &str, title: &str) -> Result<WindowInfo, WindowError> {
+    info!(
+        event = "core.window.find_by_app_and_title_started",
+        app = app,
+        title = title
+    );
+
+    let app_lower = app.to_lowercase();
+    let title_lower = title.to_lowercase();
+
+    let xcap_windows = xcap::Window::all().map_err(|e| WindowError::EnumerationFailed {
+        message: e.to_string(),
+    })?;
+
+    // Collect all windows and filter to app matches
+    let app_windows: Vec<_> = xcap_windows
+        .into_iter()
+        .filter_map(|w| {
+            let window_title = w.title().ok().unwrap_or_default();
+            let app_name = w.app_name().ok().unwrap_or_default();
+            // Include if app matches (exact or partial)
+            let app_name_lower = app_name.to_lowercase();
+            if app_name_lower == app_lower || app_name_lower.contains(&app_lower) {
+                Some((w, window_title, app_name))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if app_windows.is_empty() {
+        return Err(WindowError::WindowNotFoundByApp {
+            app: app.to_string(),
+        });
+    }
+
+    // Now apply title matching within app's windows
+    // Priority: exact title > partial title
+    if let Some(result) = try_match(&app_windows, &title_lower, MatchType::ExactTitle, title) {
+        info!(
+            event = "core.window.find_by_app_and_title_completed",
+            app = app,
+            title = title,
+            match_type = "exact_title"
+        );
+        return result;
+    }
+    if let Some(result) = try_match(&app_windows, &title_lower, MatchType::PartialTitle, title) {
+        info!(
+            event = "core.window.find_by_app_and_title_completed",
+            app = app,
+            title = title,
+            match_type = "partial_title"
+        );
+        return result;
+    }
+
+    Err(WindowError::WindowNotFound {
+        title: title.to_string(),
+    })
+}
+
 /// Get a monitor by index
 pub fn get_monitor(index: usize) -> Result<MonitorInfo, WindowError> {
     info!(event = "core.monitor.get_started", index = index);
@@ -614,5 +744,40 @@ mod tests {
             result_lower.unwrap_err().error_code(),
             result_upper.unwrap_err().error_code()
         );
+    }
+
+    #[test]
+    fn test_find_window_by_app_not_found() {
+        let result = find_window_by_app("NONEXISTENT_APP_12345_UNIQUE");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "WINDOW_NOT_FOUND_BY_APP");
+        }
+    }
+
+    #[test]
+    fn test_find_window_by_app_is_case_insensitive() {
+        // Both should return the same error (no such app exists)
+        let result_lower = find_window_by_app("nonexistent_app_test_xyz789");
+        let result_upper = find_window_by_app("NONEXISTENT_APP_TEST_XYZ789");
+
+        // Both should be errors (app doesn't exist)
+        assert!(result_lower.is_err());
+        assert!(result_upper.is_err());
+
+        // Both should have the same error code
+        assert_eq!(
+            result_lower.unwrap_err().error_code(),
+            result_upper.unwrap_err().error_code()
+        );
+    }
+
+    #[test]
+    fn test_find_window_by_app_and_title_app_not_found() {
+        let result = find_window_by_app_and_title("NONEXISTENT_APP_ABC", "Some Title");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "WINDOW_NOT_FOUND_BY_APP");
+        }
     }
 }

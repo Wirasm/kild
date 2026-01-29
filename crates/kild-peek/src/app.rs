@@ -33,6 +33,12 @@ pub fn build_cli() -> Command {
                                 .long("json")
                                 .help("Output in JSON format")
                                 .action(ArgAction::SetTrue),
+                        )
+                        .arg(
+                            Arg::new("app")
+                                .long("app")
+                                .short('a')
+                                .help("Filter windows by app name"),
                         ),
                 )
                 .subcommand(
@@ -56,11 +62,18 @@ pub fn build_cli() -> Command {
                         .conflicts_with_all(["window-id", "monitor"]),
                 )
                 .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Capture window by app name (can combine with --window for precision)")
+                        .conflicts_with_all(["window-id", "monitor"]),
+                )
+                .arg(
                     Arg::new("window-id")
                         .long("window-id")
                         .help("Capture window by ID")
                         .value_parser(clap::value_parser!(u32))
-                        .conflicts_with_all(["window", "monitor"]),
+                        .conflicts_with_all(["window", "app", "monitor"]),
                 )
                 .arg(
                     Arg::new("monitor")
@@ -137,6 +150,12 @@ pub fn build_cli() -> Command {
                         .long("window")
                         .short('w')
                         .help("Target window by title (exact match preferred, falls back to partial)"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name (can combine with --window for precision)"),
                 )
                 .arg(
                     Arg::new("exists")
@@ -421,5 +440,114 @@ mod tests {
             "--visible",
         ]);
         assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_screenshot_app() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "screenshot", "--app", "Ghostty"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert_eq!(
+            screenshot_matches.get_one::<String>("app").unwrap(),
+            "Ghostty"
+        );
+    }
+
+    #[test]
+    fn test_cli_screenshot_app_and_window() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--app",
+            "Ghostty",
+            "--window",
+            "Terminal",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert_eq!(
+            screenshot_matches.get_one::<String>("app").unwrap(),
+            "Ghostty"
+        );
+        assert_eq!(
+            screenshot_matches.get_one::<String>("window").unwrap(),
+            "Terminal"
+        );
+    }
+
+    #[test]
+    fn test_cli_screenshot_app_and_window_id_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--app",
+            "Ghostty",
+            "--window-id",
+            "123",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_screenshot_app_and_monitor_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--app",
+            "Ghostty",
+            "--monitor",
+            "0",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_assert_app() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "assert",
+            "--app",
+            "Ghostty",
+            "--exists",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let assert_matches = matches.subcommand_matches("assert").unwrap();
+        assert_eq!(
+            assert_matches.get_one::<String>("app").unwrap(),
+            "Ghostty"
+        );
+    }
+
+    #[test]
+    fn test_cli_list_windows_app_filter() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "list",
+            "windows",
+            "--app",
+            "Ghostty",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let list_matches = matches.subcommand_matches("list").unwrap();
+        let windows_matches = list_matches.subcommand_matches("windows").unwrap();
+        assert_eq!(
+            windows_matches.get_one::<String>("app").unwrap(),
+            "Ghostty"
+        );
     }
 }
