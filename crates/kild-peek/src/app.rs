@@ -108,6 +108,19 @@ pub fn build_cli() -> Command {
                         .help("JPEG quality (1-100, default: 85)")
                         .value_parser(clap::value_parser!(u8))
                         .default_value("85"),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Diff subcommand
@@ -190,6 +203,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output assertion result in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
 }
@@ -532,5 +558,87 @@ mod tests {
         let list_matches = matches.subcommand_matches("list").unwrap();
         let windows_matches = list_matches.subcommand_matches("windows").unwrap();
         assert_eq!(windows_matches.get_one::<String>("app").unwrap(), "Ghostty");
+    }
+
+    #[test]
+    fn test_cli_screenshot_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--window",
+            "Terminal",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert!(screenshot_matches.get_flag("wait"));
+        // Default timeout is 30000
+        assert_eq!(
+            *screenshot_matches.get_one::<u64>("timeout").unwrap(),
+            30000
+        );
+    }
+
+    #[test]
+    fn test_cli_screenshot_wait_with_timeout() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--window",
+            "Terminal",
+            "--wait",
+            "--timeout",
+            "5000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert!(screenshot_matches.get_flag("wait"));
+        assert_eq!(*screenshot_matches.get_one::<u64>("timeout").unwrap(), 5000);
+    }
+
+    #[test]
+    fn test_cli_assert_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "assert",
+            "--window",
+            "Terminal",
+            "--exists",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let assert_matches = matches.subcommand_matches("assert").unwrap();
+        assert!(assert_matches.get_flag("wait"));
+        assert_eq!(*assert_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_assert_wait_with_timeout() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "assert",
+            "--window",
+            "Terminal",
+            "--exists",
+            "--wait",
+            "--timeout",
+            "2000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let assert_matches = matches.subcommand_matches("assert").unwrap();
+        assert!(assert_matches.get_flag("wait"));
+        assert_eq!(*assert_matches.get_one::<u64>("timeout").unwrap(), 2000);
     }
 }

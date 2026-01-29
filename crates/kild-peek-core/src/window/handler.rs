@@ -1,7 +1,55 @@
+use std::time::{Duration, Instant};
+
 use tracing::{debug, info, warn};
 
 use super::errors::WindowError;
 use super::types::{MonitorInfo, WindowInfo};
+
+/// Generic polling function that retries until success or timeout
+///
+/// Polls every 100ms until the find function succeeds or timeout is reached.
+/// Returns immediately if found on first attempt.
+/// Propagates non-retryable errors immediately.
+fn poll_until_found<F, M, T>(
+    timeout_ms: u64,
+    find_fn: F,
+    error_matcher: M,
+    timeout_error: T,
+) -> Result<WindowInfo, WindowError>
+where
+    F: Fn() -> Result<WindowInfo, WindowError>,
+    M: Fn(WindowError) -> WindowError,
+    T: Fn() -> WindowError,
+{
+    let start = Instant::now();
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll_interval = Duration::from_millis(100);
+
+    loop {
+        match find_fn() {
+            Ok(window) => return Ok(window),
+            Err(e) => {
+                let normalized = error_matcher(e);
+
+                // Check if this is a retryable error
+                let is_retryable = matches!(
+                    normalized,
+                    WindowError::WindowNotFound { .. } | WindowError::WindowNotFoundByApp { .. }
+                );
+
+                if !is_retryable {
+                    return Err(normalized);
+                }
+
+                if start.elapsed() >= timeout {
+                    return Err(timeout_error());
+                }
+
+                std::thread::sleep(poll_interval);
+            }
+        }
+    }
+}
 
 /// List all visible windows
 pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
@@ -317,6 +365,49 @@ pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
     })
 }
 
+/// Find a window by title, polling until found or timeout
+///
+/// Polls every 100ms until the window appears or the timeout is reached.
+/// Returns immediately if the window is found on first attempt.
+pub fn find_window_by_title_with_wait(
+    title: &str,
+    timeout_ms: u64,
+) -> Result<WindowInfo, WindowError> {
+    info!(
+        event = "core.window.poll_started",
+        title = title,
+        timeout_ms = timeout_ms
+    );
+
+    let result = poll_until_found(
+        timeout_ms,
+        || find_window_by_title(title),
+        |_| WindowError::WindowNotFound {
+            title: title.to_string(),
+        },
+        || WindowError::WaitTimeoutByTitle {
+            title: title.to_string(),
+            timeout_ms,
+        },
+    );
+
+    match &result {
+        Ok(_) => {
+            info!(event = "core.window.poll_completed", title = title);
+        }
+        Err(WindowError::WaitTimeoutByTitle { .. }) => {
+            warn!(
+                event = "core.window.poll_timeout",
+                title = title,
+                timeout_ms = timeout_ms
+            );
+        }
+        _ => {}
+    }
+
+    result
+}
+
 /// Try to find a matching window using the specified match type
 fn try_match(
     windows: &[(xcap::Window, String, String)],
@@ -524,6 +615,46 @@ pub fn find_window_by_app(app: &str) -> Result<WindowInfo, WindowError> {
     })
 }
 
+/// Find a window by app name, polling until found or timeout
+///
+/// Polls every 100ms until the window appears or the timeout is reached.
+/// Returns immediately if the window is found on first attempt.
+pub fn find_window_by_app_with_wait(app: &str, timeout_ms: u64) -> Result<WindowInfo, WindowError> {
+    info!(
+        event = "core.window.poll_by_app_started",
+        app = app,
+        timeout_ms = timeout_ms
+    );
+
+    let result = poll_until_found(
+        timeout_ms,
+        || find_window_by_app(app),
+        |_| WindowError::WindowNotFoundByApp {
+            app: app.to_string(),
+        },
+        || WindowError::WaitTimeoutByApp {
+            app: app.to_string(),
+            timeout_ms,
+        },
+    );
+
+    match &result {
+        Ok(_) => {
+            info!(event = "core.window.poll_by_app_completed", app = app);
+        }
+        Err(WindowError::WaitTimeoutByApp { .. }) => {
+            warn!(
+                event = "core.window.poll_by_app_timeout",
+                app = app,
+                timeout_ms = timeout_ms
+            );
+        }
+        _ => {}
+    }
+
+    result
+}
+
 /// Helper for app matching
 fn try_match_app(
     windows: &[(xcap::Window, String, String)],
@@ -635,6 +766,63 @@ pub fn find_window_by_app_and_title(app: &str, title: &str) -> Result<WindowInfo
     Err(WindowError::WindowNotFound {
         title: title.to_string(),
     })
+}
+
+/// Find a window by app and title, polling until found or timeout
+///
+/// Polls every 100ms until the window appears or the timeout is reached.
+/// Returns immediately if the window is found on first attempt.
+pub fn find_window_by_app_and_title_with_wait(
+    app: &str,
+    title: &str,
+    timeout_ms: u64,
+) -> Result<WindowInfo, WindowError> {
+    info!(
+        event = "core.window.poll_by_app_and_title_started",
+        app = app,
+        title = title,
+        timeout_ms = timeout_ms
+    );
+
+    let result = poll_until_found(
+        timeout_ms,
+        || find_window_by_app_and_title(app, title),
+        |e| match e {
+            WindowError::WindowNotFound { .. } => WindowError::WindowNotFound {
+                title: title.to_string(),
+            },
+            WindowError::WindowNotFoundByApp { .. } => WindowError::WindowNotFoundByApp {
+                app: app.to_string(),
+            },
+            other => other,
+        },
+        || WindowError::WaitTimeoutByAppAndTitle {
+            app: app.to_string(),
+            title: title.to_string(),
+            timeout_ms,
+        },
+    );
+
+    match &result {
+        Ok(_) => {
+            info!(
+                event = "core.window.poll_by_app_and_title_completed",
+                app = app,
+                title = title
+            );
+        }
+        Err(WindowError::WaitTimeoutByAppAndTitle { .. }) => {
+            warn!(
+                event = "core.window.poll_by_app_and_title_timeout",
+                app = app,
+                title = title,
+                timeout_ms = timeout_ms
+            );
+        }
+        _ => {}
+    }
+
+    result
 }
 
 /// Get a monitor by index
@@ -815,6 +1003,38 @@ mod tests {
         assert!(result.is_err());
         if let Err(e) = result {
             assert_eq!(e.error_code(), "WINDOW_NOT_FOUND_BY_APP");
+        }
+    }
+
+    #[test]
+    fn test_find_window_by_title_with_wait_timeout() {
+        // Use a very short timeout with a non-existent window
+        let result = find_window_by_title_with_wait("NONEXISTENT_WINDOW_UNIQUE_12345", 200);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "WINDOW_WAIT_TIMEOUT_BY_TITLE");
+        }
+    }
+
+    #[test]
+    fn test_find_window_by_app_with_wait_timeout() {
+        let result = find_window_by_app_with_wait("NONEXISTENT_APP_UNIQUE_12345", 200);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "WINDOW_WAIT_TIMEOUT_BY_APP");
+        }
+    }
+
+    #[test]
+    fn test_find_window_by_app_and_title_with_wait_timeout() {
+        let result = find_window_by_app_and_title_with_wait(
+            "NONEXISTENT_APP_UNIQUE_12345",
+            "NONEXISTENT_TITLE",
+            200,
+        );
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "WINDOW_WAIT_TIMEOUT_BY_APP_AND_TITLE");
         }
     }
 }

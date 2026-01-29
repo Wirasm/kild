@@ -64,6 +64,21 @@ fn map_window_error_to_screenshot_error(error: WindowError) -> ScreenshotError {
     match error {
         WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
         WindowError::WindowNotFoundByApp { app } => ScreenshotError::WindowNotFoundByApp { app },
+        WindowError::WaitTimeoutByTitle { title, timeout_ms } => {
+            ScreenshotError::WaitTimeoutByTitle { title, timeout_ms }
+        }
+        WindowError::WaitTimeoutByApp { app, timeout_ms } => {
+            ScreenshotError::WaitTimeoutByApp { app, timeout_ms }
+        }
+        WindowError::WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        } => ScreenshotError::WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        },
         WindowError::EnumerationFailed { message } => {
             if is_permission_error(&message) {
                 debug!(
@@ -575,6 +590,69 @@ mod tests {
         // Should fail with app not found since app doesn't exist
         if let Err(e) = result {
             assert_eq!(e.error_code(), "SCREENSHOT_WINDOW_NOT_FOUND_BY_APP");
+        }
+    }
+
+    #[test]
+    fn test_wait_timeout_by_title_error_mapping() {
+        use crate::window::WindowError;
+
+        let window_error = WindowError::WaitTimeoutByTitle {
+            title: "My Window".to_string(),
+            timeout_ms: 10000,
+        };
+        let screenshot_error = map_window_error_to_screenshot_error(window_error);
+
+        match screenshot_error {
+            ScreenshotError::WaitTimeoutByTitle { title, timeout_ms } => {
+                assert_eq!(title, "My Window");
+                assert_eq!(timeout_ms, 10000);
+            }
+            _ => panic!("Expected WaitTimeoutByTitle variant"),
+        }
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_error_mapping() {
+        use crate::window::WindowError;
+
+        let window_error = WindowError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 5000,
+        };
+        let screenshot_error = map_window_error_to_screenshot_error(window_error);
+
+        match screenshot_error {
+            ScreenshotError::WaitTimeoutByApp { app, timeout_ms } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(timeout_ms, 5000);
+            }
+            _ => panic!("Expected WaitTimeoutByApp variant"),
+        }
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_and_title_error_mapping() {
+        use crate::window::WindowError;
+
+        let window_error = WindowError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 3000,
+        };
+        let screenshot_error = map_window_error_to_screenshot_error(window_error);
+
+        match screenshot_error {
+            ScreenshotError::WaitTimeoutByAppAndTitle {
+                app,
+                title,
+                timeout_ms,
+            } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(title, "Terminal");
+                assert_eq!(timeout_ms, 3000);
+            }
+            _ => panic!("Expected WaitTimeoutByAppAndTitle variant"),
         }
     }
 }

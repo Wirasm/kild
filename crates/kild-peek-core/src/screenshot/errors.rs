@@ -11,6 +11,19 @@ pub enum ScreenshotError {
     #[error("Window not found for app: '{app}'")]
     WindowNotFoundByApp { app: String },
 
+    #[error("Window '{title}' not found after {timeout_ms}ms")]
+    WaitTimeoutByTitle { title: String, timeout_ms: u64 },
+
+    #[error("Window for app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByApp { app: String, timeout_ms: u64 },
+
+    #[error("Window '{title}' in app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByAppAndTitle {
+        app: String,
+        title: String,
+        timeout_ms: u64,
+    },
+
     #[error("Window is minimized and cannot be captured: '{title}'")]
     WindowMinimized { title: String },
 
@@ -54,6 +67,11 @@ impl PeekError for ScreenshotError {
             ScreenshotError::WindowNotFound { .. } => "SCREENSHOT_WINDOW_NOT_FOUND",
             ScreenshotError::WindowNotFoundById { .. } => "SCREENSHOT_WINDOW_NOT_FOUND_BY_ID",
             ScreenshotError::WindowNotFoundByApp { .. } => "SCREENSHOT_WINDOW_NOT_FOUND_BY_APP",
+            ScreenshotError::WaitTimeoutByTitle { .. } => "SCREENSHOT_WAIT_TIMEOUT_BY_TITLE",
+            ScreenshotError::WaitTimeoutByApp { .. } => "SCREENSHOT_WAIT_TIMEOUT_BY_APP",
+            ScreenshotError::WaitTimeoutByAppAndTitle { .. } => {
+                "SCREENSHOT_WAIT_TIMEOUT_BY_APP_AND_TITLE"
+            }
             ScreenshotError::WindowMinimized { .. } => "SCREENSHOT_WINDOW_MINIMIZED",
             ScreenshotError::PermissionDenied => "SCREENSHOT_PERMISSION_DENIED",
             ScreenshotError::EnumerationFailed(_) => "SCREENSHOT_ENUMERATION_FAILED",
@@ -73,6 +91,9 @@ impl PeekError for ScreenshotError {
             ScreenshotError::WindowNotFound { .. }
                 | ScreenshotError::WindowNotFoundById { .. }
                 | ScreenshotError::WindowNotFoundByApp { .. }
+                | ScreenshotError::WaitTimeoutByTitle { .. }
+                | ScreenshotError::WaitTimeoutByApp { .. }
+                | ScreenshotError::WaitTimeoutByAppAndTitle { .. }
                 | ScreenshotError::WindowMinimized { .. }
                 | ScreenshotError::PermissionDenied
                 | ScreenshotError::MonitorNotFound { .. }
@@ -131,5 +152,51 @@ mod tests {
         let io_error = std::io::Error::new(std::io::ErrorKind::Other, "test");
         let error: ScreenshotError = io_error.into();
         assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_title_error() {
+        let error = ScreenshotError::WaitTimeoutByTitle {
+            title: "Test Window".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Test Window' not found after 5000ms"
+        );
+        assert_eq!(error.error_code(), "SCREENSHOT_WAIT_TIMEOUT_BY_TITLE");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_error() {
+        let error = ScreenshotError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window for app 'Ghostty' not found after 5000ms"
+        );
+        assert_eq!(error.error_code(), "SCREENSHOT_WAIT_TIMEOUT_BY_APP");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_and_title_error() {
+        let error = ScreenshotError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Terminal' in app 'Ghostty' not found after 5000ms"
+        );
+        assert_eq!(
+            error.error_code(),
+            "SCREENSHOT_WAIT_TIMEOUT_BY_APP_AND_TITLE"
+        );
+        assert!(error.is_user_error());
     }
 }
