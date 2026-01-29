@@ -96,8 +96,10 @@ impl DestroySafetyInfo {
         }
 
         // Uncommitted changes (blocking)
+        // Skip if status check failed (already showed critical message)
         if self.git_status.has_uncommitted_changes && !self.git_status.status_check_failed {
-            if let Some(details) = &self.git_status.uncommitted_details {
+            let message = if let Some(details) = &self.git_status.uncommitted_details {
+                // Build detailed message with file counts
                 let mut parts = Vec::new();
                 if details.staged_files > 0 {
                     parts.push(format!("{} staged", details.staged_files));
@@ -108,23 +110,26 @@ impl DestroySafetyInfo {
                 if details.untracked_files > 0 {
                     parts.push(format!("{} untracked", details.untracked_files));
                 }
-                messages.push(format!("Uncommitted changes: {}", parts.join(", ")));
+                format!("Uncommitted changes: {}", parts.join(", "))
             } else {
-                messages.push("Uncommitted changes detected".to_string());
-            }
+                // Fallback when details unavailable
+                "Uncommitted changes detected".to_string()
+            };
+            messages.push(message);
         }
 
         // Unpushed commits (warning only)
         if self.git_status.unpushed_commit_count > 0 {
-            let commit_word = if self.git_status.unpushed_commit_count == 1 {
-                "commit"
+            let count = self.git_status.unpushed_commit_count;
+
+            // Use correct singular/plural form
+            let message = if count == 1 {
+                format!("{} unpushed commit will be lost", count)
             } else {
-                "commits"
+                format!("{} unpushed commits will be lost", count)
             };
-            messages.push(format!(
-                "{} unpushed {} will be lost",
-                self.git_status.unpushed_commit_count, commit_word
-            ));
+
+            messages.push(message);
         }
 
         // Never pushed (warning only) - skip if status check failed or has unpushed commits

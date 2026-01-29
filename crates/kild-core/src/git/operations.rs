@@ -167,10 +167,13 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
     // 2. Count unpushed commits and check remote branch existence
     let (unpushed_count, has_remote) = count_unpushed_commits(&repo);
 
-    let has_uncommitted = uncommitted_result
-        .as_ref()
-        .map(|d| !d.is_empty())
-        .unwrap_or(true); // Conservative: assume dirty if check failed
+    // Determine if there are uncommitted changes
+    // Conservative fallback: assume dirty if check failed
+    let has_uncommitted = if let Some(details) = &uncommitted_result {
+        !details.is_empty()
+    } else {
+        true
+    };
 
     Ok(WorktreeStatus {
         has_uncommitted_changes: has_uncommitted,

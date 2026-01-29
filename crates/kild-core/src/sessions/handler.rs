@@ -425,28 +425,23 @@ pub fn complete_session(name: &str, force: bool) -> Result<CompleteResult, Sessi
     );
 
     // 3. Determine the result based on PR status and remote deletion outcome
-    let result = if pr_merged {
-        match delete_remote_branch(&session.worktree_path, &kild_branch) {
-            Ok(()) => {
-                info!(
-                    event = "core.session.complete_remote_deleted",
-                    branch = kild_branch
-                );
-                CompleteResult::RemoteDeleted
-            }
-            Err(e) => {
-                // Non-fatal: remote might already be deleted, not exist, or deletion failed (logged as warning)
-                warn!(
-                    event = "core.session.complete_remote_delete_failed",
-                    branch = kild_branch,
-                    worktree_path = %session.worktree_path.display(),
-                    error = %e
-                );
-                CompleteResult::RemoteDeleteFailed
-            }
-        }
-    } else {
+    let result = if !pr_merged {
         CompleteResult::PrNotMerged
+    } else if let Err(e) = delete_remote_branch(&session.worktree_path, &kild_branch) {
+        // Non-fatal: remote might already be deleted, not exist, or deletion failed
+        warn!(
+            event = "core.session.complete_remote_delete_failed",
+            branch = kild_branch,
+            worktree_path = %session.worktree_path.display(),
+            error = %e
+        );
+        CompleteResult::RemoteDeleteFailed
+    } else {
+        info!(
+            event = "core.session.complete_remote_deleted",
+            branch = kild_branch
+        );
+        CompleteResult::RemoteDeleted
     };
 
     // 4. Destroy the session (reuse existing logic)
