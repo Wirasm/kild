@@ -88,11 +88,14 @@ cargo run -p kild -- complete my-branch --force  # Force complete (bypass git ch
 
 # kild-peek - Native app inspection
 cargo run -p kild-peek -- list windows           # List all visible windows
+cargo run -p kild-peek -- list windows --app Ghostty  # List windows for specific app
 cargo run -p kild-peek -- list monitors          # List connected monitors
 cargo run -p kild-peek -- screenshot --window "Terminal" -o /tmp/term.png
+cargo run -p kild-peek -- screenshot --app Ghostty -o /tmp/ghostty.png
+cargo run -p kild-peek -- screenshot --app Ghostty --window "Terminal" -o /tmp/precise.png
 cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
 cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
-cargo run -p kild-peek -- assert --window "KILD" --exists
+cargo run -p kild-peek -- assert --app "KILD" --exists
 cargo run -p kild-peek -- assert --window "KILD" --visible
 cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 ```

@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 
 use clap::ArgMatches;
+use kild_peek_core::errors::PeekError;
 use tracing::{error, info};
 
 use kild_peek_core::assert::{Assertion, run_assertion};
 use kild_peek_core::diff::{DiffRequest, compare_images};
 use kild_peek_core::events;
 use kild_peek_core::screenshot::{CaptureRequest, ImageFormat, capture, save_to_file};
-use kild_peek_core::window::{list_monitors, list_windows};
+use kild_peek_core::window::{
+    find_window_by_app, find_window_by_app_and_title, list_monitors, list_windows,
+};
 
 use crate::table;
 
@@ -39,24 +42,29 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
 fn handle_list_windows(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let json_output = matches.get_flag("json");
+    let app_filter = matches.get_one::<String>("app");
 
     info!(
         event = "cli.list_windows_started",
-        json_output = json_output
+        json_output = json_output,
+        app_filter = ?app_filter
     );
 
     match list_windows() {
         Ok(windows) => {
+            // Apply app filter if provided
+            let filtered = apply_app_filter(windows, app_filter);
+
             if json_output {
-                println!("{}", serde_json::to_string_pretty(&windows)?);
-            } else if windows.is_empty() {
-                println!("No visible windows found.");
+                println!("{}", serde_json::to_string_pretty(&filtered)?);
+            } else if filtered.is_empty() {
+                print_no_windows_message(app_filter);
             } else {
                 println!("Visible windows:");
-                table::print_windows_table(&windows);
+                table::print_windows_table(&filtered);
             }
 
-            info!(event = "cli.list_windows_completed", count = windows.len());
+            info!(event = "cli.list_windows_completed", count = filtered.len());
             Ok(())
         }
         Err(e) => {
@@ -64,6 +72,39 @@ fn handle_list_windows(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             error!(event = "cli.list_windows_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
+        }
+    }
+}
+
+/// Apply app name filter to windows list
+fn apply_app_filter(
+    windows: Vec<kild_peek_core::window::WindowInfo>,
+    app_filter: Option<&String>,
+) -> Vec<kild_peek_core::window::WindowInfo> {
+    match app_filter {
+        Some(app) => {
+            let app_lower = app.to_lowercase();
+            windows
+                .into_iter()
+                .filter(|w| {
+                    let name = w.app_name().to_lowercase();
+                    name == app_lower || name.contains(&app_lower)
+                })
+                .collect()
+        }
+        None => windows,
+    }
+}
+
+/// Print appropriate message when no windows are found
+fn print_no_windows_message(app_filter: Option<&String>) {
+    match app_filter {
+        Some(app) => {
+            info!(event = "cli.list_windows_app_filter_empty", app = app);
+            println!("No windows found for app filter.");
+        }
+        None => {
+            println!("No visible windows found.");
         }
     }
 }
@@ -105,6 +146,7 @@ fn handle_list_monitors(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
 fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let window_title = matches.get_one::<String>("window");
     let window_id = matches.get_one::<u32>("window-id");
+    let app_name = matches.get_one::<String>("app");
     let monitor_index = matches.get_one::<usize>("monitor");
     let output_path = matches.get_one::<String>("output");
     let base64_flag = matches.get_flag("base64");
@@ -127,22 +169,14 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         event = "cli.screenshot_started",
         window_title = ?window_title,
         window_id = ?window_id,
+        app_name = ?app_name,
         monitor_index = ?monitor_index,
         base64 = use_base64,
         format = ?format_str
     );
 
     // Build the capture request
-    let request = if let Some(title) = window_title {
-        CaptureRequest::window(title).with_format(format)
-    } else if let Some(id) = window_id {
-        CaptureRequest::window_id(*id).with_format(format)
-    } else if let Some(index) = monitor_index {
-        CaptureRequest::monitor(*index).with_format(format)
-    } else {
-        // Default to primary monitor
-        CaptureRequest::primary_monitor().with_format(format)
-    };
+    let request = build_capture_request(app_name, window_title, window_id, monitor_index, format);
 
     match capture(&request) {
         Ok(result) => {
@@ -170,6 +204,26 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
             events::log_app_error(&e);
             Err(e.into())
         }
+    }
+}
+
+/// Build a capture request from command-line arguments
+fn build_capture_request(
+    app_name: Option<&String>,
+    window_title: Option<&String>,
+    window_id: Option<&u32>,
+    monitor_index: Option<&usize>,
+    format: ImageFormat,
+) -> CaptureRequest {
+    match (app_name, window_title, window_id, monitor_index) {
+        (Some(app), Some(title), None, None) => {
+            CaptureRequest::window_app_and_title(app, title).with_format(format)
+        }
+        (Some(app), None, None, None) => CaptureRequest::window_app(app).with_format(format),
+        (None, Some(title), None, None) => CaptureRequest::window(title).with_format(format),
+        (None, None, Some(id), None) => CaptureRequest::window_id(*id).with_format(format),
+        (None, None, None, Some(index)) => CaptureRequest::monitor(*index).with_format(format),
+        _ => CaptureRequest::primary_monitor().with_format(format),
     }
 }
 
@@ -231,6 +285,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
 fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let window_title = matches.get_one::<String>("window");
+    let app_name = matches.get_one::<String>("app");
     let exists_flag = matches.get_flag("exists");
     let visible_flag = matches.get_flag("visible");
     let similar_path = matches.get_one::<String>("similar");
@@ -239,28 +294,21 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
 
     let threshold = (threshold_percent as f64) / 100.0;
 
+    // Resolve the window using app and/or title
+    let resolved_title = resolve_window_title(app_name, window_title)?;
+
+    // Validate that window/app is provided when needed
+    if (exists_flag || visible_flag) && resolved_title.is_empty() {
+        return Err("--window or --app is required with --exists/--visible".into());
+    }
+
     // Determine which assertion to run
     let assertion = if exists_flag {
-        let title = window_title.ok_or("--window is required with --exists")?;
-        Assertion::window_exists(title)
+        Assertion::window_exists(&resolved_title)
     } else if visible_flag {
-        let title = window_title.ok_or("--window is required with --visible")?;
-        Assertion::window_visible(title)
+        Assertion::window_visible(&resolved_title)
     } else if let Some(baseline_path) = similar_path {
-        let title = window_title.ok_or("--window is required with --similar")?;
-        // For similar assertion, we need to capture a screenshot first and compare
-        // This is a simplified implementation - we save to a temp file and compare
-        let request = CaptureRequest::window(title);
-        let result =
-            capture(&request).map_err(|e| format!("Failed to capture screenshot: {}", e))?;
-
-        // Save to temp file
-        let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join("peek_assert_temp.png");
-        save_to_file(&result, &temp_path)
-            .map_err(|e| format!("Failed to save temp screenshot: {}", e))?;
-
-        Assertion::image_similar(&temp_path, baseline_path, threshold)
+        build_similar_assertion(app_name, window_title, baseline_path, threshold)?
     } else {
         return Err("One of --exists, --visible, or --similar must be specified".into());
     };
@@ -272,7 +320,10 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
-                let status = if result.passed { "PASS" } else { "FAIL" };
+                let status = match result.passed {
+                    true => "PASS",
+                    false => "FAIL",
+                };
                 println!("Assertion: {}", status);
                 println!("  {}", result.message);
             }
@@ -293,6 +344,81 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             Err(e.into())
         }
     }
+}
+
+/// Resolve window title from app name and/or window title
+fn resolve_window_title(
+    app_name: Option<&String>,
+    window_title: Option<&String>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match (app_name, window_title) {
+        (Some(app), Some(title)) => {
+            let window = find_window_by_app_and_title(app, title).map_err(|e| {
+                error!(
+                    event = "cli.assert_window_resolution_failed",
+                    app = app,
+                    title = title,
+                    error = %e,
+                    error_code = e.error_code()
+                );
+                events::log_app_error(&e);
+                format!(
+                    "Window not found for app '{}' with title '{}': {}",
+                    app, title, e
+                )
+            })?;
+            Ok(window.title().to_string())
+        }
+        (Some(app), None) => {
+            let window = find_window_by_app(app).map_err(|e| {
+                error!(
+                    event = "cli.assert_window_resolution_failed",
+                    app = app,
+                    error = %e,
+                    error_code = e.error_code()
+                );
+                events::log_app_error(&e);
+                format!("Window not found for app '{}': {}", app, e)
+            })?;
+            Ok(window.title().to_string())
+        }
+        (None, Some(title)) => Ok(title.clone()),
+        (None, None) => Ok(String::new()),
+    }
+}
+
+/// Build a similar assertion by capturing a screenshot and comparing to baseline
+fn build_similar_assertion(
+    app_name: Option<&String>,
+    window_title: Option<&String>,
+    baseline_path: &str,
+    threshold: f64,
+) -> Result<Assertion, Box<dyn std::error::Error>> {
+    if app_name.is_none() && window_title.is_none() {
+        return Err("--window or --app is required with --similar".into());
+    }
+
+    // Build capture request based on what was provided
+    let request = match (app_name, window_title) {
+        (Some(app), Some(title)) => CaptureRequest::window_app_and_title(app, title),
+        (Some(app), None) => CaptureRequest::window_app(app),
+        (None, Some(title)) => CaptureRequest::window(title),
+        (None, None) => unreachable!(),
+    };
+
+    let result = capture(&request).map_err(|e| format!("Failed to capture screenshot: {}", e))?;
+
+    // Save to temp file
+    let temp_dir = std::env::temp_dir();
+    let temp_path = temp_dir.join("peek_assert_temp.png");
+    save_to_file(&result, &temp_path)
+        .map_err(|e| format!("Failed to save temp screenshot: {}", e))?;
+
+    Ok(Assertion::image_similar(
+        &temp_path,
+        baseline_path,
+        threshold,
+    ))
 }
 
 #[cfg(test)]

@@ -50,17 +50,23 @@ kild-peek list windows
 This shows all visible windows with:
 - **ID** - Unique window identifier (use with `--window-id`)
 - **Title** - Window title (use with `--window`)
-- **App** - Application name (searchable with `--window`)
+- **App** - Application name (use with `--app` for filtering)
 - **Size** - Window dimensions
 - **Status** - Visible or Minimized
 
-### Window Matching Priority
+### Window Matching Strategies
 
-When using `--window <title>`, matching follows this priority:
+**Using `--window <title>` (title-based matching):**
 1. Exact case-insensitive match on window title
 2. Exact case-insensitive match on app name
 3. Partial case-insensitive match on window title
 4. Partial case-insensitive match on app name
+
+**Using `--app <name>` (app-based matching):**
+Finds windows by application name. More reliable than title matching when multiple windows share similar titles.
+
+**Using `--app` + `--window` (precise matching):**
+Combines both filters for exact targeting when multiple windows exist for the same app.
 
 ### Matching User Intent to Windows
 
@@ -81,13 +87,7 @@ When the user asks to "peek at X", find the right window:
 **Always save screenshots to the scratchpad directory:**
 
 ```bash
-# Use the scratchpad directory for temporary screenshots
-SCRATCHPAD="/private/tmp/claude/-Users-rasmus--kild-worktrees-kild-peek-cli/scratchpad"
-
-# Create if needed
-mkdir -p "$SCRATCHPAD"
-
-# Save screenshots there
+# Save screenshots to the scratchpad
 kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/kild-ui.png"
 ```
 
@@ -97,20 +97,28 @@ This keeps screenshots organized and easy to clean up.
 
 ### List Windows
 ```bash
-kild-peek list windows [--json]
+kild-peek list windows [--app <name>] [--json]
 ```
 
 Shows all visible windows. Always run this first to identify targets.
+
+**Flags:**
+- `--app <name>` - Filter windows by application name
+- `--json` - Output as JSON
 
 **Examples:**
 ```bash
 # Human-readable table
 kild-peek list windows
 
+# Filter by app
+kild-peek list windows --app Ghostty
+kild-peek list windows --app "Visual Studio Code"
+
 # JSON for parsing
 kild-peek list windows --json
 
-# Find specific window
+# Find specific window with JSON
 kild-peek list windows --json | grep -i "terminal"
 ```
 
@@ -123,13 +131,14 @@ Shows all connected displays.
 
 ### Capture Screenshot
 ```bash
-kild-peek screenshot [--window <title>] [--window-id <id>] [--monitor <index>] -o <path>
+kild-peek screenshot [--window <title>] [--app <name>] [--window-id <id>] [--monitor <index>] -o <path>
 ```
 
 Captures a screenshot of a window or monitor.
 
 **Flags:**
 - `--window <title>` - Capture window by title (exact match preferred, falls back to partial)
+- `--app <name>` - Capture window by app name (can combine with `--window` for precision)
 - `--window-id <id>` - Capture window by exact ID
 - `--monitor <index>` - Capture specific monitor (0 = primary)
 - `-o <path>` - Output file path (required for file output)
@@ -137,12 +146,20 @@ Captures a screenshot of a window or monitor.
 - `--quality <1-100>` - JPEG quality (default: 85)
 - `--base64` - Output base64 to stdout instead of file
 
+**Note:** `--app`, `--window-id`, and `--monitor` are mutually exclusive. You can combine `--app` with `--window` for precise matching.
+
 **Examples:**
 ```bash
 # Capture by window title
 kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/kild.png"
 
-# Capture by window ID (more precise)
+# Capture by app name (more reliable than title)
+kild-peek screenshot --app Ghostty -o "$SCRATCHPAD/ghostty.png"
+
+# Combine app and title for precision
+kild-peek screenshot --app Ghostty --window "Terminal" -o "$SCRATCHPAD/precise.png"
+
+# Capture by window ID (most precise)
 kild-peek screenshot --window-id 8002 -o "$SCRATCHPAD/window.png"
 
 # Capture primary monitor
@@ -181,7 +198,7 @@ kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --json
 
 ### Assert UI State
 ```bash
-kild-peek assert --window <title> [--exists|--visible|--similar <baseline>] [--json]
+kild-peek assert [--window <title>] [--app <name>] [--exists|--visible|--similar <baseline>] [--json]
 ```
 
 Runs assertions on UI state. Returns exit code 0 for pass, 1 for fail.
@@ -192,16 +209,24 @@ Runs assertions on UI state. Returns exit code 0 for pass, 1 for fail.
 - `--similar <path>` - Assert current screenshot matches baseline image
 
 **Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name (can combine with `--window`)
 - `--threshold <0-100>` - Similarity threshold for `--similar` (default: 95)
 - `--json` - Output result as JSON
 
 **Examples:**
 ```bash
-# Assert window exists
+# Assert window exists by title
 kild-peek assert --window "KILD" --exists
+
+# Assert window exists by app (more reliable)
+kild-peek assert --app "KILD" --exists
 
 # Assert window is visible
 kild-peek assert --window "Terminal" --visible
+
+# Precise targeting with app + title
+kild-peek assert --app Ghostty --window "Terminal" --visible
 
 # Assert UI matches baseline
 kild-peek assert --window "KILD" --similar "$SCRATCHPAD/baseline.png" --threshold 90
@@ -216,15 +241,15 @@ kild-peek assert --window "KILD" --exists --json
 
 ```bash
 # 1. List windows to find target
-kild-peek list windows
+kild-peek list windows --app KILD
 
-# 2. Capture before state
-kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/before.png"
+# 2. Capture before state (using app for reliability)
+kild-peek screenshot --app KILD -o "$SCRATCHPAD/before.png"
 
 # 3. Make changes...
 
 # 4. Capture after state
-kild-peek screenshot --window "KILD" -o "$SCRATCHPAD/after.png"
+kild-peek screenshot --app KILD -o "$SCRATCHPAD/after.png"
 
 # 5. Compare
 kild-peek diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png" --threshold 80
@@ -233,11 +258,11 @@ kild-peek diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png" --threshold 80
 ### Validate UI State in Tests
 
 ```bash
-# Assert the KILD UI is running and visible
-kild-peek assert --window "KILD" --visible
+# Assert the KILD UI is running and visible (using app for reliability)
+kild-peek assert --app KILD --visible
 
 # Assert it matches expected appearance
-kild-peek assert --window "KILD" --similar "./baselines/kild-empty-state.png" --threshold 90
+kild-peek assert --app KILD --similar "./baselines/kild-empty-state.png" --threshold 90
 ```
 
 ### Capture Multiple Windows
@@ -255,10 +280,12 @@ kild-peek screenshot --window-id 8429 -o "$SCRATCHPAD/ghostty.png"
 
 1. **Output is clean by default** - JSON logs are suppressed unless you use `-v/--verbose`
 2. **List windows first** to identify the correct target before capturing
-3. **Use `--window-id`** when multiple windows have similar titles
-4. **Save to scratchpad** for easy cleanup of temporary screenshots
-5. **Use `--json`** for scripting and parsing results programmatically
-6. **Exit codes are meaningful** - use them in shell scripts for automation
+3. **Use `--app` for reliability** when multiple windows have similar titles
+4. **Combine `--app` and `--window`** for precise targeting when needed
+5. **Use `--window-id`** for the most precise targeting (unique window ID)
+6. **Save to scratchpad** for easy cleanup of temporary screenshots
+7. **Use `--json`** for scripting and parsing results programmatically
+8. **Exit codes are meaningful** - use them in shell scripts for automation
 
 ## Global Flags
 

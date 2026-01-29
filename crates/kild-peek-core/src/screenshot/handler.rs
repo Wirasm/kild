@@ -8,7 +8,9 @@ use tracing::{debug, error, info, warn};
 
 use super::errors::ScreenshotError;
 use super::types::{CaptureRequest, CaptureResult, CaptureTarget, ImageFormat};
-use crate::window::{WindowError, find_window_by_title};
+use crate::window::{
+    WindowError, find_window_by_app, find_window_by_app_and_title, find_window_by_title,
+};
 
 /// Capture a screenshot based on the request
 pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotError> {
@@ -17,6 +19,10 @@ pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotErro
     match &request.target {
         CaptureTarget::Window { title } => capture_window_by_title(title, &request.format),
         CaptureTarget::WindowId { id } => capture_window_by_id(*id, &request.format),
+        CaptureTarget::WindowApp { app } => capture_window_by_app(app, &request.format),
+        CaptureTarget::WindowAppAndTitle { app, title } => {
+            capture_window_by_app_and_title(app, title, &request.format)
+        }
         CaptureTarget::Monitor { index } => capture_monitor(*index, &request.format),
         CaptureTarget::PrimaryMonitor => capture_primary_monitor(&request.format),
     }
@@ -57,6 +63,7 @@ pub fn save_to_file(result: &CaptureResult, path: &Path) -> Result<(), Screensho
 fn map_window_error_to_screenshot_error(error: WindowError) -> ScreenshotError {
     match error {
         WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
+        WindowError::WindowNotFoundByApp { app } => ScreenshotError::WindowNotFoundByApp { app },
         WindowError::EnumerationFailed { message } => {
             if is_permission_error(&message) {
                 debug!(
@@ -102,6 +109,18 @@ fn is_permission_error(message: &str) -> bool {
     message.contains("permission") || message.contains("denied")
 }
 
+/// Enumerate all windows with consistent permission error handling
+fn enumerate_windows() -> Result<Vec<xcap::Window>, ScreenshotError> {
+    xcap::Window::all().map_err(|e| {
+        let msg = e.to_string();
+        if is_permission_error(&msg) {
+            ScreenshotError::PermissionDenied
+        } else {
+            ScreenshotError::EnumerationFailed(msg)
+        }
+    })
+}
+
 /// Check if a window is minimized and return an error if so.
 ///
 /// Returns Ok(()) if the window is not minimized or if the check fails
@@ -143,14 +162,7 @@ fn capture_window_by_title(
     })?;
 
     // Now find the actual xcap window by ID to capture
-    let windows = xcap::Window::all().map_err(|e| {
-        let msg = e.to_string();
-        if is_permission_error(&msg) {
-            ScreenshotError::PermissionDenied
-        } else {
-            ScreenshotError::EnumerationFailed(msg)
-        }
-    })?;
+    let windows = enumerate_windows()?;
 
     let window = windows
         .into_iter()
@@ -179,14 +191,7 @@ fn capture_window_by_title(
 }
 
 fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
-    let windows = xcap::Window::all().map_err(|e| {
-        let msg = e.to_string();
-        if is_permission_error(&msg) {
-            ScreenshotError::PermissionDenied
-        } else {
-            ScreenshotError::EnumerationFailed(msg)
-        }
-    })?;
+    let windows = enumerate_windows()?;
 
     let window = windows
         .into_iter()
@@ -203,15 +208,88 @@ fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, 
     encode_image(image, format)
 }
 
-fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
-    let monitors = xcap::Monitor::all().map_err(|e| {
-        let msg = e.to_string();
-        if is_permission_error(&msg) {
-            ScreenshotError::PermissionDenied
-        } else {
-            ScreenshotError::EnumerationFailed(msg)
-        }
+fn capture_window_by_app(
+    app: &str,
+    format: &ImageFormat,
+) -> Result<CaptureResult, ScreenshotError> {
+    let window_info = find_window_by_app(app).map_err(|e| {
+        debug!(
+            event = "core.screenshot.window_by_app_lookup_failed",
+            original_error = %e
+        );
+        map_window_error_to_screenshot_error(e)
     })?;
+
+    // Find the actual xcap window by ID to capture
+    let windows = enumerate_windows()?;
+
+    let window = windows
+        .into_iter()
+        .find(|w| w.id().ok() == Some(window_info.id()))
+        .ok_or_else(|| {
+            warn!(
+                event = "core.screenshot.window_disappeared",
+                app = app,
+                window_id = window_info.id(),
+                "Window was found but disappeared before capture"
+            );
+            ScreenshotError::WindowNotFoundByApp {
+                app: app.to_string(),
+            }
+        })?;
+
+    let title = window.title().unwrap_or_else(|_| app.to_string());
+    check_window_not_minimized(&window, &title)?;
+
+    let image = window
+        .capture_image()
+        .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
+
+    encode_image(image, format)
+}
+
+fn capture_window_by_app_and_title(
+    app: &str,
+    title: &str,
+    format: &ImageFormat,
+) -> Result<CaptureResult, ScreenshotError> {
+    let window_info = find_window_by_app_and_title(app, title).map_err(|e| {
+        debug!(
+            event = "core.screenshot.window_by_app_and_title_lookup_failed",
+            original_error = %e
+        );
+        map_window_error_to_screenshot_error(e)
+    })?;
+
+    let windows = enumerate_windows()?;
+
+    let window = windows
+        .into_iter()
+        .find(|w| w.id().ok() == Some(window_info.id()))
+        .ok_or_else(|| {
+            warn!(
+                event = "core.screenshot.window_disappeared",
+                app = app,
+                title = title,
+                window_id = window_info.id(),
+                "Window was found but disappeared before capture"
+            );
+            ScreenshotError::WindowNotFound {
+                title: title.to_string(),
+            }
+        })?;
+
+    check_window_not_minimized(&window, title)?;
+
+    let image = window
+        .capture_image()
+        .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
+
+    encode_image(image, format)
+}
+
+fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
+    let monitors = enumerate_monitors()?;
 
     let monitor = monitors
         .into_iter()
@@ -226,14 +304,7 @@ fn capture_monitor(index: usize, format: &ImageFormat) -> Result<CaptureResult, 
 }
 
 fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, ScreenshotError> {
-    let monitors = xcap::Monitor::all().map_err(|e| {
-        let msg = e.to_string();
-        if is_permission_error(&msg) {
-            ScreenshotError::PermissionDenied
-        } else {
-            ScreenshotError::EnumerationFailed(msg)
-        }
-    })?;
+    let monitors = enumerate_monitors()?;
 
     // First try to find primary monitor
     let primary_monitor = monitors.iter().find(|m| match m.is_primary() {
@@ -263,6 +334,18 @@ fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, Screen
         .map_err(|e| ScreenshotError::CaptureFailed(e.to_string()))?;
 
     encode_image(image, format)
+}
+
+/// Enumerate all monitors with consistent permission error handling
+fn enumerate_monitors() -> Result<Vec<xcap::Monitor>, ScreenshotError> {
+    xcap::Monitor::all().map_err(|e| {
+        let msg = e.to_string();
+        if is_permission_error(&msg) {
+            ScreenshotError::PermissionDenied
+        } else {
+            ScreenshotError::EnumerationFailed(msg)
+        }
+    })
 }
 
 fn encode_image(
@@ -471,5 +554,27 @@ mod tests {
             .write_image(&img, 1, 1, image::ExtendedColorType::Rgba8)
             .unwrap();
         buffer.into_inner()
+    }
+
+    #[test]
+    fn test_capture_by_app_nonexistent() {
+        let request = CaptureRequest::window_app("NONEXISTENT_APP_12345_UNIQUE");
+        let result = capture(&request);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "SCREENSHOT_WINDOW_NOT_FOUND_BY_APP");
+        }
+    }
+
+    #[test]
+    fn test_capture_by_app_and_title_nonexistent() {
+        let request =
+            CaptureRequest::window_app_and_title("NONEXISTENT_APP_XYZ", "NONEXISTENT_TITLE");
+        let result = capture(&request);
+        assert!(result.is_err());
+        // Should fail with app not found since app doesn't exist
+        if let Err(e) = result {
+            assert_eq!(e.error_code(), "SCREENSHOT_WINDOW_NOT_FOUND_BY_APP");
+        }
     }
 }
