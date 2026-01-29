@@ -52,6 +52,33 @@ pub fn save_to_file(result: &CaptureResult, path: &Path) -> Result<(), Screensho
     Ok(())
 }
 
+/// Check if a window is minimized and return an error if so.
+///
+/// Returns Ok(()) if the window is not minimized or if the check fails
+/// (in which case we proceed anyway and let the capture fail if needed).
+fn check_window_not_minimized(window: &xcap::Window, title: &str) -> Result<(), ScreenshotError> {
+    let is_minimized = match window.is_minimized() {
+        Ok(minimized) => minimized,
+        Err(e) => {
+            debug!(
+                event = "core.screenshot.is_minimized_check_failed",
+                title = title,
+                error = %e
+            );
+            // Proceed anyway - capture will fail if there's a real problem
+            false
+        }
+    };
+
+    if is_minimized {
+        return Err(ScreenshotError::WindowMinimized {
+            title: title.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 fn capture_window_by_title(
     title: &str,
     format: &ImageFormat,
@@ -77,24 +104,7 @@ fn capture_window_by_title(
             title: title.to_string(),
         })?;
 
-    // Check if minimized
-    let is_minimized = match window.is_minimized() {
-        Ok(minimized) => minimized,
-        Err(e) => {
-            debug!(
-                event = "core.screenshot.is_minimized_check_failed",
-                title = title,
-                error = %e
-            );
-            // Proceed anyway - capture will fail if there's a real problem
-            false
-        }
-    };
-    if is_minimized {
-        return Err(ScreenshotError::WindowMinimized {
-            title: title.to_string(),
-        });
-    }
+    check_window_not_minimized(&window, title)?;
 
     let image = window
         .capture_image()
@@ -118,23 +128,8 @@ fn capture_window_by_id(id: u32, format: &ImageFormat) -> Result<CaptureResult, 
         .find(|w| w.id().ok() == Some(id))
         .ok_or(ScreenshotError::WindowNotFoundById { id })?;
 
-    // Check if minimized
-    let is_minimized = match window.is_minimized() {
-        Ok(minimized) => minimized,
-        Err(e) => {
-            debug!(
-                event = "core.screenshot.is_minimized_check_failed",
-                window_id = id,
-                error = %e
-            );
-            // Proceed anyway - capture will fail if there's a real problem
-            false
-        }
-    };
-    if is_minimized {
-        let title = window.title().unwrap_or_else(|_| format!("Window {}", id));
-        return Err(ScreenshotError::WindowMinimized { title });
-    }
+    let title = window.title().unwrap_or_else(|_| format!("Window {}", id));
+    check_window_not_minimized(&window, &title)?;
 
     let image = window
         .capture_image()
@@ -176,7 +171,7 @@ fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, Screen
     })?;
 
     // First try to find primary monitor
-    let monitor = if let Some(primary) = monitors.iter().find(|m| match m.is_primary() {
+    let primary_monitor = monitors.iter().find(|m| match m.is_primary() {
         Ok(is_primary) => is_primary,
         Err(e) => {
             debug!(
@@ -185,14 +180,17 @@ fn capture_primary_monitor(format: &ImageFormat) -> Result<CaptureResult, Screen
             );
             false
         }
-    }) {
-        primary
-    } else {
-        // Fall back to first monitor if no primary is set
-        warn!(event = "core.screenshot.no_primary_monitor_using_fallback");
-        monitors
-            .first()
-            .ok_or(ScreenshotError::MonitorNotFound { index: 0 })?
+    });
+
+    let monitor = match primary_monitor {
+        Some(primary) => primary,
+        None => {
+            // Fall back to first monitor if no primary is set
+            warn!(event = "core.screenshot.no_primary_monitor_using_fallback");
+            monitors
+                .first()
+                .ok_or(ScreenshotError::MonitorNotFound { index: 0 })?
+        }
     };
 
     let image = monitor
