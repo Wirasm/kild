@@ -161,15 +161,16 @@ kild status <branch> --json
 
 ### Destroy a kild
 ```bash
+# Destroy with safety checks (blocks on uncommitted changes, warns on unpushed commits)
 kild destroy <branch>
 
-# Force destroy (bypass git uncommitted changes check)
+# Force destroy (bypass all git safety checks)
 kild destroy <branch> --force
 
-# Destroy all kilds (with confirmation prompt)
+# Destroy all kilds (with confirmation prompt and safety checks)
 kild destroy --all
 
-# Force destroy all (skip confirmation and git checks)
+# Force destroy all (skip confirmation and all git safety checks)
 kild destroy --all --force
 ```
 

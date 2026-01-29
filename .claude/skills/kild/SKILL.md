@@ -224,18 +224,24 @@ kild destroy <branch> [--force]
 
 Completely removes a kild - closes terminal, kills process, removes worktree and branch, deletes session.
 
+**Safety Checks** (before destroying):
+- **Blocks** on uncommitted changes (staged, modified, or untracked files)
+- **Warns** about unpushed commits
+- **Warns** if branch has never been pushed to remote
+- **Warns** if no PR exists for the branch
+
 **Flags**
-- `--force` / `-f` - Force destroy even with uncommitted changes (bypasses git safety checks)
+- `--force` / `-f` - Bypass all git safety checks
 
 **Examples**
 ```bash
-# Normal destroy (blocks if uncommitted changes)
+# Normal destroy (shows warnings, blocks on uncommitted changes)
 kild destroy feature-auth
-# Result: Removes kild if clean
+# Result: Blocks if uncommitted changes exist, warns about unpushed commits
 
-# Force destroy (bypasses git checks)
+# Force destroy (bypasses all git safety checks)
 kild destroy feature-auth --force
-# Result: Removes kild regardless of uncommitted changes
+# Result: Removes kild immediately, no safety checks
 ```
 
 ### Complete a Kild (PR Cleanup)
