@@ -273,16 +273,17 @@ pub fn migrate_projects_to_canonical() -> Result<(), String> {
 
     for project in &mut data.projects {
         match project.path().canonicalize() {
-            Ok(canonical) if canonical != project.path() => {
-                tracing::info!(
-                    event = "ui.projects.path_migrated",
-                    original = %project.path().display(),
-                    canonical = %canonical.display()
-                );
-                project.set_path(canonical);
-                changed = true;
+            Ok(canonical) => {
+                if canonical != project.path() {
+                    tracing::info!(
+                        event = "ui.projects.path_migrated",
+                        original = %project.path().display(),
+                        canonical = %canonical.display()
+                    );
+                    project.set_path(canonical);
+                    changed = true;
+                }
             }
-            Ok(_) => {}
             Err(e) => {
                 tracing::warn!(
                     event = "ui.projects.path_canonicalize_failed",
@@ -297,16 +298,17 @@ pub fn migrate_projects_to_canonical() -> Result<(), String> {
 
     if let Some(ref active) = data.active {
         match active.canonicalize() {
-            Ok(canonical) if &canonical != active => {
-                tracing::info!(
-                    event = "ui.projects.active_path_migrated",
-                    original = %active.display(),
-                    canonical = %canonical.display()
-                );
-                data.active = Some(canonical);
-                changed = true;
+            Ok(canonical) => {
+                if &canonical != active {
+                    tracing::info!(
+                        event = "ui.projects.active_path_migrated",
+                        original = %active.display(),
+                        canonical = %canonical.display()
+                    );
+                    data.active = Some(canonical);
+                    changed = true;
+                }
             }
-            Ok(_) => {}
             Err(e) => {
                 tracing::warn!(
                     event = "ui.projects.active_path_canonicalize_failed",

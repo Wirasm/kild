@@ -224,21 +224,17 @@ impl ProjectManager {
             .ok_or(ProjectError::NotFound)?;
 
         // Adjust active_index before removal
-        match self.active_index {
-            Some(active) if active == index => {
+        if let Some(active) = self.active_index {
+            if active == index {
                 // Removed project was active - select first remaining, or None
                 self.active_index = if self.projects.len() > 1 {
                     Some(0)
                 } else {
                     None
                 };
-            }
-            Some(active) if active > index => {
+            } else if active > index {
                 // Active was after removed - decrement to maintain reference
                 self.active_index = Some(active - 1);
-            }
-            _ => {
-                // No change needed
             }
         }
 
@@ -449,8 +445,8 @@ impl SessionStore {
         // Check if session count changed (external create/destroy).
         let disk_count = count_session_files();
 
-        match disk_count {
-            Some(count) if count != self.displays.len() => {
+        if let Some(count) = disk_count {
+            if count != self.displays.len() {
                 tracing::info!(
                     event = "ui.auto_refresh.session_count_mismatch",
                     disk_count = count,
@@ -460,15 +456,11 @@ impl SessionStore {
                 self.refresh();
                 return;
             }
-            None => {
-                tracing::debug!(
-                    event = "ui.auto_refresh.count_check_skipped",
-                    reason = "cannot read sessions directory"
-                );
-            }
-            Some(_) => {
-                // Count matches - continue to status update
-            }
+        } else {
+            tracing::debug!(
+                event = "ui.auto_refresh.count_check_skipped",
+                reason = "cannot read sessions directory"
+            );
         }
 
         // No count change (or count unavailable) - just update process statuses
@@ -488,13 +480,13 @@ impl SessionStore {
     /// Returns all displays where `session.project_id` matches the given ID.
     /// If `project_id` is `None`, returns all displays (unfiltered).
     pub fn filtered_by_project(&self, project_id: Option<&str>) -> Vec<&KildDisplay> {
-        if let Some(id) = project_id {
-            self.displays
+        match project_id {
+            Some(id) => self
+                .displays
                 .iter()
                 .filter(|d| d.session.project_id == id)
-                .collect()
-        } else {
-            self.displays.iter().collect()
+                .collect(),
+            None => self.displays.iter().collect(),
         }
     }
 
@@ -1200,11 +1192,10 @@ fn count_session_files_in_dir(sessions_dir: &std::path::Path) -> Option<usize> {
 
     match std::fs::read_dir(sessions_dir) {
         Ok(entries) => {
-            let is_json_file = |entry: &std::fs::DirEntry| {
-                entry.path().extension().and_then(|s| s.to_str()) == Some("json")
-            };
-
-            let count = entries.filter_map(|e| e.ok()).filter(is_json_file).count();
+            let count = entries
+                .filter_map(|e| e.ok())
+                .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("json"))
+                .count();
             Some(count)
         }
         Err(e) => {

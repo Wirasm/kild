@@ -247,24 +247,20 @@ impl MainView {
     /// Handle dialog submit button click (create dialog).
     pub fn on_dialog_submit(&mut self, cx: &mut Context<Self>) {
         // Extract form data from dialog state
-        let (branch, agent, note) = match self.state.dialog() {
-            crate::state::DialogState::Create { form, .. } => {
-                let branch = form.branch_name.trim().to_string();
-                let agent = form.selected_agent();
-                let note = if form.note.trim().is_empty() {
-                    None
-                } else {
-                    Some(form.note.trim().to_string())
-                };
-                (branch, agent, note)
-            }
-            _ => {
-                tracing::error!(
-                    event = "ui.dialog_submit.invalid_state",
-                    "on_dialog_submit called when Create dialog not open"
-                );
-                return;
-            }
+        let crate::state::DialogState::Create { form, .. } = self.state.dialog() else {
+            tracing::error!(
+                event = "ui.dialog_submit.invalid_state",
+                "on_dialog_submit called when Create dialog not open"
+            );
+            return;
+        };
+
+        let branch = form.branch_name.trim().to_string();
+        let agent = form.selected_agent();
+        let note = if form.note.trim().is_empty() {
+            None
+        } else {
+            Some(form.note.trim().to_string())
         };
 
         // Get active project path for kild creation context
@@ -338,13 +334,11 @@ impl MainView {
     /// Handle confirm button click in destroy dialog.
     pub fn on_confirm_destroy(&mut self, cx: &mut Context<Self>) {
         // Extract branch from dialog state
-        let branch = match self.state.dialog() {
-            crate::state::DialogState::Confirm { branch, .. } => branch.clone(),
-            _ => {
-                tracing::warn!(event = "ui.confirm_destroy.no_target");
-                return;
-            }
+        let crate::state::DialogState::Confirm { branch, .. } = self.state.dialog() else {
+            tracing::warn!(event = "ui.confirm_destroy.no_target");
+            return;
         };
+        let branch = branch.clone();
 
         match actions::destroy_kild(&branch) {
             Ok(()) => {
@@ -615,23 +609,19 @@ impl MainView {
     /// Handle add project dialog submit.
     pub fn on_add_project_submit(&mut self, cx: &mut Context<Self>) {
         // Extract form data from dialog state
-        let (path_str, name) = match self.state.dialog() {
-            crate::state::DialogState::AddProject { form, .. } => {
-                let path_str = form.path.trim().to_string();
-                let name = if form.name.trim().is_empty() {
-                    None
-                } else {
-                    Some(form.name.trim().to_string())
-                };
-                (path_str, name)
-            }
-            _ => {
-                tracing::error!(
-                    event = "ui.add_project_submit.invalid_state",
-                    "on_add_project_submit called when AddProject dialog not open"
-                );
-                return;
-            }
+        let crate::state::DialogState::AddProject { form, .. } = self.state.dialog() else {
+            tracing::error!(
+                event = "ui.add_project_submit.invalid_state",
+                "on_add_project_submit called when AddProject dialog not open"
+            );
+            return;
+        };
+
+        let path_str = form.path.trim().to_string();
+        let name = if form.name.trim().is_empty() {
+            None
+        } else {
+            Some(form.name.trim().to_string())
         };
 
         if path_str.is_empty() {
