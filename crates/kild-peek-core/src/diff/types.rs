@@ -218,4 +218,27 @@ mod tests {
         let result = DiffResult::new(0.85, 100, 100, 100, 100, 0.80, None);
         assert_eq!(result.diff_output_path(), None);
     }
+
+    #[test]
+    fn test_diff_result_json_includes_diff_output_path_when_set() {
+        let result = DiffResult::new(
+            0.85,
+            100,
+            100,
+            100,
+            100,
+            0.80,
+            Some("/tmp/diff.png".to_string()),
+        );
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"diff_output_path\""));
+        assert!(json.contains("/tmp/diff.png"));
+    }
+
+    #[test]
+    fn test_diff_result_json_omits_diff_output_path_when_none() {
+        let result = DiffResult::new(0.85, 100, 100, 100, 100, 0.80, None);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("diff_output_path"));
+    }
 }
