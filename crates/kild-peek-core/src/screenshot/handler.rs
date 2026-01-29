@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use super::errors::ScreenshotError;
 use super::types::{CaptureRequest, CaptureResult, CaptureTarget, ImageFormat};
+use crate::window::{WindowError, find_window_by_title};
 
 /// Capture a screenshot based on the request
 pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotError> {
@@ -83,6 +84,21 @@ fn capture_window_by_title(
     title: &str,
     format: &ImageFormat,
 ) -> Result<CaptureResult, ScreenshotError> {
+    // Use shared find_window_by_title for consistent matching behavior
+    // (exact match preferred, falls back to partial match)
+    let window_info = find_window_by_title(title).map_err(|e| match e {
+        WindowError::WindowNotFound { title } => ScreenshotError::WindowNotFound { title },
+        WindowError::EnumerationFailed { message } => {
+            if message.contains("permission") || message.contains("denied") {
+                ScreenshotError::PermissionDenied
+            } else {
+                ScreenshotError::EnumerationFailed(message)
+            }
+        }
+        _ => ScreenshotError::EnumerationFailed(e.to_string()),
+    })?;
+
+    // Now find the actual xcap window by ID to capture
     let windows = xcap::Window::all().map_err(|e| {
         let msg = e.to_string();
         if msg.contains("permission") || msg.contains("denied") {
@@ -92,14 +108,9 @@ fn capture_window_by_title(
         }
     })?;
 
-    let title_lower = title.to_lowercase();
     let window = windows
         .into_iter()
-        .find(|w| {
-            w.title()
-                .ok()
-                .is_some_and(|t| t.to_lowercase().contains(&title_lower))
-        })
+        .find(|w| w.id().ok() == Some(window_info.id()))
         .ok_or_else(|| ScreenshotError::WindowNotFound {
             title: title.to_string(),
         })?;

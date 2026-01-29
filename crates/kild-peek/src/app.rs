@@ -52,7 +52,7 @@ pub fn build_cli() -> Command {
                     Arg::new("window")
                         .long("window")
                         .short('w')
-                        .help("Capture window by title (partial match)")
+                        .help("Capture window by title (exact match preferred, falls back to partial)")
                         .conflicts_with_all(["window-id", "monitor"]),
                 )
                 .arg(
@@ -136,7 +136,7 @@ pub fn build_cli() -> Command {
                     Arg::new("window")
                         .long("window")
                         .short('w')
-                        .help("Target window by title"),
+                        .help("Target window by title (exact match preferred, falls back to partial)"),
                 )
                 .arg(
                     Arg::new("exists")

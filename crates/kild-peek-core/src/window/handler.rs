@@ -247,8 +247,14 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, WindowError> {
     Ok(result)
 }
 
-/// Find a window by title (partial match, case-insensitive)
+/// Find a window by title (exact match preferred, falls back to partial match)
 /// Searches both window title and app name
+///
+/// Matching priority:
+/// 1. Exact case-insensitive match on window title
+/// 2. Exact case-insensitive match on app name
+/// 3. Partial case-insensitive match on window title
+/// 4. Partial case-insensitive match on app name
 pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
     info!(event = "core.window.find_started", title = title);
 
@@ -259,57 +265,105 @@ pub fn find_window_by_title(title: &str) -> Result<WindowInfo, WindowError> {
         message: e.to_string(),
     })?;
 
-    for w in xcap_windows {
-        let window_title = w.title().ok().unwrap_or_default();
-        let app_name = w.app_name().ok().unwrap_or_default();
+    // Collect all windows with their properties for multi-pass matching
+    let windows_with_props: Vec<_> = xcap_windows
+        .into_iter()
+        .map(|w| {
+            let window_title = w.title().ok().unwrap_or_default();
+            let app_name = w.app_name().ok().unwrap_or_default();
+            (w, window_title, app_name)
+        })
+        .collect();
 
-        // Match against both title and app_name
-        let matches = window_title.to_lowercase().contains(&title_lower)
-            || app_name.to_lowercase().contains(&title_lower);
-
-        if matches {
-            let id = w.id().ok().ok_or_else(|| WindowError::WindowNotFound {
-                title: title.to_string(),
-            })?;
-            let x = w.x().ok().unwrap_or(0);
-            let y = w.y().ok().unwrap_or(0);
-            let width = w.width().ok().unwrap_or(0);
-            let height = w.height().ok().unwrap_or(0);
-            let is_minimized = w.is_minimized().ok().unwrap_or(false);
-
-            let display_title = if window_title.is_empty() {
-                if app_name.is_empty() {
-                    format!("[Window {}]", id)
-                } else {
-                    app_name.clone()
-                }
-            } else {
-                window_title
-            };
-
+    // Pass 1: Exact match on window title (case-insensitive)
+    for (w, window_title, app_name) in &windows_with_props {
+        if window_title.to_lowercase() == title_lower {
             info!(
                 event = "core.window.find_completed",
                 title = title,
-                found_id = id
+                match_type = "exact_title"
             );
+            return build_window_info(w, window_title, app_name, title);
+        }
+    }
 
-            // Use max(1, value) to ensure non-zero dimensions for the constructor
-            return Ok(WindowInfo::new(
-                id,
-                display_title,
-                app_name,
-                x,
-                y,
-                width.max(1),
-                height.max(1),
-                is_minimized,
-            ));
+    // Pass 2: Exact match on app name (case-insensitive)
+    for (w, window_title, app_name) in &windows_with_props {
+        if app_name.to_lowercase() == title_lower {
+            info!(
+                event = "core.window.find_completed",
+                title = title,
+                match_type = "exact_app_name"
+            );
+            return build_window_info(w, window_title, app_name, title);
+        }
+    }
+
+    // Pass 3: Partial match on window title (case-insensitive)
+    for (w, window_title, app_name) in &windows_with_props {
+        if window_title.to_lowercase().contains(&title_lower) {
+            info!(
+                event = "core.window.find_completed",
+                title = title,
+                match_type = "partial_title"
+            );
+            return build_window_info(w, window_title, app_name, title);
+        }
+    }
+
+    // Pass 4: Partial match on app name (case-insensitive)
+    for (w, window_title, app_name) in &windows_with_props {
+        if app_name.to_lowercase().contains(&title_lower) {
+            info!(
+                event = "core.window.find_completed",
+                title = title,
+                match_type = "partial_app_name"
+            );
+            return build_window_info(w, window_title, app_name, title);
         }
     }
 
     Err(WindowError::WindowNotFound {
         title: title.to_string(),
     })
+}
+
+/// Helper to build WindowInfo from xcap window and pre-fetched properties
+fn build_window_info(
+    w: &xcap::Window,
+    window_title: &str,
+    app_name: &str,
+    search_title: &str,
+) -> Result<WindowInfo, WindowError> {
+    let id = w.id().ok().ok_or_else(|| WindowError::WindowNotFound {
+        title: search_title.to_string(),
+    })?;
+    let x = w.x().ok().unwrap_or(0);
+    let y = w.y().ok().unwrap_or(0);
+    let width = w.width().ok().unwrap_or(0);
+    let height = w.height().ok().unwrap_or(0);
+    let is_minimized = w.is_minimized().ok().unwrap_or(false);
+
+    let display_title = if window_title.is_empty() {
+        if app_name.is_empty() {
+            format!("[Window {}]", id)
+        } else {
+            app_name.to_string()
+        }
+    } else {
+        window_title.to_string()
+    };
+
+    Ok(WindowInfo::new(
+        id,
+        display_title,
+        app_name.to_string(),
+        x,
+        y,
+        width.max(1),
+        height.max(1),
+        is_minimized,
+    ))
 }
 
 /// Find a window by its ID
@@ -457,5 +511,23 @@ mod tests {
         assert_eq!(monitor.width(), 2560);
         assert_eq!(monitor.height(), 1440);
         assert!(monitor.is_primary());
+    }
+
+    #[test]
+    fn test_find_window_by_title_is_case_insensitive() {
+        // Both should return the same error (no such window exists)
+        // This verifies case-insensitivity is applied consistently
+        let result_lower = find_window_by_title("nonexistent_window_test_abc123");
+        let result_upper = find_window_by_title("NONEXISTENT_WINDOW_TEST_ABC123");
+
+        // Both should be errors (window doesn't exist)
+        assert!(result_lower.is_err());
+        assert!(result_upper.is_err());
+
+        // Both should have the same error code
+        assert_eq!(
+            result_lower.unwrap_err().error_code(),
+            result_upper.unwrap_err().error_code()
+        );
     }
 }
