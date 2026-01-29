@@ -22,8 +22,24 @@ pub fn capture(request: &CaptureRequest) -> Result<CaptureResult, ScreenshotErro
 }
 
 /// Save a capture result to a file
+///
+/// Creates parent directories if they don't exist.
 pub fn save_to_file(result: &CaptureResult, path: &Path) -> Result<(), ScreenshotError> {
     info!(event = "core.screenshot.save_started", path = %path.display());
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        debug!(event = "core.screenshot.creating_parent_directory", path = %parent.display());
+        std::fs::create_dir_all(parent).map_err(|source| {
+            ScreenshotError::DirectoryCreationFailed {
+                path: parent.display().to_string(),
+                source,
+            }
+        })?;
+    }
 
     std::fs::write(path, result.data())?;
 
@@ -282,5 +298,75 @@ mod tests {
         let enum_error = ScreenshotError::EnumerationFailed("some other error".to_string());
         assert_eq!(enum_error.error_code(), "SCREENSHOT_ENUMERATION_FAILED");
         assert!(!enum_error.is_user_error());
+    }
+
+    #[test]
+    fn test_save_to_file_creates_parent_directories() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_peek_test_save_creates_dir");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Path with non-existent parent directories
+        let nested_path = temp_dir.join("deeply/nested/path/screenshot.png");
+
+        // Create a minimal valid PNG (1x1 transparent pixel)
+        let png_data = create_test_png();
+        let result = CaptureResult::new(1, 1, ImageFormat::Png, png_data);
+
+        // Should succeed by creating parent directories
+        assert!(save_to_file(&result, &nested_path).is_ok());
+        assert!(nested_path.exists());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_to_file_handles_existing_directory() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_peek_test_save_existing_dir");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let path = temp_dir.join("screenshot.png");
+
+        // Create a minimal valid PNG
+        let png_data = create_test_png();
+        let result = CaptureResult::new(1, 1, ImageFormat::Png, png_data);
+
+        // Should succeed with existing directory
+        assert!(save_to_file(&result, &path).is_ok());
+        assert!(path.exists());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_directory_creation_failed_error() {
+        let error = ScreenshotError::DirectoryCreationFailed {
+            path: "/some/path".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+        };
+        assert_eq!(error.error_code(), "SCREENSHOT_DIRECTORY_CREATION_FAILED");
+        assert!(error.is_user_error());
+        assert!(error.to_string().contains("/some/path"));
+    }
+
+    /// Helper to create a minimal valid PNG for testing
+    fn create_test_png() -> Vec<u8> {
+        use image::ImageEncoder;
+        use image::codecs::png::PngEncoder;
+        use std::io::Cursor;
+
+        let img = image::RgbaImage::new(1, 1);
+        let mut buffer = Cursor::new(Vec::new());
+        let encoder = PngEncoder::new(&mut buffer);
+        encoder
+            .write_image(&img, 1, 1, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        buffer.into_inner()
     }
 }
