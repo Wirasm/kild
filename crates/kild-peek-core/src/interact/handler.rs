@@ -42,15 +42,7 @@ fn check_accessibility_permission() -> Result<(), InteractionError> {
 
 /// Resolve an InteractionTarget to a WindowInfo and focus the window
 fn resolve_and_focus_window(target: &InteractionTarget) -> Result<WindowInfo, InteractionError> {
-    let window = match target {
-        InteractionTarget::Window { title } => {
-            find_window_by_title(title).map_err(map_window_error)?
-        }
-        InteractionTarget::App { app } => find_window_by_app(app).map_err(map_window_error)?,
-        InteractionTarget::AppAndWindow { app, title } => {
-            find_window_by_app_and_title(app, title).map_err(map_window_error)?
-        }
-    };
+    let window = find_window_by_target(target)?;
 
     if window.is_minimized() {
         return Err(InteractionError::WindowMinimized {
@@ -65,6 +57,16 @@ fn resolve_and_focus_window(target: &InteractionTarget) -> Result<WindowInfo, In
     thread::sleep(FOCUS_SETTLE_DELAY);
 
     Ok(window)
+}
+
+/// Find a window by interaction target
+fn find_window_by_target(target: &InteractionTarget) -> Result<WindowInfo, InteractionError> {
+    let result = match target {
+        InteractionTarget::Window { title } => find_window_by_title(title),
+        InteractionTarget::App { app } => find_window_by_app(app),
+        InteractionTarget::AppAndWindow { app, title } => find_window_by_app_and_title(app, title),
+    };
+    result.map_err(map_window_error)
 }
 
 /// Focus a window by app name using AppleScript
@@ -116,9 +118,11 @@ fn focus_window(app_name: &str) -> Result<(), InteractionError> {
 
 /// Map WindowError to InteractionError
 fn map_window_error(error: WindowError) -> InteractionError {
+    use WindowError::*;
+
     match error {
-        WindowError::WindowNotFound { title } => InteractionError::WindowNotFound { title },
-        WindowError::WindowNotFoundByApp { app } => InteractionError::WindowNotFoundByApp { app },
+        WindowNotFound { title } => InteractionError::WindowNotFound { title },
+        WindowNotFoundByApp { app } => InteractionError::WindowNotFoundByApp { app },
         other => {
             warn!(
                 event = "peek.core.interact.window_error_unmapped",
