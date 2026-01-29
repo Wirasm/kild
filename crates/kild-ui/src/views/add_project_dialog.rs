@@ -19,8 +19,9 @@ use crate::views::MainView;
 /// - Cancel/Add buttons
 /// - Error message display
 ///
-/// # Panics
-/// Panics if called when the dialog state is not `DialogState::AddProject`.
+/// # Invalid State Handling
+/// If called with a non-`DialogState::AddProject` state, logs an error and
+/// displays "Internal error: invalid dialog state" to the user.
 pub fn render_add_project_dialog(
     dialog: &DialogState,
     cx: &mut Context<MainView>,

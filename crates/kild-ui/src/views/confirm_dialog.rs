@@ -17,8 +17,9 @@ use crate::views::MainView;
 /// - Cancel and Destroy buttons
 /// - Error message display (if destroy fails)
 ///
-/// # Panics
-/// Panics if called when the dialog state is not `DialogState::Confirm`.
+/// # Invalid State Handling
+/// If called with a non-`DialogState::Confirm` state, logs an error and
+/// displays "Internal error: invalid dialog state" to the user.
 pub fn render_confirm_dialog(dialog: &DialogState, cx: &mut Context<MainView>) -> impl IntoElement {
     let (branch, confirm_error) = match dialog {
         DialogState::Confirm { branch, error } => (branch.clone(), error.clone()),

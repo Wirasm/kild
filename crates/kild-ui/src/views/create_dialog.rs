@@ -25,8 +25,9 @@ pub fn agent_options() -> Vec<&'static str> {
 /// - Cancel/Create buttons
 /// - Error message display
 ///
-/// # Panics
-/// Panics if called when the dialog state is not `DialogState::Create`.
+/// # Invalid State Handling
+/// If called with a non-`DialogState::Create` state, logs an error and
+/// displays "Internal error: invalid dialog state" to the user.
 pub fn render_create_dialog(dialog: &DialogState, cx: &mut Context<MainView>) -> impl IntoElement {
     let (form, create_error) = match dialog {
         DialogState::Create { form, error } => (form, error.clone()),

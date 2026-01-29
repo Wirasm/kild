@@ -94,9 +94,8 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
 /// Canonicalization ensures that `/users/rasmus/project` and `/Users/rasmus/project`
 /// produce the same hash value, which is critical for project filtering.
 ///
-/// If canonicalization fails (path doesn't exist or is inaccessible), returns the
-/// original path to allow downstream validation to provide a better error message
-/// rather than failing here with a generic "path not found" error.
+/// # Errors
+/// Returns an error if the path doesn't exist or is inaccessible.
 fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
     match path.canonicalize() {
         Ok(canonical) => {
@@ -110,12 +109,12 @@ fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
             Ok(canonical)
         }
         Err(e) => {
-            debug!(
+            warn!(
                 event = "ui.normalize_path.canonicalize_failed",
                 path = %path.display(),
                 error = %e
             );
-            Ok(path)
+            Err(format!("Cannot access '{}': {}", path.display(), e))
         }
     }
 }
@@ -590,6 +589,13 @@ impl MainView {
         cx.notify();
     }
 
+    /// Clear startup errors (called when user dismisses the banner).
+    fn on_dismiss_startup_errors(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.startup_errors.dismissed");
+        self.state.dismiss_startup_errors();
+        cx.notify();
+    }
+
     // --- Project management handlers ---
 
     /// Handle click on Add Project button.
@@ -654,7 +660,14 @@ impl MainView {
                 );
                 // Update local state with new project
                 // Note: ProjectManager.add() auto-selects first project
-                let _ = self.state.add_project(project);
+                if let Err(e) = self.state.add_project(project) {
+                    tracing::warn!(
+                        event = "ui.add_project.state_sync_failed",
+                        path = %path.display(),
+                        error = %e,
+                        "Project persisted but local state update failed"
+                    );
+                }
                 self.state.close_dialog();
                 // Refresh sessions to filter by new active project
                 self.state.refresh_sessions();
@@ -685,8 +698,15 @@ impl MainView {
             return;
         }
 
-        // Update local state - select() cannot fail since persistence succeeded
-        let _ = self.state.select_project(&path);
+        // Update local state - select() should not fail since persistence succeeded
+        if let Err(e) = self.state.select_project(&path) {
+            tracing::warn!(
+                event = "ui.project_select.state_sync_failed",
+                path = %path.display(),
+                error = %e,
+                "Project selection persisted but local state update failed"
+            );
+        }
         cx.notify();
     }
 
@@ -721,7 +741,14 @@ impl MainView {
         }
 
         // Update local state - remove() handles active_index adjustment
-        let _ = self.state.remove_project(&path);
+        if let Err(e) = self.state.remove_project(&path) {
+            tracing::warn!(
+                event = "ui.remove_project.state_sync_failed",
+                path = %path.display(),
+                error = %e,
+                "Project removal persisted but local state update failed"
+            );
+        }
         cx.notify();
     }
 
@@ -969,6 +996,53 @@ impl Render for MainView {
                             ),
                     ),
             )
+            // Startup errors banner (shown when projects fail to load or migrate)
+            .when(self.state.has_startup_errors(), |this| {
+                let startup_errors = self.state.startup_errors();
+                let error_count = startup_errors.len();
+                this.child(
+                    div()
+                        .mx(px(theme::SPACE_4))
+                        .mt(px(theme::SPACE_2))
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_2))
+                        .bg(theme::with_alpha(theme::ember(), 0.15))
+                        .rounded(px(theme::RADIUS_MD))
+                        .flex()
+                        .flex_col()
+                        .gap(px(theme::SPACE_1))
+                        // Header with dismiss button
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_color(theme::ember())
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(format!(
+                                            "Startup error{}:",
+                                            if error_count == 1 { "" } else { "s" }
+                                        )),
+                                )
+                                .child(
+                                    Button::new("dismiss-startup-errors", "×")
+                                        .variant(ButtonVariant::Ghost)
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_dismiss_startup_errors(cx);
+                                        })),
+                                ),
+                        )
+                        // Error list
+                        .children(startup_errors.iter().map(|e| {
+                            div()
+                                .text_size(px(theme::TEXT_SM))
+                                .text_color(theme::with_alpha(theme::ember(), 0.8))
+                                .child(format!("• {}", e))
+                        })),
+                )
+            })
             // Bulk operation errors banner (dismissible)
             .when(self.state.has_bulk_errors(), |this| {
                 let bulk_errors = self.state.bulk_errors();
@@ -1062,15 +1136,18 @@ mod tests {
 
     #[test]
     fn test_normalize_path_with_leading_slash_nonexistent() {
-        let result = normalize_project_path("/Users/test/project").unwrap();
-        assert_eq!(result, PathBuf::from("/Users/test/project"));
+        // Nonexistent paths now return errors
+        let result = normalize_project_path("/Users/test/project");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
     fn test_normalize_path_tilde_expansion() {
-        let result = normalize_project_path("~/projects/test").unwrap();
-        let expected_home = dirs::home_dir().expect("test requires home dir");
-        assert_eq!(result, expected_home.join("projects/test"));
+        // Nonexistent paths now return errors
+        let result = normalize_project_path("~/projects/test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
@@ -1085,32 +1162,42 @@ mod tests {
 
     #[test]
     fn test_normalize_path_trims_whitespace() {
-        let result = normalize_project_path("  /Users/test/project  ").unwrap();
-        assert_eq!(result, PathBuf::from("/Users/test/project"));
+        // Nonexistent paths now return errors
+        let result = normalize_project_path("  /Users/test/project  ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
     fn test_normalize_path_without_leading_slash_fallback() {
-        let result = normalize_project_path("nonexistent/path/here").unwrap();
-        assert_eq!(result, PathBuf::from("nonexistent/path/here"));
+        // Nonexistent paths now return errors
+        let result = normalize_project_path("nonexistent/path/here");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
     fn test_normalize_path_empty_string() {
-        let result = normalize_project_path("").unwrap();
-        assert_eq!(result, PathBuf::from(""));
+        // Empty paths now return errors
+        let result = normalize_project_path("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
     fn test_normalize_path_whitespace_only() {
-        let result = normalize_project_path("   ").unwrap();
-        assert_eq!(result, PathBuf::from(""));
+        // Whitespace-only paths now return errors
+        let result = normalize_project_path("   ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
     fn test_normalize_path_tilde_in_middle_not_expanded() {
-        let result = normalize_project_path("/Users/test/~project").unwrap();
-        assert_eq!(result, PathBuf::from("/Users/test/~project"));
+        // Nonexistent paths now return errors
+        let result = normalize_project_path("/Users/test/~project");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]
@@ -1151,10 +1238,11 @@ mod tests {
     }
 
     #[test]
-    fn test_canonicalize_path_nonexistent_returns_original() {
+    fn test_canonicalize_path_nonexistent_returns_error() {
         let path = PathBuf::from("/nonexistent/path/that/does/not/exist");
-        let result = canonicalize_path(path.clone()).unwrap();
-        assert_eq!(result, path);
+        let result = canonicalize_path(path.clone());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot access"));
     }
 
     #[test]

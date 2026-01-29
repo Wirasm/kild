@@ -121,6 +121,9 @@ pub struct ProjectsData {
     pub projects: Vec<Project>,
     /// Path of the currently active project (None if no project selected)
     pub active: Option<PathBuf>,
+    /// Error message if loading failed (file corrupted, unreadable, etc.)
+    #[serde(skip)]
+    pub load_error: Option<String>,
 }
 
 /// Check if a path is a git repository.
@@ -201,16 +204,31 @@ pub fn load_projects() -> ProjectsData {
                     error = %e,
                     "Projects file exists but contains invalid JSON - project configuration lost"
                 );
-                ProjectsData::default()
+                ProjectsData {
+                    load_error: Some(format!(
+                        "Projects file corrupted ({}). Your project list could not be loaded. \
+                         Delete {} to reset.",
+                        e,
+                        path.display()
+                    )),
+                    ..Default::default()
+                }
             }
         },
         Err(e) => {
-            tracing::warn!(
+            tracing::error!(
                 event = "ui.projects.load_failed",
                 path = %path.display(),
                 error = %e
             );
-            ProjectsData::default()
+            ProjectsData {
+                load_error: Some(format!(
+                    "Failed to read projects file: {}. Check permissions on {}",
+                    e,
+                    path.display()
+                )),
+                ..Default::default()
+            }
         }
     }
 }
@@ -542,6 +560,7 @@ mod tests {
                 ),
             ],
             active: Some(PathBuf::from("/path/to/project-a")),
+            load_error: None,
         };
 
         // Serialize

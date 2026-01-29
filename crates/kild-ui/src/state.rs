@@ -812,22 +812,31 @@ pub struct AppState {
 
     /// Project management with enforced invariants.
     projects: ProjectManager,
+
+    /// Startup errors that should be shown to the user (migration failures, load errors).
+    startup_errors: Vec<String>,
 }
 
 impl AppState {
     /// Create new application state, loading sessions from disk.
     pub fn new() -> Self {
+        let mut startup_errors = Vec::new();
+
         // Migrate projects to canonical paths (fixes case mismatch on macOS)
         if let Err(e) = crate::projects::migrate_projects_to_canonical() {
-            tracing::warn!(
+            tracing::error!(
                 event = "ui.projects.migration_failed",
                 error = %e,
                 "Project migration failed - some projects may not filter correctly"
             );
+            startup_errors.push(format!("Project migration failed: {}", e));
         }
 
         // Load projects from disk (after migration)
         let projects_data = crate::projects::load_projects();
+        if let Some(load_error) = projects_data.load_error {
+            startup_errors.push(load_error);
+        }
         let projects = ProjectManager::from_data(projects_data.projects, projects_data.active);
 
         Self {
@@ -836,6 +845,7 @@ impl AppState {
             errors: OperationErrors::new(),
             selection: SelectionState::default(),
             projects,
+            startup_errors,
         }
     }
 
@@ -1023,6 +1033,25 @@ impl AppState {
     }
 
     // =========================================================================
+    // Startup errors facade methods
+    // =========================================================================
+
+    /// Get startup errors that should be shown to the user.
+    pub fn startup_errors(&self) -> &[String] {
+        &self.startup_errors
+    }
+
+    /// Check if there are any startup errors.
+    pub fn has_startup_errors(&self) -> bool {
+        !self.startup_errors.is_empty()
+    }
+
+    /// Dismiss all startup errors (user acknowledged them).
+    pub fn dismiss_startup_errors(&mut self) {
+        self.startup_errors.clear();
+    }
+
+    // =========================================================================
     // Selection facade methods
     // =========================================================================
 
@@ -1117,6 +1146,7 @@ impl AppState {
             errors: OperationErrors::new(),
             selection: SelectionState::default(),
             projects: ProjectManager::new(),
+            startup_errors: Vec::new(),
         }
     }
 
@@ -1129,6 +1159,7 @@ impl AppState {
             errors: OperationErrors::new(),
             selection: SelectionState::default(),
             projects: ProjectManager::new(),
+            startup_errors: Vec::new(),
         }
     }
 
@@ -1638,9 +1669,10 @@ mod tests {
 
     #[test]
     fn test_create_form_state_selected_agent_fallback_on_invalid_index() {
-        let mut form = CreateFormState::default();
-        // Set an invalid index
-        form.selected_agent_index = 999;
+        let form = CreateFormState {
+            selected_agent_index: 999,
+            ..Default::default()
+        };
 
         // Should fall back to default agent
         let expected = kild_core::agents::default_agent_name();
@@ -2356,10 +2388,11 @@ mod tests {
         // Simulate destroy of selected kild - the destroy handler logic:
         // if selected_kild().session.branch == destroyed_branch { clear_selection() }
         let destroyed_branch = "branch-1";
-        if let Some(selected) = state.selected_kild() {
-            if selected.session.branch == destroyed_branch {
-                state.clear_selection();
-            }
+        if state
+            .selected_kild()
+            .is_some_and(|s| s.session.branch == destroyed_branch)
+        {
+            state.clear_selection();
         }
         state
             .sessions
@@ -2417,10 +2450,11 @@ mod tests {
 
         // Destroy branch-2 (not selected)
         let destroyed_branch = "branch-2";
-        if let Some(selected) = state.selected_kild() {
-            if selected.session.branch == destroyed_branch {
-                state.clear_selection();
-            }
+        if state
+            .selected_kild()
+            .is_some_and(|s| s.session.branch == destroyed_branch)
+        {
+            state.clear_selection();
         }
         state
             .sessions
