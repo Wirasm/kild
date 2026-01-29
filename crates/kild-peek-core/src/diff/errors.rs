@@ -92,6 +92,17 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_generation_failed_error() {
+        let error = DiffError::DiffGenerationFailed("write failed".to_string());
+        assert_eq!(
+            error.to_string(),
+            "Failed to generate diff image: write failed"
+        );
+        assert_eq!(error.error_code(), "DIFF_GENERATION_FAILED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
     fn test_io_error_conversion() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let error: DiffError = io_error.into();

@@ -326,6 +326,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let image2 = matches.get_one::<String>("image2").unwrap();
     let threshold_percent = *matches.get_one::<u8>("threshold").unwrap_or(&95);
     let json_output = matches.get_flag("json");
+    let diff_output = matches.get_one::<String>("diff-output");
 
     let threshold = (threshold_percent as f64) / 100.0;
 
@@ -333,10 +334,14 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         event = "cli.diff_started",
         image1 = image1,
         image2 = image2,
-        threshold = threshold
+        threshold = threshold,
+        diff_output = ?diff_output
     );
 
-    let request = DiffRequest::new(image1, image2).with_threshold(threshold);
+    let mut request = DiffRequest::new(image1, image2).with_threshold(threshold);
+    if let Some(path) = diff_output {
+        request = request.with_diff_output(path);
+    }
 
     match compare_images(&request) {
         Ok(result) => {
@@ -353,6 +358,9 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 println!("  Threshold: {}%", threshold_percent);
                 println!("  Image 1: {}x{}", result.width1(), result.height1());
                 println!("  Image 2: {}x{}", result.width2(), result.height2());
+                if let Some(path) = result.diff_output_path() {
+                    println!("  Diff saved: {}", path);
+                }
             }
 
             info!(

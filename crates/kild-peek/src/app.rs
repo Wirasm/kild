@@ -158,6 +158,11 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("diff-output")
+                        .long("diff-output")
+                        .help("Save visual diff image highlighting differences"),
                 ),
         )
         // Assert subcommand
@@ -539,6 +544,27 @@ mod tests {
             "0",
         ]);
         assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_diff_with_diff_output() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "diff",
+            "/path/to/a.png",
+            "/path/to/b.png",
+            "--diff-output",
+            "/tmp/diff.png",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let diff_matches = matches.subcommand_matches("diff").unwrap();
+        assert_eq!(
+            diff_matches.get_one::<String>("diff-output").unwrap(),
+            "/tmp/diff.png"
+        );
     }
 
     #[test]
