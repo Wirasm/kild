@@ -194,6 +194,8 @@ impl MainView {
 
             tracing::debug!(event = "ui.watcher_task.started");
             let mut last_refresh = std::time::Instant::now();
+            // Track if events were detected but debounced - ensures we refresh after debounce expires
+            let mut pending_refresh = false;
 
             loop {
                 // Check for events every 50ms (cheap - just channel poll)
@@ -202,14 +204,19 @@ impl MainView {
                     .await;
 
                 if let Err(e) = this.update(cx, |view, cx| {
+                    // Check for new events (this drains the queue)
                     if watcher.has_pending_events() {
-                        // Debounce: only refresh if enough time has passed
-                        if last_refresh.elapsed() > crate::refresh::DEBOUNCE_INTERVAL {
-                            tracing::info!(event = "ui.watcher.refresh_triggered");
-                            view.state.refresh_sessions();
-                            last_refresh = std::time::Instant::now();
-                            cx.notify();
-                        }
+                        pending_refresh = true;
+                    }
+
+                    // Refresh if we have pending events AND debounce period has passed
+                    if pending_refresh && last_refresh.elapsed() > crate::refresh::DEBOUNCE_INTERVAL
+                    {
+                        tracing::info!(event = "ui.watcher.refresh_triggered");
+                        view.state.refresh_sessions();
+                        last_refresh = std::time::Instant::now();
+                        pending_refresh = false;
+                        cx.notify();
                     }
                 }) {
                     tracing::debug!(
