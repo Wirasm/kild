@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 use kild_peek_core::assert::{Assertion, run_assertion};
 use kild_peek_core::diff::{DiffRequest, compare_images};
 use kild_peek_core::events;
-use kild_peek_core::screenshot::{CaptureRequest, ImageFormat, capture, save_to_file};
+use kild_peek_core::screenshot::{CaptureRequest, CropArea, ImageFormat, capture, save_to_file};
 use kild_peek_core::window::{
     find_window_by_app, find_window_by_app_and_title, find_window_by_app_and_title_with_wait,
     find_window_by_app_with_wait, find_window_by_title_with_wait, list_monitors, list_windows,
@@ -158,6 +158,13 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         .map(|s| s.as_str())
         .unwrap_or("png");
     let quality = *matches.get_one::<u8>("quality").unwrap_or(&85);
+    let crop_str = matches.get_one::<String>("crop");
+
+    // Parse crop area if provided
+    let crop = match crop_str {
+        Some(s) => Some(parse_crop_area(s)?),
+        None => None,
+    };
 
     // Default to base64 output if no output path specified
     let use_base64 = base64_flag || output_path.is_none();
@@ -177,7 +184,8 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         base64 = use_base64,
         format = ?format_str,
         wait = wait_flag,
-        timeout_ms = timeout_ms
+        timeout_ms = timeout_ms,
+        crop = ?crop
     );
 
     // Build the capture request, using wait functions if --wait is set
@@ -189,6 +197,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         format,
         wait_flag,
         timeout_ms,
+        crop,
     )?;
 
     match capture(&request) {
@@ -229,6 +238,7 @@ fn build_capture_request_with_wait(
     format: ImageFormat,
     wait: bool,
     timeout_ms: u64,
+    crop: Option<CropArea>,
 ) -> Result<CaptureRequest, Box<dyn std::error::Error>> {
     // Check if wait flag is applicable to this target
     if wait {
@@ -253,7 +263,11 @@ fn build_capture_request_with_wait(
         } else if app_name.is_some() || window_title.is_some() {
             // Wait is applicable and enabled - pre-resolve window
             let window = resolve_window_for_capture(app_name, window_title, Some(timeout_ms))?;
-            return Ok(CaptureRequest::window_id(window.id()).with_format(format));
+            let req = CaptureRequest::window_id(window.id()).with_format(format);
+            return Ok(match crop {
+                Some(c) => req.with_crop(c),
+                None => req,
+            });
         }
     }
 
@@ -264,7 +278,21 @@ fn build_capture_request_with_wait(
         window_id,
         monitor_index,
         format,
+        crop,
     ))
+}
+
+/// Parse a crop area string in the format "x,y,width,height"
+fn parse_crop_area(s: &str) -> Result<CropArea, Box<dyn std::error::Error>> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 4 {
+        return Err("Crop format must be x,y,width,height".into());
+    }
+    let x: u32 = parts[0].trim().parse()?;
+    let y: u32 = parts[1].trim().parse()?;
+    let width: u32 = parts[2].trim().parse()?;
+    let height: u32 = parts[3].trim().parse()?;
+    Ok(CropArea::new(x, y, width, height))
 }
 
 /// Build a capture request from command-line arguments
@@ -274,8 +302,9 @@ fn build_capture_request(
     window_id: Option<&u32>,
     monitor_index: Option<&usize>,
     format: ImageFormat,
+    crop: Option<CropArea>,
 ) -> CaptureRequest {
-    match (app_name, window_title, window_id, monitor_index) {
+    let base = match (app_name, window_title, window_id, monitor_index) {
         (Some(app), Some(title), None, None) => {
             CaptureRequest::window_app_and_title(app, title).with_format(format)
         }
@@ -284,6 +313,11 @@ fn build_capture_request(
         (None, None, Some(id), None) => CaptureRequest::window_id(*id).with_format(format),
         (None, None, None, Some(index)) => CaptureRequest::monitor(*index).with_format(format),
         _ => CaptureRequest::primary_monitor().with_format(format),
+    };
+
+    match crop {
+        Some(c) => base.with_crop(c),
+        None => base,
     }
 }
 

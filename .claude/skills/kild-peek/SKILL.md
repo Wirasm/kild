@@ -131,7 +131,7 @@ Shows all connected displays.
 
 ### Capture Screenshot
 ```bash
-kild-peek screenshot [--window <title>] [--app <name>] [--window-id <id>] [--monitor <index>] -o <path>
+kild-peek screenshot [--window <title>] [--app <name>] [--window-id <id>] [--monitor <index>] [--crop <region>] -o <path>
 ```
 
 Captures a screenshot of a window or monitor.
@@ -141,6 +141,7 @@ Captures a screenshot of a window or monitor.
 - `--app <name>` - Capture window by app name (can combine with `--window` for precision)
 - `--window-id <id>` - Capture window by exact ID
 - `--monitor <index>` - Capture specific monitor (0 = primary)
+- `--crop <region>` - Crop to region: x,y,width,height (e.g., "0,0,400,50")
 - `-o <path>` - Output file path (required for file output)
 - `--format <png|jpg>` - Image format (default: png)
 - `--quality <1-100>` - JPEG quality (default: 85)
@@ -167,6 +168,9 @@ kild-peek screenshot -o "$SCRATCHPAD/screen.png"
 
 # Capture as JPEG
 kild-peek screenshot --window "Terminal" -o "$SCRATCHPAD/term.jpg" --format jpg --quality 90
+
+# Crop to specific region (x,y,width,height)
+kild-peek screenshot --app Ghostty --crop 0,0,400,300 -o "$SCRATCHPAD/cropped.png"
 ```
 
 ### Compare Images (Diff)

@@ -44,6 +44,18 @@ pub enum ScreenshotError {
     #[error("Monitor not found at index: {index}")]
     MonitorNotFound { index: usize },
 
+    #[error(
+        "Crop region ({x}, {y}, {width}x{height}) exceeds image bounds ({image_width}x{image_height})"
+    )]
+    InvalidCropBounds {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        image_width: u32,
+        image_height: u32,
+    },
+
     /// Directory creation failed during screenshot save.
     ///
     /// Use this for mkdir-like failures when creating parent directories.
@@ -78,6 +90,7 @@ impl PeekError for ScreenshotError {
             ScreenshotError::CaptureFailed(_) => "SCREENSHOT_CAPTURE_FAILED",
             ScreenshotError::EncodingError(_) => "SCREENSHOT_ENCODING_ERROR",
             ScreenshotError::MonitorNotFound { .. } => "SCREENSHOT_MONITOR_NOT_FOUND",
+            ScreenshotError::InvalidCropBounds { .. } => "SCREENSHOT_INVALID_CROP_BOUNDS",
             ScreenshotError::DirectoryCreationFailed { .. } => {
                 "SCREENSHOT_DIRECTORY_CREATION_FAILED"
             }
@@ -98,6 +111,7 @@ impl PeekError for ScreenshotError {
                 | ScreenshotError::PermissionDenied
                 | ScreenshotError::MonitorNotFound { .. }
                 | ScreenshotError::DirectoryCreationFailed { .. }
+                | ScreenshotError::InvalidCropBounds { .. }
         )
     }
 }
@@ -198,5 +212,23 @@ mod tests {
             "SCREENSHOT_WAIT_TIMEOUT_BY_APP_AND_TITLE"
         );
         assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_invalid_crop_bounds_error() {
+        let error = ScreenshotError::InvalidCropBounds {
+            x: 100,
+            y: 50,
+            width: 200,
+            height: 100,
+            image_width: 150,
+            image_height: 100,
+        };
+        assert_eq!(error.error_code(), "SCREENSHOT_INVALID_CROP_BOUNDS");
+        assert!(error.is_user_error());
+        let msg = error.to_string();
+        assert!(msg.contains("100, 50"));
+        assert!(msg.contains("200x100"));
+        assert!(msg.contains("150x100"));
     }
 }

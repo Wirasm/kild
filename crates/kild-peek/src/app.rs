@@ -121,6 +121,12 @@ pub fn build_cli() -> Command {
                         .help("Timeout in milliseconds when using --wait (default: 30000)")
                         .value_parser(clap::value_parser!(u64))
                         .default_value("30000"),
+                )
+                .arg(
+                    Arg::new("crop")
+                        .long("crop")
+                        .help("Crop to region: x,y,width,height (e.g., \"0,0,400,50\")")
+                        .value_name("REGION"),
                 ),
         )
         // Diff subcommand
@@ -640,5 +646,75 @@ mod tests {
         let assert_matches = matches.subcommand_matches("assert").unwrap();
         assert!(assert_matches.get_flag("wait"));
         assert_eq!(*assert_matches.get_one::<u64>("timeout").unwrap(), 2000);
+    }
+
+    #[test]
+    fn test_cli_screenshot_crop() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--window",
+            "Terminal",
+            "--crop",
+            "0,0,100,50",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert_eq!(
+            screenshot_matches.get_one::<String>("crop").unwrap(),
+            "0,0,100,50"
+        );
+    }
+
+    #[test]
+    fn test_cli_screenshot_crop_with_output() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--window",
+            "Terminal",
+            "--crop",
+            "10,20,200,100",
+            "-o",
+            "/tmp/cropped.png",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert_eq!(
+            screenshot_matches.get_one::<String>("crop").unwrap(),
+            "10,20,200,100"
+        );
+        assert_eq!(
+            screenshot_matches.get_one::<String>("output").unwrap(),
+            "/tmp/cropped.png"
+        );
+    }
+
+    #[test]
+    fn test_cli_screenshot_crop_with_monitor() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "screenshot",
+            "--monitor",
+            "0",
+            "--crop",
+            "0,0,500,300",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let screenshot_matches = matches.subcommand_matches("screenshot").unwrap();
+        assert_eq!(
+            screenshot_matches.get_one::<String>("crop").unwrap(),
+            "0,0,500,300"
+        );
+        assert_eq!(*screenshot_matches.get_one::<usize>("monitor").unwrap(), 0);
     }
 }

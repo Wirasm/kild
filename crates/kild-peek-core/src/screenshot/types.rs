@@ -1,6 +1,26 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
+/// Region to crop from captured image
+#[derive(Debug, Clone, Copy)]
+pub struct CropArea {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl CropArea {
+    pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
 /// Target for screenshot capture
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
@@ -35,6 +55,8 @@ pub struct CaptureRequest {
     pub target: CaptureTarget,
     /// Output format
     pub format: ImageFormat,
+    /// Optional crop region
+    pub crop: Option<CropArea>,
 }
 
 impl CaptureRequest {
@@ -45,6 +67,7 @@ impl CaptureRequest {
                 title: title.into(),
             },
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -53,6 +76,7 @@ impl CaptureRequest {
         Self {
             target: CaptureTarget::WindowId { id },
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -61,6 +85,7 @@ impl CaptureRequest {
         Self {
             target: CaptureTarget::WindowApp { app: app.into() },
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -72,6 +97,7 @@ impl CaptureRequest {
                 title: title.into(),
             },
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -80,6 +106,7 @@ impl CaptureRequest {
         Self {
             target: CaptureTarget::Monitor { index },
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -88,6 +115,7 @@ impl CaptureRequest {
         Self {
             target: CaptureTarget::PrimaryMonitor,
             format: ImageFormat::default(),
+            crop: None,
         }
     }
 
@@ -102,6 +130,12 @@ impl CaptureRequest {
         self.format = ImageFormat::Jpeg {
             quality: quality.min(100),
         };
+        self
+    }
+
+    /// Set crop region to extract from captured image
+    pub fn with_crop(mut self, crop: CropArea) -> Self {
+        self.crop = Some(crop);
         self
     }
 }
@@ -251,5 +285,45 @@ mod tests {
             ImageFormat::Jpeg { quality } => assert_eq!(quality, 0),
             _ => panic!("Expected JPEG format"),
         }
+    }
+
+    #[test]
+    fn test_crop_area_new() {
+        let crop = CropArea::new(10, 20, 100, 50);
+        assert_eq!(crop.x, 10);
+        assert_eq!(crop.y, 20);
+        assert_eq!(crop.width, 100);
+        assert_eq!(crop.height, 50);
+    }
+
+    #[test]
+    fn test_capture_request_with_crop() {
+        let crop = CropArea::new(0, 0, 400, 50);
+        let req = CaptureRequest::window("Test").with_crop(crop);
+        assert!(req.crop.is_some());
+        let c = req.crop.unwrap();
+        assert_eq!(c.x, 0);
+        assert_eq!(c.y, 0);
+        assert_eq!(c.width, 400);
+        assert_eq!(c.height, 50);
+    }
+
+    #[test]
+    fn test_capture_request_default_no_crop() {
+        let req = CaptureRequest::window("Test");
+        assert!(req.crop.is_none());
+    }
+
+    #[test]
+    fn test_capture_request_with_format_and_crop() {
+        let crop = CropArea::new(10, 10, 200, 100);
+        let req = CaptureRequest::window("Test")
+            .with_format(ImageFormat::Jpeg { quality: 90 })
+            .with_crop(crop);
+        match req.format {
+            ImageFormat::Jpeg { quality } => assert_eq!(quality, 90),
+            _ => panic!("Expected JPEG format"),
+        }
+        assert!(req.crop.is_some());
     }
 }

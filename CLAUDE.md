@@ -96,6 +96,7 @@ cargo run -p kild-peek -- screenshot --app Ghostty --window "Terminal" -o /tmp/p
 cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
 cargo run -p kild-peek -- screenshot --window "Terminal" --wait -o /tmp/term.png  # Wait for window
 cargo run -p kild-peek -- screenshot --window "Terminal" --wait --timeout 5000 -o /tmp/term.png  # Custom timeout
+cargo run -p kild-peek -- screenshot --app Ghostty --crop 0,0,400,300 -o /tmp/cropped.png
 cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
 cargo run -p kild-peek -- assert --app "KILD" --exists
 cargo run -p kild-peek -- assert --window "KILD" --visible
