@@ -1,8 +1,8 @@
 use crate::git::errors::GitError;
-use crate::git::types::DiffStats;
-use git2::Repository;
+use crate::git::types::{DiffStats, UncommittedDetails, WorktreeStatus};
+use git2::{Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Sanitize a string for safe use in filesystem paths and git2 worktree names.
 ///
@@ -140,6 +140,197 @@ pub fn get_diff_stats(worktree_path: &Path) -> Result<DiffStats, GitError> {
         deletions: stats.deletions(),
         files_changed: stats.files_changed(),
     })
+}
+
+/// Get comprehensive worktree status for destroy safety checks.
+///
+/// Returns information about:
+/// - Uncommitted changes (staged, modified, untracked files)
+/// - Unpushed commits (commits ahead of remote tracking branch)
+/// - Remote branch existence
+///
+/// This is a best-effort operation. If any part fails (e.g., repository
+/// issues), partial information is still returned with sensible defaults.
+///
+/// # Errors
+///
+/// Returns `GitError::Git2Error` if the repository cannot be opened.
+pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitError> {
+    let repo = Repository::open(worktree_path).map_err(|e| GitError::Git2Error { source: e })?;
+
+    // 1. Check for uncommitted changes using git2 status
+    let (has_uncommitted, uncommitted_details) = check_uncommitted_changes(&repo);
+
+    // 2. Count unpushed commits and check remote branch existence
+    let (unpushed_count, has_remote) = count_unpushed_commits(&repo);
+
+    Ok(WorktreeStatus {
+        has_uncommitted_changes: has_uncommitted,
+        unpushed_commit_count: unpushed_count,
+        has_remote_branch: has_remote,
+        uncommitted_details: if has_uncommitted {
+            Some(uncommitted_details)
+        } else {
+            None
+        },
+    })
+}
+
+/// Check for uncommitted changes in the repository.
+///
+/// Returns (has_uncommitted_changes, details).
+fn check_uncommitted_changes(repo: &Repository) -> (bool, UncommittedDetails) {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    opts.include_ignored(false);
+
+    let statuses = match repo.statuses(Some(&mut opts)) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                event = "core.git.status_check_failed",
+                error = %e,
+                "Failed to get git status - assuming clean"
+            );
+            return (false, UncommittedDetails::default());
+        }
+    };
+
+    let mut staged_files = 0;
+    let mut modified_files = 0;
+    let mut untracked_files = 0;
+
+    for entry in statuses.iter() {
+        let status = entry.status();
+
+        // Check for staged changes (index changes)
+        if status.intersects(
+            Status::INDEX_NEW
+                | Status::INDEX_MODIFIED
+                | Status::INDEX_DELETED
+                | Status::INDEX_RENAMED
+                | Status::INDEX_TYPECHANGE,
+        ) {
+            staged_files += 1;
+        }
+
+        // Check for unstaged modifications to tracked files
+        if status.intersects(
+            Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE,
+        ) {
+            modified_files += 1;
+        }
+
+        // Check for untracked files
+        if status.contains(Status::WT_NEW) {
+            untracked_files += 1;
+        }
+    }
+
+    let has_uncommitted = staged_files > 0 || modified_files > 0 || untracked_files > 0;
+    let details = UncommittedDetails {
+        staged_files,
+        modified_files,
+        untracked_files,
+    };
+
+    (has_uncommitted, details)
+}
+
+/// Count unpushed commits and check if remote tracking branch exists.
+///
+/// Returns (unpushed_commit_count, has_remote_branch).
+/// If the branch has no remote tracking branch, returns (0, false).
+fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
+    // Get current branch reference
+    let head = match repo.head() {
+        Ok(h) => h,
+        Err(e) => {
+            debug!(
+                event = "core.git.head_read_failed",
+                error = %e,
+                "Failed to read HEAD - assuming no unpushed commits"
+            );
+            return (0, false);
+        }
+    };
+
+    // Get the branch name
+    let branch_name = match head.shorthand() {
+        Some(name) => name,
+        None => {
+            debug!(
+                event = "core.git.detached_head",
+                "Repository is in detached HEAD state"
+            );
+            return (0, false);
+        }
+    };
+
+    // Find the local branch
+    let local_branch = match repo.find_branch(branch_name, git2::BranchType::Local) {
+        Ok(b) => b,
+        Err(e) => {
+            debug!(
+                event = "core.git.local_branch_not_found",
+                branch = branch_name,
+                error = %e
+            );
+            return (0, false);
+        }
+    };
+
+    // Check if there's an upstream (remote tracking) branch
+    let upstream = match local_branch.upstream() {
+        Ok(u) => u,
+        Err(_) => {
+            // No upstream configured - branch has never been pushed
+            debug!(
+                event = "core.git.no_upstream",
+                branch = branch_name,
+                "Branch has no upstream - never pushed"
+            );
+            return (0, false);
+        }
+    };
+
+    // Get the OIDs for local and remote
+    let local_oid = match head.target() {
+        Some(oid) => oid,
+        None => return (0, true),
+    };
+
+    let upstream_oid = match upstream.get().target() {
+        Some(oid) => oid,
+        None => return (0, true),
+    };
+
+    // Count commits in local that aren't in upstream (local..upstream reversed)
+    let mut revwalk = match repo.revwalk() {
+        Ok(rw) => rw,
+        Err(e) => {
+            warn!(
+                event = "core.git.revwalk_init_failed",
+                error = %e,
+                "Failed to create revwalk"
+            );
+            return (0, true);
+        }
+    };
+
+    // Push the local commit and hide the upstream commit
+    if revwalk.push(local_oid).is_err() {
+        return (0, true);
+    }
+    if revwalk.hide(upstream_oid).is_err() {
+        // If we can't hide upstream (e.g., diverged history), treat as 0 unpushed
+        // to avoid counting too many commits
+        return (0, true);
+    }
+
+    let unpushed_count = revwalk.count();
+
+    (unpushed_count, true)
 }
 
 #[cfg(test)]

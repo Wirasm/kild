@@ -1,6 +1,92 @@
+use crate::git::types::WorktreeStatus;
 use crate::terminal::types::TerminalType;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Safety information for a destroy operation.
+///
+/// Contains git status information and PR check results to help users
+/// make informed decisions before destroying a kild.
+#[derive(Debug, Clone, Default)]
+pub struct DestroySafetyInfo {
+    /// Git worktree status (uncommitted changes, unpushed commits, etc.)
+    pub git_status: WorktreeStatus,
+    /// Whether a PR exists for this branch.
+    /// - `Some(true)`: PR exists (may be open or merged)
+    /// - `Some(false)`: No PR found
+    /// - `None`: Could not check (gh CLI unavailable or error)
+    pub has_pr: Option<bool>,
+    /// The branch name being checked.
+    pub branch: String,
+}
+
+impl DestroySafetyInfo {
+    /// Returns true if the destroy should be blocked (requires --force).
+    ///
+    /// Currently blocks only on uncommitted changes, as these cannot be recovered.
+    pub fn should_block(&self) -> bool {
+        self.git_status.has_uncommitted_changes
+    }
+
+    /// Returns true if there are any warnings to show the user.
+    pub fn has_warnings(&self) -> bool {
+        self.git_status.has_uncommitted_changes
+            || self.git_status.unpushed_commit_count > 0
+            || !self.git_status.has_remote_branch
+            || self.has_pr == Some(false)
+    }
+
+    /// Generate warning messages for display.
+    ///
+    /// Returns a list of human-readable warning messages.
+    pub fn warning_messages(&self) -> Vec<String> {
+        let mut messages = Vec::new();
+
+        // Uncommitted changes (blocking)
+        if self.git_status.has_uncommitted_changes {
+            if let Some(details) = &self.git_status.uncommitted_details {
+                let mut parts = Vec::new();
+                if details.staged_files > 0 {
+                    parts.push(format!("{} staged", details.staged_files));
+                }
+                if details.modified_files > 0 {
+                    parts.push(format!("{} modified", details.modified_files));
+                }
+                if details.untracked_files > 0 {
+                    parts.push(format!("{} untracked", details.untracked_files));
+                }
+                messages.push(format!("Uncommitted changes: {}", parts.join(", ")));
+            } else {
+                messages.push("Uncommitted changes detected".to_string());
+            }
+        }
+
+        // Unpushed commits (warning only)
+        if self.git_status.unpushed_commit_count > 0 {
+            let commit_word = if self.git_status.unpushed_commit_count == 1 {
+                "commit"
+            } else {
+                "commits"
+            };
+            messages.push(format!(
+                "{} unpushed {} will be lost",
+                self.git_status.unpushed_commit_count, commit_word
+            ));
+        }
+
+        // Never pushed (warning only)
+        if !self.git_status.has_remote_branch && self.git_status.unpushed_commit_count == 0 {
+            messages.push("Branch has never been pushed".to_string());
+        }
+
+        // No PR found (advisory)
+        if self.has_pr == Some(false) {
+            messages.push("No PR found for this branch".to_string());
+        }
+
+        messages
+    }
+}
 
 /// Result of the `complete_session` operation, distinguishing between different outcomes.
 #[derive(Debug, Clone, PartialEq)]

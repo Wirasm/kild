@@ -3,6 +3,7 @@ use tracing::{debug, error, info, warn};
 use crate::agents;
 use crate::config::{Config, KildConfig};
 use crate::git;
+use crate::git::operations::get_worktree_status;
 use crate::process::{delete_pid_file, get_pid_file_path};
 use crate::sessions::{errors::SessionError, operations, types::*};
 use crate::terminal;
@@ -593,6 +594,157 @@ fn delete_remote_branch(worktree_path: &std::path::Path, branch: &str) -> Result
                 branch: branch.to_string(),
                 message: stderr.trim().to_string(),
             })
+        }
+    }
+}
+
+/// Get safety information before destroying a kild.
+///
+/// Gathers information about:
+/// - Uncommitted changes in the worktree
+/// - Unpushed commits
+/// - Whether a remote branch exists
+/// - Whether a PR exists (optional, requires gh CLI)
+///
+/// This is a best-effort operation. If any check fails, partial information
+/// is still returned with sensible defaults. The operation never fails.
+///
+/// # Arguments
+/// * `name` - Branch name or kild identifier
+///
+/// # Returns
+/// * `Ok(DestroySafetyInfo)` - Safety information (always succeeds if session found)
+/// * `Err(SessionError::NotFound)` - Session doesn't exist
+pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionError> {
+    info!(event = "core.session.safety_check_started", name = name);
+
+    let config = Config::new();
+
+    // 1. Find session by name (branch name)
+    let session =
+        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+            SessionError::NotFound {
+                name: name.to_string(),
+            }
+        })?;
+
+    let kild_branch = format!("kild_{}", name);
+
+    // 2. Get git worktree status (best-effort)
+    let git_status = if session.worktree_path.exists() {
+        match get_worktree_status(&session.worktree_path) {
+            Ok(status) => {
+                debug!(
+                    event = "core.session.safety_check_git_status",
+                    has_uncommitted = status.has_uncommitted_changes,
+                    unpushed_count = status.unpushed_commit_count,
+                    has_remote = status.has_remote_branch
+                );
+                status
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.safety_check_git_failed",
+                    name = name,
+                    error = %e,
+                    "Failed to get git status - assuming clean"
+                );
+                Default::default()
+            }
+        }
+    } else {
+        warn!(
+            event = "core.session.safety_check_worktree_missing",
+            name = name,
+            path = %session.worktree_path.display()
+        );
+        Default::default()
+    };
+
+    // 3. Check if PR exists (best-effort, requires gh CLI)
+    let has_pr = check_pr_exists(&session.worktree_path, &kild_branch);
+    debug!(
+        event = "core.session.safety_check_pr",
+        branch = kild_branch,
+        has_pr = ?has_pr
+    );
+
+    info!(
+        event = "core.session.safety_check_completed",
+        name = name,
+        should_block = git_status.has_uncommitted_changes,
+        has_warnings = git_status.has_uncommitted_changes
+            || git_status.unpushed_commit_count > 0
+            || !git_status.has_remote_branch
+    );
+
+    Ok(DestroySafetyInfo {
+        git_status,
+        has_pr,
+        branch: name.to_string(),
+    })
+}
+
+/// Check if a PR exists for the given branch.
+///
+/// # Arguments
+/// * `worktree_path` - Path to the git worktree
+/// * `branch` - Branch name to check
+///
+/// # Returns
+/// * `Some(true)` - PR exists (open, merged, or closed)
+/// * `Some(false)` - No PR found
+/// * `None` - Could not check (gh CLI unavailable or error)
+fn check_pr_exists(worktree_path: &std::path::Path, branch: &str) -> Option<bool> {
+    debug!(
+        event = "core.session.pr_exists_check_started",
+        branch = branch
+    );
+
+    // Check if worktree exists first
+    if !worktree_path.exists() {
+        debug!(
+            event = "core.session.pr_exists_check_skipped",
+            reason = "worktree_missing"
+        );
+        return None;
+    }
+
+    let output = std::process::Command::new("gh")
+        .current_dir(worktree_path)
+        .args(["pr", "view", branch, "--json", "state"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            // PR exists (regardless of state)
+            Some(true)
+        }
+        Ok(output) => {
+            // Check if it's "no PR found" vs other error
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("no pull requests found")
+                || stderr.contains("Could not resolve")
+                || stderr.contains("no open pull requests")
+            {
+                Some(false)
+            } else {
+                // Some other error (auth, network, etc.)
+                debug!(
+                    event = "core.session.pr_exists_check_error",
+                    branch = branch,
+                    stderr = %stderr.trim()
+                );
+                None
+            }
+        }
+        Err(e) => {
+            // gh CLI not available or other I/O error
+            debug!(
+                event = "core.session.pr_exists_check_unavailable",
+                error = %e
+            );
+            None
         }
     }
 }

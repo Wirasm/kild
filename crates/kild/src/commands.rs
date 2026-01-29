@@ -245,6 +245,36 @@ fn handle_destroy_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         force = force
     );
 
+    // Pre-destroy safety check (unless --force is specified)
+    if !force
+        && let Ok(safety_info) = session_handler::get_destroy_safety_info(branch)
+        && safety_info.has_warnings()
+    {
+        let warnings = safety_info.warning_messages();
+        for warning in &warnings {
+            if safety_info.should_block() {
+                eprintln!("⚠️  {}", warning);
+            } else {
+                println!("⚠️  {}", warning);
+            }
+        }
+
+        // Block on uncommitted changes
+        if safety_info.should_block() {
+            eprintln!();
+            eprintln!("❌ Cannot destroy '{}' with uncommitted changes.", branch);
+            eprintln!("   Use --force to destroy anyway (changes will be lost).");
+
+            error!(
+                event = "cli.destroy_blocked",
+                branch = branch,
+                reason = "uncommitted_changes"
+            );
+
+            return Err("Uncommitted changes detected. Use --force to override.".into());
+        }
+    }
+
     match session_handler::destroy_session(branch, force) {
         Ok(()) => {
             println!("✅ KILD '{}' destroyed successfully!", branch);

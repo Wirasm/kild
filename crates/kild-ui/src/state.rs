@@ -9,8 +9,8 @@
 //! - `DialogState`: Mutually exclusive dialog states (create, confirm, add project)
 //! - More modules to be added in future refactoring phases
 
-use kild_core::Session;
 use kild_core::git::{operations::get_diff_stats, types::DiffStats};
+use kild_core::{DestroySafetyInfo, Session};
 use std::path::PathBuf;
 
 use crate::projects::Project;
@@ -38,6 +38,9 @@ pub enum DialogState {
     Confirm {
         /// Branch being destroyed.
         branch: String,
+        /// Safety information for the destroy operation.
+        /// None if the safety check failed (proceed without warnings).
+        safety_info: Option<DestroySafetyInfo>,
         error: Option<String>,
     },
     /// Add project dialog is open.
@@ -72,9 +75,10 @@ impl DialogState {
     }
 
     /// Open the confirm dialog for destroying a branch.
-    pub fn open_confirm(branch: String) -> Self {
+    pub fn open_confirm(branch: String, safety_info: Option<DestroySafetyInfo>) -> Self {
         DialogState::Confirm {
             branch,
+            safety_info,
             error: None,
         }
     }
@@ -873,8 +877,33 @@ impl AppState {
     }
 
     /// Open the confirm dialog for a specific branch.
+    ///
+    /// Fetches safety information (uncommitted changes, unpushed commits, etc.)
+    /// to display warnings in the dialog.
     pub fn open_confirm_dialog(&mut self, branch: String) {
-        self.dialog = DialogState::open_confirm(branch);
+        // Fetch safety info (best-effort, don't block on failure)
+        let safety_info = match kild_core::session_ops::get_destroy_safety_info(&branch) {
+            Ok(info) => {
+                tracing::debug!(
+                    event = "ui.confirm_dialog.safety_info_fetched",
+                    branch = %branch,
+                    should_block = info.should_block(),
+                    has_warnings = info.has_warnings()
+                );
+                Some(info)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.confirm_dialog.safety_info_failed",
+                    branch = %branch,
+                    error = %e,
+                    "Failed to fetch safety info - proceeding without warnings"
+                );
+                None
+            }
+        };
+
+        self.dialog = DialogState::open_confirm(branch, safety_info);
     }
 
     /// Open the add project dialog.
@@ -1218,6 +1247,7 @@ mod tests {
         let mut state = AppState::test_new();
         state.set_dialog(DialogState::Confirm {
             branch: "feature-branch".to_string(),
+            safety_info: None,
             error: Some("Some error".to_string()),
         });
 
@@ -1235,7 +1265,7 @@ mod tests {
         assert!(!create.is_confirm());
         assert!(!create.is_add_project());
 
-        let confirm = DialogState::open_confirm("test-branch".to_string());
+        let confirm = DialogState::open_confirm("test-branch".to_string(), None);
         assert!(!confirm.is_create());
         assert!(confirm.is_confirm());
         assert!(!confirm.is_add_project());

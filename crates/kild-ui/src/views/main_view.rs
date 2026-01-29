@@ -340,14 +340,25 @@ impl MainView {
 
     /// Handle confirm button click in destroy dialog.
     pub fn on_confirm_destroy(&mut self, cx: &mut Context<Self>) {
-        // Extract branch from dialog state
-        let crate::state::DialogState::Confirm { branch, .. } = self.state.dialog() else {
+        // Extract branch and safety_info from dialog state
+        let crate::state::DialogState::Confirm {
+            branch,
+            safety_info,
+            ..
+        } = self.state.dialog()
+        else {
             tracing::warn!(event = "ui.confirm_destroy.no_target");
             return;
         };
         let branch = branch.clone();
 
-        match actions::destroy_kild(&branch) {
+        // Use force=true if safety_info indicates blocking (user clicked "Force Destroy")
+        let force = safety_info
+            .as_ref()
+            .map(|s| s.should_block())
+            .unwrap_or(false);
+
+        match actions::destroy_kild(&branch, force) {
             Ok(()) => {
                 // Clear selection if the destroyed kild was selected
                 // After refresh, the selected kild won't exist in the list anyway,

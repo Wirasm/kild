@@ -106,10 +106,18 @@ pub fn refresh_sessions() -> (Vec<KildDisplay>, Option<String>) {
 ///
 /// Thin wrapper around kild-core's `destroy_session`, which handles
 /// terminal cleanup, process termination, worktree removal, and session file deletion.
-pub fn destroy_kild(branch: &str) -> Result<(), String> {
-    tracing::info!(event = "ui.destroy_kild.started", branch = branch);
+///
+/// # Arguments
+/// * `branch` - Branch name of the kild to destroy
+/// * `force` - If true, bypasses git safety checks (e.g., uncommitted changes)
+pub fn destroy_kild(branch: &str, force: bool) -> Result<(), String> {
+    tracing::info!(
+        event = "ui.destroy_kild.started",
+        branch = branch,
+        force = force
+    );
 
-    match session_ops::destroy_session(branch, false) {
+    match session_ops::destroy_session(branch, force) {
         Ok(()) => {
             tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
             Ok(())

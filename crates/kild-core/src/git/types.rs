@@ -54,6 +54,36 @@ impl WorktreeInfo {
     }
 }
 
+/// Comprehensive worktree status for destroy safety checks.
+///
+/// Contains information about uncommitted changes, unpushed commits,
+/// and remote branch existence to help users make informed decisions
+/// before destroying a kild.
+#[derive(Debug, Clone, Default)]
+pub struct WorktreeStatus {
+    /// Whether there are uncommitted changes (staged, modified, or untracked).
+    pub has_uncommitted_changes: bool,
+    /// Number of commits ahead of the remote tracking branch.
+    /// Zero if the branch tracks a remote and is up-to-date, or if there's no remote.
+    pub unpushed_commit_count: usize,
+    /// Whether a remote tracking branch exists for this branch.
+    /// False means the branch has never been pushed.
+    pub has_remote_branch: bool,
+    /// Details about uncommitted changes (file counts by category).
+    pub uncommitted_details: Option<UncommittedDetails>,
+}
+
+/// Detailed breakdown of uncommitted changes.
+#[derive(Debug, Clone, Default)]
+pub struct UncommittedDetails {
+    /// Number of files staged for commit.
+    pub staged_files: usize,
+    /// Number of tracked files with unstaged modifications.
+    pub modified_files: usize,
+    /// Number of untracked files.
+    pub untracked_files: usize,
+}
+
 impl ProjectInfo {
     pub fn new(id: String, name: String, path: PathBuf, remote_url: Option<String>) -> Self {
         Self {
