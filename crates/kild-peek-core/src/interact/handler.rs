@@ -9,7 +9,8 @@ use tracing::{debug, info, warn};
 use super::errors::InteractionError;
 use super::operations;
 use super::types::{
-    ClickRequest, InteractionResult, InteractionTarget, KeyComboRequest, TypeRequest,
+    ClickRequest, ClickTextRequest, InteractionResult, InteractionTarget, KeyComboRequest,
+    TypeRequest,
 };
 use crate::window::{
     WindowError, WindowInfo, find_window_by_app, find_window_by_app_and_title, find_window_by_title,
@@ -353,6 +354,142 @@ pub fn send_key_combo(request: &KeyComboRequest) -> Result<InteractionResult, In
     ))
 }
 
+/// Click an element identified by text content
+///
+/// Finds the target element by text, computes its center position in window-relative
+/// coordinates, then clicks at that position. Errors if no element or multiple elements
+/// match the text.
+///
+/// # Errors
+///
+/// Returns error if accessibility permission is denied, window is not found or
+/// minimized, element text is not found, multiple elements match (ambiguous),
+/// or the element has no position data.
+pub fn click_text(request: &ClickTextRequest) -> Result<InteractionResult, InteractionError> {
+    info!(
+        event = "peek.core.interact.click_text_started",
+        text = request.text(),
+        target = ?request.target()
+    );
+
+    check_accessibility_permission()?;
+
+    // Find the window (without focusing yet)
+    let window = find_window_by_target(request.target())?;
+
+    if window.is_minimized() {
+        return Err(InteractionError::WindowMinimized {
+            title: window.title().to_string(),
+        });
+    }
+
+    let pid = window.pid().ok_or(InteractionError::NoPidAvailable)?;
+
+    // Query accessibility tree for elements
+    let raw_elements = crate::element::accessibility::query_elements(pid)
+        .map_err(|reason| InteractionError::ElementQueryFailed { reason })?;
+
+    // Convert RawElement → ElementInfo (screen-absolute → window-relative coordinates)
+    let elements: Vec<crate::element::ElementInfo> = raw_elements
+        .iter()
+        .map(|raw| crate::element::handler::convert_raw_to_element_info(raw, &window))
+        .collect();
+
+    // Find matching elements
+    let matches: Vec<&crate::element::ElementInfo> = elements
+        .iter()
+        .filter(|e| e.matches_text(request.text()))
+        .collect();
+
+    let element = match matches.len() {
+        0 => {
+            return Err(InteractionError::ElementNotFound {
+                text: request.text().to_string(),
+            });
+        }
+        1 => matches[0],
+        count => {
+            return Err(InteractionError::ElementAmbiguous {
+                text: request.text().to_string(),
+                count,
+            });
+        }
+    };
+
+    // Element must have non-zero width or height (reject invisible/zero-size elements)
+    if element.width() == 0 && element.height() == 0 {
+        return Err(InteractionError::ElementNoPosition);
+    }
+
+    // Compute center of element (window-relative)
+    let center_x = element.x() + (element.width() as i32) / 2;
+    let center_y = element.y() + (element.height() as i32) / 2;
+
+    // Now focus the window
+    focus_window(window.app_name())?;
+    thread::sleep(FOCUS_SETTLE_DELAY);
+
+    // Validate coordinates are within bounds
+    validate_coordinates(center_x, center_y, &window)?;
+
+    let (screen_x, screen_y) = to_screen_coordinates(center_x, center_y, &window);
+    let point = CGPoint::new(screen_x, screen_y);
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|()| InteractionError::EventSourceFailed)?;
+
+    let mouse_down = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|()| InteractionError::MouseEventFailed {
+        x: screen_x,
+        y: screen_y,
+    })?;
+
+    let mouse_up =
+        CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+            .map_err(|()| InteractionError::MouseEventFailed {
+                x: screen_x,
+                y: screen_y,
+            })?;
+
+    debug!(
+        event = "peek.core.interact.click_text_posting",
+        screen_x = screen_x,
+        screen_y = screen_y,
+        text = request.text()
+    );
+    mouse_down.post(CGEventTapLocation::HID);
+    thread::sleep(MOUSE_EVENT_DELAY);
+    mouse_up.post(CGEventTapLocation::HID);
+
+    info!(
+        event = "peek.core.interact.click_text_completed",
+        text = request.text(),
+        center_x = center_x,
+        center_y = center_y,
+        window_title = window.title()
+    );
+
+    Ok(InteractionResult::success(
+        "click_text",
+        serde_json::json!({
+            "text": request.text(),
+            "element_role": element.role(),
+            "element_x": element.x(),
+            "element_y": element.y(),
+            "center_x": center_x,
+            "center_y": center_y,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
+            "window": window.title(),
+        }),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +505,7 @@ mod tests {
             800,
             600,
             false,
+            None,
         );
         let (sx, sy) = to_screen_coordinates(50, 30, &window);
         assert!((sx - 150.0).abs() < f64::EPSILON);
@@ -385,6 +523,7 @@ mod tests {
             800,
             600,
             false,
+            None,
         );
         let (sx, sy) = to_screen_coordinates(0, 0, &window);
         assert!((sx - 0.0).abs() < f64::EPSILON);
@@ -402,6 +541,7 @@ mod tests {
             800,
             600,
             false,
+            None,
         );
         assert!(validate_coordinates(0, 0, &window).is_ok());
         assert!(validate_coordinates(799, 599, &window).is_ok());
@@ -419,6 +559,7 @@ mod tests {
             800,
             600,
             false,
+            None,
         );
         assert!(validate_coordinates(800, 0, &window).is_err());
         assert!(validate_coordinates(0, 600, &window).is_err());
@@ -436,6 +577,7 @@ mod tests {
             800,
             600,
             false,
+            None,
         );
         assert!(validate_coordinates(-1, 0, &window).is_err());
         assert!(validate_coordinates(0, -1, &window).is_err());
@@ -473,6 +615,37 @@ mod tests {
                 assert!(reason.contains("test error"));
             }
             _ => panic!("Expected WindowLookupFailed"),
+        }
+    }
+
+    // Integration tests requiring accessibility permissions
+    #[test]
+    #[ignore]
+    fn test_click_text_integration() {
+        // This test requires accessibility permission and a running app
+        // Run manually: cargo test --all -- --ignored test_click_text_integration
+        // WARNING: This will actually click on a UI element!
+
+        let request = ClickTextRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "File",
+        );
+        let result = click_text(&request);
+        match result {
+            Ok(result) => {
+                assert!(result.success);
+            }
+            Err(InteractionError::AccessibilityPermissionDenied) => {
+                // Expected if running without accessibility permission
+            }
+            Err(InteractionError::ElementNotFound { .. }) => {
+                // "File" menu might not exist if Finder isn't focused
+            }
+            Err(e) => {
+                panic!("Unexpected error: {:?}", e);
+            }
         }
     }
 }

@@ -6,9 +6,11 @@ use tracing::{error, info, warn};
 
 use kild_peek_core::assert::{Assertion, run_assertion};
 use kild_peek_core::diff::{DiffRequest, compare_images};
+use kild_peek_core::element::{ElementsRequest, FindRequest, find_element, list_elements};
 use kild_peek_core::events;
 use kild_peek_core::interact::{
-    ClickRequest, InteractionTarget, KeyComboRequest, TypeRequest, click, send_key_combo, type_text,
+    ClickRequest, ClickTextRequest, InteractionTarget, KeyComboRequest, TypeRequest, click,
+    click_text, send_key_combo, type_text,
 };
 use kild_peek_core::screenshot::{CaptureRequest, CropArea, ImageFormat, capture, save_to_file};
 use kild_peek_core::window::{
@@ -25,6 +27,8 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("list", sub_matches)) => handle_list_command(sub_matches),
         Some(("screenshot", sub_matches)) => handle_screenshot_command(sub_matches),
         Some(("diff", sub_matches)) => handle_diff_command(sub_matches),
+        Some(("elements", sub_matches)) => handle_elements_command(sub_matches),
+        Some(("find", sub_matches)) => handle_find_command(sub_matches),
         Some(("click", sub_matches)) => handle_click_command(sub_matches),
         Some(("type", sub_matches)) => handle_type_command(sub_matches),
         Some(("key", sub_matches)) => handle_key_command(sub_matches),
@@ -439,11 +443,111 @@ fn parse_coordinates(at_str: &str) -> Result<(i32, i32), Box<dyn std::error::Err
     Ok((x, y))
 }
 
-fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let target = parse_interaction_target(matches)?;
-    let at_str = matches.get_one::<String>("at").unwrap();
     let json_output = matches.get_flag("json");
 
+    info!(
+        event = "cli.elements_started",
+        target = ?target
+    );
+
+    let request = ElementsRequest::new(target);
+
+    match list_elements(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if result.elements().is_empty() {
+                println!("No elements found in window \"{}\"", result.window());
+            } else {
+                println!(
+                    "Elements in \"{}\" ({} found):",
+                    result.window(),
+                    result.count()
+                );
+                table::print_elements_table(result.elements());
+            }
+
+            info!(event = "cli.elements_completed", count = result.count());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Elements listing failed: {}", e);
+            error!(event = "cli.elements_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let text = matches.get_one::<String>("text").unwrap();
+    let json_output = matches.get_flag("json");
+
+    info!(
+        event = "cli.find_started",
+        text = text.as_str(),
+        target = ?target
+    );
+
+    let request = FindRequest::new(target, text);
+
+    match find_element(&request) {
+        Ok(element) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&element)?);
+            } else {
+                println!("Found element:");
+                println!("  Role: {}", element.role());
+                if let Some(title) = element.title() {
+                    println!("  Title: {}", title);
+                }
+                if let Some(value) = element.value() {
+                    println!("  Value: {}", value);
+                }
+                if let Some(desc) = element.description() {
+                    println!("  Description: {}", desc);
+                }
+                println!("  Position: ({}, {})", element.x(), element.y());
+                println!("  Size: {}x{}", element.width(), element.height());
+                println!("  Enabled: {}", element.enabled());
+            }
+
+            info!(
+                event = "cli.find_completed",
+                text = text.as_str(),
+                role = element.role()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Find failed: {}", e);
+            error!(event = "cli.find_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let at_str = matches.get_one::<String>("at");
+    let text_str = matches.get_one::<String>("text");
+    let json_output = matches.get_flag("json");
+
+    // Must have either --at or --text
+    if at_str.is_none() && text_str.is_none() {
+        return Err("Either --at or --text is required".into());
+    }
+
+    // Dispatch to text-based or coordinate-based click
+    if let Some(text) = text_str {
+        return handle_click_text(target, text, json_output);
+    }
+
+    let at_str = at_str.unwrap();
     let (x, y) = parse_coordinates(at_str)?;
 
     info!(
@@ -478,6 +582,51 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
         Err(e) => {
             eprintln!("Click failed: {}", e);
             error!(event = "cli.interact.click_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+fn handle_click_text(
+    target: InteractionTarget,
+    text: &str,
+    json_output: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!(
+        event = "cli.interact.click_text_started",
+        text = text,
+        target = ?target
+    );
+
+    let request = ClickTextRequest::new(target, text);
+
+    match click_text(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Clicked element with text \"{}\"", text);
+                if let Some(details) = &result.details {
+                    if let Some(window) = details.get("window") {
+                        println!("  Window: {}", window.as_str().unwrap_or("unknown"));
+                    }
+                    if let Some(role) = details.get("element_role") {
+                        println!("  Role: {}", role.as_str().unwrap_or("unknown"));
+                    }
+                    if let (Some(cx), Some(cy)) = (details.get("center_x"), details.get("center_y"))
+                    {
+                        println!("  Center: ({}, {})", cx, cy);
+                    }
+                }
+            }
+
+            info!(event = "cli.interact.click_text_completed", text = text);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Click by text failed: {}", e);
+            error!(event = "cli.interact.click_text_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }

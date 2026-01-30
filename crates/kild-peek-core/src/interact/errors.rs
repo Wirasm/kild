@@ -41,6 +41,21 @@ pub enum InteractionError {
 
     #[error("Window lookup failed: {reason}")]
     WindowLookupFailed { reason: String },
+
+    #[error("No element found with text: '{text}'")]
+    ElementNotFound { text: String },
+
+    #[error("Multiple elements found with text '{text}': found {count}, expected 1")]
+    ElementAmbiguous { text: String, count: usize },
+
+    #[error("Element has no position data")]
+    ElementNoPosition,
+
+    #[error("Element query failed: {reason}")]
+    ElementQueryFailed { reason: String },
+
+    #[error("Window has no PID available (required for element finding)")]
+    NoPidAvailable,
 }
 
 impl PeekError for InteractionError {
@@ -59,6 +74,11 @@ impl PeekError for InteractionError {
             InteractionError::WindowMinimized { .. } => "INTERACTION_WINDOW_MINIMIZED",
             InteractionError::WindowFocusFailed { .. } => "INTERACTION_WINDOW_FOCUS_FAILED",
             InteractionError::WindowLookupFailed { .. } => "INTERACTION_WINDOW_LOOKUP_FAILED",
+            InteractionError::ElementNotFound { .. } => "INTERACTION_ELEMENT_NOT_FOUND",
+            InteractionError::ElementAmbiguous { .. } => "INTERACTION_ELEMENT_AMBIGUOUS",
+            InteractionError::ElementNoPosition => "INTERACTION_ELEMENT_NO_POSITION",
+            InteractionError::ElementQueryFailed { .. } => "INTERACTION_ELEMENT_QUERY_FAILED",
+            InteractionError::NoPidAvailable => "INTERACTION_NO_PID",
         }
     }
 
@@ -73,6 +93,10 @@ impl PeekError for InteractionError {
                 | InteractionError::WindowMinimized { .. }
                 | InteractionError::WindowFocusFailed { .. }
                 | InteractionError::WindowLookupFailed { .. }
+                | InteractionError::ElementNotFound { .. }
+                | InteractionError::ElementAmbiguous { .. }
+                | InteractionError::ElementNoPosition
+                | InteractionError::NoPidAvailable
         )
     }
 }
@@ -200,6 +224,56 @@ mod tests {
             "Window lookup failed: enumeration failed"
         );
         assert_eq!(error.error_code(), "INTERACTION_WINDOW_LOOKUP_FAILED");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_element_not_found_error() {
+        let error = InteractionError::ElementNotFound {
+            text: "Submit".to_string(),
+        };
+        assert_eq!(error.to_string(), "No element found with text: 'Submit'");
+        assert_eq!(error.error_code(), "INTERACTION_ELEMENT_NOT_FOUND");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_element_ambiguous_error() {
+        let error = InteractionError::ElementAmbiguous {
+            text: "OK".to_string(),
+            count: 3,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Multiple elements found with text 'OK': found 3, expected 1"
+        );
+        assert_eq!(error.error_code(), "INTERACTION_ELEMENT_AMBIGUOUS");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_element_no_position_error() {
+        let error = InteractionError::ElementNoPosition;
+        assert_eq!(error.to_string(), "Element has no position data");
+        assert_eq!(error.error_code(), "INTERACTION_ELEMENT_NO_POSITION");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_element_query_failed_error() {
+        let error = InteractionError::ElementQueryFailed {
+            reason: "timeout".to_string(),
+        };
+        assert_eq!(error.to_string(), "Element query failed: timeout");
+        assert_eq!(error.error_code(), "INTERACTION_ELEMENT_QUERY_FAILED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_no_pid_available_error() {
+        let error = InteractionError::NoPidAvailable;
+        assert!(error.to_string().contains("no PID available"));
+        assert_eq!(error.error_code(), "INTERACTION_NO_PID");
         assert!(error.is_user_error());
     }
 

@@ -99,10 +99,16 @@ cargo run -p kild-peek -- screenshot --window "Terminal" --wait --timeout 5000 -
 cargo run -p kild-peek -- screenshot --app Ghostty --crop 0,0,400,300 -o /tmp/cropped.png
 cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
 cargo run -p kild-peek -- diff img1.png img2.png --diff-output /tmp/diff.png
+cargo run -p kild-peek -- elements --app Finder                  # List all UI elements
+cargo run -p kild-peek -- elements --window "Terminal" --json    # JSON output
+cargo run -p kild-peek -- find --app Finder --text "File"        # Find element by text
+cargo run -p kild-peek -- find --app KILD --text "Create" --json # JSON output
 cargo run -p kild-peek -- click --window "Terminal" --at 100,50  # Click at coordinates (x,y)
 cargo run -p kild-peek -- click --app Ghostty --at 200,100      # Target by app name
 cargo run -p kild-peek -- click --app Ghostty --window "Terminal" --at 150,75  # Target both
 cargo run -p kild-peek -- click --window "Terminal" --at 100,50 --json  # JSON output
+cargo run -p kild-peek -- click --app KILD --text "Create"       # Click element by text
+cargo run -p kild-peek -- click --app Finder --text "File" --json  # Click by text, JSON output
 cargo run -p kild-peek -- type --window "Terminal" "hello world"  # Type text
 cargo run -p kild-peek -- type --app TextEdit "some text"         # Target by app
 cargo run -p kild-peek -- type --window "Terminal" "test" --json  # JSON output
@@ -153,7 +159,8 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `screenshot/` - Screenshot capture with multiple targets (window, monitor, base64 output)
 - `diff/` - Image comparison using SSIM algorithm
 - `assert/` - UI state assertions (window exists, visible, image similarity)
-- `interact/` - Native UI interaction (mouse clicks, keyboard input, key combinations)
+- `interact/` - Native UI interaction (mouse clicks, keyboard input, key combinations, text-based clicking)
+- `element/` - Accessibility API-based element enumeration, text search, and element finding
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
@@ -189,7 +196,7 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 | `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
 | `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`
+**Domains:** `session`, `terminal`, `git`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
@@ -265,6 +272,7 @@ grep 'ui\.watcher\.'    # File watcher events
 grep 'peek\.core\.window\.'     # Window enumeration events
 grep 'peek\.core\.screenshot\.' # Screenshot capture events
 grep 'peek\.core\.interact\.'   # UI interaction events
+grep 'peek\.core\.element\.'    # Element enumeration events
 
 # By outcome
 grep '_failed"'         # All failures

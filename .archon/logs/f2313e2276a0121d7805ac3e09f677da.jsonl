@@ -1,0 +1,5 @@
+{"type":"workflow_start","workflow_name":"archon-assist","content":"Say hello","workflow_id":"f2313e2276a0121d7805ac3e09f677da","ts":"2026-01-30T08:32:35.839Z"}
+{"type":"step_start","step":"archon-assist","step_index":0,"workflow_id":"f2313e2276a0121d7805ac3e09f677da","ts":"2026-01-30T08:32:35.840Z"}
+{"type":"assistant","content":"Hello!","workflow_id":"f2313e2276a0121d7805ac3e09f677da","ts":"2026-01-30T08:32:39.131Z"}
+{"type":"step_complete","step":"archon-assist","step_index":0,"workflow_id":"f2313e2276a0121d7805ac3e09f677da","ts":"2026-01-30T08:32:39.846Z"}
+{"type":"workflow_complete","workflow_id":"f2313e2276a0121d7805ac3e09f677da","ts":"2026-01-30T08:32:39.846Z"}

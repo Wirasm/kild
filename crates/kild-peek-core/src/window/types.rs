@@ -11,6 +11,7 @@ pub struct WindowInfo {
     width: u32,
     height: u32,
     is_minimized: bool,
+    pid: Option<i32>,
 }
 
 impl WindowInfo {
@@ -25,6 +26,7 @@ impl WindowInfo {
         width: u32,
         height: u32,
         is_minimized: bool,
+        pid: Option<i32>,
     ) -> Self {
         debug_assert!(width > 0, "Window width must be positive");
         debug_assert!(height > 0, "Window height must be positive");
@@ -38,6 +40,7 @@ impl WindowInfo {
             width,
             height,
             is_minimized,
+            pid,
         }
     }
 
@@ -79,6 +82,11 @@ impl WindowInfo {
     /// Whether the window is minimized
     pub fn is_minimized(&self) -> bool {
         self.is_minimized
+    }
+
+    /// Process ID of the owning application, if available
+    pub fn pid(&self) -> Option<i32> {
+        self.pid
     }
 }
 

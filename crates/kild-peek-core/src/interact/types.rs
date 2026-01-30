@@ -58,6 +58,30 @@ impl KeyComboRequest {
     }
 }
 
+/// Request to click an element identified by text content
+#[derive(Debug, Clone)]
+pub struct ClickTextRequest {
+    target: InteractionTarget,
+    text: String,
+}
+
+impl ClickTextRequest {
+    pub fn new(target: InteractionTarget, text: impl Into<String>) -> Self {
+        Self {
+            target,
+            text: text.into(),
+        }
+    }
+
+    pub fn target(&self) -> &InteractionTarget {
+        &self.target
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 /// Result of an interaction operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionResult {
@@ -178,6 +202,32 @@ mod tests {
         assert!(json.contains("\"action\":\"key\""));
         // details should be skipped when None
         assert!(!json.contains("details"));
+    }
+
+    #[test]
+    fn test_click_text_request_new() {
+        let req = ClickTextRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "Submit",
+        );
+        assert_eq!(req.text(), "Submit");
+        match req.target() {
+            InteractionTarget::App { app } => assert_eq!(app, "Finder"),
+            _ => panic!("Expected App target"),
+        }
+    }
+
+    #[test]
+    fn test_click_text_request_with_string() {
+        let req = ClickTextRequest::new(
+            InteractionTarget::Window {
+                title: "KILD".to_string(),
+            },
+            String::from("Create"),
+        );
+        assert_eq!(req.text(), "Create");
     }
 
     #[test]

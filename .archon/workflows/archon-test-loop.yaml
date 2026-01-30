@@ -1,0 +1,37 @@
+name: archon-test-loop
+description: |
+  Use when: User explicitly says "test-loop", "run test-loop", or "execute test-loop workflow".
+  IMPORTANT: This is an autonomous LOOP workflow that iterates until completion.
+  NOT for: General testing questions or debugging.
+  Does: Iterates with a counter until it reaches 3, then outputs COMPLETE signal.
+
+loop:
+  until: COMPLETE
+  max_iterations: 5
+  fresh_context: false
+
+prompt: |
+  You are testing the Ralph loop functionality.
+
+  ## Your Task
+
+  This is a simple test to verify the loop works correctly.
+
+  1. Read the file `.archon/test-loop-counter.txt` (create it if it doesn't exist with value "0")
+  2. Parse the current counter value
+  3. Increment it by 1
+  4. Write the new value back to the file
+  5. Report the current iteration
+
+  ## User Intent
+
+  $USER_MESSAGE
+
+  ## Completion Criteria
+
+  - If the counter reaches 3 or higher, output: <promise>COMPLETE</promise>
+  - Otherwise, just report your progress and end normally (another iteration will run)
+
+  ## Important
+
+  Be concise. Just do the task and report the counter value.

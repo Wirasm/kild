@@ -1,0 +1,13 @@
+name: archon-feature-development
+description: |
+  Use when: Implementing a feature from an existing plan.
+  Input: Path to a plan file (.archon/artifacts/*/plan.md) or GitHub issue containing a plan.
+  Does: Implements the plan with validation loops -> creates pull request.
+  NOT for: Creating plans (plans should be created separately), bug fixes, code reviews.
+
+model: sonnet
+
+steps:
+  - command: archon-implement
+
+  - command: archon-create-pr

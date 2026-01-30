@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "accessibility-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46a6a8e90a1d8b96a48249e7c8f5b4058447bea8847280db7bfccb6dcab6b8e1"
+dependencies = [
+ "core-foundation-sys",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3216,7 +3225,9 @@ dependencies = [
 name = "kild-peek-core"
 version = "0.1.0"
 dependencies = [
+ "accessibility-sys",
  "base64",
+ "core-foundation 0.10.0",
  "core-graphics 0.24.0",
  "image",
  "image-compare",

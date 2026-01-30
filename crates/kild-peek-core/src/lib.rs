@@ -11,6 +11,7 @@
 
 pub mod assert;
 pub mod diff;
+pub mod element;
 pub mod errors;
 pub mod events;
 pub mod interact;
@@ -36,5 +37,9 @@ pub use assert::{Assertion, AssertionResult, ElementQuery};
 
 // Re-export interact types
 pub use interact::{
-    ClickRequest, InteractionResult, InteractionTarget, KeyComboRequest, TypeRequest,
+    ClickRequest, ClickTextRequest, InteractionResult, InteractionTarget, KeyComboRequest,
+    TypeRequest,
 };
+
+// Re-export element types
+pub use element::{ElementError, ElementInfo, ElementsRequest, ElementsResult, FindRequest};

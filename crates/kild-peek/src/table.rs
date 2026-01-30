@@ -1,3 +1,4 @@
+use kild_peek_core::element::ElementInfo;
 use kild_peek_core::window::{MonitorInfo, WindowInfo};
 
 /// Print a formatted table of windows
@@ -172,6 +173,106 @@ pub fn print_monitors_table(monitors: &[MonitorInfo]) {
     );
 
     println!("\nTotal: {} monitor(s)", monitors.len());
+}
+
+/// Print a formatted table of UI elements
+pub fn print_elements_table(elements: &[ElementInfo]) {
+    let role_width = elements
+        .iter()
+        .map(|e| e.role().chars().count())
+        .max()
+        .unwrap_or(4)
+        .clamp(4, 20);
+    let title_width = elements
+        .iter()
+        .filter_map(|e| e.title())
+        .map(|t| t.chars().count())
+        .max()
+        .unwrap_or(5)
+        .clamp(5, 30);
+    let value_width = elements
+        .iter()
+        .filter_map(|e| e.value())
+        .map(|v| v.chars().count())
+        .max()
+        .unwrap_or(5)
+        .clamp(5, 30);
+    let pos_width = 11;
+    let size_width = 11;
+    let enabled_width = 7;
+
+    // Header
+    println!(
+        "┌{}┬{}┬{}┬{}┬{}┬{}┐",
+        "─".repeat(role_width + 2),
+        "─".repeat(title_width + 2),
+        "─".repeat(value_width + 2),
+        "─".repeat(pos_width + 2),
+        "─".repeat(size_width + 2),
+        "─".repeat(enabled_width + 2),
+    );
+    println!(
+        "│ {:<role_width$} │ {:<title_width$} │ {:<value_width$} │ {:<pos_width$} │ {:<size_width$} │ {:<enabled_width$} │",
+        "Role",
+        "Title",
+        "Value",
+        "Position",
+        "Size",
+        "Enabled",
+        role_width = role_width,
+        title_width = title_width,
+        value_width = value_width,
+        pos_width = pos_width,
+        size_width = size_width,
+        enabled_width = enabled_width,
+    );
+    println!(
+        "├{}┼{}┼{}┼{}┼{}┼{}┤",
+        "─".repeat(role_width + 2),
+        "─".repeat(title_width + 2),
+        "─".repeat(value_width + 2),
+        "─".repeat(pos_width + 2),
+        "─".repeat(size_width + 2),
+        "─".repeat(enabled_width + 2),
+    );
+
+    // Rows
+    for elem in elements {
+        let title = elem.title().unwrap_or("-");
+        let value = elem.value().unwrap_or("-");
+        let pos = format!("x:{} y:{}", elem.x(), elem.y());
+        let size = format!("{}x{}", elem.width(), elem.height());
+        let enabled = if elem.enabled() { "Yes" } else { "No" };
+
+        println!(
+            "│ {:<role_width$} │ {:<title_width$} │ {:<value_width$} │ {:<pos_width$} │ {:<size_width$} │ {:<enabled_width$} │",
+            truncate(elem.role(), role_width),
+            truncate(title, title_width),
+            truncate(value, value_width),
+            truncate(&pos, pos_width),
+            truncate(&size, size_width),
+            enabled,
+            role_width = role_width,
+            title_width = title_width,
+            value_width = value_width,
+            pos_width = pos_width,
+            size_width = size_width,
+            enabled_width = enabled_width,
+        );
+    }
+
+    // Footer
+    println!(
+        "└{}┴{}┴{}┴{}┴{}┴{}┘",
+        "─".repeat(role_width + 2),
+        "─".repeat(title_width + 2),
+        "─".repeat(value_width + 2),
+        "─".repeat(pos_width + 2),
+        "─".repeat(size_width + 2),
+        "─".repeat(enabled_width + 2),
+    );
+
+    println!("\nTotal: {} element(s)", elements.len());
 }
 
 /// Truncate a string to a maximum display width, adding "..." if truncated.

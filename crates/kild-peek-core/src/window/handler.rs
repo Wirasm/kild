@@ -167,6 +167,8 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
                 }
             };
 
+            let pid = w.pid().ok().map(|p| p as i32);
+
             Some(WindowInfo::new(
                 id,
                 display_title,
@@ -176,6 +178,7 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
                 width,
                 height,
                 is_minimized,
+                pid,
             ))
         })
         .collect();
@@ -483,6 +486,8 @@ fn build_window_info(
         false
     });
 
+    let pid = w.pid().ok().map(|p| p as i32);
+
     let display_title = build_display_title(window_title, app_name, id);
 
     Ok(WindowInfo::new(
@@ -494,6 +499,7 @@ fn build_window_info(
         width.max(1),
         height.max(1),
         is_minimized,
+        pid,
     ))
 }
 
@@ -928,6 +934,7 @@ mod tests {
             800,
             600,
             false,
+            Some(1234),
         );
 
         assert_eq!(window.id(), 123);
@@ -938,6 +945,7 @@ mod tests {
         assert_eq!(window.width(), 800);
         assert_eq!(window.height(), 600);
         assert!(!window.is_minimized());
+        assert_eq!(window.pid(), Some(1234));
     }
 
     #[test]

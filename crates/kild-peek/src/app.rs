@@ -165,10 +165,62 @@ pub fn build_cli() -> Command {
                         .help("Save visual diff image highlighting differences"),
                 ),
         )
+        // Elements subcommand
+        .subcommand(
+            Command::new("elements")
+                .about("List all UI elements in a window via Accessibility API")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        // Find subcommand
+        .subcommand(
+            Command::new("find")
+                .about("Find a UI element by text content")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("text")
+                        .long("text")
+                        .required(true)
+                        .help("Text to search for in element title, value, or description"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                ),
+        )
         // Click subcommand
         .subcommand(
             Command::new("click")
-                .about("Click at coordinates within a window")
+                .about("Click at coordinates or on a text element within a window")
                 .arg(
                     Arg::new("window")
                         .long("window")
@@ -184,8 +236,14 @@ pub fn build_cli() -> Command {
                 .arg(
                     Arg::new("at")
                         .long("at")
-                        .required(true)
-                        .help("Coordinates to click: x,y (relative to window top-left)"),
+                        .help("Coordinates to click: x,y (relative to window top-left)")
+                        .conflicts_with("text"),
+                )
+                .arg(
+                    Arg::new("text")
+                        .long("text")
+                        .help("Click element by text content (uses Accessibility API)")
+                        .conflicts_with("at"),
                 )
                 .arg(
                     Arg::new("json")
@@ -893,9 +951,48 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_click_requires_at() {
+    fn test_cli_click_accepts_at_or_text() {
+        // --at works
         let app = build_cli();
-        let matches = app.try_get_matches_from(vec!["kild-peek", "click", "--window", "Terminal"]);
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--window",
+            "Terminal",
+            "--at",
+            "100,50",
+        ]);
+        assert!(matches.is_ok());
+
+        // --text works
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--text",
+            "Submit",
+        ]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert_eq!(click_matches.get_one::<String>("text").unwrap(), "Submit");
+    }
+
+    #[test]
+    fn test_cli_click_at_text_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--text",
+            "Submit",
+        ]);
         assert!(matches.is_err());
     }
 
@@ -1009,6 +1106,103 @@ mod tests {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild-peek", "key", "--window", "Terminal"]);
         assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_elements_with_app() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild-peek", "elements", "--app", "Finder"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let elements_matches = matches.subcommand_matches("elements").unwrap();
+        assert_eq!(elements_matches.get_one::<String>("app").unwrap(), "Finder");
+    }
+
+    #[test]
+    fn test_cli_elements_with_window() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "elements", "--window", "Terminal"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let elements_matches = matches.subcommand_matches("elements").unwrap();
+        assert_eq!(
+            elements_matches.get_one::<String>("window").unwrap(),
+            "Terminal"
+        );
+    }
+
+    #[test]
+    fn test_cli_elements_json() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "elements", "--app", "Finder", "--json"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let elements_matches = matches.subcommand_matches("elements").unwrap();
+        assert!(elements_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_find_with_text() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "find",
+            "--app",
+            "Finder",
+            "--text",
+            "File",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let find_matches = matches.subcommand_matches("find").unwrap();
+        assert_eq!(find_matches.get_one::<String>("app").unwrap(), "Finder");
+        assert_eq!(find_matches.get_one::<String>("text").unwrap(), "File");
+    }
+
+    #[test]
+    fn test_cli_find_requires_text() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild-peek", "find", "--app", "Finder"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_find_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "find",
+            "--app",
+            "Finder",
+            "--text",
+            "File",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let find_matches = matches.subcommand_matches("find").unwrap();
+        assert!(find_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_find_with_window() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "find",
+            "--window",
+            "Terminal",
+            "--text",
+            "Search",
+        ]);
+        assert!(matches.is_ok());
     }
 
     #[test]
