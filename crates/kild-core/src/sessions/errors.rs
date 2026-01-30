@@ -61,6 +61,11 @@ pub enum SessionError {
 
     #[error("Failed to delete remote branch '{branch}': {message}")]
     RemoteBranchDeleteFailed { branch: String, message: String },
+
+    #[error(
+        "Cannot complete '{name}' with uncommitted changes. Use 'kild destroy --force' to remove."
+    )]
+    UncommittedChanges { name: String },
 }
 
 impl KildError for SessionError {
@@ -83,6 +88,7 @@ impl KildError for SessionError {
             SessionError::ProcessAccessDenied { .. } => "PROCESS_ACCESS_DENIED",
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::RemoteBranchDeleteFailed { .. } => "REMOTE_BRANCH_DELETE_FAILED",
+            SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
         }
     }
 
@@ -100,6 +106,7 @@ impl KildError for SessionError {
                 | SessionError::PortAllocationFailed { .. }
                 | SessionError::ConfigError { .. }
                 | SessionError::RemoteBranchDeleteFailed { .. }
+                | SessionError::UncommittedChanges { .. }
         )
     }
 }
@@ -139,5 +146,18 @@ mod tests {
         let cmd_error = SessionError::InvalidCommand;
         assert_eq!(cmd_error.to_string(), "Invalid command: cannot be empty");
         assert!(cmd_error.is_user_error());
+    }
+
+    #[test]
+    fn test_uncommitted_changes_error() {
+        let error = SessionError::UncommittedChanges {
+            name: "my-branch".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Cannot complete 'my-branch' with uncommitted changes. Use 'kild destroy --force' to remove."
+        );
+        assert_eq!(error.error_code(), "SESSION_UNCOMMITTED_CHANGES");
+        assert!(error.is_user_error());
     }
 }

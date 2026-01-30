@@ -444,7 +444,20 @@ pub fn complete_session(name: &str, force: bool) -> Result<CompleteResult, Sessi
         CompleteResult::RemoteDeleted
     };
 
-    // 4. Destroy the session (reuse existing logic)
+    // 4. Safety check: always block on uncommitted changes (no --force bypass for complete)
+    let safety_info = get_destroy_safety_info(name)?;
+    if safety_info.should_block() {
+        error!(
+            event = "core.session.complete_blocked",
+            name = name,
+            reason = "uncommitted_changes"
+        );
+        return Err(SessionError::UncommittedChanges {
+            name: name.to_string(),
+        });
+    }
+
+    // 5. Destroy the session (reuse existing logic)
     destroy_session(name, force)?;
 
     info!(
@@ -1176,6 +1189,44 @@ mod tests {
         let result = complete_session("non-existent", true);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
+    }
+
+    #[test]
+    fn test_uncommitted_changes_error_is_user_error() {
+        use crate::errors::KildError;
+        let error = SessionError::UncommittedChanges {
+            name: "test-branch".to_string(),
+        };
+        assert!(error.is_user_error());
+        assert_eq!(error.error_code(), "SESSION_UNCOMMITTED_CHANGES");
+        assert!(error.to_string().contains("kild destroy --force"));
+    }
+
+    #[test]
+    fn test_complete_blocks_on_uncommitted_via_safety_info() {
+        // Verify that DestroySafetyInfo with uncommitted changes would block complete.
+        // complete_session always checks should_block(), regardless of force flag.
+        use crate::git::types::WorktreeStatus;
+        use crate::sessions::types::DestroySafetyInfo;
+
+        let dirty = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_uncommitted_changes: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Complete always blocks — force flag is irrelevant for this check
+        assert!(dirty.should_block());
+
+        let clean = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_uncommitted_changes: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(!clean.should_block());
     }
 
     // Note: create_session test would require git repository setup
