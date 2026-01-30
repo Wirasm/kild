@@ -93,19 +93,21 @@ impl ProjectManager {
             .ok_or(ProjectError::NotFound)?;
 
         // Adjust active_index before removal
-        if let Some(active) = self.active_index {
-            if active == index {
+        self.active_index = match self.active_index {
+            Some(active) if active == index => {
                 // Removed project was active - select first remaining, or None
-                self.active_index = if self.projects.len() > 1 {
+                if self.projects.len() > 1 {
                     Some(0)
                 } else {
                     None
-                };
-            } else if active > index {
-                // Active was after removed - decrement to maintain reference
-                self.active_index = Some(active - 1);
+                }
             }
-        }
+            Some(active) if active > index => {
+                // Active was after removed - decrement to maintain reference
+                Some(active - 1)
+            }
+            other => other,
+        };
 
         Ok(self.projects.remove(index))
     }

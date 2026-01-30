@@ -262,25 +262,27 @@ pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, Strin
     let mut data = load_projects();
 
     // Create validated project with canonical path
-    let project = Project::new(path.clone(), name).map_err(|e| match e {
-        ProjectError::NotADirectory => format!("'{}' is not a directory", path.display()),
-        ProjectError::NotAGitRepo => format!("'{}' is not a git repository", path.display()),
-        ProjectError::CanonicalizationFailed { source } => {
-            format!("Cannot access '{}': {}", path.display(), source)
+    let project = Project::new(path.clone(), name).map_err(|e| {
+        let path_display = path.display();
+        match e {
+            ProjectError::NotADirectory => format!("'{}' is not a directory", path_display),
+            ProjectError::NotAGitRepo => format!("'{}' is not a git repository", path_display),
+            ProjectError::CanonicalizationFailed { source } => {
+                format!("Cannot access '{}': {}", path_display, source)
+            }
+            ProjectError::GitCommandFailed { source } => {
+                format!(
+                    "Cannot verify if '{}' is a git repository: {}. Is git installed?",
+                    path_display, source
+                )
+            }
+            // These errors shouldn't occur in Project::new(), but handle explicitly
+            // so new variants force a review of user-facing messages
+            ProjectError::NotFound
+            | ProjectError::AlreadyExists
+            | ProjectError::SaveFailed { .. }
+            | ProjectError::LoadCorrupted { .. } => e.to_string(),
         }
-        ProjectError::GitCommandFailed { source } => {
-            format!(
-                "Cannot verify if '{}' is a git repository: {}. Is git installed?",
-                path.display(),
-                source
-            )
-        }
-        // These errors shouldn't occur in Project::new(), but handle explicitly
-        // so new variants force a review of user-facing messages
-        ProjectError::NotFound
-        | ProjectError::AlreadyExists
-        | ProjectError::SaveFailed { .. }
-        | ProjectError::LoadCorrupted { .. } => e.to_string(),
     })?;
 
     // Check if project already exists (by canonical path)
@@ -323,8 +325,8 @@ pub fn remove_project(path: &Path) -> Result<(), String> {
         return Err("Project not found".to_string());
     }
 
-    // Clear active project if it was removed
-    if data.active.as_ref() == Some(&path.to_path_buf()) {
+    // Clear active project if it was removed, select first remaining if any
+    if data.active.as_deref() == Some(path) {
         data.active = data.projects.first().map(|p| p.path().to_path_buf());
     }
 
