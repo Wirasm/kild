@@ -312,19 +312,10 @@ pub fn print_elements_tree(elements: &[ElementInfo]) {
 /// A sibling is the next element at the same depth that shares the same parent.
 /// We scan forward until we find an element at the same or lesser depth.
 fn is_last_sibling(elements: &[ElementInfo], index: usize, depth: usize) -> bool {
-    for elem in &elements[index + 1..] {
-        if elem.depth() < depth {
-            // Went up to parent level - no more siblings
-            return true;
-        }
-        if elem.depth() == depth {
-            // Found a sibling at the same depth
-            return false;
-        }
-        // elem.depth() > depth means it's a child - keep looking
-    }
-    // Reached end of list - last sibling
-    true
+    elements[index + 1..]
+        .iter()
+        .find(|elem| elem.depth() <= depth)
+        .is_none_or(|elem| elem.depth() < depth)
 }
 
 /// Build the indent prefix for a tree node at the given depth.
@@ -347,16 +338,10 @@ fn build_tree_indent(elements: &[ElementInfo], index: usize, depth: usize) -> St
 
 /// Check if there's a future element at the given level after the current index.
 fn has_future_sibling_at_level(elements: &[ElementInfo], index: usize, level: usize) -> bool {
-    for elem in &elements[index + 1..] {
-        if elem.depth() < level {
-            // Went above this level - no more at this level
-            return false;
-        }
-        if elem.depth() == level {
-            return true;
-        }
-    }
-    false
+    elements[index + 1..]
+        .iter()
+        .find(|elem| elem.depth() <= level)
+        .is_some_and(|elem| elem.depth() == level)
 }
 
 /// Print a single tree node with the given prefix.
