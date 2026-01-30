@@ -10,10 +10,13 @@ description: |
   - "visual check", "verify the UI shows", "check the window"
   - "compare screenshots", "diff the images"
   - "assert the window", "validate the UI"
+  - "click on X", "interact with the UI", "press the button"
+  - "list elements", "find element", "inspect the UI elements"
 
   kild-peek captures screenshots of native macOS applications, compares images,
-  and runs assertions on UI state. Use it to visually verify what applications
-  look like and validate UI state during development.
+  runs assertions on UI state, and interacts with UI elements. Use it to visually
+  verify what applications look like, validate UI state, and automate UI interactions
+  during development.
 
   IMPORTANT: Always list windows first to identify the correct target.
   Save screenshots to the scratchpad directory for easy cleanup.
@@ -239,6 +242,168 @@ kild-peek assert --window "KILD" --similar "$SCRATCHPAD/baseline.png" --threshol
 kild-peek assert --window "KILD" --exists --json
 ```
 
+## UI Interaction Commands
+
+### List UI Elements
+```bash
+kild-peek elements [--window <title>] [--app <name>] [--json]
+```
+
+Lists all UI elements in a window using the macOS Accessibility API. Shows buttons, text fields, labels, and other interactive elements.
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name (can combine with `--window`)
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# List all elements in Finder
+kild-peek elements --app Finder
+
+# List elements in specific window
+kild-peek elements --window "Terminal"
+
+# Precise targeting with app + window
+kild-peek elements --app Ghostty --window "Terminal"
+
+# JSON output for parsing
+kild-peek elements --app KILD --json
+```
+
+**Output includes:**
+- Element role (button, text field, menu item, etc.)
+- Title, value, and description (when available)
+- Position (x, y) and size (width, height)
+- Enabled state
+
+### Find UI Element by Text
+```bash
+kild-peek find --text <search> [--window <title>] [--app <name>] [--json]
+```
+
+Finds a UI element by searching for text in its title, value, or description.
+
+**Flags:**
+- `--text <search>` - Text to search for (required)
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name (can combine with `--window`)
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Find "File" menu in Finder
+kild-peek find --app Finder --text "File"
+
+# Find "Create" button in KILD
+kild-peek find --app KILD --text "Create"
+
+# JSON output
+kild-peek find --app Finder --text "Submit" --json
+```
+
+**Search behavior:**
+- Case-insensitive partial matching
+- Searches title, value, and description fields
+- Returns first matching element
+
+### Click UI Element
+```bash
+kild-peek click [--window <title>] [--app <name>] --at <x,y> [--json]
+kild-peek click [--window <title>] [--app <name>] --text <search> [--json]
+```
+
+Clicks at specific coordinates or on an element identified by text.
+
+**Coordinate-based click:**
+- `--at <x,y>` - Click at coordinates relative to window top-left
+
+**Text-based click:**
+- `--text <search>` - Find and click element by text (uses Accessibility API)
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name (can combine with `--window`)
+- `--json` - Output as JSON
+
+**Note:** `--at` and `--text` are mutually exclusive.
+
+**Examples:**
+```bash
+# Click at coordinates
+kild-peek click --window "Terminal" --at 100,50
+
+# Click by app name
+kild-peek click --app Ghostty --at 200,100
+
+# Precise targeting with app + window
+kild-peek click --app Ghostty --window "Terminal" --at 150,75
+
+# Click element by text
+kild-peek click --app KILD --text "Create"
+
+# Click button by text
+kild-peek click --app Finder --text "Submit"
+
+# JSON output
+kild-peek click --app KILD --text "Open" --json
+```
+
+### Type Text
+```bash
+kild-peek type [--window <title>] [--app <name>] <text> [--json]
+```
+
+Types text into the focused element in the target window.
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Type into Terminal
+kild-peek type --window "Terminal" "hello world"
+
+# Type into TextEdit
+kild-peek type --app TextEdit "some text"
+
+# JSON output
+kild-peek type --window "Terminal" "test" --json
+```
+
+### Send Key Combination
+```bash
+kild-peek key [--window <title>] [--app <name>] <key-combo> [--json]
+```
+
+Sends a key or key combination to the target window.
+
+**Supported modifiers:** `cmd`, `shift`, `opt` (or `alt`), `ctrl`
+
+**Common keys:** `enter`, `return`, `tab`, `space`, `escape`, `delete`, `backspace`, arrow keys, function keys
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Single key
+kild-peek key --window "Terminal" "enter"
+
+# Key combo with modifier
+kild-peek key --app Ghostty "cmd+s"
+
+# Multiple modifiers
+kild-peek key --window "Terminal" "cmd+shift+p"
+
+# JSON output
+kild-peek key --app TextEdit "tab" --json
+```
+
 ## Workflow Examples
 
 ### Visual Verification of UI Changes
@@ -278,6 +443,45 @@ kild-peek list windows --json > "$SCRATCHPAD/windows.json"
 # Capture specific ones by ID
 kild-peek screenshot --window-id 8002 -o "$SCRATCHPAD/kild.png"
 kild-peek screenshot --window-id 8429 -o "$SCRATCHPAD/ghostty.png"
+```
+
+### Automated UI Interaction
+
+```bash
+# 1. List windows to identify target
+kild-peek list windows --app KILD
+
+# 2. List UI elements to find clickable items
+kild-peek elements --app KILD
+
+# 3. Find specific element
+kild-peek find --app KILD --text "Create"
+
+# 4. Click the element by text
+kild-peek click --app KILD --text "Create"
+
+# 5. Type into focused field
+kild-peek type --app KILD "my-new-branch"
+
+# 6. Send key combination
+kild-peek key --app KILD "enter"
+```
+
+### Element-Based Testing
+
+```bash
+# Check if UI element exists
+kild-peek find --app KILD --text "Submit" && echo "Button found"
+
+# Click button and verify outcome
+kild-peek click --app KILD --text "Submit"
+sleep 1
+kild-peek assert --app KILD --visible
+
+# Automated form filling
+kild-peek click --app KILD --text "Branch Name"
+kild-peek type --app KILD "feature-auth"
+kild-peek click --app KILD --text "Create"
 ```
 
 ## Tips

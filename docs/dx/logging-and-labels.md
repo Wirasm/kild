@@ -29,6 +29,8 @@ Both systems use: `{layer}.{domain}`
 - `screenshot` - Screenshot capture (kild-peek)
 - `diff` - Image comparison (kild-peek)
 - `assert` - UI state assertions (kild-peek)
+- `interact` - UI interaction: clicks, typing, key combos (kild-peek)
+- `element` - Accessibility element enumeration and finding (kild-peek)
 
 ## In Practice
 
