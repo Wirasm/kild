@@ -3185,6 +3185,7 @@ dependencies = [
  "clap",
  "kild-core",
  "serde_json",
+ "shlex",
  "tempfile",
  "tracing",
 ]

@@ -768,6 +768,7 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
     let editor_override = matches.get_one::<String>("editor").cloned();
+    let flags = matches.get_one::<String>("flags").cloned();
 
     info!(
         event = "cli.code_started",
@@ -789,20 +790,39 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     // 2. Determine editor: CLI flag > $EDITOR > "zed"
     let editor = select_editor(editor_override);
 
+    // 3. Parse flags using shell-style parsing (handles quoted strings)
+    let parsed_flags: Vec<String> = match &flags {
+        Some(f) => shlex::split(f).unwrap_or_else(|| {
+            warn!(
+                event = "cli.code_flags_parse_failed",
+                flags = f,
+                message = "Failed to parse flags, using as single argument"
+            );
+            vec![f.clone()]
+        }),
+        None => vec![],
+    };
+
     info!(
         event = "cli.code_editor_selected",
         branch = branch,
         editor = editor
     );
 
-    // 3. Spawn editor with worktree path
-    match std::process::Command::new(&editor)
-        .arg(&session.worktree_path)
-        .spawn()
-    {
+    // 4. Spawn editor with flags and worktree path
+    let mut cmd = std::process::Command::new(&editor);
+    for flag in &parsed_flags {
+        cmd.arg(flag);
+    }
+    cmd.arg(&session.worktree_path);
+
+    match cmd.spawn() {
         Ok(_) => {
             println!("✅ Opening '{}' in {}", branch, editor);
             println!("   Path: {}", session.worktree_path.display());
+            if !parsed_flags.is_empty() {
+                println!("   Flags: {}", parsed_flags.join(" "));
+            }
             info!(
                 event = "cli.code_completed",
                 branch = branch,

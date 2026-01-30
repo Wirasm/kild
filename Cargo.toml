@@ -31,6 +31,7 @@ uuid = { version = "1", features = ["v4"] }
 
 # CLI-only dependencies
 clap = { version = "4.0", features = ["derive"] }
+shlex = "1.3"
 
 # Screenshot and image processing dependencies
 xcap = "0.8"

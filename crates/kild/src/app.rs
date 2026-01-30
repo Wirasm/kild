@@ -182,6 +182,13 @@ pub fn build_cli() -> Command {
                         .short('e')
                         .help("Editor to use (defaults to $EDITOR or 'zed')")
                 )
+                .arg(
+                    Arg::new("flags")
+                        .long("flags")
+                        .num_args(1)
+                        .allow_hyphen_values(true)
+                        .help("Additional flags to pass to the editor (use --flags 'value' or --flags='value')")
+                )
         )
         .subcommand(
             Command::new("focus")
@@ -679,6 +686,33 @@ mod tests {
             "test-branch"
         );
         assert_eq!(code_matches.get_one::<String>("editor").unwrap(), "vim");
+    }
+
+    #[test]
+    fn test_cli_code_command_with_complex_flags() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "code",
+            "test-branch",
+            "--editor",
+            "code",
+            "--flags",
+            "--new-window",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let code_matches = matches.subcommand_matches("code").unwrap();
+        assert_eq!(
+            code_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert_eq!(code_matches.get_one::<String>("editor").unwrap(), "code");
+        assert_eq!(
+            code_matches.get_one::<String>("flags").unwrap(),
+            "--new-window"
+        );
     }
 
     #[test]
