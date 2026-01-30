@@ -16,6 +16,12 @@ use crate::terminal::is_terminal_window_open;
 ///
 /// Created via `SessionInfo::from_session()`, which runs process detection,
 /// git status checks, and diff stat computation.
+///
+/// Status fields reflect state at construction time and become stale as
+/// processes start/stop and files change. Refresh via `from_session()` or
+/// targeted field updates as needed.
+///
+/// Invariant: `diff_stats` is `Some` only when `git_status` is `Dirty`.
 #[derive(Clone)]
 pub struct SessionInfo {
     pub session: Session,
@@ -67,6 +73,10 @@ impl SessionInfo {
 ///
 /// Uses PID-based detection as primary method, falling back to window-based
 /// detection for terminals like Ghostty where PID is unavailable.
+///
+/// Detection failures are logged as warnings and return:
+/// - `ProcessStatus::Unknown` when PID check errors
+/// - `ProcessStatus::Stopped` when window check errors or no detection method available
 pub fn determine_process_status(session: &Session) -> ProcessStatus {
     if let Some(pid) = session.process_id {
         match is_process_running(pid) {
