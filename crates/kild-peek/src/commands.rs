@@ -456,10 +456,11 @@ fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
         timeout_ms = timeout_ms
     );
 
-    let mut request = ElementsRequest::new(target);
-    if wait_flag {
-        request = request.with_wait(timeout_ms);
-    }
+    let request = if wait_flag {
+        ElementsRequest::new(target).with_wait(timeout_ms)
+    } else {
+        ElementsRequest::new(target)
+    };
 
     match list_elements(&request) {
         Ok(result) => {
@@ -503,10 +504,11 @@ fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         timeout_ms = timeout_ms
     );
 
-    let mut request = FindRequest::new(target, text);
-    if wait_flag {
-        request = request.with_wait(timeout_ms);
-    }
+    let request = if wait_flag {
+        FindRequest::new(target, text).with_wait(timeout_ms)
+    } else {
+        FindRequest::new(target, text)
+    };
 
     match find_element(&request) {
         Ok(element) => {
@@ -552,7 +554,7 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let json_output = matches.get_flag("json");
     let wait_flag = matches.get_flag("wait");
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
-    let wait_timeout = if wait_flag { Some(timeout_ms) } else { None };
+    let wait_timeout = wait_flag.then_some(timeout_ms);
 
     // Must have either --at or --text
     if at_str.is_none() && text_str.is_none() {
@@ -576,10 +578,11 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
         timeout_ms = timeout_ms
     );
 
-    let mut request = ClickRequest::new(target, x, y);
-    if wait_flag {
-        request = request.with_wait(timeout_ms);
-    }
+    let request = if wait_flag {
+        ClickRequest::new(target, x, y).with_wait(timeout_ms)
+    } else {
+        ClickRequest::new(target, x, y)
+    };
 
     match click(&request) {
         Ok(result) => {
@@ -623,10 +626,11 @@ fn handle_click_text(
         timeout_ms = ?timeout_ms
     );
 
-    let mut request = ClickTextRequest::new(target, text);
-    if let Some(timeout) = timeout_ms {
-        request = request.with_wait(timeout);
-    }
+    let request = if let Some(timeout) = timeout_ms {
+        ClickTextRequest::new(target, text).with_wait(timeout)
+    } else {
+        ClickTextRequest::new(target, text)
+    };
 
     match click_text(&request) {
         Ok(result) => {
@@ -675,10 +679,11 @@ fn handle_type_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         timeout_ms = timeout_ms
     );
 
-    let mut request = TypeRequest::new(target, text);
-    if wait_flag {
-        request = request.with_wait(timeout_ms);
-    }
+    let request = if wait_flag {
+        TypeRequest::new(target, text).with_wait(timeout_ms)
+    } else {
+        TypeRequest::new(target, text)
+    };
 
     match type_text(&request) {
         Ok(result) => {
@@ -720,10 +725,11 @@ fn handle_key_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Er
         timeout_ms = timeout_ms
     );
 
-    let mut request = KeyComboRequest::new(target, combo);
-    if wait_flag {
-        request = request.with_wait(timeout_ms);
-    }
+    let request = if wait_flag {
+        KeyComboRequest::new(target, combo).with_wait(timeout_ms)
+    } else {
+        KeyComboRequest::new(target, combo)
+    };
 
     match send_key_combo(&request) {
         Ok(result) => {

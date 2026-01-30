@@ -31,20 +31,27 @@ fn find_window_by_target(
     target: &InteractionTarget,
     timeout_ms: Option<u64>,
 ) -> Result<WindowInfo, ElementError> {
-    let result = match (target, timeout_ms) {
-        (InteractionTarget::Window { title }, Some(timeout)) => {
-            find_window_by_title_with_wait(title, timeout)
+    let result = match target {
+        InteractionTarget::Window { title } => {
+            if let Some(timeout) = timeout_ms {
+                find_window_by_title_with_wait(title, timeout)
+            } else {
+                find_window_by_title(title)
+            }
         }
-        (InteractionTarget::Window { title }, None) => find_window_by_title(title),
-        (InteractionTarget::App { app }, Some(timeout)) => {
-            find_window_by_app_with_wait(app, timeout)
+        InteractionTarget::App { app } => {
+            if let Some(timeout) = timeout_ms {
+                find_window_by_app_with_wait(app, timeout)
+            } else {
+                find_window_by_app(app)
+            }
         }
-        (InteractionTarget::App { app }, None) => find_window_by_app(app),
-        (InteractionTarget::AppAndWindow { app, title }, Some(timeout)) => {
-            find_window_by_app_and_title_with_wait(app, title, timeout)
-        }
-        (InteractionTarget::AppAndWindow { app, title }, None) => {
-            find_window_by_app_and_title(app, title)
+        InteractionTarget::AppAndWindow { app, title } => {
+            if let Some(timeout) = timeout_ms {
+                find_window_by_app_and_title_with_wait(app, title, timeout)
+            } else {
+                find_window_by_app_and_title(app, title)
+            }
         }
     };
     result.map_err(map_window_error)
