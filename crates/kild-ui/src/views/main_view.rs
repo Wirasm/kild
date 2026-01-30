@@ -602,9 +602,9 @@ impl MainView {
     }
 
     /// Clear startup errors (called when user dismisses the banner).
-    fn on_dismiss_startup_errors(&mut self, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.startup_errors.dismissed");
-        self.state.dismiss_startup_errors();
+    fn on_dismiss_errors(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(event = "ui.errors.dismissed");
+        self.state.dismiss_errors();
         cx.notify();
     }
 
@@ -669,12 +669,13 @@ impl MainView {
                 // Update local state with new project
                 // Note: ProjectManager.add() auto-selects first project
                 if let Err(e) = self.state.add_project(project) {
-                    tracing::warn!(
+                    tracing::error!(
                         event = "ui.add_project.state_sync_failed",
                         path = %path.display(),
                         error = %e,
-                        "Project persisted but local state update failed"
+                        "Project persisted but local state update failed, reloading from disk"
                     );
+                    self.state.reload_projects();
                 }
                 self.state.close_dialog();
                 // Refresh sessions to filter by new active project
@@ -701,19 +702,21 @@ impl MainView {
 
         if let Err(e) = actions::set_active_project(Some(path.clone())) {
             tracing::error!(event = "ui.project_select.failed", error = %e);
-            // Note: This error is rare (file system issue) and logged - no UI display
+            self.state
+                .push_error(format!("Failed to select project: {}", e));
             cx.notify();
             return;
         }
 
         // Update local state - select() should not fail since persistence succeeded
         if let Err(e) = self.state.select_project(&path) {
-            tracing::warn!(
+            tracing::error!(
                 event = "ui.project_select.state_sync_failed",
                 path = %path.display(),
                 error = %e,
-                "Project selection persisted but local state update failed"
+                "Project selection persisted but local state update failed, reloading from disk"
             );
+            self.state.reload_projects();
         }
         cx.notify();
     }
@@ -724,7 +727,8 @@ impl MainView {
 
         if let Err(e) = actions::set_active_project(None) {
             tracing::error!(event = "ui.project_select_all.failed", error = %e);
-            // Note: This error is rare (file system issue) and logged - no UI display
+            self.state
+                .push_error(format!("Failed to update project selection: {}", e));
             cx.notify();
             return;
         }
@@ -742,20 +746,21 @@ impl MainView {
 
         if let Err(e) = actions::remove_project(&path) {
             tracing::error!(event = "ui.remove_project.failed", error = %e);
-            // Note: remove_project errors don't have a dedicated error field
-            // since they happen outside of any dialog context
+            self.state
+                .push_error(format!("Failed to remove project: {}", e));
             cx.notify();
             return;
         }
 
         // Update local state - remove() handles active_index adjustment
         if let Err(e) = self.state.remove_project(&path) {
-            tracing::warn!(
+            tracing::error!(
                 event = "ui.remove_project.state_sync_failed",
                 path = %path.display(),
                 error = %e,
-                "Project removal persisted but local state update failed"
+                "Project removal persisted but local state update failed, reloading from disk"
             );
+            self.state.reload_projects();
         }
         cx.notify();
     }
@@ -1004,10 +1009,10 @@ impl Render for MainView {
                             ),
                     ),
             )
-            // Startup errors banner (shown when projects fail to load or migrate)
-            .when(self.state.has_startup_errors(), |this| {
-                let startup_errors = self.state.startup_errors();
-                let error_count = startup_errors.len();
+            // Error banner (shown for startup failures, project errors, state desync recovery)
+            .when(self.state.has_banner_errors(), |this| {
+                let errors = self.state.banner_errors();
+                let error_count = errors.len();
                 this.child(
                     div()
                         .mx(px(theme::SPACE_4))
@@ -1030,20 +1035,20 @@ impl Render for MainView {
                                         .text_color(theme::ember())
                                         .font_weight(FontWeight::BOLD)
                                         .child(format!(
-                                            "Startup error{}:",
+                                            "Error{}:",
                                             if error_count == 1 { "" } else { "s" }
                                         )),
                                 )
                                 .child(
-                                    Button::new("dismiss-startup-errors", "×")
+                                    Button::new("dismiss-errors", "×")
                                         .variant(ButtonVariant::Ghost)
                                         .on_click(cx.listener(|view, _, _, cx| {
-                                            view.on_dismiss_startup_errors(cx);
+                                            view.on_dismiss_errors(cx);
                                         })),
                                 ),
                         )
                         // Error list
-                        .children(startup_errors.iter().map(|e| {
+                        .children(errors.iter().map(|e| {
                             div()
                                 .text_size(px(theme::TEXT_SM))
                                 .text_color(theme::with_alpha(theme::ember(), 0.8))

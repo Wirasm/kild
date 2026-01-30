@@ -268,7 +268,19 @@ pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, Strin
         ProjectError::CanonicalizationFailed { source } => {
             format!("Cannot access '{}': {}", path.display(), source)
         }
-        _ => e.to_string(),
+        ProjectError::GitCommandFailed { source } => {
+            format!(
+                "Cannot verify if '{}' is a git repository: {}. Is git installed?",
+                path.display(),
+                source
+            )
+        }
+        // These errors shouldn't occur in Project::new(), but handle explicitly
+        // so new variants force a review of user-facing messages
+        ProjectError::NotFound
+        | ProjectError::AlreadyExists
+        | ProjectError::SaveFailed { .. }
+        | ProjectError::LoadCorrupted { .. } => e.to_string(),
     })?;
 
     // Check if project already exists (by canonical path)

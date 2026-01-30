@@ -6,7 +6,7 @@ use super::types::ProjectsData;
 /// Load projects from ~/.kild/projects.json.
 ///
 /// Falls back to `./.kild/projects.json` if home directory cannot be determined.
-/// Returns default empty state if file doesn't exist or is corrupted (with warning logged).
+/// Returns default empty state if file doesn't exist or is corrupted (with error logged).
 pub fn load_projects() -> ProjectsData {
     let path = projects_file_path();
     if !path.exists() {
@@ -17,6 +17,8 @@ pub fn load_projects() -> ProjectsData {
         Ok(content) => match serde_json::from_str(&content) {
             Ok(data) => data,
             Err(e) => {
+                // ERROR (not warn): file exists but is corrupted — indicates
+                // data loss or external tampering, requires user action.
                 tracing::error!(
                     event = "core.projects.json_parse_failed",
                     path = %path.display(),
@@ -35,6 +37,8 @@ pub fn load_projects() -> ProjectsData {
             }
         },
         Err(e) => {
+            // ERROR (not warn): file exists but can't be read — likely a
+            // permission issue or filesystem problem requiring user action.
             tracing::error!(
                 event = "core.projects.load_failed",
                 path = %path.display(),
@@ -90,19 +94,21 @@ pub fn migrate_projects_to_canonical() -> Result<(), ProjectError> {
     let mut changed = false;
 
     for project in &mut data.projects {
-        match project.path().canonicalize() {
-            Ok(canonical) => {
-                if canonical != project.path() {
+        let original_path = project.path().to_path_buf();
+        match project.canonicalize_path() {
+            Ok(did_change) => {
+                if did_change {
                     tracing::info!(
                         event = "core.projects.path_migrated",
-                        original = %project.path().display(),
-                        canonical = %canonical.display()
+                        original = %original_path.display(),
+                        canonical = %project.path().display()
                     );
-                    project.set_path(canonical);
                     changed = true;
                 }
             }
             Err(e) => {
+                // WARN (not error): expected during migration when projects live
+                // on disconnected drives or paths have been deleted.
                 tracing::warn!(
                     event = "core.projects.path_canonicalize_failed",
                     path = %project.path().display(),
@@ -128,6 +134,8 @@ pub fn migrate_projects_to_canonical() -> Result<(), ProjectError> {
                 }
             }
             Err(e) => {
+                // WARN (not error): the active project path may no longer exist
+                // (e.g., drive disconnected). Clearing selection is safe recovery.
                 tracing::warn!(
                     event = "core.projects.active_path_canonicalize_failed",
                     path = %active.display(),
@@ -170,8 +178,8 @@ fn projects_file_path() -> PathBuf {
 
 /// Test utilities for projects persistence.
 ///
-/// Available under `#[cfg(test)]` for this crate AND as a public module
-/// for downstream crates (kild-ui) that need the env lock/guard for their tests.
+/// Public so downstream crates (kild-ui) can use the env lock/guard in their tests.
+#[doc(hidden)]
 pub mod test_helpers {
     use std::sync::Mutex;
 
@@ -183,7 +191,9 @@ pub mod test_helpers {
 
     impl ProjectsFileEnvGuard {
         pub fn new(path: &std::path::Path) -> Self {
-            // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to prevent concurrent access
+            // SAFETY: Caller must hold PROJECTS_FILE_ENV_LOCK to serialize access
+            // from Rust test code. This is inherently unsafe as other threads or
+            // C code could read the environment, but acceptable in test-only code.
             unsafe { std::env::set_var("KILD_PROJECTS_FILE", path) };
             Self
         }
@@ -191,7 +201,8 @@ pub mod test_helpers {
 
     impl Drop for ProjectsFileEnvGuard {
         fn drop(&mut self) {
-            // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to prevent concurrent access
+            // SAFETY: Caller must hold PROJECTS_FILE_ENV_LOCK throughout guard
+            // lifetime. See safety comment in new().
             unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
         }
     }
@@ -228,7 +239,7 @@ mod tests {
     fn test_projects_file_path_default_after_cleanup() {
         let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
 
-        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to prevent concurrent access
+        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to serialize test access
         unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
 
         let default_path = super::projects_file_path();
@@ -240,14 +251,14 @@ mod tests {
     fn test_projects_file_path_empty_env_var_uses_default() {
         let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
 
-        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to prevent concurrent access
+        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to serialize test access
         unsafe { std::env::set_var("KILD_PROJECTS_FILE", "") };
 
         let path = super::projects_file_path();
         assert!(path.ends_with("projects.json"));
         assert!(path.to_string_lossy().contains(".kild"));
 
-        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to prevent concurrent access
+        // SAFETY: We hold PROJECTS_FILE_ENV_LOCK to serialize test access
         unsafe { std::env::remove_var("KILD_PROJECTS_FILE") };
     }
 
@@ -272,6 +283,37 @@ mod tests {
         let loaded = load_projects();
         assert_eq!(loaded.projects.len(), 1);
         assert_eq!(loaded.projects[0].name(), "Test Project");
+    }
+
+    #[test]
+    fn test_load_corrupted_json_returns_default_with_error() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let custom_path = temp_dir.path().join("corrupted.json");
+        std::fs::write(&custom_path, "{ this is not valid json }").unwrap();
+        let _guard = ProjectsFileEnvGuard::new(&custom_path);
+
+        let data = load_projects();
+        assert!(data.projects.is_empty());
+        assert!(data.active.is_none());
+        assert!(data.load_error.is_some());
+        assert!(data.load_error.unwrap().contains("corrupted"));
+    }
+
+    #[test]
+    fn test_load_unreadable_file_returns_default_with_error() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let custom_path = temp_dir.path().join("projects.json");
+        // Create a directory where a file is expected — causes a read error
+        std::fs::create_dir_all(&custom_path).unwrap();
+        let _guard = ProjectsFileEnvGuard::new(&custom_path);
+
+        let data = load_projects();
+        assert!(data.projects.is_empty());
+        assert!(data.load_error.is_some());
     }
 
     #[test]

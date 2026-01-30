@@ -1,5 +1,7 @@
 use crate::errors::KildError;
 
+/// Note: This type intentionally does not implement `Clone` because
+/// `io::Error` (in `GitCommandFailed` and `CanonicalizationFailed`) is not `Clone`.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
     #[error("Path is not a directory")]
@@ -7,6 +9,9 @@ pub enum ProjectError {
 
     #[error("Path is not a git repository")]
     NotAGitRepo,
+
+    #[error("Git command failed: {source}")]
+    GitCommandFailed { source: std::io::Error },
 
     #[error("Cannot resolve path: {source}")]
     CanonicalizationFailed { source: std::io::Error },
@@ -29,6 +34,7 @@ impl KildError for ProjectError {
         match self {
             ProjectError::NotADirectory => "PROJECT_NOT_A_DIRECTORY",
             ProjectError::NotAGitRepo => "PROJECT_NOT_GIT_REPO",
+            ProjectError::GitCommandFailed { .. } => "PROJECT_GIT_COMMAND_FAILED",
             ProjectError::CanonicalizationFailed { .. } => "PROJECT_CANONICALIZATION_FAILED",
             ProjectError::NotFound => "PROJECT_NOT_FOUND",
             ProjectError::AlreadyExists => "PROJECT_ALREADY_EXISTS",
@@ -38,14 +44,18 @@ impl KildError for ProjectError {
     }
 
     fn is_user_error(&self) -> bool {
-        matches!(
-            self,
+        // Exhaustive match ensures new variants force an explicit classification.
+        match self {
             ProjectError::NotADirectory
-                | ProjectError::NotAGitRepo
-                | ProjectError::CanonicalizationFailed { .. }
-                | ProjectError::NotFound
-                | ProjectError::AlreadyExists
-        )
+            | ProjectError::NotAGitRepo
+            | ProjectError::CanonicalizationFailed { .. }
+            | ProjectError::NotFound
+            | ProjectError::AlreadyExists => true,
+
+            ProjectError::GitCommandFailed { .. }
+            | ProjectError::SaveFailed { .. }
+            | ProjectError::LoadCorrupted { .. } => false,
+        }
     }
 }
 
@@ -67,6 +77,16 @@ mod tests {
         assert_eq!(error.to_string(), "Path is not a git repository");
         assert_eq!(error.error_code(), "PROJECT_NOT_GIT_REPO");
         assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_project_error_git_command_failed() {
+        let error = ProjectError::GitCommandFailed {
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "git not found"),
+        };
+        assert!(error.to_string().contains("Git command failed"));
+        assert_eq!(error.error_code(), "PROJECT_GIT_COMMAND_FAILED");
+        assert!(!error.is_user_error());
     }
 
     #[test]

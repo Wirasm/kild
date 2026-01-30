@@ -894,21 +894,26 @@ impl AppState {
     }
 
     // =========================================================================
-    // Startup errors facade methods
+    // Error banner facade methods
     // =========================================================================
 
-    /// Get startup errors that should be shown to the user.
-    pub fn startup_errors(&self) -> &[String] {
+    /// Get errors that should be shown to the user in the error banner.
+    pub fn banner_errors(&self) -> &[String] {
         &self.startup_errors
     }
 
-    /// Check if there are any startup errors.
-    pub fn has_startup_errors(&self) -> bool {
+    /// Check if there are any banner errors.
+    pub fn has_banner_errors(&self) -> bool {
         !self.startup_errors.is_empty()
     }
 
-    /// Dismiss all startup errors (user acknowledged them).
-    pub fn dismiss_startup_errors(&mut self) {
+    /// Add an error to the banner (for runtime failures the user should see).
+    pub fn push_error(&mut self, message: String) {
+        self.startup_errors.push(message);
+    }
+
+    /// Dismiss all banner errors (user acknowledged them).
+    pub fn dismiss_errors(&mut self) {
         self.startup_errors.clear();
     }
 
@@ -934,6 +939,18 @@ impl AppState {
     // =========================================================================
     // Project facade methods
     // =========================================================================
+
+    /// Reload projects from disk, replacing in-memory state.
+    ///
+    /// Used to recover from state desync (e.g., disk write succeeded but
+    /// in-memory update failed).
+    pub fn reload_projects(&mut self) {
+        let data = kild_core::projects::load_projects();
+        if let Some(load_error) = data.load_error {
+            self.startup_errors.push(load_error);
+        }
+        self.projects = ProjectManager::from_data(data.projects, data.active);
+    }
 
     /// Select a project by path.
     pub fn select_project(&mut self, path: &std::path::Path) -> Result<(), ProjectError> {
@@ -1918,7 +1935,7 @@ mod tests {
         assert!(state.active_project_id().is_none());
 
         // With active project - should return a hash, not directory name
-        let project = kild_core::projects::Project::new_unchecked(
+        let project = kild_core::projects::types::test_helpers::make_test_project(
             PathBuf::from("/Users/test/Projects/my-project"),
             "My Project".to_string(),
         );
@@ -2033,7 +2050,7 @@ mod tests {
 
         // Active project set - should filter
         // Add project and select it
-        let project = kild_core::projects::Project::new_unchecked(
+        let project = kild_core::projects::types::test_helpers::make_test_project(
             project_path.clone(),
             "Project A".to_string(),
         );
@@ -2082,7 +2099,7 @@ mod tests {
         }]);
 
         // Active project set to a different path - should return empty
-        let project = kild_core::projects::Project::new_unchecked(
+        let project = kild_core::projects::types::test_helpers::make_test_project(
             PathBuf::from("/different/project/path"),
             "Different Project".to_string(),
         );
