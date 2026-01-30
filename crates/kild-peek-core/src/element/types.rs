@@ -14,7 +14,7 @@ pub struct ElementInfo {
     width: u32,
     height: u32,
     enabled: bool,
-    /// Depth in the accessibility tree (0 = window-level)
+    /// Depth in the accessibility tree (0 = window element itself, 1 = direct children, etc.)
     depth: usize,
 }
 
@@ -34,6 +34,7 @@ impl ElementInfo {
         depth: usize,
     ) -> Self {
         debug_assert!(!role.is_empty(), "Element role must not be empty");
+        debug_assert!(depth <= 20, "Depth exceeds maximum traversal depth (20)");
         Self {
             role,
             title,
@@ -89,7 +90,8 @@ impl ElementInfo {
         check(&self.title) || check(&self.value) || check(&self.description)
     }
 
-    /// Check if any text field matches the given regex pattern (case-sensitive by default)
+    /// Check if any text field matches the given regex pattern.
+    /// Case-sensitive by default; use `(?i)` prefix in the pattern for case-insensitive matching.
     pub fn matches_regex(&self, pattern: &regex::Regex) -> bool {
         let check = |opt: &Option<String>| opt.as_ref().is_some_and(|s| pattern.is_match(s));
         check(&self.title) || check(&self.value) || check(&self.description)
@@ -125,7 +127,7 @@ impl ElementsRequest {
     }
 }
 
-/// How to match element text in find operations
+/// How to match element text in find operations (used by `FindRequest`)
 #[derive(Debug, Clone, Default)]
 pub enum FindMode {
     /// Case-insensitive substring match (default)

@@ -128,15 +128,10 @@ pub fn list_elements(request: &ElementsRequest) -> Result<ElementsResult, Elemen
 
 /// Find a specific element by text content
 pub fn find_element(request: &FindRequest) -> Result<ElementInfo, ElementError> {
-    let mode_label = match request.mode() {
-        FindMode::Substring => "substring",
-        FindMode::Regex => "regex",
-    };
-
     info!(
         event = "peek.core.element.find_started",
         text = request.text(),
-        mode = mode_label,
+        regex = matches!(request.mode(), FindMode::Regex),
         target = ?request.target()
     );
 
@@ -459,6 +454,26 @@ mod tests {
         assert_eq!(elem.width(), 500);
         assert_eq!(elem.height(), 0);
         // Element is still valid, just has zero height
+    }
+
+    #[test]
+    fn test_find_element_invalid_regex() {
+        let request = FindRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "[unclosed",
+        )
+        .with_regex();
+
+        let result = find_element(&request);
+        match result {
+            Err(ElementError::InvalidRegex { pattern, reason }) => {
+                assert_eq!(pattern, "[unclosed");
+                assert!(!reason.is_empty());
+            }
+            other => panic!("Expected InvalidRegex error, got {:?}", other),
+        }
     }
 
     // Integration tests requiring accessibility permissions

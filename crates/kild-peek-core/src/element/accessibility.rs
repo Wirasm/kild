@@ -32,7 +32,7 @@ pub struct RawElement {
     /// Element size
     size: Option<(f64, f64)>,
     enabled: bool,
-    /// Depth in the accessibility tree (0 = window-level)
+    /// Depth in the accessibility tree (0 = window element itself, 1 = direct children, etc.)
     depth: usize,
 }
 
