@@ -1,6 +1,6 @@
 pub(crate) mod accessibility;
 mod errors;
-mod handler;
+pub(crate) mod handler;
 mod types;
 
 pub use errors::ElementError;

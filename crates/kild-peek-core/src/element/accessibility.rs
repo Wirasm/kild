@@ -76,8 +76,14 @@ fn collect_elements(element: AXUIElementRef, out: &mut Vec<RawElement>, depth: u
     }
 
     // Read this element's properties
-    if let Some(raw) = read_element_properties(element) {
-        out.push(raw);
+    match read_element_properties(element) {
+        Some(raw) => out.push(raw),
+        None => {
+            debug!(
+                event = "peek.core.element.property_read_skipped",
+                depth = depth
+            );
+        }
     }
 
     // Recurse into children
@@ -124,14 +130,15 @@ fn get_string_attribute(element: AXUIElementRef, attribute: &str) -> Option<Stri
         return None;
     }
 
-    // SAFETY: The returned value is a retained CFTypeRef. wrap_under_create_rule
-    // takes ownership so it will be released when dropped.
+    // SAFETY: value is a retained CFTypeRef from CopyAttributeValue (Create Rule).
+    // wrap_under_create_rule takes ownership so it will be released when dropped.
     let cf_type: CFType = unsafe { TCFType::wrap_under_create_rule(value) };
 
-    // Try to interpret as CFString
     if cf_type.instance_of::<CFString>() {
-        let cf_string: CFString = unsafe { TCFType::wrap_under_get_rule(value as *const _) };
-        Some(cf_string.to_string())
+        // Extract the string before cf_type drops
+        let ptr = cf_type.as_CFTypeRef() as *const _;
+        let s = unsafe { CFString::wrap_under_get_rule(ptr) }.to_string();
+        Some(s)
     } else {
         None
     }
@@ -151,12 +158,14 @@ fn get_boolean_attribute(element: AXUIElementRef, attribute: &str) -> Option<boo
         return None;
     }
 
-    // SAFETY: Owned CFTypeRef from CopyAttributeValue.
+    // SAFETY: value is a retained CFTypeRef from CopyAttributeValue (Create Rule).
+    // wrap_under_create_rule takes ownership so it will be released when dropped.
     let cf_type: CFType = unsafe { TCFType::wrap_under_create_rule(value) };
 
     if cf_type.instance_of::<CFBoolean>() {
-        let cf_bool: CFBoolean = unsafe { TCFType::wrap_under_get_rule(value as *const _) };
-        Some(cf_bool.into())
+        let ptr = cf_type.as_CFTypeRef() as *const _;
+        let b: bool = unsafe { CFBoolean::wrap_under_get_rule(ptr) }.into();
+        Some(b)
     } else {
         None
     }
@@ -247,9 +256,11 @@ fn get_ax_value_size(element: AXUIElementRef, attribute: &str) -> Option<(f64, f
 }
 
 /// Get children (or windows) array from an AX element.
-/// Returns raw AXUIElementRef pointers. The caller must NOT release them;
-/// they remain valid as long as the returned Vec is in scope because the
-/// backing CFArray is kept alive.
+/// Returns raw AXUIElementRef pointers and the backing CFArray.
+///
+/// SAFETY: The returned pointers are only valid while the CFArray (second tuple element)
+/// remains alive. Caller must retain the CFArray for the lifetime of pointer usage.
+/// Do NOT release the individual element refs — they are owned by the CFArray.
 fn get_children_refs(
     element: AXUIElementRef,
     attribute: &str,

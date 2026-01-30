@@ -109,7 +109,7 @@ pub fn find_element(request: &FindRequest) -> Result<ElementInfo, ElementError> 
     let result = list_elements(&elements_request)?;
 
     let matches: Vec<&ElementInfo> = result
-        .elements
+        .elements()
         .iter()
         .filter(|e| e.matches_text(&request.text))
         .collect();
@@ -128,7 +128,7 @@ pub fn find_element(request: &FindRequest) -> Result<ElementInfo, ElementError> 
             info!(
                 event = "peek.core.element.find_completed",
                 text = &request.text,
-                role = &matches[0].role
+                role = matches[0].role()
             );
             Ok(matches[0].clone())
         }
@@ -138,15 +138,20 @@ pub fn find_element(request: &FindRequest) -> Result<ElementInfo, ElementError> 
                 text = &request.text,
                 count = count
             );
-            // Return first match but log the ambiguity
-            Ok(matches[0].clone())
+            Err(ElementError::ElementAmbiguous {
+                text: request.text.clone(),
+                count,
+            })
         }
     }
 }
 
 /// Convert a RawElement to ElementInfo, adjusting coordinates from screen-absolute
 /// to window-relative.
-fn convert_raw_to_element_info(raw: accessibility::RawElement, window: &WindowInfo) -> ElementInfo {
+///
+/// Subtracts window position (window.x, window.y) from element's screen coordinates
+/// to produce coordinates relative to the window's top-left corner.
+pub(crate) fn convert_raw_to_element_info(raw: accessibility::RawElement, window: &WindowInfo) -> ElementInfo {
     let (x, y) = match raw.position {
         Some((abs_x, abs_y)) => {
             let rel_x = abs_x as i32 - window.x();
@@ -204,15 +209,15 @@ mod tests {
         };
 
         let elem = convert_raw_to_element_info(raw, &window);
-        assert_eq!(elem.role, "AXButton");
-        assert_eq!(elem.title.as_deref(), Some("OK"));
+        assert_eq!(elem.role(), "AXButton");
+        assert_eq!(elem.title(), Some("OK"));
         // 250 - 100 = 150 (screen x - window x)
-        assert_eq!(elem.x, 150);
+        assert_eq!(elem.x(), 150);
         // 350 - 200 = 150 (screen y - window y)
-        assert_eq!(elem.y, 150);
-        assert_eq!(elem.width, 80);
-        assert_eq!(elem.height, 30);
-        assert!(elem.enabled);
+        assert_eq!(elem.y(), 150);
+        assert_eq!(elem.width(), 80);
+        assert_eq!(elem.height(), 30);
+        assert!(elem.enabled());
     }
 
     #[test]
@@ -240,10 +245,10 @@ mod tests {
         };
 
         let elem = convert_raw_to_element_info(raw, &window);
-        assert_eq!(elem.x, 0);
-        assert_eq!(elem.y, 0);
-        assert_eq!(elem.width, 0);
-        assert_eq!(elem.height, 0);
+        assert_eq!(elem.x(), 0);
+        assert_eq!(elem.y(), 0);
+        assert_eq!(elem.width(), 0);
+        assert_eq!(elem.height(), 0);
     }
 
     #[test]

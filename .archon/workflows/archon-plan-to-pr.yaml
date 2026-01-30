@@ -1,0 +1,106 @@
+name: archon-plan-to-pr
+description: |
+  Use when: You have an existing implementation plan and want to execute it end-to-end.
+  Input: Path to a plan file (.archon/artifacts/*/plan.md or .agents/plans/*.md)
+  Output: PR ready for merge with comprehensive review completed
+
+  Full workflow:
+  1. Read plan, setup branch, extract scope limits
+  2. Verify plan research is still valid
+  3. Implement all tasks with type-checking
+  4. Run full validation suite
+  5. Create PR with template, mark ready
+  6. Comprehensive code review (5 parallel agents with scope limit awareness)
+  7. Synthesize and fix review findings
+  8. Final summary with decision matrix → GitHub comment + follow-up recommendations
+
+  NOT for: Creating plans from scratch (use archon-idea-to-pr), quick fixes, standalone reviews.
+
+model: sonnet
+
+steps:
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 1: SETUP
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-plan-setup
+    clearContext: true
+    # Reads plan, extracts scope limits (NOT Building), ensures branch ready
+    # Artifact: plan-context.md (includes scope limits for review agents)
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 2: CONFIRM PLAN
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-confirm-plan
+    clearContext: true
+    # Verifies patterns still exist, code hasn't drifted
+    # Artifact: plan-confirmation.md
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 3: IMPLEMENT
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-implement-tasks
+    clearContext: true
+    # Executes each task with type-check after every change
+    # Artifact: implementation.md
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 4: VALIDATE
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-validate
+    clearContext: true
+    model: haiku
+    # Runs full validation: type-check, lint, tests, build
+    # Artifact: validation.md
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 5: FINALIZE PR
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-finalize-pr
+    clearContext: true
+    # Commits, pushes, creates PR with template (if exists), marks ready
+    # Artifact: pr-ready.md
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 6: CODE REVIEW
+  # ═══════════════════════════════════════════════════════════════════
+
+  # Scope the review
+  - command: archon-pr-review-scope
+    clearContext: true
+
+  # Sync with main before review
+  - command: archon-sync-pr-with-main
+    clearContext: true
+
+  # Run all review agents in parallel
+  - parallel:
+      - command: archon-code-review-agent
+      - command: archon-error-handling-agent
+      - command: archon-test-coverage-agent
+      - command: archon-comment-quality-agent
+      - command: archon-docs-impact-agent
+
+  # Synthesize findings from all agents
+  - command: archon-synthesize-review
+    clearContext: true
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 7: FIX REVIEW ISSUES
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-implement-review-fixes
+    clearContext: true
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 8: FINAL SUMMARY & FOLLOW-UP
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-workflow-summary
+    clearContext: true
+    # Reads ALL artifacts, creates decision matrix, posts to GitHub
+    # Artifact: workflow-summary.md + GitHub PR comment

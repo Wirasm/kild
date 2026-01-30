@@ -1,0 +1,68 @@
+name: archon-fix-github-issue
+description: |
+  Use when: User wants to FIX, RESOLVE, or IMPLEMENT a solution for a GitHub issue.
+  Triggers: "fix this issue", "implement issue #123", "resolve this bug", "fix it".
+  NOT for: Questions about issues, CI failures, PR reviews, general exploration.
+
+  Full workflow:
+  1. Investigate issue → root cause analysis, implementation plan
+  2. Implement fix → code changes, tests, PR creation
+  3. Comprehensive review → 5 parallel agents with scope awareness
+  4. Fix review issues → address CRITICAL/HIGH findings
+  5. Final summary → decision matrix, follow-up recommendations
+
+model: sonnet
+
+steps:
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 1: INVESTIGATE
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-investigate-issue
+    # Analyzes issue, creates investigation.md artifact
+    # Posts analysis to GitHub issue
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 2: IMPLEMENT
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-implement-issue
+    clearContext: true
+    # Implements fix from investigation, creates PR
+    # Artifact: implementation.md
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 3: CODE REVIEW
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-pr-review-scope
+    clearContext: true
+    # Scopes the review, extracts OUT OF SCOPE from investigation
+
+  - command: archon-sync-pr-with-main
+    clearContext: true
+
+  - parallel:
+      - command: archon-code-review-agent
+      - command: archon-error-handling-agent
+      - command: archon-test-coverage-agent
+      - command: archon-comment-quality-agent
+      - command: archon-docs-impact-agent
+
+  - command: archon-synthesize-review
+    clearContext: true
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 4: FIX REVIEW ISSUES
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-implement-review-fixes
+    clearContext: true
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PHASE 5: FINAL SUMMARY
+  # ═══════════════════════════════════════════════════════════════════
+
+  - command: archon-workflow-summary
+    clearContext: true
+    # Reads ALL artifacts, posts decision matrix to GitHub

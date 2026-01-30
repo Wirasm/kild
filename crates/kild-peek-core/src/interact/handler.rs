@@ -389,30 +389,10 @@ pub fn click_text(request: &ClickTextRequest) -> Result<InteractionResult, Inter
     let raw_elements = crate::element::accessibility::query_elements(pid)
         .map_err(|reason| InteractionError::ElementQueryFailed { reason })?;
 
-    // Convert to ElementInfo for text matching
+    // Convert RawElement → ElementInfo (screen-absolute → window-relative coordinates)
     let elements: Vec<crate::element::ElementInfo> = raw_elements
         .into_iter()
-        .map(|raw| {
-            let (x, y) = match raw.position {
-                Some((abs_x, abs_y)) => (abs_x as i32 - window.x(), abs_y as i32 - window.y()),
-                None => (0, 0),
-            };
-            let (width, height) = match raw.size {
-                Some((w, h)) => (w as u32, h as u32),
-                None => (0, 0),
-            };
-            crate::element::ElementInfo::new(
-                raw.role,
-                raw.title,
-                raw.value,
-                raw.description,
-                x,
-                y,
-                width,
-                height,
-                raw.enabled,
-            )
-        })
+        .map(|raw| crate::element::handler::convert_raw_to_element_info(raw, &window))
         .collect();
 
     // Find matching elements
@@ -436,14 +416,14 @@ pub fn click_text(request: &ClickTextRequest) -> Result<InteractionResult, Inter
         }
     };
 
-    // Element must have valid dimensions for center calculation
-    if element.width == 0 && element.height == 0 {
+    // Element must have non-zero width or height (reject invisible/zero-size elements)
+    if element.width() == 0 && element.height() == 0 {
         return Err(InteractionError::ElementNoPosition);
     }
 
     // Compute center of element (window-relative)
-    let center_x = element.x + (element.width as i32) / 2;
-    let center_y = element.y + (element.height as i32) / 2;
+    let center_x = element.x() + (element.width() as i32) / 2;
+    let center_y = element.y() + (element.height() as i32) / 2;
 
     // Now focus the window
     focus_window(window.app_name())?;

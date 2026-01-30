@@ -5,24 +5,15 @@ use crate::interact::InteractionTarget;
 /// Information about a UI element discovered via Accessibility API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementInfo {
-    /// AXRole: "AXButton", "AXTextField", etc.
-    pub role: String,
-    /// AXTitle
-    pub title: Option<String>,
-    /// AXValue (text content)
-    pub value: Option<String>,
-    /// AXDescription (accessibility label)
-    pub description: Option<String>,
-    /// Window-relative x position
-    pub x: i32,
-    /// Window-relative y position
-    pub y: i32,
-    /// Element width in pixels
-    pub width: u32,
-    /// Element height in pixels
-    pub height: u32,
-    /// Whether the element is enabled
-    pub enabled: bool,
+    role: String,
+    title: Option<String>,
+    value: Option<String>,
+    description: Option<String>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    enabled: bool,
 }
 
 impl ElementInfo {
@@ -39,6 +30,7 @@ impl ElementInfo {
         height: u32,
         enabled: bool,
     ) -> Self {
+        debug_assert!(!role.is_empty(), "Element role must not be empty");
         Self {
             role,
             title,
@@ -50,6 +42,34 @@ impl ElementInfo {
             height,
             enabled,
         }
+    }
+
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+    pub fn x(&self) -> i32 {
+        self.x
+    }
+    pub fn y(&self) -> i32 {
+        self.y
+    }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 
     /// Check if any text field contains the given substring (case-insensitive)
@@ -67,15 +87,11 @@ impl ElementInfo {
 #[derive(Debug, Clone)]
 pub struct ElementsRequest {
     pub target: InteractionTarget,
-    pub role_filter: Option<String>,
 }
 
 impl ElementsRequest {
     pub fn new(target: InteractionTarget) -> Self {
-        Self {
-            target,
-            role_filter: None,
-        }
+        Self { target }
     }
 }
 
@@ -98,9 +114,9 @@ impl FindRequest {
 /// Result of listing elements
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementsResult {
-    pub elements: Vec<ElementInfo>,
-    pub window: String,
-    pub count: usize,
+    elements: Vec<ElementInfo>,
+    window: String,
+    count: usize,
 }
 
 impl ElementsResult {
@@ -111,6 +127,18 @@ impl ElementsResult {
             window,
             count,
         }
+    }
+
+    pub fn elements(&self) -> &[ElementInfo] {
+        &self.elements
+    }
+
+    pub fn window(&self) -> &str {
+        &self.window
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
     }
 }
 
@@ -131,15 +159,15 @@ mod tests {
             30,
             true,
         );
-        assert_eq!(elem.role, "AXButton");
-        assert_eq!(elem.title.as_deref(), Some("Submit"));
-        assert!(elem.value.is_none());
-        assert_eq!(elem.description.as_deref(), Some("Submit button"));
-        assert_eq!(elem.x, 100);
-        assert_eq!(elem.y, 200);
-        assert_eq!(elem.width, 80);
-        assert_eq!(elem.height, 30);
-        assert!(elem.enabled);
+        assert_eq!(elem.role(), "AXButton");
+        assert_eq!(elem.title(), Some("Submit"));
+        assert!(elem.value().is_none());
+        assert_eq!(elem.description(), Some("Submit button"));
+        assert_eq!(elem.x(), 100);
+        assert_eq!(elem.y(), 200);
+        assert_eq!(elem.width(), 80);
+        assert_eq!(elem.height(), 30);
+        assert!(elem.enabled());
     }
 
     #[test]
@@ -217,7 +245,6 @@ mod tests {
         let req = ElementsRequest::new(InteractionTarget::App {
             app: "Finder".to_string(),
         });
-        assert!(req.role_filter.is_none());
         match &req.target {
             InteractionTarget::App { app } => assert_eq!(app, "Finder"),
             _ => panic!("Expected App target"),
@@ -262,9 +289,9 @@ mod tests {
             ),
         ];
         let result = ElementsResult::new(elements, "Test Window".to_string());
-        assert_eq!(result.count, 2);
-        assert_eq!(result.window, "Test Window");
-        assert_eq!(result.elements.len(), 2);
+        assert_eq!(result.count(), 2);
+        assert_eq!(result.window(), "Test Window");
+        assert_eq!(result.elements().len(), 2);
     }
 
     #[test]
