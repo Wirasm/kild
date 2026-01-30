@@ -272,6 +272,20 @@ pub fn build_cli() -> Command {
                         .conflicts_with("at"),
                 )
                 .arg(
+                    Arg::new("right")
+                        .long("right")
+                        .help("Right-click (context menu)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("double"),
+                )
+                .arg(
+                    Arg::new("double")
+                        .long("double")
+                        .help("Double-click")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("right"),
+                )
+                .arg(
                     Arg::new("json")
                         .long("json")
                         .help("Output in JSON format")
@@ -354,6 +368,171 @@ pub fn build_cli() -> Command {
                         .required(true)
                         .index(1)
                         .help("Key combination (e.g., \"enter\", \"tab\", \"cmd+s\", \"cmd+shift+p\")"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
+                ),
+        )
+        // Drag subcommand
+        .subcommand(
+            Command::new("drag")
+                .about("Drag from one point to another within a window")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("from")
+                        .long("from")
+                        .required(true)
+                        .help("Start coordinates: x,y (relative to window top-left)"),
+                )
+                .arg(
+                    Arg::new("to")
+                        .long("to")
+                        .required(true)
+                        .help("End coordinates: x,y (relative to window top-left)"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
+                ),
+        )
+        // Scroll subcommand
+        .subcommand(
+            Command::new("scroll")
+                .about("Scroll within a window")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("up")
+                        .long("up")
+                        .help("Lines to scroll up")
+                        .value_parser(clap::value_parser!(i32))
+                        .conflicts_with("down"),
+                )
+                .arg(
+                    Arg::new("down")
+                        .long("down")
+                        .help("Lines to scroll down")
+                        .value_parser(clap::value_parser!(i32))
+                        .conflicts_with("up"),
+                )
+                .arg(
+                    Arg::new("left")
+                        .long("left")
+                        .help("Lines to scroll left")
+                        .value_parser(clap::value_parser!(i32))
+                        .conflicts_with("scroll_right"),
+                )
+                .arg(
+                    Arg::new("scroll_right")
+                        .long("right")
+                        .help("Lines to scroll right")
+                        .value_parser(clap::value_parser!(i32))
+                        .conflicts_with("left"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .help("Position to scroll at: x,y (relative to window top-left)"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
+                ),
+        )
+        // Hover subcommand
+        .subcommand(
+            Command::new("hover")
+                .about("Move the mouse to a position or element without clicking")
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .short('w')
+                        .help("Target window by title"),
+                )
+                .arg(
+                    Arg::new("app")
+                        .long("app")
+                        .short('a')
+                        .help("Target window by app name"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .help("Coordinates to hover: x,y (relative to window top-left)")
+                        .conflicts_with("text"),
+                )
+                .arg(
+                    Arg::new("text")
+                        .long("text")
+                        .help("Hover over element by text content (uses Accessibility API)")
+                        .conflicts_with("at"),
                 )
                 .arg(
                     Arg::new("json")
@@ -1444,5 +1623,382 @@ mod tests {
             "0,0,500,300"
         );
         assert_eq!(*screenshot_matches.get_one::<usize>("monitor").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_cli_click_right_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--right",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert!(click_matches.get_flag("right"));
+        assert!(!click_matches.get_flag("double"));
+    }
+
+    #[test]
+    fn test_cli_click_double_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--double",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert!(!click_matches.get_flag("right"));
+        assert!(click_matches.get_flag("double"));
+    }
+
+    #[test]
+    fn test_cli_click_right_double_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--right",
+            "--double",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_click_right_with_text() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--text",
+            "File",
+            "--right",
+        ]);
+        assert!(matches.is_ok());
+    }
+
+    #[test]
+    fn test_cli_drag_basic() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "drag",
+            "--app",
+            "Finder",
+            "--from",
+            "100,100",
+            "--to",
+            "300,200",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let drag_matches = matches.subcommand_matches("drag").unwrap();
+        assert_eq!(drag_matches.get_one::<String>("from").unwrap(), "100,100");
+        assert_eq!(drag_matches.get_one::<String>("to").unwrap(), "300,200");
+    }
+
+    #[test]
+    fn test_cli_drag_requires_from() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "drag",
+            "--app",
+            "Finder",
+            "--to",
+            "300,200",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_drag_requires_to() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "drag",
+            "--app",
+            "Finder",
+            "--from",
+            "100,100",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_drag_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "drag",
+            "--app",
+            "Finder",
+            "--from",
+            "100,100",
+            "--to",
+            "300,200",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let drag_matches = matches.subcommand_matches("drag").unwrap();
+        assert!(drag_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_drag_wait() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "drag",
+            "--app",
+            "Finder",
+            "--from",
+            "10,20",
+            "--to",
+            "30,40",
+            "--wait",
+            "--timeout",
+            "5000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let drag_matches = matches.subcommand_matches("drag").unwrap();
+        assert!(drag_matches.get_flag("wait"));
+        assert_eq!(*drag_matches.get_one::<u64>("timeout").unwrap(), 5000);
+    }
+
+    #[test]
+    fn test_cli_scroll_down() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--down",
+            "5",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let scroll_matches = matches.subcommand_matches("scroll").unwrap();
+        assert_eq!(*scroll_matches.get_one::<i32>("down").unwrap(), 5);
+    }
+
+    #[test]
+    fn test_cli_scroll_up() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "scroll", "--app", "Finder", "--up", "3"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let scroll_matches = matches.subcommand_matches("scroll").unwrap();
+        assert_eq!(*scroll_matches.get_one::<i32>("up").unwrap(), 3);
+    }
+
+    #[test]
+    fn test_cli_scroll_up_down_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--up",
+            "3",
+            "--down",
+            "5",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_scroll_left_right_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--left",
+            "2",
+            "--right",
+            "4",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_scroll_with_at() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--down",
+            "5",
+            "--at",
+            "100,200",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let scroll_matches = matches.subcommand_matches("scroll").unwrap();
+        assert_eq!(scroll_matches.get_one::<String>("at").unwrap(), "100,200");
+    }
+
+    #[test]
+    fn test_cli_scroll_horizontal() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--right",
+            "4",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let scroll_matches = matches.subcommand_matches("scroll").unwrap();
+        assert_eq!(*scroll_matches.get_one::<i32>("scroll_right").unwrap(), 4);
+    }
+
+    #[test]
+    fn test_cli_scroll_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "scroll",
+            "--app",
+            "Finder",
+            "--down",
+            "5",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let scroll_matches = matches.subcommand_matches("scroll").unwrap();
+        assert!(scroll_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_hover_at() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "hover",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hover_matches = matches.subcommand_matches("hover").unwrap();
+        assert_eq!(hover_matches.get_one::<String>("at").unwrap(), "100,50");
+    }
+
+    #[test]
+    fn test_cli_hover_text() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "hover",
+            "--app",
+            "Finder",
+            "--text",
+            "File",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hover_matches = matches.subcommand_matches("hover").unwrap();
+        assert_eq!(hover_matches.get_one::<String>("text").unwrap(), "File");
+    }
+
+    #[test]
+    fn test_cli_hover_at_text_conflict() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "hover",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--text",
+            "File",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_hover_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "hover",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--json",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hover_matches = matches.subcommand_matches("hover").unwrap();
+        assert!(hover_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_hover_wait() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "hover",
+            "--app",
+            "Finder",
+            "--at",
+            "50,50",
+            "--wait",
+            "--timeout",
+            "3000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hover_matches = matches.subcommand_matches("hover").unwrap();
+        assert!(hover_matches.get_flag("wait"));
+        assert_eq!(*hover_matches.get_one::<u64>("timeout").unwrap(), 3000);
     }
 }

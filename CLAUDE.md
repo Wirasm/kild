@@ -113,6 +113,19 @@ cargo run -p kild-peek -- click --window "Terminal" --at 100,50 --json  # JSON o
 cargo run -p kild-peek -- click --app KILD --text "Create"       # Click element by text
 cargo run -p kild-peek -- click --app Finder --text "File" --json  # Click by text, JSON output
 cargo run -p kild-peek -- click --app KILD --text "Create" --wait  # Wait for window to appear
+cargo run -p kild-peek -- click --app Finder --at 100,50 --right  # Right-click (context menu)
+cargo run -p kild-peek -- click --app Finder --at 100,50 --double # Double-click
+cargo run -p kild-peek -- click --app Finder --text "File" --right  # Right-click element by text
+cargo run -p kild-peek -- drag --app Finder --from 100,100 --to 300,200  # Drag from point to point
+cargo run -p kild-peek -- drag --app Finder --from 10,20 --to 30,40 --json  # JSON output
+cargo run -p kild-peek -- scroll --app Finder --down 5            # Scroll down 5 lines
+cargo run -p kild-peek -- scroll --app Finder --up 3              # Scroll up 3 lines
+cargo run -p kild-peek -- scroll --app Finder --left 2            # Scroll left 2 lines
+cargo run -p kild-peek -- scroll --app Finder --right 4           # Scroll right 4 lines
+cargo run -p kild-peek -- scroll --app Finder --at 100,200 --down 5  # Scroll at position
+cargo run -p kild-peek -- hover --app Finder --at 100,50          # Move mouse without clicking
+cargo run -p kild-peek -- hover --app Finder --text "File"        # Hover over element by text
+cargo run -p kild-peek -- hover --app Finder --at 50,50 --json    # JSON output
 cargo run -p kild-peek -- type --window "Terminal" "hello world"  # Type text
 cargo run -p kild-peek -- type --app TextEdit "some text"         # Target by app
 cargo run -p kild-peek -- type --window "Terminal" "test" --json  # JSON output

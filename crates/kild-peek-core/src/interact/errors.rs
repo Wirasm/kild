@@ -69,6 +69,17 @@ pub enum InteractionError {
         title: String,
         timeout_ms: u64,
     },
+
+    #[error("Failed to create scroll event")]
+    ScrollEventFailed,
+
+    #[error("Failed to create drag event from ({from_x}, {from_y}) to ({to_x}, {to_y})")]
+    DragEventFailed {
+        from_x: f64,
+        from_y: f64,
+        to_x: f64,
+        to_y: f64,
+    },
 }
 
 impl PeekError for InteractionError {
@@ -97,6 +108,8 @@ impl PeekError for InteractionError {
             InteractionError::WaitTimeoutByAppAndTitle { .. } => {
                 "INTERACTION_WAIT_TIMEOUT_BY_APP_AND_TITLE"
             }
+            InteractionError::ScrollEventFailed => "INTERACTION_SCROLL_EVENT_FAILED",
+            InteractionError::DragEventFailed { .. } => "INTERACTION_DRAG_EVENT_FAILED",
         }
     }
 
@@ -356,5 +369,29 @@ mod tests {
             title: "test".to_string(),
         };
         assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn test_scroll_event_failed_error() {
+        let error = InteractionError::ScrollEventFailed;
+        assert_eq!(error.to_string(), "Failed to create scroll event");
+        assert_eq!(error.error_code(), "INTERACTION_SCROLL_EVENT_FAILED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_drag_event_failed_error() {
+        let error = InteractionError::DragEventFailed {
+            from_x: 100.0,
+            from_y: 200.0,
+            to_x: 300.0,
+            to_y: 400.0,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Failed to create drag event from (100, 200) to (300, 400)"
+        );
+        assert_eq!(error.error_code(), "INTERACTION_DRAG_EVENT_FAILED");
+        assert!(!error.is_user_error());
     }
 }
