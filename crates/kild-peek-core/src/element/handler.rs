@@ -5,7 +5,9 @@ use super::errors::ElementError;
 use super::types::{ElementInfo, ElementsRequest, ElementsResult, FindRequest};
 use crate::interact::InteractionTarget;
 use crate::window::{
-    WindowError, WindowInfo, find_window_by_app, find_window_by_app_and_title, find_window_by_title,
+    WindowError, WindowInfo, find_window_by_app, find_window_by_app_and_title,
+    find_window_by_app_and_title_with_wait, find_window_by_app_with_wait, find_window_by_title,
+    find_window_by_title_with_wait,
 };
 
 // SAFETY: FFI declaration for AXIsProcessTrusted from macOS ApplicationServices framework.
@@ -24,12 +26,26 @@ fn check_accessibility_permission() -> Result<(), ElementError> {
     Ok(())
 }
 
-/// Find a window by interaction target
-fn find_window_by_target(target: &InteractionTarget) -> Result<WindowInfo, ElementError> {
-    let result = match target {
-        InteractionTarget::Window { title } => find_window_by_title(title),
-        InteractionTarget::App { app } => find_window_by_app(app),
-        InteractionTarget::AppAndWindow { app, title } => find_window_by_app_and_title(app, title),
+/// Find a window by interaction target, optionally waiting for it to appear
+fn find_window_by_target(
+    target: &InteractionTarget,
+    timeout_ms: Option<u64>,
+) -> Result<WindowInfo, ElementError> {
+    let result = match (target, timeout_ms) {
+        (InteractionTarget::Window { title }, Some(timeout)) => {
+            find_window_by_title_with_wait(title, timeout)
+        }
+        (InteractionTarget::Window { title }, None) => find_window_by_title(title),
+        (InteractionTarget::App { app }, Some(timeout)) => {
+            find_window_by_app_with_wait(app, timeout)
+        }
+        (InteractionTarget::App { app }, None) => find_window_by_app(app),
+        (InteractionTarget::AppAndWindow { app, title }, Some(timeout)) => {
+            find_window_by_app_and_title_with_wait(app, title, timeout)
+        }
+        (InteractionTarget::AppAndWindow { app, title }, None) => {
+            find_window_by_app_and_title(app, title)
+        }
     };
     result.map_err(map_window_error)
 }
@@ -41,6 +57,19 @@ fn map_window_error(error: WindowError) -> ElementError {
     match error {
         WindowNotFound { title } => ElementError::WindowNotFound { title },
         WindowNotFoundByApp { app } => ElementError::WindowNotFoundByApp { app },
+        WaitTimeoutByTitle { title, timeout_ms } => {
+            ElementError::WaitTimeoutByTitle { title, timeout_ms }
+        }
+        WaitTimeoutByApp { app, timeout_ms } => ElementError::WaitTimeoutByApp { app, timeout_ms },
+        WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        } => ElementError::WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        },
         other => {
             warn!(
                 event = "peek.core.element.window_error_unmapped",
@@ -62,7 +91,7 @@ pub fn list_elements(request: &ElementsRequest) -> Result<ElementsResult, Elemen
 
     check_accessibility_permission()?;
 
-    let window = find_window_by_target(request.target())?;
+    let window = find_window_by_target(request.target(), request.timeout_ms())?;
 
     if window.is_minimized() {
         return Err(ElementError::WindowMinimized {
@@ -105,7 +134,10 @@ pub fn find_element(request: &FindRequest) -> Result<ElementInfo, ElementError> 
     }
 
     // List all elements then filter
-    let elements_request = ElementsRequest::new(request.target().clone());
+    let mut elements_request = ElementsRequest::new(request.target().clone());
+    if let Some(timeout) = request.timeout_ms() {
+        elements_request = elements_request.with_wait(timeout);
+    }
     let result = list_elements(&elements_request)?;
 
     let matches: Vec<&ElementInfo> = result
@@ -278,6 +310,57 @@ mod tests {
                 assert!(reason.contains("test error"));
             }
             _ => panic!("Expected WindowLookupFailed"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_title() {
+        let err = map_window_error(WindowError::WaitTimeoutByTitle {
+            title: "Test".to_string(),
+            timeout_ms: 5000,
+        });
+        match err {
+            ElementError::WaitTimeoutByTitle { title, timeout_ms } => {
+                assert_eq!(title, "Test");
+                assert_eq!(timeout_ms, 5000);
+            }
+            _ => panic!("Expected WaitTimeoutByTitle"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_app() {
+        let err = map_window_error(WindowError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 3000,
+        });
+        match err {
+            ElementError::WaitTimeoutByApp { app, timeout_ms } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(timeout_ms, 3000);
+            }
+            _ => panic!("Expected WaitTimeoutByApp"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_app_and_title() {
+        let err = map_window_error(WindowError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 10000,
+        });
+        match err {
+            ElementError::WaitTimeoutByAppAndTitle {
+                app,
+                title,
+                timeout_ms,
+            } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(title, "Terminal");
+                assert_eq!(timeout_ms, 10000);
+            }
+            _ => panic!("Expected WaitTimeoutByAppAndTitle"),
         }
     }
 

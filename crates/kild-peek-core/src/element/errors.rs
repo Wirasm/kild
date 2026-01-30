@@ -30,6 +30,19 @@ pub enum ElementError {
 
     #[error("Window lookup failed: {reason}")]
     WindowLookupFailed { reason: String },
+
+    #[error("Window '{title}' not found after {timeout_ms}ms")]
+    WaitTimeoutByTitle { title: String, timeout_ms: u64 },
+
+    #[error("Window for app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByApp { app: String, timeout_ms: u64 },
+
+    #[error("Window '{title}' in app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByAppAndTitle {
+        app: String,
+        title: String,
+        timeout_ms: u64,
+    },
 }
 
 impl PeekError for ElementError {
@@ -44,6 +57,11 @@ impl PeekError for ElementError {
             ElementError::NoPidAvailable => "ELEMENT_NO_PID",
             ElementError::WindowMinimized { .. } => "ELEMENT_WINDOW_MINIMIZED",
             ElementError::WindowLookupFailed { .. } => "ELEMENT_WINDOW_LOOKUP_FAILED",
+            ElementError::WaitTimeoutByTitle { .. } => "ELEMENT_WAIT_TIMEOUT_BY_TITLE",
+            ElementError::WaitTimeoutByApp { .. } => "ELEMENT_WAIT_TIMEOUT_BY_APP",
+            ElementError::WaitTimeoutByAppAndTitle { .. } => {
+                "ELEMENT_WAIT_TIMEOUT_BY_APP_AND_TITLE"
+            }
         }
     }
 
@@ -58,6 +76,9 @@ impl PeekError for ElementError {
                 | ElementError::NoPidAvailable
                 | ElementError::WindowMinimized { .. }
                 | ElementError::WindowLookupFailed { .. }
+                | ElementError::WaitTimeoutByTitle { .. }
+                | ElementError::WaitTimeoutByApp { .. }
+                | ElementError::WaitTimeoutByAppAndTitle { .. }
         )
     }
 }
@@ -157,6 +178,49 @@ mod tests {
             "Window lookup failed: enumeration failed"
         );
         assert_eq!(error.error_code(), "ELEMENT_WINDOW_LOOKUP_FAILED");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_title_error() {
+        let error = ElementError::WaitTimeoutByTitle {
+            title: "Test Window".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Test Window' not found after 5000ms"
+        );
+        assert_eq!(error.error_code(), "ELEMENT_WAIT_TIMEOUT_BY_TITLE");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_error() {
+        let error = ElementError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 3000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window for app 'Ghostty' not found after 3000ms"
+        );
+        assert_eq!(error.error_code(), "ELEMENT_WAIT_TIMEOUT_BY_APP");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_and_title_error() {
+        let error = ElementError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 10000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Terminal' in app 'Ghostty' not found after 10000ms"
+        );
+        assert_eq!(error.error_code(), "ELEMENT_WAIT_TIMEOUT_BY_APP_AND_TITLE");
         assert!(error.is_user_error());
     }
 

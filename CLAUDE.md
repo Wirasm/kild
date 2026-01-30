@@ -101,21 +101,27 @@ cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
 cargo run -p kild-peek -- diff img1.png img2.png --diff-output /tmp/diff.png
 cargo run -p kild-peek -- elements --app Finder                  # List all UI elements
 cargo run -p kild-peek -- elements --window "Terminal" --json    # JSON output
+cargo run -p kild-peek -- elements --app Finder --wait           # Wait for window to appear
+cargo run -p kild-peek -- elements --app Finder --wait --timeout 5000  # Custom timeout
 cargo run -p kild-peek -- find --app Finder --text "File"        # Find element by text
 cargo run -p kild-peek -- find --app KILD --text "Create" --json # JSON output
+cargo run -p kild-peek -- find --app KILD --text "Create" --wait # Wait for window to appear
 cargo run -p kild-peek -- click --window "Terminal" --at 100,50  # Click at coordinates (x,y)
 cargo run -p kild-peek -- click --app Ghostty --at 200,100      # Target by app name
 cargo run -p kild-peek -- click --app Ghostty --window "Terminal" --at 150,75  # Target both
 cargo run -p kild-peek -- click --window "Terminal" --at 100,50 --json  # JSON output
 cargo run -p kild-peek -- click --app KILD --text "Create"       # Click element by text
 cargo run -p kild-peek -- click --app Finder --text "File" --json  # Click by text, JSON output
+cargo run -p kild-peek -- click --app KILD --text "Create" --wait  # Wait for window to appear
 cargo run -p kild-peek -- type --window "Terminal" "hello world"  # Type text
 cargo run -p kild-peek -- type --app TextEdit "some text"         # Target by app
 cargo run -p kild-peek -- type --window "Terminal" "test" --json  # JSON output
+cargo run -p kild-peek -- type --app TextEdit "text" --wait       # Wait for window to appear
 cargo run -p kild-peek -- key --window "Terminal" "enter"         # Single key
 cargo run -p kild-peek -- key --app Ghostty "cmd+s"               # Key combo
 cargo run -p kild-peek -- key --window "Terminal" "cmd+shift+p"   # Multiple modifiers
 cargo run -p kild-peek -- key --app TextEdit "tab" --json         # JSON output
+cargo run -p kild-peek -- key --app Ghostty "enter" --wait        # Wait for window to appear
 cargo run -p kild-peek -- assert --app "KILD" --exists
 cargo run -p kild-peek -- assert --window "KILD" --visible
 cargo run -p kild-peek -- assert --window "KILD" --exists --wait  # Wait for window to appear

@@ -13,7 +13,9 @@ use super::types::{
     TypeRequest,
 };
 use crate::window::{
-    WindowError, WindowInfo, find_window_by_app, find_window_by_app_and_title, find_window_by_title,
+    WindowError, WindowInfo, find_window_by_app, find_window_by_app_and_title,
+    find_window_by_app_and_title_with_wait, find_window_by_app_with_wait, find_window_by_title,
+    find_window_by_title_with_wait,
 };
 
 // SAFETY: FFI declaration for AXIsProcessTrusted from macOS ApplicationServices framework.
@@ -42,8 +44,11 @@ fn check_accessibility_permission() -> Result<(), InteractionError> {
 }
 
 /// Resolve an InteractionTarget to a WindowInfo and focus the window
-fn resolve_and_focus_window(target: &InteractionTarget) -> Result<WindowInfo, InteractionError> {
-    let window = find_window_by_target(target)?;
+fn resolve_and_focus_window(
+    target: &InteractionTarget,
+    timeout_ms: Option<u64>,
+) -> Result<WindowInfo, InteractionError> {
+    let window = find_window_by_target(target, timeout_ms)?;
 
     if window.is_minimized() {
         return Err(InteractionError::WindowMinimized {
@@ -60,12 +65,26 @@ fn resolve_and_focus_window(target: &InteractionTarget) -> Result<WindowInfo, In
     Ok(window)
 }
 
-/// Find a window by interaction target
-fn find_window_by_target(target: &InteractionTarget) -> Result<WindowInfo, InteractionError> {
-    let result = match target {
-        InteractionTarget::Window { title } => find_window_by_title(title),
-        InteractionTarget::App { app } => find_window_by_app(app),
-        InteractionTarget::AppAndWindow { app, title } => find_window_by_app_and_title(app, title),
+/// Find a window by interaction target, optionally waiting for it to appear
+fn find_window_by_target(
+    target: &InteractionTarget,
+    timeout_ms: Option<u64>,
+) -> Result<WindowInfo, InteractionError> {
+    let result = match (target, timeout_ms) {
+        (InteractionTarget::Window { title }, Some(timeout)) => {
+            find_window_by_title_with_wait(title, timeout)
+        }
+        (InteractionTarget::Window { title }, None) => find_window_by_title(title),
+        (InteractionTarget::App { app }, Some(timeout)) => {
+            find_window_by_app_with_wait(app, timeout)
+        }
+        (InteractionTarget::App { app }, None) => find_window_by_app(app),
+        (InteractionTarget::AppAndWindow { app, title }, Some(timeout)) => {
+            find_window_by_app_and_title_with_wait(app, title, timeout)
+        }
+        (InteractionTarget::AppAndWindow { app, title }, None) => {
+            find_window_by_app_and_title(app, title)
+        }
     };
     result.map_err(map_window_error)
 }
@@ -124,6 +143,21 @@ fn map_window_error(error: WindowError) -> InteractionError {
     match error {
         WindowNotFound { title } => InteractionError::WindowNotFound { title },
         WindowNotFoundByApp { app } => InteractionError::WindowNotFoundByApp { app },
+        WaitTimeoutByTitle { title, timeout_ms } => {
+            InteractionError::WaitTimeoutByTitle { title, timeout_ms }
+        }
+        WaitTimeoutByApp { app, timeout_ms } => {
+            InteractionError::WaitTimeoutByApp { app, timeout_ms }
+        }
+        WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        } => InteractionError::WaitTimeoutByAppAndTitle {
+            app,
+            title,
+            timeout_ms,
+        },
         other => {
             warn!(
                 event = "peek.core.interact.window_error_unmapped",
@@ -175,7 +209,7 @@ pub fn click(request: &ClickRequest) -> Result<InteractionResult, InteractionErr
 
     check_accessibility_permission()?;
 
-    let window = resolve_and_focus_window(&request.target)?;
+    let window = resolve_and_focus_window(&request.target, request.timeout_ms)?;
     validate_coordinates(request.x, request.y, &window)?;
 
     let (screen_x, screen_y) = to_screen_coordinates(request.x, request.y, &window);
@@ -249,7 +283,7 @@ pub fn type_text(request: &TypeRequest) -> Result<InteractionResult, Interaction
 
     check_accessibility_permission()?;
 
-    let window = resolve_and_focus_window(&request.target)?;
+    let window = resolve_and_focus_window(&request.target, request.timeout_ms)?;
 
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|()| InteractionError::EventSourceFailed)?;
@@ -300,7 +334,7 @@ pub fn send_key_combo(request: &KeyComboRequest) -> Result<InteractionResult, In
 
     check_accessibility_permission()?;
 
-    let window = resolve_and_focus_window(&request.target)?;
+    let window = resolve_and_focus_window(&request.target, request.timeout_ms)?;
     let mapping = operations::parse_key_combo(&request.combo)?;
 
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
@@ -375,7 +409,7 @@ pub fn click_text(request: &ClickTextRequest) -> Result<InteractionResult, Inter
     check_accessibility_permission()?;
 
     // Find the window (without focusing yet)
-    let window = find_window_by_target(request.target())?;
+    let window = find_window_by_target(request.target(), request.timeout_ms())?;
 
     if window.is_minimized() {
         return Err(InteractionError::WindowMinimized {
@@ -615,6 +649,57 @@ mod tests {
                 assert!(reason.contains("test error"));
             }
             _ => panic!("Expected WindowLookupFailed"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_title() {
+        let err = map_window_error(WindowError::WaitTimeoutByTitle {
+            title: "Test".to_string(),
+            timeout_ms: 5000,
+        });
+        match err {
+            InteractionError::WaitTimeoutByTitle { title, timeout_ms } => {
+                assert_eq!(title, "Test");
+                assert_eq!(timeout_ms, 5000);
+            }
+            _ => panic!("Expected WaitTimeoutByTitle"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_app() {
+        let err = map_window_error(WindowError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 3000,
+        });
+        match err {
+            InteractionError::WaitTimeoutByApp { app, timeout_ms } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(timeout_ms, 3000);
+            }
+            _ => panic!("Expected WaitTimeoutByApp"),
+        }
+    }
+
+    #[test]
+    fn test_map_window_error_wait_timeout_by_app_and_title() {
+        let err = map_window_error(WindowError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 10000,
+        });
+        match err {
+            InteractionError::WaitTimeoutByAppAndTitle {
+                app,
+                title,
+                timeout_ms,
+            } => {
+                assert_eq!(app, "Ghostty");
+                assert_eq!(title, "Terminal");
+                assert_eq!(timeout_ms, 10000);
+            }
+            _ => panic!("Expected WaitTimeoutByAppAndTitle"),
         }
     }
 

@@ -17,11 +17,22 @@ pub struct ClickRequest {
     pub target: InteractionTarget,
     pub x: i32,
     pub y: i32,
+    pub timeout_ms: Option<u64>,
 }
 
 impl ClickRequest {
     pub fn new(target: InteractionTarget, x: i32, y: i32) -> Self {
-        Self { target, x, y }
+        Self {
+            target,
+            x,
+            y,
+            timeout_ms: None,
+        }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 }
 
@@ -30,6 +41,7 @@ impl ClickRequest {
 pub struct TypeRequest {
     pub target: InteractionTarget,
     pub text: String,
+    pub timeout_ms: Option<u64>,
 }
 
 impl TypeRequest {
@@ -37,7 +49,13 @@ impl TypeRequest {
         Self {
             target,
             text: text.into(),
+            timeout_ms: None,
         }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 }
 
@@ -47,6 +65,7 @@ pub struct KeyComboRequest {
     pub target: InteractionTarget,
     /// Key combination string, e.g., "cmd+s", "enter", "cmd+shift+p"
     pub combo: String,
+    pub timeout_ms: Option<u64>,
 }
 
 impl KeyComboRequest {
@@ -54,7 +73,13 @@ impl KeyComboRequest {
         Self {
             target,
             combo: combo.into(),
+            timeout_ms: None,
         }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 }
 
@@ -63,6 +88,7 @@ impl KeyComboRequest {
 pub struct ClickTextRequest {
     target: InteractionTarget,
     text: String,
+    timeout_ms: Option<u64>,
 }
 
 impl ClickTextRequest {
@@ -70,7 +96,13 @@ impl ClickTextRequest {
         Self {
             target,
             text: text.into(),
+            timeout_ms: None,
         }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 
     pub fn target(&self) -> &InteractionTarget {
@@ -79,6 +111,10 @@ impl ClickTextRequest {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub fn timeout_ms(&self) -> Option<u64> {
+        self.timeout_ms
     }
 }
 
@@ -238,5 +274,77 @@ mod tests {
         let debug = format!("{:?}", target);
         assert!(debug.contains("Window"));
         assert!(debug.contains("Test"));
+    }
+
+    #[test]
+    fn test_click_request_default_timeout_none() {
+        let req = ClickRequest::new(
+            InteractionTarget::Window {
+                title: "Terminal".to_string(),
+            },
+            100,
+            50,
+        );
+        assert!(req.timeout_ms.is_none());
+    }
+
+    #[test]
+    fn test_click_request_with_wait() {
+        let req = ClickRequest::new(
+            InteractionTarget::Window {
+                title: "Terminal".to_string(),
+            },
+            100,
+            50,
+        )
+        .with_wait(5000);
+        assert_eq!(req.timeout_ms, Some(5000));
+    }
+
+    #[test]
+    fn test_type_request_with_wait() {
+        let req = TypeRequest::new(
+            InteractionTarget::App {
+                app: "TextEdit".to_string(),
+            },
+            "hello",
+        )
+        .with_wait(3000);
+        assert_eq!(req.timeout_ms, Some(3000));
+    }
+
+    #[test]
+    fn test_key_combo_request_with_wait() {
+        let req = KeyComboRequest::new(
+            InteractionTarget::App {
+                app: "Ghostty".to_string(),
+            },
+            "cmd+s",
+        )
+        .with_wait(10000);
+        assert_eq!(req.timeout_ms, Some(10000));
+    }
+
+    #[test]
+    fn test_click_text_request_with_wait() {
+        let req = ClickTextRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "File",
+        )
+        .with_wait(5000);
+        assert_eq!(req.timeout_ms(), Some(5000));
+    }
+
+    #[test]
+    fn test_click_text_request_default_timeout_none() {
+        let req = ClickTextRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "File",
+        );
+        assert!(req.timeout_ms().is_none());
     }
 }

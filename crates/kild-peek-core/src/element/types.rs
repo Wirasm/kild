@@ -87,15 +87,28 @@ impl ElementInfo {
 #[derive(Debug, Clone)]
 pub struct ElementsRequest {
     target: InteractionTarget,
+    timeout_ms: Option<u64>,
 }
 
 impl ElementsRequest {
     pub fn new(target: InteractionTarget) -> Self {
-        Self { target }
+        Self {
+            target,
+            timeout_ms: None,
+        }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 
     pub fn target(&self) -> &InteractionTarget {
         &self.target
+    }
+
+    pub fn timeout_ms(&self) -> Option<u64> {
+        self.timeout_ms
     }
 }
 
@@ -104,6 +117,7 @@ impl ElementsRequest {
 pub struct FindRequest {
     target: InteractionTarget,
     text: String,
+    timeout_ms: Option<u64>,
 }
 
 impl FindRequest {
@@ -111,7 +125,13 @@ impl FindRequest {
         Self {
             target,
             text: text.into(),
+            timeout_ms: None,
         }
+    }
+
+    pub fn with_wait(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
     }
 
     pub fn target(&self) -> &InteractionTarget {
@@ -120,6 +140,10 @@ impl FindRequest {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub fn timeout_ms(&self) -> Option<u64> {
+        self.timeout_ms
     }
 }
 
@@ -388,6 +412,46 @@ mod tests {
         assert!(elem.matches_text("日本語"));
         assert!(elem.matches_text("text"));
         assert!(elem.matches_text("mixed"));
+    }
+
+    #[test]
+    fn test_elements_request_with_wait() {
+        let req = ElementsRequest::new(InteractionTarget::App {
+            app: "Finder".to_string(),
+        })
+        .with_wait(5000);
+        assert_eq!(req.timeout_ms(), Some(5000));
+    }
+
+    #[test]
+    fn test_elements_request_default_timeout_none() {
+        let req = ElementsRequest::new(InteractionTarget::App {
+            app: "Finder".to_string(),
+        });
+        assert!(req.timeout_ms().is_none());
+    }
+
+    #[test]
+    fn test_find_request_with_wait() {
+        let req = FindRequest::new(
+            InteractionTarget::Window {
+                title: "KILD".to_string(),
+            },
+            "Submit",
+        )
+        .with_wait(10000);
+        assert_eq!(req.timeout_ms(), Some(10000));
+    }
+
+    #[test]
+    fn test_find_request_default_timeout_none() {
+        let req = FindRequest::new(
+            InteractionTarget::Window {
+                title: "KILD".to_string(),
+            },
+            "Submit",
+        );
+        assert!(req.timeout_ms().is_none());
     }
 
     #[test]

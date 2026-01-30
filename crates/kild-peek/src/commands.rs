@@ -446,13 +446,20 @@ fn parse_coordinates(at_str: &str) -> Result<(i32, i32), Box<dyn std::error::Err
 fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let target = parse_interaction_target(matches)?;
     let json_output = matches.get_flag("json");
+    let wait_flag = matches.get_flag("wait");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
         event = "cli.elements_started",
-        target = ?target
+        target = ?target,
+        wait = wait_flag,
+        timeout_ms = timeout_ms
     );
 
-    let request = ElementsRequest::new(target);
+    let mut request = ElementsRequest::new(target);
+    if wait_flag {
+        request = request.with_wait(timeout_ms);
+    }
 
     match list_elements(&request) {
         Ok(result) => {
@@ -485,14 +492,21 @@ fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let target = parse_interaction_target(matches)?;
     let text = matches.get_one::<String>("text").unwrap();
     let json_output = matches.get_flag("json");
+    let wait_flag = matches.get_flag("wait");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
         event = "cli.find_started",
         text = text.as_str(),
-        target = ?target
+        target = ?target,
+        wait = wait_flag,
+        timeout_ms = timeout_ms
     );
 
-    let request = FindRequest::new(target, text);
+    let mut request = FindRequest::new(target, text);
+    if wait_flag {
+        request = request.with_wait(timeout_ms);
+    }
 
     match find_element(&request) {
         Ok(element) => {
@@ -536,6 +550,9 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let at_str = matches.get_one::<String>("at");
     let text_str = matches.get_one::<String>("text");
     let json_output = matches.get_flag("json");
+    let wait_flag = matches.get_flag("wait");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
+    let wait_timeout = if wait_flag { Some(timeout_ms) } else { None };
 
     // Must have either --at or --text
     if at_str.is_none() && text_str.is_none() {
@@ -544,7 +561,7 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
 
     // Dispatch to text-based or coordinate-based click
     if let Some(text) = text_str {
-        return handle_click_text(target, text, json_output);
+        return handle_click_text(target, text, json_output, wait_timeout);
     }
 
     let at_str = at_str.unwrap();
@@ -554,10 +571,15 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
         event = "cli.interact.click_started",
         x = x,
         y = y,
-        target = ?target
+        target = ?target,
+        wait = wait_flag,
+        timeout_ms = timeout_ms
     );
 
-    let request = ClickRequest::new(target, x, y);
+    let mut request = ClickRequest::new(target, x, y);
+    if wait_flag {
+        request = request.with_wait(timeout_ms);
+    }
 
     match click(&request) {
         Ok(result) => {
@@ -592,14 +614,19 @@ fn handle_click_text(
     target: InteractionTarget,
     text: &str,
     json_output: bool,
+    timeout_ms: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(
         event = "cli.interact.click_text_started",
         text = text,
-        target = ?target
+        target = ?target,
+        timeout_ms = ?timeout_ms
     );
 
-    let request = ClickTextRequest::new(target, text);
+    let mut request = ClickTextRequest::new(target, text);
+    if let Some(timeout) = timeout_ms {
+        request = request.with_wait(timeout);
+    }
 
     match click_text(&request) {
         Ok(result) => {
@@ -637,14 +664,21 @@ fn handle_type_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let target = parse_interaction_target(matches)?;
     let text = matches.get_one::<String>("text").unwrap();
     let json_output = matches.get_flag("json");
+    let wait_flag = matches.get_flag("wait");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
         event = "cli.interact.type_started",
         text_len = text.len(),
-        target = ?target
+        target = ?target,
+        wait = wait_flag,
+        timeout_ms = timeout_ms
     );
 
-    let request = TypeRequest::new(target, text);
+    let mut request = TypeRequest::new(target, text);
+    if wait_flag {
+        request = request.with_wait(timeout_ms);
+    }
 
     match type_text(&request) {
         Ok(result) => {
@@ -675,14 +709,21 @@ fn handle_key_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Er
     let target = parse_interaction_target(matches)?;
     let combo = matches.get_one::<String>("combo").unwrap();
     let json_output = matches.get_flag("json");
+    let wait_flag = matches.get_flag("wait");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
         event = "cli.interact.key_started",
         combo = combo.as_str(),
-        target = ?target
+        target = ?target,
+        wait = wait_flag,
+        timeout_ms = timeout_ms
     );
 
-    let request = KeyComboRequest::new(target, combo);
+    let mut request = KeyComboRequest::new(target, combo);
+    if wait_flag {
+        request = request.with_wait(timeout_ms);
+    }
 
     match send_key_combo(&request) {
         Ok(result) => {

@@ -186,6 +186,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Find subcommand
@@ -215,6 +228,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Click subcommand
@@ -250,6 +276,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Type subcommand
@@ -279,6 +318,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Key subcommand
@@ -308,6 +360,19 @@ pub fn build_cli() -> Command {
                         .long("json")
                         .help("Output in JSON format")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .help("Wait for window to appear (polls until found or timeout)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .help("Timeout in milliseconds when using --wait (default: 30000)")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("30000"),
                 ),
         )
         // Assert subcommand
@@ -1203,6 +1268,160 @@ mod tests {
             "Search",
         ]);
         assert!(matches.is_ok());
+    }
+
+    #[test]
+    fn test_cli_elements_wait_flag() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild-peek", "elements", "--app", "Finder", "--wait"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let elements_matches = matches.subcommand_matches("elements").unwrap();
+        assert!(elements_matches.get_flag("wait"));
+        assert_eq!(*elements_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_elements_wait_with_timeout() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "elements",
+            "--app",
+            "Finder",
+            "--wait",
+            "--timeout",
+            "5000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let elements_matches = matches.subcommand_matches("elements").unwrap();
+        assert!(elements_matches.get_flag("wait"));
+        assert_eq!(*elements_matches.get_one::<u64>("timeout").unwrap(), 5000);
+    }
+
+    #[test]
+    fn test_cli_find_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "find",
+            "--app",
+            "Finder",
+            "--text",
+            "File",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let find_matches = matches.subcommand_matches("find").unwrap();
+        assert!(find_matches.get_flag("wait"));
+        assert_eq!(*find_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_click_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert!(click_matches.get_flag("wait"));
+        assert_eq!(*click_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_click_wait_with_timeout() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "click",
+            "--app",
+            "Finder",
+            "--at",
+            "100,50",
+            "--wait",
+            "--timeout",
+            "2000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let click_matches = matches.subcommand_matches("click").unwrap();
+        assert!(click_matches.get_flag("wait"));
+        assert_eq!(*click_matches.get_one::<u64>("timeout").unwrap(), 2000);
+    }
+
+    #[test]
+    fn test_cli_type_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "type",
+            "--app",
+            "TextEdit",
+            "hello",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let type_matches = matches.subcommand_matches("type").unwrap();
+        assert!(type_matches.get_flag("wait"));
+        assert_eq!(*type_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_key_wait_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "key",
+            "--app",
+            "Ghostty",
+            "cmd+s",
+            "--wait",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let key_matches = matches.subcommand_matches("key").unwrap();
+        assert!(key_matches.get_flag("wait"));
+        assert_eq!(*key_matches.get_one::<u64>("timeout").unwrap(), 30000);
+    }
+
+    #[test]
+    fn test_cli_key_wait_with_timeout() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild-peek",
+            "key",
+            "--app",
+            "Ghostty",
+            "enter",
+            "--wait",
+            "--timeout",
+            "8000",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let key_matches = matches.subcommand_matches("key").unwrap();
+        assert!(key_matches.get_flag("wait"));
+        assert_eq!(*key_matches.get_one::<u64>("timeout").unwrap(), 8000);
     }
 
     #[test]

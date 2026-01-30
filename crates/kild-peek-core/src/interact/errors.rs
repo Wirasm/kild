@@ -56,6 +56,19 @@ pub enum InteractionError {
 
     #[error("Window has no PID available (required for element finding)")]
     NoPidAvailable,
+
+    #[error("Window '{title}' not found after {timeout_ms}ms")]
+    WaitTimeoutByTitle { title: String, timeout_ms: u64 },
+
+    #[error("Window for app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByApp { app: String, timeout_ms: u64 },
+
+    #[error("Window '{title}' in app '{app}' not found after {timeout_ms}ms")]
+    WaitTimeoutByAppAndTitle {
+        app: String,
+        title: String,
+        timeout_ms: u64,
+    },
 }
 
 impl PeekError for InteractionError {
@@ -79,6 +92,11 @@ impl PeekError for InteractionError {
             InteractionError::ElementNoPosition => "INTERACTION_ELEMENT_NO_POSITION",
             InteractionError::ElementQueryFailed { .. } => "INTERACTION_ELEMENT_QUERY_FAILED",
             InteractionError::NoPidAvailable => "INTERACTION_NO_PID",
+            InteractionError::WaitTimeoutByTitle { .. } => "INTERACTION_WAIT_TIMEOUT_BY_TITLE",
+            InteractionError::WaitTimeoutByApp { .. } => "INTERACTION_WAIT_TIMEOUT_BY_APP",
+            InteractionError::WaitTimeoutByAppAndTitle { .. } => {
+                "INTERACTION_WAIT_TIMEOUT_BY_APP_AND_TITLE"
+            }
         }
     }
 
@@ -97,6 +115,9 @@ impl PeekError for InteractionError {
                 | InteractionError::ElementAmbiguous { .. }
                 | InteractionError::ElementNoPosition
                 | InteractionError::NoPidAvailable
+                | InteractionError::WaitTimeoutByTitle { .. }
+                | InteractionError::WaitTimeoutByApp { .. }
+                | InteractionError::WaitTimeoutByAppAndTitle { .. }
         )
     }
 }
@@ -274,6 +295,52 @@ mod tests {
         let error = InteractionError::NoPidAvailable;
         assert!(error.to_string().contains("no PID available"));
         assert_eq!(error.error_code(), "INTERACTION_NO_PID");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_title_error() {
+        let error = InteractionError::WaitTimeoutByTitle {
+            title: "Test Window".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Test Window' not found after 5000ms"
+        );
+        assert_eq!(error.error_code(), "INTERACTION_WAIT_TIMEOUT_BY_TITLE");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_error() {
+        let error = InteractionError::WaitTimeoutByApp {
+            app: "Ghostty".to_string(),
+            timeout_ms: 3000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window for app 'Ghostty' not found after 3000ms"
+        );
+        assert_eq!(error.error_code(), "INTERACTION_WAIT_TIMEOUT_BY_APP");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_by_app_and_title_error() {
+        let error = InteractionError::WaitTimeoutByAppAndTitle {
+            app: "Ghostty".to_string(),
+            title: "Terminal".to_string(),
+            timeout_ms: 10000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Window 'Terminal' in app 'Ghostty' not found after 10000ms"
+        );
+        assert_eq!(
+            error.error_code(),
+            "INTERACTION_WAIT_TIMEOUT_BY_APP_AND_TITLE"
+        );
         assert!(error.is_user_error());
     }
 
