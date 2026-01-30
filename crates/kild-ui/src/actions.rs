@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 
 use kild_core::{CreateSessionRequest, KildConfig, Session, session_ops};
 
-use crate::state::{KildDisplay, OperationError, ProcessStatus};
+use crate::state::OperationError;
 use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
+use kild_core::{ProcessStatus, SessionInfo};
 
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
@@ -83,14 +84,14 @@ pub fn create_kild(
 /// Refresh the list of sessions from disk.
 ///
 /// Returns `(displays, error)` where `error` is `Some` if session loading failed.
-pub fn refresh_sessions() -> (Vec<KildDisplay>, Option<String>) {
+pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
     tracing::info!(event = "ui.refresh_sessions.started");
 
     match session_ops::list_sessions() {
         Ok(sessions) => {
             let displays = sessions
                 .into_iter()
-                .map(KildDisplay::from_session)
+                .map(SessionInfo::from_session)
                 .collect();
             tracing::info!(event = "ui.refresh_sessions.completed");
             (displays, None)
@@ -172,7 +173,7 @@ pub fn stop_kild(branch: &str) -> Result<(), String> {
 /// Open agents in all stopped kilds.
 ///
 /// Returns (opened_count, errors) where errors contains operation errors with branch names.
-pub fn open_all_stopped(displays: &[KildDisplay]) -> (usize, Vec<OperationError>) {
+pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,
         ProcessStatus::Stopped,
@@ -188,7 +189,7 @@ pub fn open_all_stopped(displays: &[KildDisplay]) -> (usize, Vec<OperationError>
 /// Stop all running kilds.
 ///
 /// Returns (stopped_count, errors) where errors contains operation errors with branch names.
-pub fn stop_all_running(displays: &[KildDisplay]) -> (usize, Vec<OperationError>) {
+pub fn stop_all_running(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,
         ProcessStatus::Running,
@@ -199,7 +200,7 @@ pub fn stop_all_running(displays: &[KildDisplay]) -> (usize, Vec<OperationError>
 
 /// Execute a bulk operation on kilds with a specific status.
 fn execute_bulk_operation(
-    displays: &[KildDisplay],
+    displays: &[SessionInfo],
     target_status: ProcessStatus,
     operation: impl Fn(&str) -> Result<(), String>,
     event_prefix: &str,
@@ -208,7 +209,7 @@ fn execute_bulk_operation(
 
     let targets: Vec<_> = displays
         .iter()
-        .filter(|d| d.status == target_status)
+        .filter(|d| d.process_status == target_status)
         .collect();
 
     let mut success_count = 0;
@@ -370,28 +371,27 @@ pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::{GitStatus, KildDisplay, ProcessStatus};
-    use kild_core::Session;
     use kild_core::projects::persistence::test_helpers::{
         PROJECTS_FILE_ENV_LOCK, ProjectsFileEnvGuard,
     };
     use kild_core::sessions::types::SessionStatus;
+    use kild_core::{GitStatus, ProcessStatus, Session, SessionInfo};
     use std::path::PathBuf;
 
     /// Get branches of all stopped kilds (for testing filtering logic).
-    fn get_stopped_branches(displays: &[KildDisplay]) -> Vec<String> {
+    fn get_stopped_branches(displays: &[SessionInfo]) -> Vec<String> {
         displays
             .iter()
-            .filter(|d| d.status == ProcessStatus::Stopped)
+            .filter(|d| d.process_status == ProcessStatus::Stopped)
             .map(|d| d.session.branch.clone())
             .collect()
     }
 
     /// Get branches of all running kilds (for testing filtering logic).
-    fn get_running_branches(displays: &[KildDisplay]) -> Vec<String> {
+    fn get_running_branches(displays: &[SessionInfo]) -> Vec<String> {
         displays
             .iter()
-            .filter(|d| d.status == ProcessStatus::Running)
+            .filter(|d| d.process_status == ProcessStatus::Running)
             .map(|d| d.session.branch.clone())
             .collect()
     }
@@ -419,10 +419,10 @@ mod tests {
         }
     }
 
-    fn make_display(id: &str, branch: &str, status: ProcessStatus) -> KildDisplay {
-        KildDisplay {
+    fn make_display(id: &str, branch: &str, process_status: ProcessStatus) -> SessionInfo {
+        SessionInfo {
             session: make_session(id, branch),
-            status,
+            process_status,
             git_status: GitStatus::Unknown,
             diff_stats: None,
         }
@@ -508,14 +508,14 @@ mod tests {
 
     #[test]
     fn test_get_stopped_branches_empty_input() {
-        let displays: Vec<KildDisplay> = vec![];
+        let displays: Vec<SessionInfo> = vec![];
         let stopped = get_stopped_branches(&displays);
         assert!(stopped.is_empty());
     }
 
     #[test]
     fn test_get_running_branches_empty_input() {
-        let displays: Vec<KildDisplay> = vec![];
+        let displays: Vec<SessionInfo> = vec![];
         let running = get_running_branches(&displays);
         assert!(running.is_empty());
     }

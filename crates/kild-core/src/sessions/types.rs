@@ -319,6 +319,33 @@ impl CreateSessionRequest {
     }
 }
 
+/// Process status for a kild session.
+///
+/// Represents whether the agent process is currently running, stopped,
+/// or in an unknown state (detection failed).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessStatus {
+    /// Process is confirmed running
+    Running,
+    /// Process is confirmed stopped (or no PID exists)
+    Stopped,
+    /// Could not determine status (process check failed)
+    Unknown,
+}
+
+/// Git working tree status for a kild session.
+///
+/// Represents whether the worktree has uncommitted changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitStatus {
+    /// Worktree has no uncommitted changes
+    Clean,
+    /// Worktree has uncommitted changes
+    Dirty,
+    /// Could not determine git status (error occurred)
+    Unknown,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

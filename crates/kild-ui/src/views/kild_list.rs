@@ -6,9 +6,10 @@ use chrono::{DateTime, Utc};
 use gpui::{Context, IntoElement, div, prelude::*, px, uniform_list};
 
 use crate::components::{Button, ButtonVariant, Status, StatusIndicator};
-use crate::state::{AppState, GitStatus, ProcessStatus};
+use crate::state::AppState;
 use crate::theme;
 use crate::views::MainView;
+use kild_core::{GitStatus, ProcessStatus};
 
 /// Format RFC3339 timestamp as relative time (e.g., "5m ago", "2h ago").
 fn format_relative_time(timestamp: &str) -> String {
@@ -138,7 +139,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                 let branch = display.session.branch.clone();
 
                                 // Map ProcessStatus to Status for StatusIndicator
-                                let status = match display.status {
+                                let status = match display.process_status {
                                     ProcessStatus::Running => Status::Active,
                                     ProcessStatus::Stopped => Status::Stopped,
                                     ProcessStatus::Unknown => Status::Crashed,
@@ -148,7 +149,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                 let row_error = errors.get(&branch).map(|e| e.message.clone());
 
                                 // Show Open button when stopped, Stop button when running
-                                let is_running = display.status == ProcessStatus::Running;
+                                let is_running = display.process_status == ProcessStatus::Running;
 
                                 // Clone data for use in closures
                                 let branch_for_open = branch.clone();
@@ -449,8 +450,9 @@ mod tests {
 
     #[test]
     fn test_should_not_show_welcome_when_displays_exist_without_projects() {
-        use crate::state::{AppState, GitStatus, KildDisplay, ProcessStatus};
+        use crate::state::AppState;
         use kild_core::sessions::types::{Session, SessionStatus};
+        use kild_core::{GitStatus, ProcessStatus, SessionInfo};
         use std::path::PathBuf;
 
         // Create a kild display (simulating CLI-created kild)
@@ -475,9 +477,9 @@ mod tests {
             note: None,
         };
 
-        let state = AppState::test_with_displays(vec![KildDisplay {
+        let state = AppState::test_with_displays(vec![SessionInfo {
             session,
-            status: ProcessStatus::Stopped,
+            process_status: ProcessStatus::Stopped,
             git_status: GitStatus::Unknown,
             diff_stats: None,
         }]);
