@@ -190,7 +190,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
-**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/commands.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract. UI-specific state mutations use `UICommand` enum in `kild-ui/state/ui_commands.rs`.
+**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/types.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract. UI-specific state mutations use `UICommand` enum in `kild-ui/state/ui_commands.rs`.
 
 ## Code Style Preferences
 

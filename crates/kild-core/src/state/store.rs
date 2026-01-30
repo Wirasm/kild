@@ -1,10 +1,18 @@
-use super::commands::Command;
+use super::types::Command;
 
 /// Trait for dispatching business commands.
 ///
-/// Interfaces (CLI, UI, server) implement this trait to execute
-/// commands with their specific needs (UI adds event emission,
-/// async handling, etc.).
+/// Decouples command definitions from their execution. Interfaces (CLI, UI)
+/// implement this trait to execute commands with their specific needs
+/// (e.g., UI adds event emission and async handling, CLI runs synchronously).
+///
+/// # Semantics
+///
+/// - **Ordering**: Commands execute in the order received. No implicit batching.
+/// - **Idempotency**: Commands are not idempotent (e.g., `CreateKild` fails if
+///   the branch already exists). Callers must avoid duplicate dispatches.
+/// - **Error handling**: Implementations define their own error type. Errors
+///   should distinguish user errors (invalid input) from system errors (IO failure).
 pub trait Store {
     type Error;
     fn dispatch(&mut self, cmd: Command) -> Result<(), Self::Error>;

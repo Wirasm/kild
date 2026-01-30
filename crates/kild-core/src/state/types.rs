@@ -11,21 +11,31 @@ use serde::{Deserialize, Serialize};
 pub enum Command {
     /// Create a new kild session with a git worktree and agent.
     CreateKild {
+        /// Branch name for the new kild (will be prefixed with `kild_`).
         branch: String,
+        /// Agent to launch. Uses default from config if `None`.
         agent: Option<String>,
+        /// Optional note describing what this kild is for.
         note: Option<String>,
+        /// Project path for session tracking. Uses current directory if `None`.
         project_path: Option<PathBuf>,
     },
     /// Destroy a kild session, removing worktree and session file.
-    DestroyKild { branch: String, force: bool },
-    /// Open a new agent terminal in an existing kild (additive).
+    DestroyKild {
+        branch: String,
+        /// Bypass safety checks (uncommitted changes, unpushed commits).
+        force: bool,
+    },
+    /// Open an additional agent terminal in an existing kild (does not replace the current agent).
     OpenKild {
         branch: String,
+        /// Agent to launch. Uses default from config if `None`.
         agent: Option<String>,
     },
     /// Stop the agent process in a kild without destroying it.
     StopKild { branch: String },
-    /// Complete a kild: check PR status, optionally delete remote branch, destroy session.
+    /// Complete a kild: check if PR was merged, delete remote branch if merged, destroy session.
+    /// The `force` flag bypasses safety checks for session destruction only.
     CompleteKild { branch: String, force: bool },
     /// Refresh the session list from disk.
     RefreshSessions,
