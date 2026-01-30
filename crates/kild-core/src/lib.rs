@@ -21,12 +21,14 @@ pub mod git;
 pub mod health;
 pub mod logging;
 pub mod process;
+pub mod projects;
 pub mod sessions;
 pub mod terminal;
 
 // Re-export commonly used types at crate root for convenience
 pub use config::KildConfig;
 pub use git::types::{UncommittedDetails, WorktreeStatus};
+pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::types::{
     CompleteResult, CreateSessionRequest, DestroySafetyInfo, PrCheckResult, Session, SessionStatus,
 };

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use kild_core::{CreateSessionRequest, KildConfig, Session, session_ops};
 
-use crate::projects::{Project, ProjectError, load_projects, save_projects};
 use crate::state::{KildDisplay, OperationError, ProcessStatus};
+use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
 
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
@@ -265,9 +265,10 @@ pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, Strin
     let project = Project::new(path.clone(), name).map_err(|e| match e {
         ProjectError::NotADirectory => format!("'{}' is not a directory", path.display()),
         ProjectError::NotAGitRepo => format!("'{}' is not a git repository", path.display()),
-        ProjectError::CanonicalizationFailed(io_err) => {
-            format!("Cannot access '{}': {}", path.display(), io_err)
+        ProjectError::CanonicalizationFailed { source } => {
+            format!("Cannot access '{}': {}", path.display(), source)
         }
+        _ => e.to_string(),
     })?;
 
     // Check if project already exists (by canonical path)
@@ -283,7 +284,7 @@ pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, Strin
         data.active = Some(canonical_path.clone());
     }
 
-    save_projects(&data)?;
+    save_projects(&data).map_err(|e| e.to_string())?;
 
     tracing::info!(
         event = "ui.add_project.completed",
@@ -315,7 +316,7 @@ pub fn remove_project(path: &Path) -> Result<(), String> {
         data.active = data.projects.first().map(|p| p.path().to_path_buf());
     }
 
-    save_projects(&data)?;
+    save_projects(&data).map_err(|e| e.to_string())?;
 
     tracing::info!(
         event = "ui.remove_project.completed",
@@ -343,7 +344,7 @@ pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
     }
 
     data.active = path;
-    save_projects(&data)?;
+    save_projects(&data).map_err(|e| e.to_string())?;
 
     tracing::info!(
         event = "ui.set_active_project.completed",
@@ -355,9 +356,11 @@ pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::projects::test_helpers::{PROJECTS_FILE_ENV_LOCK, ProjectsFileEnvGuard};
     use crate::state::{GitStatus, KildDisplay, ProcessStatus};
     use kild_core::Session;
+    use kild_core::projects::persistence::test_helpers::{
+        PROJECTS_FILE_ENV_LOCK, ProjectsFileEnvGuard,
+    };
     use kild_core::sessions::types::SessionStatus;
     use std::path::PathBuf;
 
@@ -753,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_derive_display_name_works_correctly() {
-        use crate::projects::derive_display_name;
+        use kild_core::projects::types::derive_display_name;
 
         let path = PathBuf::from("/Users/test/Projects/my-awesome-project");
         let name = derive_display_name(&path);

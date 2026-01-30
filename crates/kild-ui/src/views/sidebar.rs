@@ -26,7 +26,7 @@ struct ProjectItemData {
 impl ProjectItemData {
     fn from_project(
         idx: usize,
-        project: &crate::projects::Project,
+        project: &kild_core::projects::Project,
         active_path: Option<&std::path::Path>,
         state: &AppState,
     ) -> Self {

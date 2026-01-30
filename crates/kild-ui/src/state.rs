@@ -10,10 +10,8 @@
 //! - More modules to be added in future refactoring phases
 
 use kild_core::git::{operations::get_diff_stats, types::DiffStats};
+use kild_core::projects::{Project, ProjectError, ProjectManager};
 use kild_core::{DestroySafetyInfo, Session};
-use std::path::PathBuf;
-
-use crate::projects::Project;
 
 // =============================================================================
 // Dialog State
@@ -112,164 +110,6 @@ pub enum ProcessStatus {
 pub struct OperationError {
     pub branch: String,
     pub message: String,
-}
-
-// =============================================================================
-// Project Manager
-// =============================================================================
-
-/// Error type for project operations.
-#[derive(Debug, Clone)]
-pub enum ProjectError {
-    /// Project not found in the list.
-    NotFound,
-    /// Project already exists in the list.
-    AlreadyExists,
-}
-
-impl std::fmt::Display for ProjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectError::NotFound => write!(f, "Project not found"),
-            ProjectError::AlreadyExists => write!(f, "Project already exists"),
-        }
-    }
-}
-
-impl std::error::Error for ProjectError {}
-
-/// Encapsulates project list with enforced invariants.
-///
-/// Key invariant: `active_index` always points to a valid index in `projects`,
-/// or is `None` (meaning "all projects" view). This invariant is maintained
-/// automatically when projects are added or removed.
-#[derive(Clone, Debug, Default)]
-pub struct ProjectManager {
-    /// List of registered projects (private to enforce invariants).
-    projects: Vec<Project>,
-    /// Index of the active project, or None for "all projects" view.
-    active_index: Option<usize>,
-}
-
-impl ProjectManager {
-    /// Create a new empty project manager.
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a project manager from existing data.
-    ///
-    /// If `active_path` doesn't match any project, sets active_index to None.
-    pub fn from_data(projects: Vec<Project>, active_path: Option<PathBuf>) -> Self {
-        let active_index = active_path
-            .as_ref()
-            .and_then(|path| projects.iter().position(|p| p.path() == path));
-
-        Self {
-            projects,
-            active_index,
-        }
-    }
-
-    /// Select a project by path.
-    ///
-    /// # Errors
-    /// Returns `ProjectError::NotFound` if no project matches the path.
-    pub fn select(&mut self, path: &std::path::Path) -> Result<(), ProjectError> {
-        let index = self
-            .projects
-            .iter()
-            .position(|p| p.path() == path)
-            .ok_or(ProjectError::NotFound)?;
-        self.active_index = Some(index);
-        Ok(())
-    }
-
-    /// Select "all projects" view (clears active project selection).
-    pub fn select_all(&mut self) {
-        self.active_index = None;
-    }
-
-    /// Add a project to the list.
-    ///
-    /// If this is the first project added, it becomes active automatically.
-    ///
-    /// # Errors
-    /// Returns `ProjectError::AlreadyExists` if a project with the same path exists.
-    pub fn add(&mut self, project: Project) -> Result<(), ProjectError> {
-        if self.projects.iter().any(|p| p.path() == project.path()) {
-            return Err(ProjectError::AlreadyExists);
-        }
-
-        self.projects.push(project);
-
-        // First project becomes active automatically
-        if self.projects.len() == 1 {
-            self.active_index = Some(0);
-        }
-
-        Ok(())
-    }
-
-    /// Remove a project by path.
-    ///
-    /// Automatically adjusts `active_index` to maintain invariant:
-    /// - If removed project was active: selects first project, or None if empty
-    /// - If removed project was before active: decrements active_index
-    ///
-    /// # Errors
-    /// Returns `ProjectError::NotFound` if no project matches the path.
-    pub fn remove(&mut self, path: &std::path::Path) -> Result<Project, ProjectError> {
-        let index = self
-            .projects
-            .iter()
-            .position(|p| p.path() == path)
-            .ok_or(ProjectError::NotFound)?;
-
-        // Adjust active_index before removal
-        if let Some(active) = self.active_index {
-            if active == index {
-                // Removed project was active - select first remaining, or None
-                self.active_index = if self.projects.len() > 1 {
-                    Some(0)
-                } else {
-                    None
-                };
-            } else if active > index {
-                // Active was after removed - decrement to maintain reference
-                self.active_index = Some(active - 1);
-            }
-        }
-
-        Ok(self.projects.remove(index))
-    }
-
-    /// Get the active project, if any.
-    pub fn active(&self) -> Option<&Project> {
-        self.active_index.map(|i| &self.projects[i])
-    }
-
-    /// Get the active project's path, if any.
-    pub fn active_path(&self) -> Option<&std::path::Path> {
-        self.active().map(|p| p.path())
-    }
-
-    /// Iterate over all projects.
-    pub fn iter(&self) -> impl Iterator<Item = &Project> {
-        self.projects.iter()
-    }
-
-    /// Check if the project list is empty.
-    pub fn is_empty(&self) -> bool {
-        self.projects.is_empty()
-    }
-
-    /// Get the number of projects.
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.projects.len()
-    }
 }
 
 // =============================================================================
@@ -819,7 +659,7 @@ impl AppState {
         let mut startup_errors = Vec::new();
 
         // Migrate projects to canonical paths (fixes case mismatch on macOS)
-        if let Err(e) = crate::projects::migrate_projects_to_canonical() {
+        if let Err(e) = kild_core::projects::migrate_projects_to_canonical() {
             tracing::error!(
                 event = "ui.projects.migration_failed",
                 error = %e,
@@ -829,7 +669,7 @@ impl AppState {
         }
 
         // Load projects from disk (after migration)
-        let projects_data = crate::projects::load_projects();
+        let projects_data = kild_core::projects::load_projects();
         if let Some(load_error) = projects_data.load_error {
             startup_errors.push(load_error);
         }
@@ -941,7 +781,7 @@ impl AppState {
     pub fn active_project_id(&self) -> Option<String> {
         self.projects
             .active_path()
-            .map(crate::projects::derive_project_id)
+            .map(kild_core::projects::generate_project_id)
     }
 
     /// Get displays filtered by active project.
@@ -966,7 +806,7 @@ impl AppState {
 
     /// Count kilds for a specific project (by project path).
     pub fn kild_count_for_project(&self, project_path: &std::path::Path) -> usize {
-        let project_id = crate::projects::derive_project_id(project_path);
+        let project_id = kild_core::projects::generate_project_id(project_path);
         self.sessions.kild_count_for_project(&project_id)
     }
 
@@ -1241,6 +1081,7 @@ fn count_session_files_in_dir(sessions_dir: &std::path::Path) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_close_dialog_clears_confirm_state() {
@@ -2077,7 +1918,7 @@ mod tests {
         assert!(state.active_project_id().is_none());
 
         // With active project - should return a hash, not directory name
-        let project = crate::projects::Project::new_unchecked(
+        let project = kild_core::projects::Project::new_unchecked(
             PathBuf::from("/Users/test/Projects/my-project"),
             "My Project".to_string(),
         );
@@ -2143,8 +1984,9 @@ mod tests {
 
         // Use the actual hash for the project path
         let project_path = PathBuf::from("/Users/test/Projects/project-a");
-        let project_id_a = crate::projects::derive_project_id(&project_path);
-        let project_id_b = crate::projects::derive_project_id(&PathBuf::from("/other/project"));
+        let project_id_a = kild_core::projects::generate_project_id(&project_path);
+        let project_id_b =
+            kild_core::projects::generate_project_id(&PathBuf::from("/other/project"));
 
         let make_session = |id: &str, project_id: &str| Session {
             id: id.to_string(),
@@ -2191,8 +2033,10 @@ mod tests {
 
         // Active project set - should filter
         // Add project and select it
-        let project =
-            crate::projects::Project::new_unchecked(project_path.clone(), "Project A".to_string());
+        let project = kild_core::projects::Project::new_unchecked(
+            project_path.clone(),
+            "Project A".to_string(),
+        );
         state.projects.add(project).unwrap();
         // First project is auto-selected, so this should filter
         let filtered = state.filtered_displays();
@@ -2238,7 +2082,7 @@ mod tests {
         }]);
 
         // Active project set to a different path - should return empty
-        let project = crate::projects::Project::new_unchecked(
+        let project = kild_core::projects::Project::new_unchecked(
             PathBuf::from("/different/project/path"),
             "Different Project".to_string(),
         );
@@ -2614,292 +2458,5 @@ mod tests {
             count, None,
             "Should return None when directory cannot be read"
         );
-    }
-
-    // --- ProjectManager tests ---
-
-    #[test]
-    fn test_project_manager_new_is_empty() {
-        let pm = ProjectManager::new();
-        assert!(pm.is_empty());
-        assert_eq!(pm.len(), 0);
-        assert!(pm.active().is_none());
-        assert!(pm.active_path().is_none());
-    }
-
-    #[test]
-    fn test_project_manager_add_first_project_becomes_active() {
-        let mut pm = ProjectManager::new();
-        let project = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Test Project".to_string(),
-        );
-
-        pm.add(project).unwrap();
-
-        assert!(!pm.is_empty());
-        assert_eq!(pm.len(), 1);
-        assert!(pm.active().is_some());
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_add_duplicate_returns_error() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Test Project".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Same Path".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        let result = pm.add(project2);
-
-        assert!(matches!(result, Err(ProjectError::AlreadyExists)));
-    }
-
-    #[test]
-    fn test_project_manager_select_all_clears_active() {
-        let mut pm = ProjectManager::new();
-        let project = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Test Project".to_string(),
-        );
-
-        pm.add(project).unwrap();
-        assert!(pm.active().is_some());
-
-        pm.select_all();
-        assert!(pm.active().is_none());
-    }
-
-    #[test]
-    fn test_project_manager_select_valid_path() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-b"),
-            "Project B".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        pm.add(project2).unwrap();
-
-        // First project is active by default
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-a"))
-        );
-
-        // Select second project
-        pm.select(std::path::Path::new("/path/to/project-b"))
-            .unwrap();
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-b"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_select_invalid_path_returns_error() {
-        let mut pm = ProjectManager::new();
-        let project = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Test Project".to_string(),
-        );
-
-        pm.add(project).unwrap();
-
-        let result = pm.select(std::path::Path::new("/nonexistent/path"));
-        assert!(matches!(result, Err(ProjectError::NotFound)));
-    }
-
-    #[test]
-    fn test_project_manager_remove_active_selects_first() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-b"),
-            "Project B".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        pm.add(project2).unwrap();
-
-        // First project is active
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-a"))
-        );
-
-        // Remove active project
-        pm.remove(std::path::Path::new("/path/to/project-a"))
-            .unwrap();
-
-        // Active should now be the remaining project (which becomes first)
-        assert_eq!(pm.len(), 1);
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-b"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_remove_non_active_preserves_selection() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-b"),
-            "Project B".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        pm.add(project2).unwrap();
-
-        // First project is active
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-a"))
-        );
-
-        // Remove non-active project
-        pm.remove(std::path::Path::new("/path/to/project-b"))
-            .unwrap();
-
-        // Active should still be the first project
-        assert_eq!(pm.len(), 1);
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-a"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_remove_last_clears_active() {
-        let mut pm = ProjectManager::new();
-        let project = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project"),
-            "Test Project".to_string(),
-        );
-
-        pm.add(project).unwrap();
-        pm.remove(std::path::Path::new("/path/to/project")).unwrap();
-
-        assert!(pm.is_empty());
-        assert!(pm.active().is_none());
-    }
-
-    #[test]
-    fn test_project_manager_remove_before_active_adjusts_index() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-b"),
-            "Project B".to_string(),
-        );
-        let project3 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-c"),
-            "Project C".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        pm.add(project2).unwrap();
-        pm.add(project3).unwrap();
-
-        // Select project-c (index 2)
-        pm.select(std::path::Path::new("/path/to/project-c"))
-            .unwrap();
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-c"))
-        );
-
-        // Remove project-a (index 0, before active)
-        pm.remove(std::path::Path::new("/path/to/project-a"))
-            .unwrap();
-
-        // Active should still be project-c (now at index 1)
-        assert_eq!(pm.len(), 2);
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-c"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_from_data_with_valid_active() {
-        let projects = vec![
-            crate::projects::Project::new_unchecked(
-                PathBuf::from("/path/to/project-a"),
-                "Project A".to_string(),
-            ),
-            crate::projects::Project::new_unchecked(
-                PathBuf::from("/path/to/project-b"),
-                "Project B".to_string(),
-            ),
-        ];
-
-        let pm = ProjectManager::from_data(projects, Some(PathBuf::from("/path/to/project-b")));
-
-        assert_eq!(pm.len(), 2);
-        assert_eq!(
-            pm.active_path(),
-            Some(std::path::Path::new("/path/to/project-b"))
-        );
-    }
-
-    #[test]
-    fn test_project_manager_from_data_with_invalid_active() {
-        let projects = vec![crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        )];
-
-        let pm = ProjectManager::from_data(projects, Some(PathBuf::from("/nonexistent/path")));
-
-        assert_eq!(pm.len(), 1);
-        assert!(
-            pm.active().is_none(),
-            "Invalid active path should be ignored"
-        );
-    }
-
-    #[test]
-    fn test_project_manager_iter() {
-        let mut pm = ProjectManager::new();
-        let project1 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-a"),
-            "Project A".to_string(),
-        );
-        let project2 = crate::projects::Project::new_unchecked(
-            PathBuf::from("/path/to/project-b"),
-            "Project B".to_string(),
-        );
-
-        pm.add(project1).unwrap();
-        pm.add(project2).unwrap();
-
-        let paths: Vec<_> = pm.iter().map(|p| p.path()).collect();
-        assert_eq!(paths.len(), 2);
-        assert_eq!(paths[0], std::path::Path::new("/path/to/project-a"));
-        assert_eq!(paths[1], std::path::Path::new("/path/to/project-b"));
     }
 }

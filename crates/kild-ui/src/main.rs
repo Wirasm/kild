@@ -9,7 +9,6 @@ use gpui::{
 
 mod actions;
 mod components;
-mod projects;
 mod refresh;
 mod state;
 mod theme;
