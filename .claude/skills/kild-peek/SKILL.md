@@ -262,7 +262,7 @@ kild-peek assert --window "KILD" --exists --json
 
 ### List UI Elements
 ```bash
-kild-peek elements [--window <title>] [--app <name>] [--wait] [--timeout <ms>] [--json]
+kild-peek elements [--window <title>] [--app <name>] [--tree] [--wait] [--timeout <ms>] [--json]
 ```
 
 Lists all UI elements in a window using the macOS Accessibility API. Shows buttons, text fields, labels, and other interactive elements.
@@ -270,6 +270,7 @@ Lists all UI elements in a window using the macOS Accessibility API. Shows butto
 **Flags:**
 - `--window <title>` - Target window by title
 - `--app <name>` - Target window by app name (can combine with `--window`)
+- `--tree` - Display elements as indented tree hierarchy with box-drawing characters
 - `--wait` - Wait for window to appear (polls until found or timeout)
 - `--timeout <ms>` - Timeout in milliseconds when using `--wait` (default: 30000)
 - `--json` - Output as JSON
@@ -282,6 +283,9 @@ kild-peek elements --app Finder
 # List elements in specific window
 kild-peek elements --window "Terminal"
 
+# Display as tree hierarchy
+kild-peek elements --app Finder --tree
+
 # Precise targeting with app + window
 kild-peek elements --app Ghostty --window "Terminal"
 
@@ -291,7 +295,7 @@ kild-peek elements --app Finder --wait
 # Wait with custom timeout
 kild-peek elements --app Finder --wait --timeout 5000
 
-# JSON output for parsing
+# JSON output for parsing (includes depth field)
 kild-peek elements --app KILD --json
 ```
 
@@ -300,16 +304,18 @@ kild-peek elements --app KILD --json
 - Title, value, and description (when available)
 - Position (x, y) and size (width, height)
 - Enabled state
+- Depth in hierarchy (visible in JSON output, or as indentation with `--tree`)
 
 ### Find UI Element by Text
 ```bash
-kild-peek find --text <search> [--window <title>] [--app <name>] [--wait] [--timeout <ms>] [--json]
+kild-peek find --text <search> [--regex] [--window <title>] [--app <name>] [--wait] [--timeout <ms>] [--json]
 ```
 
 Finds a UI element by searching for text in its title, value, or description.
 
 **Flags:**
 - `--text <search>` - Text to search for (required)
+- `--regex` - Treat `--text` value as a regex pattern (case-sensitive by default)
 - `--window <title>` - Target window by title
 - `--app <name>` - Target window by app name (can combine with `--window`)
 - `--wait` - Wait for window to appear (polls until found or timeout)
@@ -318,11 +324,20 @@ Finds a UI element by searching for text in its title, value, or description.
 
 **Examples:**
 ```bash
-# Find "File" menu in Finder
+# Find "File" menu in Finder (substring match)
 kild-peek find --app Finder --text "File"
 
 # Find "Create" button in KILD
 kild-peek find --app KILD --text "Create"
+
+# Exact match with regex
+kild-peek find --app Finder --text "^File$" --regex
+
+# Alternation pattern (match Create OR Destroy)
+kild-peek find --app KILD --text "Create|Destroy" --regex
+
+# Case-insensitive regex (using (?i) prefix)
+kild-peek find --app KILD --text "(?i)submit" --regex
 
 # Wait for window to appear
 kild-peek find --app KILD --text "Create" --wait
@@ -332,7 +347,8 @@ kild-peek find --app Finder --text "Submit" --json
 ```
 
 **Search behavior:**
-- Case-insensitive partial matching
+- Default: Case-insensitive partial matching (substring)
+- With `--regex`: Case-sensitive regex pattern matching (use `(?i)` prefix for case-insensitive)
 - Searches title, value, and description fields
 - Returns first matching element
 

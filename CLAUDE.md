@@ -101,10 +101,12 @@ cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
 cargo run -p kild-peek -- diff img1.png img2.png --diff-output /tmp/diff.png
 cargo run -p kild-peek -- elements --app Finder                  # List all UI elements
 cargo run -p kild-peek -- elements --window "Terminal" --json    # JSON output
+cargo run -p kild-peek -- elements --app Finder --tree           # Display as indented tree hierarchy
 cargo run -p kild-peek -- elements --app Finder --wait           # Wait for window to appear
 cargo run -p kild-peek -- elements --app Finder --wait --timeout 5000  # Custom timeout
 cargo run -p kild-peek -- find --app Finder --text "File"        # Find element by text
 cargo run -p kild-peek -- find --app KILD --text "Create" --json # JSON output
+cargo run -p kild-peek -- find --app Finder --text "^File$" --regex  # Find by regex pattern
 cargo run -p kild-peek -- find --app KILD --text "Create" --wait # Wait for window to appear
 cargo run -p kild-peek -- click --window "Terminal" --at 100,50  # Click at coordinates (x,y)
 cargo run -p kild-peek -- click --app Ghostty --at 200,100      # Target by app name
