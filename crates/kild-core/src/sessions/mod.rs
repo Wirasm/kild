@@ -1,7 +1,9 @@
 pub mod errors;
 pub mod handler;
+pub mod info;
 pub mod operations;
 pub mod persistence;
 pub mod ports;
+pub mod store;
 pub mod types;
 pub mod validation;

@@ -9,9 +9,8 @@
 //! - `DialogState`: Mutually exclusive dialog states (create, confirm, add project)
 //! - More modules to be added in future refactoring phases
 
-use kild_core::git::{operations::get_diff_stats, types::DiffStats};
 use kild_core::projects::{Project, ProjectError, ProjectManager};
-use kild_core::{DestroySafetyInfo, Session};
+use kild_core::{DestroySafetyInfo, ProcessStatus, SessionInfo};
 
 // =============================================================================
 // Dialog State
@@ -88,21 +87,6 @@ impl DialogState {
             error: None,
         }
     }
-}
-
-// =============================================================================
-// Process Status
-// =============================================================================
-
-/// Process status for a kild, distinguishing between running, stopped, and unknown states.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProcessStatus {
-    /// Process is confirmed running
-    Running,
-    /// Process is confirmed stopped (or no PID exists)
-    Stopped,
-    /// Could not determine status (process check failed)
-    Unknown,
 }
 
 /// Error from a kild operation, with the branch name for context.
@@ -220,12 +204,12 @@ impl SelectionState {
 ///
 /// Provides a clean API for managing kild displays, filtering by project,
 /// and tracking refresh timestamps. Encapsulates:
-/// - `displays`: The list of KildDisplay items
+/// - `displays`: The list of SessionInfo items
 /// - `load_error`: Error from last refresh attempt
 /// - `last_refresh`: Timestamp of last successful refresh
 pub struct SessionStore {
     /// List of kild displays (private to enforce invariants).
-    displays: Vec<KildDisplay>,
+    displays: Vec<SessionInfo>,
     /// Error from last refresh attempt, if any.
     load_error: Option<String>,
     /// Timestamp of last successful status refresh.
@@ -245,7 +229,7 @@ impl SessionStore {
 
     /// Create a session store with provided data (for testing).
     #[cfg(test)]
-    pub fn from_data(displays: Vec<KildDisplay>, load_error: Option<String>) -> Self {
+    pub fn from_data(displays: Vec<SessionInfo>, load_error: Option<String>) -> Self {
         Self {
             displays,
             load_error,
@@ -255,13 +239,13 @@ impl SessionStore {
 
     /// Set displays directly (for testing).
     #[cfg(test)]
-    pub fn set_displays(&mut self, displays: Vec<KildDisplay>) {
+    pub fn set_displays(&mut self, displays: Vec<SessionInfo>) {
         self.displays = displays;
     }
 
     /// Get mutable access to displays (for testing status updates).
     #[cfg(test)]
-    pub fn displays_mut(&mut self) -> &mut Vec<KildDisplay> {
+    pub fn displays_mut(&mut self) -> &mut Vec<SessionInfo> {
         &mut self.displays
     }
 
@@ -287,7 +271,7 @@ impl SessionStore {
     /// for a full refresh that includes git information.
     pub fn update_statuses_only(&mut self) {
         // Check if session count changed (external create/destroy).
-        let disk_count = count_session_files();
+        let disk_count = kild_core::sessions::store::count_session_files();
 
         if let Some(count) = disk_count {
             if count != self.displays.len() {
@@ -309,13 +293,14 @@ impl SessionStore {
 
         // No count change (or count unavailable) - just update process statuses
         for kild_display in &mut self.displays {
-            kild_display.status = determine_process_status(&kild_display.session);
+            kild_display.process_status =
+                kild_core::sessions::info::determine_process_status(&kild_display.session);
         }
         self.last_refresh = std::time::Instant::now();
     }
 
     /// Get all displays.
-    pub fn displays(&self) -> &[KildDisplay] {
+    pub fn displays(&self) -> &[SessionInfo] {
         &self.displays
     }
 
@@ -323,7 +308,7 @@ impl SessionStore {
     ///
     /// Returns all displays where `session.project_id` matches the given ID.
     /// If `project_id` is `None`, returns all displays (unfiltered).
-    pub fn filtered_by_project(&self, project_id: Option<&str>) -> Vec<&KildDisplay> {
+    pub fn filtered_by_project(&self, project_id: Option<&str>) -> Vec<&SessionInfo> {
         match project_id {
             Some(id) => self
                 .displays
@@ -349,7 +334,7 @@ impl SessionStore {
     pub fn stopped_count(&self) -> usize {
         self.displays
             .iter()
-            .filter(|d| d.status == ProcessStatus::Stopped)
+            .filter(|d| d.process_status == ProcessStatus::Stopped)
             .count()
     }
 
@@ -357,7 +342,7 @@ impl SessionStore {
     pub fn running_count(&self) -> usize {
         self.displays
             .iter()
-            .filter(|d| d.status == ProcessStatus::Running)
+            .filter(|d| d.process_status == ProcessStatus::Running)
             .count()
     }
 
@@ -383,151 +368,6 @@ impl SessionStore {
 impl Default for SessionStore {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// =============================================================================
-// Git Status
-// =============================================================================
-
-/// Git status for a worktree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GitStatus {
-    /// Worktree has no uncommitted changes
-    Clean,
-    /// Worktree has uncommitted changes
-    Dirty,
-    /// Could not determine git status (error occurred)
-    Unknown,
-}
-
-/// Display data for a kild, combining Session with computed process status.
-#[derive(Clone)]
-pub struct KildDisplay {
-    pub session: Session,
-    pub status: ProcessStatus,
-    pub git_status: GitStatus,
-    pub diff_stats: Option<DiffStats>,
-}
-
-/// Check if a worktree has uncommitted changes.
-///
-/// Returns `GitStatus::Dirty` if there are uncommitted changes,
-/// `GitStatus::Clean` if the worktree is clean, or `GitStatus::Unknown`
-/// if the git status check failed.
-fn check_git_status(worktree_path: &std::path::Path) -> GitStatus {
-    match std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(worktree_path)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            if output.stdout.is_empty() {
-                GitStatus::Clean
-            } else {
-                GitStatus::Dirty
-            }
-        }
-        Ok(output) => {
-            tracing::warn!(
-                event = "ui.kild_list.git_status_failed",
-                path = %worktree_path.display(),
-                exit_code = ?output.status.code(),
-                stderr = %String::from_utf8_lossy(&output.stderr),
-                "Git status command failed"
-            );
-            GitStatus::Unknown
-        }
-        Err(e) => {
-            tracing::warn!(
-                event = "ui.kild_list.git_status_error",
-                path = %worktree_path.display(),
-                error = %e,
-                "Failed to execute git status"
-            );
-            GitStatus::Unknown
-        }
-    }
-}
-
-/// Determine process status from session data.
-///
-/// Uses PID-based detection as primary method, falling back to window-based
-/// detection for terminals like Ghostty where PID is unavailable.
-fn determine_process_status(session: &Session) -> ProcessStatus {
-    if let Some(pid) = session.process_id {
-        // Primary: PID-based detection
-        match kild_core::process::is_process_running(pid) {
-            Ok(true) => ProcessStatus::Running,
-            Ok(false) => ProcessStatus::Stopped,
-            Err(e) => {
-                tracing::warn!(
-                    event = "ui.kild_list.process_check_failed",
-                    pid = pid,
-                    branch = session.branch,
-                    error = %e
-                );
-                ProcessStatus::Unknown
-            }
-        }
-    } else if let (Some(terminal_type), Some(window_id)) =
-        (&session.terminal_type, &session.terminal_window_id)
-    {
-        // Fallback: Window-based detection for Ghostty (open -na doesn't return PID)
-        match kild_core::terminal::is_terminal_window_open(terminal_type, window_id) {
-            Ok(Some(true)) => ProcessStatus::Running,
-            Ok(Some(false)) => ProcessStatus::Stopped,
-            Ok(None) => ProcessStatus::Stopped, // Backend doesn't support window detection
-            Err(e) => {
-                tracing::warn!(
-                    event = "ui.kild_list.window_check_failed",
-                    terminal_type = ?terminal_type,
-                    window_id = %window_id,
-                    branch = session.branch,
-                    error = %e
-                );
-                ProcessStatus::Stopped
-            }
-        }
-    } else {
-        ProcessStatus::Stopped
-    }
-}
-
-impl KildDisplay {
-    pub fn from_session(session: Session) -> Self {
-        let status = determine_process_status(&session);
-
-        let git_status = if session.worktree_path.exists() {
-            check_git_status(&session.worktree_path)
-        } else {
-            GitStatus::Unknown
-        };
-
-        // Compute diff stats if worktree exists and is dirty
-        let diff_stats = if git_status == GitStatus::Dirty {
-            match get_diff_stats(&session.worktree_path) {
-                Ok(stats) => Some(stats),
-                Err(e) => {
-                    tracing::warn!(
-                        event = "ui.kild_list.diff_stats_failed",
-                        path = %session.worktree_path.display(),
-                        error = %e,
-                        "Failed to compute diff stats - showing fallback indicator"
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        Self {
-            session,
-            status,
-            git_status,
-            diff_stats,
-        }
     }
 }
 
@@ -789,7 +629,7 @@ impl AppState {
     /// Filters kilds where `session.project_id` matches the derived ID of the active project path.
     /// Uses path-based hashing that matches kild-core's `generate_project_id`.
     /// If no active project is set, returns all displays (unfiltered).
-    pub fn filtered_displays(&self) -> Vec<&KildDisplay> {
+    pub fn filtered_displays(&self) -> Vec<&SessionInfo> {
         self.sessions
             .filtered_by_project(self.active_project_id().as_deref())
     }
@@ -819,7 +659,7 @@ impl AppState {
     ///
     /// Returns `None` if no kild is selected or if the selected kild no longer
     /// exists in the current display list (e.g., after being destroyed externally).
-    pub fn selected_kild(&self) -> Option<&KildDisplay> {
+    pub fn selected_kild(&self) -> Option<&SessionInfo> {
         let id = self.selection.id()?;
 
         match self.sessions.displays().iter().find(|d| d.session.id == id) {
@@ -997,7 +837,7 @@ impl AppState {
     // =========================================================================
 
     /// Get all session displays.
-    pub fn displays(&self) -> &[KildDisplay] {
+    pub fn displays(&self) -> &[SessionInfo] {
         self.sessions.displays()
     }
 
@@ -1030,7 +870,7 @@ impl AppState {
 
     /// Create an AppState for testing with provided displays.
     #[cfg(test)]
-    pub fn test_with_displays(displays: Vec<KildDisplay>) -> Self {
+    pub fn test_with_displays(displays: Vec<SessionInfo>) -> Self {
         Self {
             sessions: SessionStore::from_data(displays, None),
             dialog: DialogState::None,
@@ -1054,50 +894,10 @@ impl Default for AppState {
     }
 }
 
-/// Count session files on disk without fully loading them.
-///
-/// This is a lightweight check (directory traversal only, no file parsing or
-/// deserialization) used by `update_statuses_only()` to detect when sessions
-/// have been added or removed externally (e.g., via CLI).
-///
-/// Returns `None` if the directory cannot be read (permission error, I/O error, etc.),
-/// allowing the caller to distinguish between "0 sessions exist" and "cannot determine count".
-fn count_session_files() -> Option<usize> {
-    let config = kild_core::config::Config::new();
-    count_session_files_in_dir(&config.sessions_dir())
-}
-
-/// Count `.json` session files in a directory.
-///
-/// Extracted for testability - allows unit tests to provide a temp directory
-/// instead of relying on the actual sessions directory.
-fn count_session_files_in_dir(sessions_dir: &std::path::Path) -> Option<usize> {
-    if !sessions_dir.exists() {
-        return Some(0);
-    }
-
-    match std::fs::read_dir(sessions_dir) {
-        Ok(entries) => {
-            let count = entries
-                .filter_map(|e| e.ok())
-                .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("json"))
-                .count();
-            Some(count)
-        }
-        Err(e) => {
-            tracing::warn!(
-                event = "ui.count_session_files.read_dir_failed",
-                path = %sessions_dir.display(),
-                error = %e
-            );
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kild_core::{GitStatus, Session};
     use std::path::PathBuf;
 
     #[test]
@@ -1264,8 +1064,8 @@ mod tests {
             note: None,
         };
 
-        let display = KildDisplay::from_session(session);
-        assert_eq!(display.status, ProcessStatus::Stopped);
+        let display = SessionInfo::from_session(session);
+        assert_eq!(display.process_status, ProcessStatus::Stopped);
         // Non-existent path should result in Unknown git status
         assert_eq!(display.git_status, GitStatus::Unknown);
     }
@@ -1298,11 +1098,12 @@ mod tests {
             note: None,
         };
 
-        let display = KildDisplay::from_session(session);
+        let display = SessionInfo::from_session(session);
         // With window detection fallback, should attempt to check window
         // In test environment without Ghostty running, will fall back to Stopped
         assert!(
-            display.status == ProcessStatus::Stopped || display.status == ProcessStatus::Running,
+            display.process_status == ProcessStatus::Stopped
+                || display.process_status == ProcessStatus::Running,
             "Should have valid status from window detection fallback"
         );
     }
@@ -1368,7 +1169,7 @@ mod tests {
             note: None,
         };
 
-        let display = KildDisplay::from_session(session);
+        let display = SessionInfo::from_session(session);
 
         assert_eq!(display.git_status, GitStatus::Dirty);
         assert!(
@@ -1379,112 +1180,6 @@ mod tests {
         assert_eq!(stats.insertions, 2, "Should have 2 insertions");
         assert_eq!(stats.files_changed, 1);
         assert!(stats.has_changes());
-    }
-
-    #[test]
-    fn test_git_status_clean_repo() {
-        use std::process::Command;
-        use tempfile::TempDir;
-
-        // Create a temp directory and initialize a git repo
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Initialize git repo
-        Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .output()
-            .expect("git init failed");
-
-        // Configure git user (required for commit)
-        Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(path)
-            .output()
-            .expect("git config email failed");
-        Command::new("git")
-            .args(["config", "user.name", "Test User"])
-            .current_dir(path)
-            .output()
-            .expect("git config name failed");
-
-        // Create a file and commit it
-        std::fs::write(path.join("test.txt"), "hello").unwrap();
-        Command::new("git")
-            .args(["add", "."])
-            .current_dir(path)
-            .output()
-            .expect("git add failed");
-        Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(path)
-            .output()
-            .expect("git commit failed");
-
-        // Now repo should be clean
-        let status = check_git_status(path);
-        assert_eq!(status, GitStatus::Clean, "Expected clean repo after commit");
-    }
-
-    #[test]
-    fn test_git_status_dirty_repo() {
-        use std::process::Command;
-        use tempfile::TempDir;
-
-        // Create a temp directory and initialize a git repo
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Initialize git repo
-        Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .output()
-            .expect("git init failed");
-
-        // Create an uncommitted file
-        std::fs::write(path.join("test.txt"), "hello").unwrap();
-
-        // Repo should be dirty
-        let status = check_git_status(path);
-        assert_eq!(
-            status,
-            GitStatus::Dirty,
-            "Expected dirty repo with uncommitted files"
-        );
-    }
-
-    #[test]
-    fn test_git_status_non_git_directory() {
-        use tempfile::TempDir;
-
-        // Create a temp directory that is NOT a git repo
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Should return Unknown (git command fails in non-git directory)
-        let status = check_git_status(path);
-        assert_eq!(
-            status,
-            GitStatus::Unknown,
-            "Expected Unknown for non-git directory"
-        );
-    }
-
-    #[test]
-    fn test_git_status_nonexistent_directory() {
-        use std::path::Path;
-
-        let path = Path::new("/nonexistent/path/that/does/not/exist");
-
-        // Should return Unknown (git command fails)
-        let status = check_git_status(path);
-        assert_eq!(
-            status,
-            GitStatus::Unknown,
-            "Expected Unknown for nonexistent directory"
-        );
     }
 
     // --- CreateDialogField tests ---
@@ -1779,21 +1474,21 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: session_with_dead_pid,
-                status: ProcessStatus::Running, // Start as Running (incorrect)
+                process_status: ProcessStatus::Running, // Start as Running (incorrect)
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: session_with_live_pid,
-                status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
+                process_status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: session_no_pid,
-                status: ProcessStatus::Stopped, // Start as Stopped (correct)
+                process_status: ProcessStatus::Stopped, // Start as Stopped (correct)
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -1816,21 +1511,21 @@ mod tests {
 
         // Non-existent PID should be marked Stopped
         assert_eq!(
-            state.sessions.displays()[0].status,
+            state.sessions.displays()[0].process_status,
             ProcessStatus::Stopped,
             "Non-existent PID should be marked Stopped"
         );
 
         // Current process PID should be marked Running
         assert_eq!(
-            state.sessions.displays()[1].status,
+            state.sessions.displays()[1].process_status,
             ProcessStatus::Running,
             "Current process PID should be marked Running"
         );
 
         // No PID should remain Stopped (not checked, so unchanged)
         assert_eq!(
-            state.sessions.displays()[2].status,
+            state.sessions.displays()[2].process_status,
             ProcessStatus::Stopped,
             "Session with no PID should remain Stopped"
         );
@@ -1872,33 +1567,33 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: make_session("1", "branch-1"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("2", "branch-2"),
-                status: ProcessStatus::Running,
+                process_status: ProcessStatus::Running,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("3", "branch-3"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("4", "branch-4"),
-                status: ProcessStatus::Running,
+                process_status: ProcessStatus::Running,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("5", "branch-5"),
-                status: ProcessStatus::Unknown,
+                process_status: ProcessStatus::Unknown,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -1976,15 +1671,15 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: make_session("1", "project-a"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("2", "project-b"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -2028,21 +1723,21 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: make_session("1", &project_id_a),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("2", &project_id_b),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("3", &project_id_a),
-                status: ProcessStatus::Running,
+                process_status: ProcessStatus::Running,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -2091,9 +1786,9 @@ mod tests {
         };
 
         let mut state = AppState::test_new();
-        state.sessions.set_displays(vec![KildDisplay {
+        state.sessions.set_displays(vec![SessionInfo {
             session: make_session("1", "other-project-hash"),
-            status: ProcessStatus::Stopped,
+            process_status: ProcessStatus::Stopped,
             git_status: GitStatus::Unknown,
             diff_stats: None,
         }]);
@@ -2137,9 +1832,9 @@ mod tests {
         };
 
         let mut state = AppState::test_new();
-        state.sessions.set_displays(vec![KildDisplay {
+        state.sessions.set_displays(vec![SessionInfo {
             session: make_session("test-id"),
-            status: ProcessStatus::Stopped,
+            process_status: ProcessStatus::Stopped,
             git_status: GitStatus::Unknown,
             diff_stats: None,
         }]);
@@ -2185,9 +1880,9 @@ mod tests {
         };
 
         let mut state = AppState::test_new();
-        state.sessions.set_displays(vec![KildDisplay {
+        state.sessions.set_displays(vec![SessionInfo {
             session: make_session("test-id"),
-            status: ProcessStatus::Stopped,
+            process_status: ProcessStatus::Stopped,
             git_status: GitStatus::Unknown,
             diff_stats: None,
         }]);
@@ -2197,10 +1892,10 @@ mod tests {
         assert!(state.selected_kild().is_some());
 
         // Simulate refresh that keeps the same kild (new display list with same ID)
-        state.sessions.set_displays(vec![KildDisplay {
+        state.sessions.set_displays(vec![SessionInfo {
             session: make_session("test-id"),
-            status: ProcessStatus::Running, // Status may change
-            git_status: GitStatus::Dirty,   // Git status may change
+            process_status: ProcessStatus::Running, // Status may change
+            git_status: GitStatus::Dirty,           // Git status may change
             diff_stats: None,
         }]);
 
@@ -2252,15 +1947,15 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: make_session("id-1", "branch-1"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("id-2", "branch-2"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -2315,15 +2010,15 @@ mod tests {
 
         let mut state = AppState::test_new();
         state.sessions.set_displays(vec![
-            KildDisplay {
+            SessionInfo {
                 session: make_session("id-1", "branch-1"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
-            KildDisplay {
+            SessionInfo {
                 session: make_session("id-2", "branch-2"),
-                status: ProcessStatus::Stopped,
+                process_status: ProcessStatus::Stopped,
                 git_status: GitStatus::Unknown,
                 diff_stats: None,
             },
@@ -2350,130 +2045,5 @@ mod tests {
             "Selection should persist when a different kild is destroyed"
         );
         assert!(state.selected_kild().is_some());
-    }
-
-    // --- count_session_files_in_dir tests (issue #103 fix) ---
-
-    #[test]
-    fn test_count_session_files_nonexistent_directory() {
-        use std::path::Path;
-
-        let path = Path::new("/nonexistent/path/that/does/not/exist");
-        let count = super::count_session_files_in_dir(path);
-
-        assert_eq!(
-            count,
-            Some(0),
-            "Non-existent directory should return Some(0)"
-        );
-    }
-
-    #[test]
-    fn test_count_session_files_empty_directory() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let count = super::count_session_files_in_dir(temp_dir.path());
-
-        assert_eq!(count, Some(0), "Empty directory should return Some(0)");
-    }
-
-    #[test]
-    fn test_count_session_files_filters_json_only() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Create mix of files
-        std::fs::write(path.join("session1.json"), "{}").unwrap();
-        std::fs::write(path.join("session2.json"), "{}").unwrap();
-        std::fs::write(path.join("readme.txt"), "text").unwrap();
-        std::fs::write(path.join("config.toml"), "").unwrap();
-        std::fs::write(path.join(".hidden.json"), "{}").unwrap(); // Hidden but still .json
-
-        let count = super::count_session_files_in_dir(path);
-
-        assert_eq!(
-            count,
-            Some(3),
-            "Should count only .json files (including hidden)"
-        );
-    }
-
-    #[test]
-    fn test_count_session_files_ignores_subdirectories() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Create a json file
-        std::fs::write(path.join("session1.json"), "{}").unwrap();
-
-        // Create a subdirectory with json files (should not be counted)
-        std::fs::create_dir(path.join("subdir")).unwrap();
-        std::fs::write(path.join("subdir").join("session2.json"), "{}").unwrap();
-
-        let count = super::count_session_files_in_dir(path);
-
-        assert_eq!(
-            count,
-            Some(1),
-            "Should count only top-level .json files, not subdirectories"
-        );
-    }
-
-    #[test]
-    fn test_count_session_files_ignores_directories_named_json() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Create a directory that ends in .json (should not be counted)
-        std::fs::create_dir(path.join("fake.json")).unwrap();
-        std::fs::write(path.join("real.json"), "{}").unwrap();
-
-        let count = super::count_session_files_in_dir(path);
-
-        // Note: The current implementation counts directory entries with .json extension,
-        // not distinguishing files from directories. This is acceptable since session
-        // directories shouldn't have .json extension in practice.
-        // If this becomes an issue, we can add is_file() check.
-        assert!(
-            count.is_some(),
-            "Should return Some even with directories named .json"
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_count_session_files_returns_none_on_permission_error() {
-        use std::os::unix::fs::PermissionsExt;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Create a file first
-        std::fs::write(path.join("session.json"), "{}").unwrap();
-
-        // Remove read permission from directory
-        let mut perms = std::fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o000);
-        std::fs::set_permissions(path, perms).unwrap();
-
-        let count = super::count_session_files_in_dir(path);
-
-        // Restore permissions for cleanup
-        let mut perms = std::fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(path, perms).unwrap();
-
-        assert_eq!(
-            count, None,
-            "Should return None when directory cannot be read"
-        );
     }
 }

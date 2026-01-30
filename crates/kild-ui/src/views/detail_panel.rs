@@ -6,9 +6,10 @@
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use crate::components::{Button, ButtonVariant, Status, StatusIndicator};
-use crate::state::{AppState, GitStatus, ProcessStatus};
+use crate::state::AppState;
 use crate::theme;
 use crate::views::main_view::MainView;
+use kild_core::{GitStatus, ProcessStatus};
 
 /// Width of the detail panel in pixels (from mockup).
 pub const DETAIL_PANEL_WIDTH: f32 = 320.0;
@@ -30,7 +31,7 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
     let created_at = session.created_at.clone();
 
     // Map process status to display values
-    let (status, status_text, status_color) = match kild.status {
+    let (status, status_text, status_color) = match kild.process_status {
         ProcessStatus::Running => (Status::Active, "Running", theme::aurora()),
         ProcessStatus::Stopped => (Status::Stopped, "Stopped", theme::copper()),
         ProcessStatus::Unknown => (Status::Crashed, "Unknown", theme::ember()),
@@ -58,7 +59,7 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
     let window_id_for_focus = session.terminal_window_id.clone();
     let branch_for_action = branch.clone();
     let branch_for_destroy = branch.clone();
-    let is_running = kild.status == ProcessStatus::Running;
+    let is_running = kild.process_status == ProcessStatus::Running;
 
     div()
         .w(px(DETAIL_PANEL_WIDTH))

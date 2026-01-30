@@ -191,6 +191,8 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 
 **Prefer string literals over enums for event names.** Event names are typed as string literals directly in the tracing macros, not as enum variants. This keeps logging flexible and greppable.
 
+**No backward-compatibility shims.** When renaming or moving types, rename all usages. Never introduce type aliases, re-exports, or wrapper types solely for backward compatibility. This is a single-developer tool with no external consumers — there is nobody to keep compatible with. One name, one type, everywhere.
+
 ## Structured Logging
 
 ### Setup

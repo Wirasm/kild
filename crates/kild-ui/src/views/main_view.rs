@@ -466,7 +466,7 @@ impl MainView {
     /// Common handler for bulk operations (open all / stop all).
     fn handle_bulk_operation(
         &mut self,
-        operation: impl Fn(&[crate::state::KildDisplay]) -> (usize, Vec<crate::state::OperationError>),
+        operation: impl Fn(&[kild_core::SessionInfo]) -> (usize, Vec<crate::state::OperationError>),
         error_event: &str,
         cx: &mut Context<Self>,
     ) {
