@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use tracing::{debug, warn};
+#[cfg(target_os = "macos")]
+use tracing::debug;
+use tracing::warn;
 
 use super::backends::{GhosttyBackend, ITermBackend, TerminalAppBackend};
 use super::errors::TerminalError;

@@ -14,42 +14,21 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Full build + test + lint on macOS (all crates)
-  macos:
-    name: macOS (all crates)
-    runs-on: macos-latest
-    timeout-minutes: 30
+  # Fast formatting check — no build required
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: macos-cargo-
+          components: rustfmt
 
       - name: Check formatting
         run: cargo fmt --all --check
-
-      - name: Clippy (all crates)
-        run: cargo clippy --all -- -D warnings
-
-      - name: Build (all crates)
-        run: cargo build --all
-
-      - name: Test (all crates)
-        run: cargo test --all
 
   # Cross-platform crates on Linux (kild-core + kild CLI)
   linux:
@@ -62,7 +41,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Install system dependencies
         run: |
@@ -81,16 +60,113 @@ jobs:
           key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-cargo-
 
-      - name: Check formatting
-        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy -p kild-core -p kild -- -D warnings
 
-      - name: Clippy (cross-platform crates)
-        run: |
-          cargo clippy -p kild-core -- -D warnings
-          cargo clippy -p kild -- -D warnings
-
-      - name: Build (cross-platform crates)
+      - name: Build
         run: cargo build -p kild-core -p kild
 
-      - name: Test (cross-platform crates)
+      - name: Test
         run: cargo test -p kild-core -p kild
+
+  # macOS core + CLI
+  macos-core:
+    name: macOS (kild-core, kild)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-core-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-core-cargo-
+
+      - name: Clippy
+        run: cargo clippy -p kild-core -p kild -- -D warnings
+
+      - name: Build
+        run: cargo build -p kild-core -p kild
+
+      - name: Test
+        run: cargo test -p kild-core -p kild
+
+  # macOS GUI (heavy gpui dependency)
+  macos-ui:
+    name: macOS (kild-ui)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-ui-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-ui-cargo-
+
+      - name: Clippy
+        run: cargo clippy -p kild-ui -- -D warnings
+
+      - name: Build
+        run: cargo build -p kild-ui
+
+      - name: Test
+        run: cargo test -p kild-ui
+
+  # macOS peek (heavy native framework dependencies)
+  macos-peek:
+    name: macOS (kild-peek)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-peek-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-peek-cargo-
+
+      - name: Clippy
+        run: cargo clippy -p kild-peek-core -p kild-peek -- -D warnings
+
+      - name: Build
+        run: cargo build -p kild-peek-core -p kild-peek
+
+      - name: Test
+        run: cargo test -p kild-peek-core -p kild-peek
