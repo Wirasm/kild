@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use tracing::{debug, warn};
 
-use super::backends::{GhosttyBackend, ITermBackend, TerminalAppBackend};
+use super::backends::{AlacrittyBackend, GhosttyBackend, ITermBackend, TerminalAppBackend};
 use super::errors::TerminalError;
 use super::traits::TerminalBackend;
 use super::types::TerminalType;
@@ -24,6 +24,7 @@ impl TerminalRegistry {
         backends.insert(TerminalType::Ghostty, Box::new(GhosttyBackend));
         backends.insert(TerminalType::ITerm, Box::new(ITermBackend));
         backends.insert(TerminalType::TerminalApp, Box::new(TerminalAppBackend));
+        backends.insert(TerminalType::Alacritty, Box::new(AlacrittyBackend));
         // Note: Native is NOT registered - it delegates to detected type
         Self { backends }
     }
@@ -73,7 +74,31 @@ pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     Err(TerminalError::NoTerminalFound)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Detect available terminal on Linux (Alacritty + Hyprland).
+///
+/// Checks terminals in preference order and returns the first available one.
+/// This function will never return `TerminalType::Native`.
+#[cfg(target_os = "linux")]
+pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
+    debug!(event = "core.terminal.detection_started");
+
+    // Check in preference order (currently only Alacritty with Hyprland is supported)
+    let terminals = [TerminalType::Alacritty];
+
+    for terminal_type in terminals {
+        if let Some(backend) = get_backend(&terminal_type)
+            && backend.is_available()
+        {
+            debug!(event = "core.terminal.detected", terminal = backend.name());
+            return Ok(terminal_type);
+        }
+    }
+
+    warn!(event = "core.terminal.none_found", checked = "Alacritty");
+    Err(TerminalError::NoTerminalFound)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     warn!(
         event = "core.terminal.platform_not_supported",
@@ -108,6 +133,13 @@ mod tests {
     }
 
     #[test]
+    fn test_get_backend_alacritty() {
+        let backend = get_backend(&TerminalType::Alacritty);
+        assert!(backend.is_some());
+        assert_eq!(backend.unwrap().name(), "alacritty");
+    }
+
+    #[test]
     fn test_get_backend_native_returns_none() {
         // Native is not registered - must use detect_terminal() first
         let backend = get_backend(&TerminalType::Native);
@@ -126,6 +158,7 @@ mod tests {
             TerminalType::Ghostty,
             TerminalType::ITerm,
             TerminalType::TerminalApp,
+            TerminalType::Alacritty,
         ];
         for terminal_type in expected {
             let backend = get_backend(&terminal_type);
@@ -143,6 +176,7 @@ mod tests {
             (TerminalType::Ghostty, "ghostty"),
             (TerminalType::ITerm, "iterm"),
             (TerminalType::TerminalApp, "terminal"),
+            (TerminalType::Alacritty, "alacritty"),
         ];
         for (terminal_type, expected_name) in checks {
             let backend = get_backend(&terminal_type).unwrap();

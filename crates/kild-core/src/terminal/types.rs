@@ -7,6 +7,7 @@ pub enum TerminalType {
     ITerm,
     TerminalApp,
     Ghostty,
+    Alacritty,
     Native, // System default
 }
 
@@ -126,6 +127,7 @@ impl std::fmt::Display for TerminalType {
             TerminalType::ITerm => write!(f, "iterm"),
             TerminalType::TerminalApp => write!(f, "terminal"),
             TerminalType::Ghostty => write!(f, "ghostty"),
+            TerminalType::Alacritty => write!(f, "alacritty"),
             TerminalType::Native => write!(f, "native"),
         }
     }
@@ -140,6 +142,7 @@ mod tests {
         assert_eq!(TerminalType::ITerm.to_string(), "iterm");
         assert_eq!(TerminalType::TerminalApp.to_string(), "terminal");
         assert_eq!(TerminalType::Ghostty.to_string(), "ghostty");
+        assert_eq!(TerminalType::Alacritty.to_string(), "alacritty");
         assert_eq!(TerminalType::Native.to_string(), "native");
     }
 

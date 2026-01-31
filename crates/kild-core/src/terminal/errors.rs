@@ -2,7 +2,7 @@ use crate::errors::KildError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalError {
-    #[error("No supported terminal found (tried: Ghostty, iTerm, Terminal.app)")]
+    #[error("No supported terminal found (tried: Ghostty, iTerm, Terminal.app, Alacritty)")]
     NoTerminalFound,
 
     #[error("Terminal '{terminal}' not found or not executable")]
@@ -22,6 +22,9 @@ pub enum TerminalError {
 
     #[error("AppleScript failed with error: {stderr}")]
     AppleScriptFailed { stderr: String },
+
+    #[error("Hyprland IPC failed: {message}")]
+    HyprlandIpcFailed { message: String },
 
     #[error("Failed to focus terminal window: {message}")]
     FocusFailed { message: String },
@@ -43,6 +46,7 @@ impl KildError for TerminalError {
             TerminalError::InvalidCommand => "INVALID_COMMAND",
             TerminalError::AppleScriptExecution { .. } => "APPLESCRIPT_EXECUTION_FAILED",
             TerminalError::AppleScriptFailed { .. } => "APPLESCRIPT_FAILED",
+            TerminalError::HyprlandIpcFailed { .. } => "HYPRLAND_IPC_FAILED",
             TerminalError::FocusFailed { .. } => "TERMINAL_FOCUS_FAILED",
             TerminalError::IoError { .. } => "TERMINAL_IO_ERROR",
         }
@@ -56,6 +60,7 @@ impl KildError for TerminalError {
                 | TerminalError::InvalidCommand
                 | TerminalError::AppleScriptExecution { .. }
                 | TerminalError::AppleScriptFailed { .. }
+                | TerminalError::HyprlandIpcFailed { .. }
                 | TerminalError::FocusFailed { .. }
         )
     }
@@ -70,9 +75,19 @@ mod tests {
         let error = TerminalError::NoTerminalFound;
         assert_eq!(
             error.to_string(),
-            "No supported terminal found (tried: Ghostty, iTerm, Terminal.app)"
+            "No supported terminal found (tried: Ghostty, iTerm, Terminal.app, Alacritty)"
         );
         assert_eq!(error.error_code(), "NO_TERMINAL_FOUND");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_hyprland_ipc_failed() {
+        let error = TerminalError::HyprlandIpcFailed {
+            message: "Failed to connect".to_string(),
+        };
+        assert_eq!(error.to_string(), "Hyprland IPC failed: Failed to connect");
+        assert_eq!(error.error_code(), "HYPRLAND_IPC_FAILED");
         assert!(error.is_user_error());
     }
 

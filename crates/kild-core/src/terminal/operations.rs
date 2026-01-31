@@ -3,9 +3,9 @@
 use crate::terminal::{errors::TerminalError, registry, types::*};
 use std::path::Path;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 use tracing::debug;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use tracing::warn;
 
 // Re-export common utilities for backward compatibility and external use
@@ -15,14 +15,9 @@ pub use crate::terminal::common::escape::{
 
 /// Detect the available terminal.
 ///
-/// Checks terminals in preference order (Ghostty > iTerm > Terminal.app)
-/// and returns the first available one.
-#[cfg(target_os = "macos")]
-pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
-    registry::detect_terminal()
-}
-
-#[cfg(not(target_os = "macos"))]
+/// Checks terminals in preference order
+///   macOs: (Ghostty > iTerm > Terminal.app)
+///   Linux: (Alacritty with Hyprland)
 pub fn detect_terminal() -> Result<TerminalType, TerminalError> {
     registry::detect_terminal()
 }
@@ -84,6 +79,18 @@ pub fn build_spawn_command(config: &SpawnConfig) -> Result<Vec<String>, Terminal
                 cd_command,
             ])
         }
+        TerminalType::Alacritty => {
+            // On Linux, Alacritty is spawned directly with --title for window identification
+            Ok(vec![
+                "alacritty".to_string(),
+                "--title".to_string(),
+                "kild-session".to_string(),
+                "-e".to_string(),
+                "sh".to_string(),
+                "-c".to_string(),
+                cd_command,
+            ])
+        }
         TerminalType::Native => {
             // Use system default (detect and delegate)
             let detected = detect_terminal()?;
@@ -133,13 +140,13 @@ pub fn extract_command_name(command: &str) -> String {
 ///
 /// # Arguments
 /// * `config` - The spawn configuration
-/// * `window_title` - Optional unique title for Ghostty (used as "window ID")
+/// * `window_title` - Optional unique title for window identification
 ///
 /// # Returns
 /// * `Ok(Some(window_id))` - Window ID captured successfully
 /// * `Ok(None)` - Script succeeded but no window ID captured
 /// * `Err(TerminalError)` - Script execution failed
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn execute_spawn_script(
     config: &SpawnConfig,
     window_title: Option<&str>,
@@ -164,12 +171,12 @@ pub fn execute_spawn_script(
     backend.execute_spawn(&resolved_config, window_title)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn execute_spawn_script(
     _config: &SpawnConfig,
     _window_title: Option<&str>,
 ) -> Result<Option<String>, TerminalError> {
-    // Terminal spawning with window ID capture not yet implemented for non-macOS platforms
+    // Terminal spawning not supported on this platform
     debug!(
         event = "core.terminal.spawn_script_not_supported",
         platform = std::env::consts::OS
@@ -182,15 +189,15 @@ pub fn execute_spawn_script(
 /// This function delegates to the appropriate backend via the registry.
 ///
 /// # Arguments
-/// * `terminal_type` - The type of terminal (iTerm, Terminal.app, Ghostty)
-/// * `window_id` - The window ID (for iTerm/Terminal.app) or title (for Ghostty)
+/// * `terminal_type` - The type of terminal (iTerm, Terminal.app, Ghostty, Alacritty)
+/// * `window_id` - The window ID or title for window identification
 ///
 /// # Behavior
 /// - If window_id is None, skips close (logs debug message)
 /// - If window_id is Some, attempts to close that specific window
 /// - Close failures are non-fatal and logged at warn level
 /// - Returns () because close operations should never block session destruction
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn close_terminal_window(terminal_type: &TerminalType, window_id: Option<&str>) {
     // Resolve Native to actual terminal type
     let resolved_type = match terminal_type {
@@ -220,9 +227,9 @@ pub fn close_terminal_window(terminal_type: &TerminalType, window_id: Option<&st
     backend.close_window(window_id);
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn close_terminal_window(_terminal_type: &TerminalType, _window_id: Option<&str>) {
-    // Terminal closing not yet implemented for non-macOS platforms
+    // Terminal closing not supported on this platform
     debug!(
         event = "core.terminal.close_not_supported",
         platform = std::env::consts::OS
@@ -234,13 +241,13 @@ pub fn close_terminal_window(_terminal_type: &TerminalType, _window_id: Option<&
 /// This function delegates to the appropriate backend via the registry.
 ///
 /// # Arguments
-/// * `terminal_type` - The type of terminal (iTerm, Terminal.app, Ghostty)
-/// * `window_id` - The window ID (for iTerm/Terminal.app) or title (for Ghostty)
+/// * `terminal_type` - The type of terminal (iTerm, Terminal.app, Ghostty, Alacritty)
+/// * `window_id` - The window ID or title for window identification
 ///
 /// # Returns
 /// * `Ok(())` - Window was focused successfully
 /// * `Err(TerminalError)` - Focus failed (window not found, permission denied, etc.)
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn focus_terminal_window(
     terminal_type: &TerminalType,
     window_id: &str,
@@ -254,7 +261,7 @@ pub fn focus_terminal_window(
     backend.focus_window(window_id)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn focus_terminal_window(
     _terminal_type: &TerminalType,
     _window_id: &str,
@@ -268,7 +275,7 @@ pub fn focus_terminal_window(
 ///
 /// Returns `Ok(Some(true/false))` if the terminal supports window detection,
 /// or `Ok(None)` if the terminal doesn't support it (use PID-based detection instead).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn is_terminal_window_open(
     terminal_type: &TerminalType,
     window_id: &str,
@@ -282,12 +289,12 @@ pub fn is_terminal_window_open(
     backend.is_window_open(window_id)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn is_terminal_window_open(
     _terminal_type: &TerminalType,
     _window_id: &str,
 ) -> Result<Option<bool>, TerminalError> {
-    // Window detection not supported on non-macOS platforms - use PID-based detection instead
+    // Window detection not supported on this platform - use PID-based detection instead
     Ok(None)
 }
 
@@ -468,6 +475,7 @@ mod tests {
         close_terminal_window(&TerminalType::ITerm, None);
         close_terminal_window(&TerminalType::TerminalApp, None);
         close_terminal_window(&TerminalType::Ghostty, None);
+        close_terminal_window(&TerminalType::Alacritty, None);
     }
 
     #[test]
