@@ -111,6 +111,7 @@ pub fn spawn_terminal(
             "iterm2" | "iterm" => TerminalType::ITerm,
             "terminal" => TerminalType::TerminalApp,
             "ghostty" => TerminalType::Ghostty,
+            "alacritty" => TerminalType::Alacritty,
             "native" => TerminalType::Native,
             _ => {
                 warn!(

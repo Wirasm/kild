@@ -3,3 +3,4 @@
 pub mod applescript;
 pub mod detection;
 pub mod escape;
+pub mod hyprland;

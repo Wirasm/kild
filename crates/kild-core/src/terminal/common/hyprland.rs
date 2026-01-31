@@ -1,0 +1,241 @@
+//! Hyprland IPC utilities for terminal window management.
+//!
+//! This module provides utilities for interacting with Hyprland compositor
+//! via `hyprctl` commands. Used by the Alacritty backend on Linux.
+
+use crate::terminal::errors::TerminalError;
+use tracing::{debug, warn};
+
+/// Check if Hyprland is available and running.
+///
+/// Returns true if `hyprctl version` succeeds.
+#[cfg(target_os = "linux")]
+pub fn is_hyprland_available() -> bool {
+    std::process::Command::new("hyprctl")
+        .arg("version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_hyprland_available() -> bool {
+    false
+}
+
+/// Focus a window by its title using Hyprland IPC.
+///
+/// Uses `hyprctl dispatch focuswindow title:X` to focus the window.
+#[cfg(target_os = "linux")]
+pub fn focus_window_by_title(title: &str) -> Result<(), TerminalError> {
+    debug!(
+        event = "core.terminal.hyprland_focus_started",
+        title = %title
+    );
+
+    let output = std::process::Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("focuswindow")
+        .arg(format!("title:{}", title))
+        .output()
+        .map_err(|e| TerminalError::HyprlandIpcFailed {
+            message: format!("Failed to execute hyprctl: {}", e),
+        })?;
+
+    if output.status.success() {
+        debug!(
+            event = "core.terminal.hyprland_focus_completed",
+            title = %title
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            event = "core.terminal.hyprland_focus_failed",
+            title = %title,
+            stderr = %stderr.trim()
+        );
+        Err(TerminalError::FocusFailed {
+            message: format!("Hyprland focus failed for '{}': {}", title, stderr.trim()),
+        })
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn focus_window_by_title(_title: &str) -> Result<(), TerminalError> {
+    Err(TerminalError::FocusFailed {
+        message: "Hyprland focus not supported on this platform".to_string(),
+    })
+}
+
+/// Close a window by its title using Hyprland IPC.
+///
+/// Uses `hyprctl dispatch closewindow title:X` to close the window.
+/// This is a fire-and-forget operation - errors are logged but not returned.
+#[cfg(target_os = "linux")]
+pub fn close_window_by_title(title: &str) {
+    debug!(
+        event = "core.terminal.hyprland_close_started",
+        title = %title
+    );
+
+    match std::process::Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("closewindow")
+        .arg(format!("title:{}", title))
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            debug!(
+                event = "core.terminal.hyprland_close_completed",
+                title = %title
+            );
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                event = "core.terminal.hyprland_close_failed",
+                title = %title,
+                stderr = %stderr.trim(),
+                message = "hyprctl closewindow failed - window may remain open"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event = "core.terminal.hyprland_close_exec_failed",
+                title = %title,
+                error = %e,
+                message = "Failed to execute hyprctl - window may remain open"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn close_window_by_title(_title: &str) {
+    debug!(
+        event = "core.terminal.hyprland_close_not_supported",
+        platform = std::env::consts::OS
+    );
+}
+
+/// Check if a window with the given title exists using Hyprland IPC.
+///
+/// Uses `hyprctl clients -j` to query all windows and searches for a matching title.
+///
+/// # Returns
+/// - `Ok(Some(true))` - Window exists
+/// - `Ok(Some(false))` - Window does not exist
+/// - `Ok(None)` - Cannot determine (hyprctl failed to parse)
+/// - `Err(...)` - hyprctl execution failed
+#[cfg(target_os = "linux")]
+pub fn window_exists_by_title(title: &str) -> Result<Option<bool>, TerminalError> {
+    debug!(
+        event = "core.terminal.hyprland_window_check_started",
+        title = %title
+    );
+
+    let output = std::process::Command::new("hyprctl")
+        .arg("clients")
+        .arg("-j")
+        .output()
+        .map_err(|e| TerminalError::HyprlandIpcFailed {
+            message: format!("Failed to execute hyprctl clients: {}", e),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            event = "core.terminal.hyprland_window_check_failed",
+            title = %title,
+            stderr = %stderr.trim()
+        );
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON output to find windows with matching title
+    // The JSON is an array of client objects, each with a "title" field
+    match serde_json::from_str::<Vec<HyprlandClient>>(&stdout) {
+        Ok(clients) => {
+            let found = clients.iter().any(|c| c.title.contains(title));
+            debug!(
+                event = "core.terminal.hyprland_window_check_completed",
+                title = %title,
+                found = found,
+                client_count = clients.len()
+            );
+            Ok(Some(found))
+        }
+        Err(e) => {
+            warn!(
+                event = "core.terminal.hyprland_window_check_parse_failed",
+                title = %title,
+                error = %e,
+                message = "Failed to parse hyprctl clients JSON"
+            );
+            Ok(None)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn window_exists_by_title(_title: &str) -> Result<Option<bool>, TerminalError> {
+    Ok(None)
+}
+
+/// Hyprland client (window) information from `hyprctl clients -j`.
+#[derive(Debug, serde::Deserialize)]
+struct HyprlandClient {
+    /// Window title
+    title: String,
+    // Other fields exist but we only need title for window matching
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hyprland_available_does_not_panic() {
+        // Just verify the function doesn't panic
+        let _available = is_hyprland_available();
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn test_hyprland_not_available_on_non_linux() {
+        assert!(!is_hyprland_available());
+    }
+
+    #[test]
+    fn test_close_window_does_not_panic() {
+        // close_window_by_title is fire-and-forget, should never panic
+        close_window_by_title("nonexistent-window-12345");
+    }
+
+    #[test]
+    fn test_window_exists_nonexistent() {
+        // On non-Linux or without Hyprland, should return Ok(None) or Ok(Some(false))
+        let result = window_exists_by_title("nonexistent-window-12345");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_hyprland_client_parsing() {
+        let json = r#"[
+            {"title": "kild-test-session", "class": "Alacritty"},
+            {"title": "Firefox", "class": "firefox"}
+        ]"#;
+
+        let clients: Vec<HyprlandClient> = serde_json::from_str(json).unwrap();
+        assert_eq!(clients.len(), 2);
+        assert_eq!(clients[0].title, "kild-test-session");
+        assert_eq!(clients[1].title, "Firefox");
+
+        // Test title matching logic
+        assert!(clients.iter().any(|c| c.title.contains("kild-test")));
+        assert!(!clients.iter().any(|c| c.title.contains("nonexistent")));
+    }
+}

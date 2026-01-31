@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 kild-core.workspace = true
 gpui.workspace = true
-core-text.workspace = true  # Pin to fix gpui dependency conflict
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 chrono.workspace = true
@@ -20,6 +19,10 @@ serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
 notify.workspace = true
+
+# core-text is macOS-only; pinned to fix gpui font-kit conflict
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
