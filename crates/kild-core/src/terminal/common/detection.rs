@@ -1,5 +1,6 @@
 //! Platform-specific detection utilities.
 
+#[cfg(target_os = "macos")]
 use std::path::Path;
 
 /// Check if a macOS application exists in /Applications.

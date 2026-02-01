@@ -3,17 +3,18 @@
 use tracing::debug;
 
 use crate::terminal::{
-    common::{
-        applescript::{close_applescript_window, execute_spawn_script},
-        detection::app_exists_macos,
-        escape::{applescript_escape, build_cd_command},
-    },
-    errors::TerminalError,
-    traits::TerminalBackend,
+    common::detection::app_exists_macos, errors::TerminalError, traits::TerminalBackend,
     types::SpawnConfig,
 };
 
+#[cfg(target_os = "macos")]
+use crate::terminal::common::{
+    applescript::{close_applescript_window, execute_spawn_script},
+    escape::{applescript_escape, build_cd_command},
+};
+
 /// AppleScript template for iTerm window launching (with window ID capture).
+#[cfg(target_os = "macos")]
 const ITERM_SCRIPT: &str = r#"tell application "iTerm"
         set newWindow to (create window with default profile)
         set windowId to id of newWindow
@@ -25,6 +26,7 @@ const ITERM_SCRIPT: &str = r#"tell application "iTerm"
 
 /// AppleScript template for iTerm window closing (with window ID support).
 /// Errors are handled in Rust, not AppleScript, for proper logging.
+#[cfg(target_os = "macos")]
 const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
         close window id {window_id}
     end tell"#;
@@ -32,6 +34,7 @@ const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
 /// AppleScript template for iTerm window focusing.
 /// - `activate` brings iTerm to the foreground (above other apps)
 /// - `set frontmost` ensures the specific window is in front of other iTerm windows
+#[cfg(target_os = "macos")]
 const ITERM_FOCUS_SCRIPT: &str = r#"tell application "iTerm"
         activate
         set frontmost of window id {window_id} to true
@@ -122,7 +125,6 @@ impl TerminalBackend for ITermBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_iterm_backend_name() {
@@ -143,18 +145,22 @@ mod tests {
         backend.close_window(None);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_iterm_script_has_window_id_return() {
         assert!(ITERM_SCRIPT.contains("return windowId"));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_iterm_close_script_has_window_id_placeholder() {
         assert!(ITERM_CLOSE_SCRIPT.contains("{window_id}"));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_iterm_script_command_substitution() {
+        use std::path::PathBuf;
         let cd_command = build_cd_command(&PathBuf::from("/tmp"), "echo hello");
         let script = ITERM_SCRIPT.replace("{command}", &applescript_escape(&cd_command));
         assert!(script.contains("/tmp"));

@@ -376,10 +376,14 @@ mod tests {
             None,
         );
 
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, TerminalError::WorkingDirectoryNotFound { .. }));
-        }
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                TerminalError::WorkingDirectoryNotFound { .. } | TerminalError::NoTerminalFound
+            ),
+            "Expected WorkingDirectoryNotFound or NoTerminalFound, got: {err}"
+        );
     }
 
     #[test]
@@ -388,10 +392,14 @@ mod tests {
         let config = KildConfig::default();
         let result = spawn_terminal(&current_dir, "", &config, None, None);
 
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(matches!(e, TerminalError::InvalidCommand));
-        }
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                TerminalError::InvalidCommand | TerminalError::NoTerminalFound
+            ),
+            "Expected InvalidCommand or NoTerminalFound, got: {err}"
+        );
     }
 
     #[test]

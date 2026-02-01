@@ -1,15 +1,17 @@
 //! Ghostty terminal backend implementation.
 
-use tracing::{debug, warn};
+use tracing::debug;
+#[cfg(target_os = "macos")]
+use tracing::warn;
 
 use crate::terminal::{
-    common::{
-        detection::app_exists_macos,
-        escape::{applescript_escape, build_cd_command, escape_regex, shell_escape},
-    },
-    errors::TerminalError,
-    traits::TerminalBackend,
+    common::detection::app_exists_macos, errors::TerminalError, traits::TerminalBackend,
     types::SpawnConfig,
+};
+
+#[cfg(target_os = "macos")]
+use crate::terminal::common::escape::{
+    applescript_escape, build_cd_command, escape_regex, shell_escape,
 };
 
 /// Find the Ghostty process PID that contains the given session identifier in its command line.
@@ -583,7 +585,6 @@ impl TerminalBackend for GhosttyBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_ghostty_backend_name() {
@@ -604,6 +605,7 @@ mod tests {
         backend.close_window(None);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_ghostty_pkill_pattern_escaping() {
         // Verify the pattern format used in close_window
@@ -614,8 +616,11 @@ mod tests {
         assert_eq!(pattern, "Ghostty.*my-kild\\.test");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_ghostty_spawn_command_structure() {
+        use std::path::PathBuf;
+
         // Verify the structure of what would be passed to 'open'
         let config = SpawnConfig::new(
             crate::terminal::types::TerminalType::Ghostty,
@@ -637,6 +642,7 @@ mod tests {
         assert!(ghostty_command.contains("/tmp/test"));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_is_ghostty_process_helper() {
         // Just verify the function doesn't panic with invalid PID
@@ -645,6 +651,7 @@ mod tests {
         assert!(!result, "Non-existent PID should not be a Ghostty process");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_find_ghostty_pid_no_match() {
         // Search for a session ID that definitely doesn't exist

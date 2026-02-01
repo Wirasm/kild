@@ -1,6 +1,7 @@
 //! AppleScript execution utilities for terminal backends.
 
 use crate::terminal::errors::TerminalError;
+#[cfg(target_os = "macos")]
 use tracing::{debug, warn};
 
 /// Execute an AppleScript and return the stdout as window ID.
