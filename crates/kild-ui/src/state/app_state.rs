@@ -84,6 +84,62 @@ impl AppState {
         self.sessions.update_statuses_only();
     }
 
+    /// Apply core events to update application state.
+    ///
+    /// Maps each `Event` variant to the appropriate state mutations.
+    /// Called after successful `CoreStore::dispatch()` to drive UI updates
+    /// from the event stream rather than manual side-effect code.
+    pub fn apply_events(&mut self, events: &[kild_core::Event]) {
+        tracing::debug!(
+            event = "ui.state.apply_events_started",
+            count = events.len()
+        );
+
+        for ev in events {
+            tracing::debug!(event = "ui.state.event_applied", event_type = ?ev);
+
+            match ev {
+                kild_core::Event::KildCreated { .. } => {
+                    self.close_dialog();
+                    self.refresh_sessions();
+                }
+                kild_core::Event::KildDestroyed { branch } => {
+                    self.clear_selection_if_matches(branch);
+                    self.close_dialog();
+                    self.refresh_sessions();
+                }
+                kild_core::Event::KildOpened { .. } => {
+                    self.refresh_sessions();
+                }
+                kild_core::Event::KildStopped { .. } => {
+                    self.refresh_sessions();
+                }
+                kild_core::Event::KildCompleted { branch } => {
+                    self.clear_selection_if_matches(branch);
+                    self.refresh_sessions();
+                }
+                kild_core::Event::SessionsRefreshed => {
+                    // Already handled by the refresh call that produced this event
+                }
+                kild_core::Event::ProjectAdded { .. }
+                | kild_core::Event::ProjectRemoved { .. }
+                | kild_core::Event::ActiveProjectChanged { .. } => {
+                    // Not yet dispatched — project commands return NotImplemented
+                }
+            }
+        }
+    }
+
+    /// Clear selection if the currently selected kild matches the given branch.
+    fn clear_selection_if_matches(&mut self, branch: &str) {
+        if self
+            .selected_kild()
+            .is_some_and(|s| s.session.branch == branch)
+        {
+            self.clear_selection();
+        }
+    }
+
     /// Close any open dialog.
     pub fn close_dialog(&mut self) {
         self.dialog = DialogState::None;
@@ -436,7 +492,7 @@ impl Default for AppState {
 mod tests {
     use super::*;
     use kild_core::sessions::types::SessionStatus;
-    use kild_core::{GitStatus, ProcessStatus, Session};
+    use kild_core::{Event, GitStatus, ProcessStatus, Session};
     use std::path::PathBuf;
 
     use super::super::dialog::AddProjectDialogField;
@@ -926,5 +982,162 @@ mod tests {
             "Selection should persist when a different kild is destroyed"
         );
         assert!(state.selected_kild().is_some());
+    }
+
+    // --- apply_events tests ---
+
+    fn make_session_for_event_test(id: &str, branch: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            branch: branch.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            agent: "claude".to_string(),
+            project_id: "test-project".to_string(),
+            status: SessionStatus::Active,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            port_range_start: 0,
+            port_range_end: 0,
+            port_count: 0,
+            process_id: None,
+            process_name: None,
+            process_start_time: None,
+            terminal_type: None,
+            terminal_window_id: None,
+            command: String::new(),
+            last_activity: None,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn test_apply_events_handles_empty_vec() {
+        let mut state = AppState::test_new();
+        state.set_dialog(DialogState::open_create());
+
+        state.apply_events(&[]);
+
+        // Dialog should still be open — no events means no mutations
+        assert!(state.dialog().is_create());
+    }
+
+    #[test]
+    fn test_apply_kild_created_closes_dialog_and_refreshes() {
+        let mut state = AppState::test_new();
+        state.set_dialog(DialogState::open_create());
+
+        state.apply_events(&[Event::KildCreated {
+            branch: "test-branch".to_string(),
+            session_id: "test-id".to_string(),
+        }]);
+
+        assert!(matches!(state.dialog(), DialogState::None));
+    }
+
+    #[test]
+    fn test_apply_kild_destroyed_clears_selection_when_selected() {
+        let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Stopped,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
+        state.set_dialog(DialogState::open_confirm("branch-1".to_string(), None));
+
+        state.apply_events(&[Event::KildDestroyed {
+            branch: "branch-1".to_string(),
+        }]);
+
+        assert!(!state.has_selection());
+        assert!(matches!(state.dialog(), DialogState::None));
+    }
+
+    #[test]
+    fn test_apply_kild_destroyed_preserves_selection_when_other() {
+        let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![
+            SessionInfo {
+                session: make_session_for_event_test("id-1", "branch-1"),
+                process_status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+                diff_stats: None,
+            },
+            SessionInfo {
+                session: make_session_for_event_test("id-2", "branch-2"),
+                process_status: ProcessStatus::Stopped,
+                git_status: GitStatus::Unknown,
+                diff_stats: None,
+            },
+        ]);
+        state.selection.select("id-1".to_string());
+
+        state.apply_events(&[Event::KildDestroyed {
+            branch: "branch-2".to_string(),
+        }]);
+
+        // Selection of branch-1 should be preserved
+        assert!(state.has_selection());
+        assert_eq!(state.selected_id(), Some("id-1"));
+    }
+
+    #[test]
+    fn test_apply_kild_opened_preserves_selection_and_dialog() {
+        let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Stopped,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
+        state.set_dialog(DialogState::open_create());
+
+        state.apply_events(&[Event::KildOpened {
+            branch: "branch-1".to_string(),
+        }]);
+
+        assert!(state.dialog().is_create());
+        assert!(state.has_selection());
+        assert_eq!(state.selected_id(), Some("id-1"));
+    }
+
+    #[test]
+    fn test_apply_kild_stopped_preserves_selection_and_dialog() {
+        let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Running,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
+        state.set_dialog(DialogState::open_create());
+
+        state.apply_events(&[Event::KildStopped {
+            branch: "branch-1".to_string(),
+        }]);
+
+        assert!(state.dialog().is_create());
+        assert!(state.has_selection());
+        assert_eq!(state.selected_id(), Some("id-1"));
+    }
+
+    #[test]
+    fn test_apply_kild_completed_clears_selection_when_selected() {
+        let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Stopped,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
+
+        state.apply_events(&[Event::KildCompleted {
+            branch: "branch-1".to_string(),
+        }]);
+
+        assert!(!state.has_selection());
     }
 }

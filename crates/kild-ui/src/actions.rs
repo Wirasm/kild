@@ -5,26 +5,35 @@
 
 use std::path::{Path, PathBuf};
 
-use kild_core::{
-    Command, CoreStore, CreateSessionRequest, KildConfig, Session, Store, session_ops,
-};
+use kild_core::{Command, CoreStore, Event, KildConfig, Store, session_ops};
 
 use crate::state::OperationError;
 use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
 use kild_core::{ProcessStatus, SessionInfo};
+
+/// Load config and create a CoreStore instance.
+///
+/// Helper function to avoid duplicating config loading logic across action handlers.
+fn create_store() -> Result<CoreStore, String> {
+    let config = KildConfig::load_hierarchy().map_err(|e| {
+        tracing::error!(event = "ui.config_load_failed", error = %e);
+        format!("Failed to load config: {e}")
+    })?;
+    Ok(CoreStore::new(config))
+}
 
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
 /// When `project_path` is provided (UI context), detects project from that path.
 /// When `None` (shouldn't happen in UI), falls back to current working directory detection.
 ///
-/// Returns the created session on success, or an error message on failure.
+/// Dispatches through `CoreStore` and returns the resulting events on success.
 pub fn create_kild(
     branch: &str,
     agent: &str,
     note: Option<String>,
     project_path: Option<PathBuf>,
-) -> Result<Session, String> {
+) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.create_kild.started",
         branch = branch,
@@ -41,35 +50,17 @@ pub fn create_kild(
         return Err("Branch name cannot be empty".to_string());
     }
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.create_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
+    let mut store = create_store()?;
 
-    let request = match project_path {
-        Some(path) => CreateSessionRequest::with_project_path(
-            branch.to_string(),
-            Some(agent.to_string()),
-            note,
-            path,
-        ),
-        None => CreateSessionRequest::new(branch.to_string(), Some(agent.to_string()), note),
-    };
-
-    match session_ops::create_session(request, &config) {
-        Ok(session) => {
-            tracing::info!(
-                event = "ui.create_kild.completed",
-                session_id = session.id,
-                branch = session.branch
-            );
-            Ok(session)
+    match store.dispatch(Command::CreateKild {
+        branch: branch.to_string(),
+        agent: Some(agent.to_string()),
+        note,
+        project_path,
+    }) {
+        Ok(events) => {
+            tracing::info!(event = "ui.create_kild.completed", branch = branch);
+            Ok(events)
         }
         Err(e) => {
             tracing::error!(
@@ -113,32 +104,22 @@ pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
 /// # Arguments
 /// * `branch` - Branch name of the kild to destroy
 /// * `force` - If true, bypasses git safety checks (e.g., uncommitted changes)
-pub fn destroy_kild(branch: &str, force: bool) -> Result<(), String> {
+pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.destroy_kild.started",
         branch = branch,
         force = force
     );
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.destroy_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::DestroyKild {
         branch: branch.to_string(),
         force,
     }) {
-        Ok(_events) => {
+        Ok(events) => {
             tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
-            Ok(())
+            Ok(events)
         }
         Err(e) => {
             tracing::error!(event = "ui.destroy_kild.failed", branch = branch, error = %e);
@@ -150,17 +131,19 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<(), String> {
 /// Open a new agent terminal in an existing kild (additive - doesn't close existing terminals).
 ///
 /// Unlike relaunch, this does NOT close existing terminals - multiple agents can run in the same kild.
-pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Session, String> {
+/// Dispatches through `CoreStore` and returns the resulting events on success.
+pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.open_kild.started", branch = branch, agent = ?agent);
 
-    match session_ops::open_session(branch, agent) {
-        Ok(session) => {
-            tracing::info!(
-                event = "ui.open_kild.completed",
-                branch = branch,
-                process_id = session.process_id
-            );
-            Ok(session)
+    let mut store = create_store()?;
+
+    match store.dispatch(Command::OpenKild {
+        branch: branch.to_string(),
+        agent,
+    }) {
+        Ok(events) => {
+            tracing::info!(event = "ui.open_kild.completed", branch = branch);
+            Ok(events)
         }
         Err(e) => {
             tracing::error!(event = "ui.open_kild.failed", branch = branch, error = %e);
@@ -173,27 +156,17 @@ pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Session, String>
 ///
 /// Dispatches through `CoreStore` to route to kild-core's `stop_session`.
 /// The worktree and session file are preserved. The kild can be reopened with open_kild().
-pub fn stop_kild(branch: &str) -> Result<(), String> {
+pub fn stop_kild(branch: &str) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.stop_kild.started", branch = branch);
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.stop_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::StopKild {
         branch: branch.to_string(),
     }) {
-        Ok(_events) => {
+        Ok(events) => {
             tracing::info!(event = "ui.stop_kild.completed", branch = branch);
-            Ok(())
+            Ok(events)
         }
         Err(e) => {
             tracing::error!(event = "ui.stop_kild.failed", branch = branch, error = %e);

@@ -282,11 +282,7 @@ impl MainView {
         }
 
         match actions::create_kild(&branch, &agent, note, project_path) {
-            Ok(_session) => {
-                // Success - close dialog and refresh list
-                self.state.close_dialog();
-                self.state.refresh_sessions();
-            }
+            Ok(events) => self.state.apply_events(&events),
             Err(e) => {
                 tracing::warn!(
                     event = "ui.dialog_submit.error_displayed",
@@ -359,18 +355,7 @@ impl MainView {
             .unwrap_or(false);
 
         match actions::destroy_kild(&branch, force) {
-            Ok(()) => {
-                // Clear selection if the destroyed kild was selected
-                // After refresh, the selected kild won't exist in the list anyway,
-                // but clearing explicitly ensures the panel disappears immediately
-                if let Some(selected) = self.state.selected_kild()
-                    && selected.session.branch == branch
-                {
-                    self.state.clear_selection();
-                }
-                self.state.close_dialog();
-                self.state.refresh_sessions();
-            }
+            Ok(events) => self.state.apply_events(&events),
             Err(e) => {
                 tracing::warn!(
                     event = "ui.confirm_destroy.error_displayed",
@@ -403,9 +388,7 @@ impl MainView {
         self.state.clear_error(branch);
 
         match actions::open_kild(branch, None) {
-            Ok(_session) => {
-                self.state.refresh_sessions();
-            }
+            Ok(events) => self.state.apply_events(&events),
             Err(e) => {
                 tracing::warn!(
                     event = "ui.open_click.error_displayed",
@@ -430,9 +413,7 @@ impl MainView {
         self.state.clear_error(branch);
 
         match actions::stop_kild(branch) {
-            Ok(()) => {
-                self.state.refresh_sessions();
-            }
+            Ok(events) => self.state.apply_events(&events),
             Err(e) => {
                 tracing::warn!(
                     event = "ui.stop_click.error_displayed",
