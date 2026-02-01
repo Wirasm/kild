@@ -5,7 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-use kild_core::{CreateSessionRequest, KildConfig, Session, session_ops};
+use kild_core::{
+    Command, CoreStore, CreateSessionRequest, KildConfig, Session, Store, session_ops,
+};
 
 use crate::state::OperationError;
 use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
@@ -105,7 +107,7 @@ pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
 
 /// Destroy a kild by branch name.
 ///
-/// Thin wrapper around kild-core's `destroy_session`, which handles
+/// Dispatches through `CoreStore` to route to kild-core's `destroy_session`, which handles
 /// terminal cleanup, process termination, worktree removal, and session file deletion.
 ///
 /// # Arguments
@@ -118,7 +120,13 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<(), String> {
         force = force
     );
 
-    match session_ops::destroy_session(branch, force) {
+    let config = KildConfig::load_hierarchy().unwrap_or_default();
+    let mut store = CoreStore::new(config);
+
+    match store.dispatch(Command::DestroyKild {
+        branch: branch.to_string(),
+        force,
+    }) {
         Ok(()) => {
             tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
             Ok(())
@@ -154,11 +162,17 @@ pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Session, String>
 
 /// Stop the agent process in a kild without destroying the kild.
 ///
+/// Dispatches through `CoreStore` to route to kild-core's `stop_session`.
 /// The worktree and session file are preserved. The kild can be reopened with open_kild().
 pub fn stop_kild(branch: &str) -> Result<(), String> {
     tracing::info!(event = "ui.stop_kild.started", branch = branch);
 
-    match session_ops::stop_session(branch) {
+    let config = KildConfig::load_hierarchy().unwrap_or_default();
+    let mut store = CoreStore::new(config);
+
+    match store.dispatch(Command::StopKild {
+        branch: branch.to_string(),
+    }) {
         Ok(()) => {
             tracing::info!(event = "ui.stop_kild.completed", branch = branch);
             Ok(())

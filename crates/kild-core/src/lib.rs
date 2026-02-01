@@ -35,7 +35,7 @@ pub use sessions::types::{
     CompleteResult, CreateSessionRequest, DestroySafetyInfo, GitStatus, PrCheckResult,
     ProcessStatus, Session, SessionStatus,
 };
-pub use state::{Command, Store};
+pub use state::{Command, CoreStore, DispatchError, Store};
 
 // Re-export handler modules as the primary API
 pub use cleanup::handler as cleanup_ops;
