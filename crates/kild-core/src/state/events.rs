@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 /// All business state changes that can result from a dispatched command.
 ///
-/// Each variant describes _what happened_, not what should happen.
+/// Each variant describes _what happened_, not what should happen. Only
+/// successful state changes produce events — failures use the `Result`
+/// error channel (`Err(DispatchError)`), not the event stream.
+///
 /// Events use owned types (`String`, `PathBuf`) so they can be serialized,
 /// stored, and sent across boundaries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,14 +26,17 @@ pub enum Event {
     SessionsRefreshed,
 
     /// A project was added to the project list.
+    ///
+    /// Not yet emitted — `AddProject` command returns `NotImplemented`.
     ProjectAdded { path: PathBuf, name: String },
     /// A project was removed from the project list.
+    ///
+    /// Not yet emitted — `RemoveProject` command returns `NotImplemented`.
     ProjectRemoved { path: PathBuf },
     /// The active project selection changed.
+    ///
+    /// Not yet emitted — `SelectProject` command returns `NotImplemented`.
     ActiveProjectChanged { path: Option<PathBuf> },
-
-    /// A dispatched operation failed.
-    OperationFailed { command: String, error: String },
 }
 
 #[cfg(test)]
@@ -79,10 +85,6 @@ mod tests {
                 path: Some(PathBuf::from("/projects/app")),
             },
             Event::ActiveProjectChanged { path: None },
-            Event::OperationFailed {
-                command: "CreateKild".to_string(),
-                error: "branch exists".to_string(),
-            },
         ];
         for event in events {
             assert!(
@@ -121,10 +123,6 @@ mod tests {
                 path: PathBuf::from("/tmp"),
             },
             Event::ActiveProjectChanged { path: None },
-            Event::OperationFailed {
-                command: "StopKild".to_string(),
-                error: "not found".to_string(),
-            },
         ];
 
         for event in events {
