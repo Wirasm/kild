@@ -11,6 +11,17 @@ use crate::state::OperationError;
 use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
 use kild_core::{ProcessStatus, SessionInfo};
 
+/// Load config and create a CoreStore instance.
+///
+/// Helper function to avoid duplicating config loading logic across action handlers.
+fn create_store() -> Result<CoreStore, String> {
+    let config = KildConfig::load_hierarchy().map_err(|e| {
+        tracing::error!(event = "ui.config_load_failed", error = %e);
+        format!("Failed to load config: {e}")
+    })?;
+    Ok(CoreStore::new(config))
+}
+
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
 /// When `project_path` is provided (UI context), detects project from that path.
@@ -39,17 +50,7 @@ pub fn create_kild(
         return Err("Branch name cannot be empty".to_string());
     }
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.create_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::CreateKild {
         branch: branch.to_string(),
@@ -110,17 +111,7 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
         force = force
     );
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.destroy_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::DestroyKild {
         branch: branch.to_string(),
@@ -144,17 +135,7 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
 pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.open_kild.started", branch = branch, agent = ?agent);
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.open_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::OpenKild {
         branch: branch.to_string(),
@@ -178,17 +159,7 @@ pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, Stri
 pub fn stop_kild(branch: &str) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.stop_kild.started", branch = branch);
 
-    let config = match KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(
-                event = "ui.stop_kild.config_load_failed",
-                error = %e
-            );
-            return Err(format!("Failed to load config: {e}"));
-        }
-    };
-    let mut store = CoreStore::new(config);
+    let mut store = create_store()?;
 
     match store.dispatch(Command::StopKild {
         branch: branch.to_string(),
