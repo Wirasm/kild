@@ -187,7 +187,8 @@ pub fn create_worktree(
         }
 
         // Resolve base commit: prefer remote tracking branch, fall back to HEAD
-        let base_commit = resolve_base_commit(&repo, git_config)?;
+        let fetched = git_config.fetch_before_create();
+        let base_commit = resolve_base_commit(&repo, git_config, fetched)?;
 
         repo.branch(&kild_branch, &base_commit, false)
             .map_err(git2_error)?;
@@ -347,9 +348,14 @@ fn fetch_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<(), GitE
 ///
 /// Tries the remote tracking branch first (e.g., `origin/main`),
 /// falls back to local HEAD if the remote ref doesn't exist.
+///
+/// When `fetch_was_enabled` is true and the remote ref is missing, warns the user
+/// since they expected to branch from the remote. When false (--no-fetch), the
+/// fallback to HEAD is silent since the user explicitly opted out of fetching.
 fn resolve_base_commit<'repo>(
     repo: &'repo Repository,
     git_config: &GitConfig,
+    fetch_was_enabled: bool,
 ) -> Result<git2::Commit<'repo>, GitError> {
     let remote_ref = format!(
         "refs/remotes/{}/{}",
@@ -375,12 +381,16 @@ fn resolve_base_commit<'repo>(
                 remote_ref = remote_ref,
                 reason = "remote tracking branch not found"
             );
-            eprintln!(
-                "Warning: Remote tracking branch '{}/{}' not found, using local HEAD. \
-                 Consider running 'git fetch' first.",
-                git_config.remote(),
-                git_config.base_branch()
-            );
+            // Only warn users when fetch was enabled — they expected the remote ref to exist.
+            // With --no-fetch, falling back to HEAD is the expected behavior.
+            if fetch_was_enabled {
+                eprintln!(
+                    "Warning: Remote tracking branch '{}/{}' not found, using local HEAD. \
+                     Consider running 'git fetch' first.",
+                    git_config.remote(),
+                    git_config.base_branch()
+                );
+            }
             let head = repo.head().map_err(git2_error)?;
             let commit = head.peel_to_commit().map_err(git2_error)?;
             info!(
@@ -1024,7 +1034,7 @@ mod tests {
         };
 
         // No remote set up, should fall back to HEAD
-        let commit = resolve_base_commit(&repo, &git_config).unwrap();
+        let commit = resolve_base_commit(&repo, &git_config, false).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(commit.id(), head.id());
 
@@ -1057,7 +1067,7 @@ mod tests {
             fetch_before_create: Some(false),
         };
 
-        let commit = resolve_base_commit(&repo, &git_config).unwrap();
+        let commit = resolve_base_commit(&repo, &git_config, false).unwrap();
         assert_eq!(commit.id(), head_oid);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
