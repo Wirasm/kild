@@ -376,9 +376,14 @@ mod tests {
             None,
         );
 
-        // Fails with WorkingDirectoryNotFound when a terminal is available,
-        // or NoTerminalFound on CI runners without terminal apps installed.
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                TerminalError::WorkingDirectoryNotFound { .. } | TerminalError::NoTerminalFound
+            ),
+            "Expected WorkingDirectoryNotFound or NoTerminalFound, got: {err}"
+        );
     }
 
     #[test]
@@ -387,9 +392,14 @@ mod tests {
         let config = KildConfig::default();
         let result = spawn_terminal(&current_dir, "", &config, None, None);
 
-        // Fails with InvalidCommand when a terminal is available,
-        // or NoTerminalFound on CI runners without terminal apps installed.
-        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                TerminalError::InvalidCommand | TerminalError::NoTerminalFound
+            ),
+            "Expected InvalidCommand or NoTerminalFound, got: {err}"
+        );
     }
 
     #[test]
