@@ -12,7 +12,7 @@
 //! 4. **CLI arguments** - Command-line flags (highest priority)
 
 use crate::agents;
-use crate::config::types::{AgentConfig, HealthConfig, KildConfig, TerminalConfig};
+use crate::config::types::{AgentConfig, GitConfig, HealthConfig, KildConfig, TerminalConfig};
 use crate::config::validation::validate_config;
 use crate::files::types::IncludeConfig;
 use std::fs;
@@ -162,6 +162,14 @@ pub fn merge_configs(base: KildConfig, override_config: KildConfig) -> KildConfi
                 .health
                 .history_retention_days
                 .or(base.health.history_retention_days),
+        },
+        git: GitConfig {
+            remote: override_config.git.remote.or(base.git.remote),
+            base_branch: override_config.git.base_branch.or(base.git.base_branch),
+            fetch_before_create: override_config
+                .git
+                .fetch_before_create
+                .or(base.git.fetch_before_create),
         },
     }
 }
@@ -726,5 +734,49 @@ enabled = false
         assert!(!include.enabled); // explicitly set
         assert_eq!(include.patterns.len(), 4); // should use field default
         assert!(include.patterns.contains(&".env*".to_string()));
+    }
+
+    #[test]
+    fn test_git_config_merge() {
+        let user_config: KildConfig = toml::from_str(
+            r#"
+[git]
+remote = "upstream"
+base_branch = "develop"
+"#,
+        )
+        .unwrap();
+
+        let project_config: KildConfig = toml::from_str(
+            r#"
+[git]
+base_branch = "main"
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_configs(user_config, project_config);
+        // Project overrides base_branch
+        assert_eq!(merged.git.base_branch(), "main");
+        // User's "upstream" is preserved because project doesn't set remote
+        assert_eq!(merged.git.remote(), "upstream");
+    }
+
+    #[test]
+    fn test_git_config_merge_defaults_preserved() {
+        let base = KildConfig::default();
+        let override_config: KildConfig = toml::from_str(
+            r#"
+[agent]
+default = "claude"
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_configs(base, override_config);
+        // Git defaults should be preserved when override doesn't specify git section
+        assert_eq!(merged.git.remote(), "origin");
+        assert_eq!(merged.git.base_branch(), "main");
+        assert!(merged.git.fetch_before_create());
     }
 }

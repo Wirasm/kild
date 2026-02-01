@@ -127,11 +127,22 @@ pub fn create_session(
     );
 
     let base_config = Config::new();
+
+    // Build effective git config with CLI overrides
+    let mut git_config = kild_config.git.clone();
+    if let Some(base) = &request.base_branch {
+        git_config.base_branch = Some(base.clone());
+    }
+    if request.no_fetch {
+        git_config.fetch_before_create = Some(false);
+    }
+
     let worktree = git::handler::create_worktree(
         &base_config.kild_dir,
         &project,
         &validated.name,
         Some(kild_config),
+        &git_config,
     )
     .map_err(|e| SessionError::GitError { source: e })?;
 

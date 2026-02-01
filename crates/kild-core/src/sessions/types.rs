@@ -283,6 +283,10 @@ pub struct CreateSessionRequest {
     ///
     /// See [`crate::sessions::handler::create_session`] for the branching logic.
     pub project_path: Option<PathBuf>,
+    /// Override base branch for this create (CLI --base flag).
+    pub base_branch: Option<String>,
+    /// Skip fetching before create (CLI --no-fetch flag).
+    pub no_fetch: bool,
 }
 
 impl CreateSessionRequest {
@@ -292,6 +296,8 @@ impl CreateSessionRequest {
             agent,
             note,
             project_path: None,
+            base_branch: None,
+            no_fetch: false,
         }
     }
 
@@ -307,7 +313,19 @@ impl CreateSessionRequest {
             agent,
             note,
             project_path: Some(project_path),
+            base_branch: None,
+            no_fetch: false,
         }
+    }
+
+    pub fn with_base_branch(mut self, base_branch: Option<String>) -> Self {
+        self.base_branch = base_branch;
+        self
+    }
+
+    pub fn with_no_fetch(mut self, no_fetch: bool) -> Self {
+        self.no_fetch = no_fetch;
+        self
     }
 
     pub fn agent(&self) -> String {

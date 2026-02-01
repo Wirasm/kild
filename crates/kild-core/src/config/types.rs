@@ -72,6 +72,10 @@ pub struct KildConfig {
     /// Health monitoring configuration
     #[serde(default)]
     pub health: HealthConfig,
+
+    /// Git configuration for worktree creation
+    #[serde(default)]
+    pub git: GitConfig,
 }
 
 impl Default for KildConfig {
@@ -82,7 +86,50 @@ impl Default for KildConfig {
             agents: HashMap::default(),
             include_patterns: default_include_patterns_option(),
             health: HealthConfig::default(),
+            git: GitConfig::default(),
         }
+    }
+}
+
+/// Git configuration for worktree creation.
+///
+/// Controls how new worktrees are branched — which remote to fetch from
+/// and which branch to use as the base for new kild branches.
+///
+/// Fields are `Option<T>` to support proper config hierarchy merging:
+/// only explicitly-set values override lower-priority configs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GitConfig {
+    /// Remote name to fetch from before creating worktrees.
+    /// Default: "origin"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+
+    /// Base branch to fetch and create new worktrees from.
+    /// Default: "main"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+
+    /// Whether to fetch the base branch from remote before creating a worktree.
+    /// Default: true
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetch_before_create: Option<bool>,
+}
+
+impl GitConfig {
+    /// Returns the remote name, defaulting to "origin".
+    pub fn remote(&self) -> &str {
+        self.remote.as_deref().unwrap_or("origin")
+    }
+
+    /// Returns the base branch, defaulting to "main".
+    pub fn base_branch(&self) -> &str {
+        self.base_branch.as_deref().unwrap_or("main")
+    }
+
+    /// Returns whether to fetch before creating worktrees, defaulting to true.
+    pub fn fetch_before_create(&self) -> bool {
+        self.fetch_before_create.unwrap_or(true)
     }
 }
 
@@ -213,5 +260,57 @@ flags = "--custom-flag"
         let settings: AgentSettings = toml::from_str(toml_str).unwrap();
         assert_eq!(settings.startup_command, Some("custom-cmd".to_string()));
         assert_eq!(settings.flags, Some("--custom-flag".to_string()));
+    }
+
+    #[test]
+    fn test_git_config_serialization() {
+        let config = GitConfig::default();
+        assert_eq!(config.remote(), "origin");
+        assert_eq!(config.base_branch(), "main");
+        assert!(config.fetch_before_create());
+
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: GitConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.remote(), config.remote());
+        assert_eq!(parsed.base_branch(), config.base_branch());
+        assert_eq!(parsed.fetch_before_create(), config.fetch_before_create());
+    }
+
+    #[test]
+    fn test_git_config_from_toml() {
+        let config: KildConfig = toml::from_str(
+            r#"
+[git]
+remote = "upstream"
+base_branch = "develop"
+fetch_before_create = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.git.remote(), "upstream");
+        assert_eq!(config.git.base_branch(), "develop");
+        assert!(!config.git.fetch_before_create());
+    }
+
+    #[test]
+    fn test_git_config_defaults_when_missing() {
+        let config: KildConfig = toml::from_str("").unwrap();
+        assert_eq!(config.git.remote(), "origin");
+        assert_eq!(config.git.base_branch(), "main");
+        assert!(config.git.fetch_before_create());
+    }
+
+    #[test]
+    fn test_git_config_partial_toml() {
+        let config: KildConfig = toml::from_str(
+            r#"
+[git]
+base_branch = "develop"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.git.remote(), "origin"); // default via accessor
+        assert_eq!(config.git.base_branch(), "develop"); // specified
+        assert!(config.git.fetch_before_create()); // default via accessor
     }
 }

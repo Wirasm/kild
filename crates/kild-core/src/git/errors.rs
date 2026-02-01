@@ -29,6 +29,9 @@ pub enum GitError {
     #[error("Git operation failed: {message}")]
     OperationFailed { message: String },
 
+    #[error("Failed to fetch from remote '{remote}': {message}")]
+    FetchFailed { remote: String, message: String },
+
     #[error("Git2 library error: {source}")]
     Git2Error {
         #[from]
@@ -54,6 +57,7 @@ impl KildError for GitError {
             GitError::WorktreeRemovalFailed { .. } => "WORKTREE_REMOVAL_FAILED",
             GitError::InvalidPath { .. } => "INVALID_PATH",
             GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
+            GitError::FetchFailed { .. } => "GIT_FETCH_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",
         }

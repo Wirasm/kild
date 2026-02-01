@@ -3,6 +3,7 @@ use std::path::Path;
 use tracing::{debug, error, info, warn};
 
 use crate::config::KildConfig;
+use crate::config::types::GitConfig;
 use crate::files;
 use crate::git::{errors::GitError, operations, types::*};
 
@@ -121,6 +122,7 @@ pub fn create_worktree(
     project: &ProjectInfo,
     branch: &str,
     config: Option<&KildConfig>,
+    git_config: &GitConfig,
 ) -> Result<WorktreeInfo, GitError> {
     let validated_branch = operations::validate_branch_name(branch)?;
 
@@ -179,10 +181,15 @@ pub fn create_worktree(
             branch = kild_branch
         );
 
-        let head = repo.head().map_err(git2_error)?;
-        let head_commit = head.peel_to_commit().map_err(git2_error)?;
+        // Fetch latest base branch from remote if configured
+        if git_config.fetch_before_create() {
+            fetch_remote(&project.path, git_config.remote(), git_config.base_branch())?;
+        }
 
-        repo.branch(&kild_branch, &head_commit, false)
+        // Resolve base commit: prefer remote tracking branch, fall back to HEAD
+        let base_commit = resolve_base_commit(&repo, git_config)?;
+
+        repo.branch(&kild_branch, &base_commit, false)
             .map_err(git2_error)?;
 
         debug!(
@@ -263,6 +270,128 @@ pub fn create_worktree(
     }
 
     Ok(worktree_info)
+}
+
+/// Validate a git argument to prevent injection.
+///
+/// Rejects:
+/// - Dash-prefixed values (git interprets as flags)
+/// - Control characters (invisible, could confuse terminal)
+/// - `::` sequences (git pseudo-URL refspec syntax)
+fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
+    if value.starts_with('-') {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: '{value}' (must not start with '-')"),
+        });
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: contains control characters"),
+        });
+    }
+    if value.contains("::") {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: '::' sequences are not allowed"),
+        });
+    }
+    Ok(())
+}
+
+/// Fetch a specific branch from a remote using git CLI.
+///
+/// Uses `git fetch` CLI to inherit the user's existing auth setup
+/// (SSH agent, credential helpers, etc.) with zero auth code.
+fn fetch_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
+    validate_git_arg(remote, "remote name")?;
+    validate_git_arg(branch, "branch name")?;
+
+    info!(
+        event = "core.git.fetch_started",
+        remote = remote,
+        branch = branch,
+        repo_path = %repo_path.display()
+    );
+
+    let output = std::process::Command::new("git")
+        .current_dir(repo_path)
+        .args(["fetch", remote, branch])
+        .output()
+        .map_err(|e| GitError::FetchFailed {
+            remote: remote.to_string(),
+            message: format!("Failed to execute git: {}", e),
+        })?;
+
+    if output.status.success() {
+        info!(
+            event = "core.git.fetch_completed",
+            remote = remote,
+            branch = branch
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            event = "core.git.fetch_failed",
+            remote = remote,
+            branch = branch,
+            stderr = %stderr.trim()
+        );
+        Err(GitError::FetchFailed {
+            remote: remote.to_string(),
+            message: stderr.trim().to_string(),
+        })
+    }
+}
+
+/// Resolve the base commit for a new branch.
+///
+/// Tries the remote tracking branch first (e.g., `origin/main`),
+/// falls back to local HEAD if the remote ref doesn't exist.
+fn resolve_base_commit<'repo>(
+    repo: &'repo Repository,
+    git_config: &GitConfig,
+) -> Result<git2::Commit<'repo>, GitError> {
+    let remote_ref = format!(
+        "refs/remotes/{}/{}",
+        git_config.remote(),
+        git_config.base_branch()
+    );
+
+    match repo.find_reference(&remote_ref) {
+        Ok(reference) => {
+            let commit = reference.peel_to_commit().map_err(git2_error)?;
+            info!(
+                event = "core.git.base_resolved",
+                source = "remote",
+                reference = remote_ref,
+                commit = %commit.id()
+            );
+            Ok(commit)
+        }
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            // Remote ref not found - fall back to HEAD
+            warn!(
+                event = "core.git.base_fallback_to_head",
+                remote_ref = remote_ref,
+                reason = "remote tracking branch not found"
+            );
+            eprintln!(
+                "Warning: Remote tracking branch '{}/{}' not found, using local HEAD. \
+                 Consider running 'git fetch' first.",
+                git_config.remote(),
+                git_config.base_branch()
+            );
+            let head = repo.head().map_err(git2_error)?;
+            let commit = head.peel_to_commit().map_err(git2_error)?;
+            info!(
+                event = "core.git.base_resolved",
+                source = "head",
+                commit = %commit.id()
+            );
+            Ok(commit)
+        }
+        Err(e) => Err(git2_error(e)),
+    }
 }
 
 pub fn remove_worktree(project: &ProjectInfo, worktree_path: &Path) -> Result<(), GitError> {
@@ -716,7 +845,11 @@ mod tests {
         );
 
         let base_dir = create_temp_test_dir("kild_test_no_orphan_base");
-        let result = create_worktree(&base_dir, &project, "my-feature", None);
+        let git_config = GitConfig {
+            fetch_before_create: Some(false),
+            ..GitConfig::default()
+        };
+        let result = create_worktree(&base_dir, &project, "my-feature", None, &git_config);
         assert!(result.is_ok(), "create_worktree should succeed");
 
         let repo = Repository::open(&temp_dir).unwrap();
@@ -815,7 +948,11 @@ mod tests {
         );
 
         let base_dir = create_temp_test_dir("kild_test_slashed_base");
-        let result = create_worktree(&base_dir, &project, "feature/auth", None);
+        let git_config = GitConfig {
+            fetch_before_create: Some(false),
+            ..GitConfig::default()
+        };
+        let result = create_worktree(&base_dir, &project, "feature/auth", None, &git_config);
         assert!(result.is_ok(), "create_worktree should succeed");
 
         let repo = Repository::open(&temp_dir).unwrap();
@@ -870,5 +1007,215 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_base_commit_falls_back_to_head() {
+        use crate::config::types::GitConfig;
+
+        let temp_dir = create_temp_test_dir("kild_test_resolve_base");
+        init_test_repo(&temp_dir);
+
+        let repo = Repository::open(&temp_dir).unwrap();
+        let git_config = GitConfig {
+            remote: Some("origin".to_string()),
+            base_branch: Some("main".to_string()),
+            fetch_before_create: Some(false),
+        };
+
+        // No remote set up, should fall back to HEAD
+        let commit = resolve_base_commit(&repo, &git_config).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(commit.id(), head.id());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_base_commit_uses_remote_ref_when_present() {
+        use crate::config::types::GitConfig;
+
+        let temp_dir = create_temp_test_dir("kild_test_resolve_remote");
+        init_test_repo(&temp_dir);
+
+        let repo = Repository::open(&temp_dir).unwrap();
+
+        // Create a fake remote ref to simulate a fetched remote tracking branch
+        let head = repo.head().unwrap();
+        let head_oid = head.target().unwrap();
+        repo.reference(
+            "refs/remotes/origin/main",
+            head_oid,
+            false,
+            "test: create remote tracking ref",
+        )
+        .unwrap();
+
+        let git_config = GitConfig {
+            remote: Some("origin".to_string()),
+            base_branch: Some("main".to_string()),
+            fetch_before_create: Some(false),
+        };
+
+        let commit = resolve_base_commit(&repo, &git_config).unwrap();
+        assert_eq!(commit.id(), head_oid);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fetch_remote_rejects_dash_prefixed_remote() {
+        let temp_dir = create_temp_test_dir("kild_test_fetch_dash_remote");
+        init_test_repo(&temp_dir);
+
+        let result = fetch_remote(&temp_dir, "--upload-pack=evil", "main");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            GitError::OperationFailed { .. }
+        ));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fetch_remote_rejects_dash_prefixed_branch() {
+        let temp_dir = create_temp_test_dir("kild_test_fetch_dash_branch");
+        init_test_repo(&temp_dir);
+
+        let result = fetch_remote(&temp_dir, "origin", "--upload-pack=evil");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            GitError::OperationFailed { .. }
+        ));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fetch_remote_fails_with_nonexistent_remote() {
+        let temp_dir = create_temp_test_dir("kild_test_fetch_no_remote");
+        init_test_repo(&temp_dir);
+
+        let result = fetch_remote(&temp_dir, "nonexistent", "main");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), GitError::FetchFailed { .. }));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_create_worktree_fails_when_fetch_fails() {
+        // fetch_before_create=true with nonexistent remote should propagate FetchFailed
+        let temp_dir = create_temp_test_dir("kild_test_fetch_fail");
+        init_test_repo(&temp_dir);
+
+        let project = ProjectInfo::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            temp_dir.clone(),
+            None,
+        );
+
+        let base_dir = create_temp_test_dir("kild_test_fetch_fail_base");
+        let git_config = GitConfig {
+            remote: Some("nonexistent".to_string()),
+            fetch_before_create: Some(true),
+            ..GitConfig::default()
+        };
+
+        let result = create_worktree(&base_dir, &project, "test-branch", None, &git_config);
+        assert!(result.is_err(), "should fail when fetch fails");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, GitError::FetchFailed { .. }),
+            "expected FetchFailed, got: {:?}",
+            err
+        );
+
+        // Verify no worktree directory was created
+        let worktree_path = crate::git::operations::calculate_worktree_path(
+            &base_dir,
+            "test-project",
+            "test-branch",
+        );
+        assert!(
+            !worktree_path.exists(),
+            "worktree directory should not exist after fetch failure"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_create_worktree_skips_fetch_when_disabled() {
+        // fetch_before_create=false with nonexistent remote should still succeed
+        let temp_dir = create_temp_test_dir("kild_test_skip_fetch");
+        init_test_repo(&temp_dir);
+
+        let project = ProjectInfo::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            temp_dir.clone(),
+            None,
+        );
+
+        let base_dir = create_temp_test_dir("kild_test_skip_fetch_base");
+        let git_config = GitConfig {
+            remote: Some("nonexistent".to_string()),
+            fetch_before_create: Some(false),
+            ..GitConfig::default()
+        };
+
+        let result = create_worktree(&base_dir, &project, "test-branch", None, &git_config);
+        assert!(
+            result.is_ok(),
+            "should succeed when fetch is disabled: {:?}",
+            result.err()
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_validate_git_arg_rejects_control_chars() {
+        let result = validate_git_arg("origin\x00evil", "remote name");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("control characters")
+        );
+
+        let result = validate_git_arg("main\ttab", "branch name");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("control characters")
+        );
+    }
+
+    #[test]
+    fn test_validate_git_arg_rejects_pseudo_urls() {
+        let result = validate_git_arg("evil::protocol", "remote name");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("::"));
+
+        let result = validate_git_arg("git::https://evil.com", "remote name");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_git_arg_accepts_valid_values() {
+        assert!(validate_git_arg("origin", "remote name").is_ok());
+        assert!(validate_git_arg("main", "branch name").is_ok());
+        assert!(validate_git_arg("feature/auth", "branch name").is_ok());
+        assert!(validate_git_arg("my-remote", "remote name").is_ok());
     }
 }

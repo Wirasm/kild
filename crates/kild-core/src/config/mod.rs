@@ -46,7 +46,9 @@ pub mod types;
 pub mod validation;
 
 // Public API exports
-pub use types::{AgentConfig, AgentSettings, Config, HealthConfig, KildConfig, TerminalConfig};
+pub use types::{
+    AgentConfig, AgentSettings, Config, GitConfig, HealthConfig, KildConfig, TerminalConfig,
+};
 pub use validation::{VALID_TERMINALS, validate_config};
 
 // Backward-compatible delegation for KildConfig methods

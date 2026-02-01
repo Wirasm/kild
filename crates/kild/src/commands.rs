@@ -112,7 +112,12 @@ fn handle_create_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         note = ?note
     );
 
-    let request = CreateSessionRequest::new(branch.clone(), agent_override, note);
+    let base_branch = matches.get_one::<String>("base").cloned();
+    let no_fetch = matches.get_flag("no-fetch");
+
+    let request = CreateSessionRequest::new(branch.clone(), agent_override, note)
+        .with_base_branch(base_branch)
+        .with_no_fetch(no_fetch);
 
     match session_handler::create_session(request, &config) {
         Ok(session) => {
@@ -135,7 +140,16 @@ fn handle_create_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to create kild: {}", e);
+            // Surface actionable hint for fetch failures
+            let err_str = e.to_string();
+            if err_str.contains("Failed to fetch") {
+                eprintln!("❌ Failed to create kild: {}", e);
+                eprintln!(
+                    "   Hint: Use --no-fetch to skip fetching, or check your network/remote config."
+                );
+            } else {
+                eprintln!("❌ Failed to create kild: {}", e);
+            }
 
             error!(
                 event = "cli.create_failed",

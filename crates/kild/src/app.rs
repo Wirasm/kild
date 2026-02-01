@@ -55,6 +55,18 @@ pub fn build_cli() -> Command {
                         .short('n')
                         .help("Description of what this kild is for (shown in list/status output)")
                 )
+                .arg(
+                    Arg::new("base")
+                        .long("base")
+                        .short('b')
+                        .help("Base branch to create worktree from (overrides config, default: main)")
+                )
+                .arg(
+                    Arg::new("no-fetch")
+                        .long("no-fetch")
+                        .help("Skip fetching from remote before creating worktree")
+                        .action(ArgAction::SetTrue)
+                )
         )
         .subcommand(
             Command::new("list")
@@ -969,5 +981,63 @@ mod tests {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "complete"]);
         assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_with_base_branch() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "create", "feature-auth", "--base", "develop"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert_eq!(create_matches.get_one::<String>("base").unwrap(), "develop");
+    }
+
+    #[test]
+    fn test_cli_create_with_base_short_flag() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "create", "feature-auth", "-b", "develop"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert_eq!(create_matches.get_one::<String>("base").unwrap(), "develop");
+    }
+
+    #[test]
+    fn test_cli_create_with_no_fetch() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "create", "feature-auth", "--no-fetch"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("no-fetch"));
+    }
+
+    #[test]
+    fn test_cli_create_with_base_and_no_fetch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "feature-auth",
+            "--base",
+            "develop",
+            "--no-fetch",
+        ]);
+        assert!(matches.is_ok());
+    }
+
+    #[test]
+    fn test_cli_create_no_fetch_default_false() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "create", "feature-auth"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(!create_matches.get_flag("no-fetch"));
+        assert!(create_matches.get_one::<String>("base").is_none());
     }
 }
