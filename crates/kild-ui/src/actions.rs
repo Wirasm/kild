@@ -136,7 +136,7 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<(), String> {
         branch: branch.to_string(),
         force,
     }) {
-        Ok(()) => {
+        Ok(_events) => {
             tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
             Ok(())
         }
@@ -191,7 +191,7 @@ pub fn stop_kild(branch: &str) -> Result<(), String> {
     match store.dispatch(Command::StopKild {
         branch: branch.to_string(),
     }) {
-        Ok(()) => {
+        Ok(_events) => {
             tracing::info!(event = "ui.stop_kild.completed", branch = branch);
             Ok(())
         }

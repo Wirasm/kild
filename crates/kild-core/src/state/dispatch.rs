@@ -4,6 +4,7 @@ use crate::config::KildConfig;
 use crate::sessions::handler as session_ops;
 use crate::sessions::types::CreateSessionRequest;
 use crate::state::errors::DispatchError;
+use crate::state::events::Event;
 use crate::state::store::Store;
 use crate::state::types::Command;
 
@@ -27,7 +28,7 @@ impl CoreStore {
 impl Store for CoreStore {
     type Error = DispatchError;
 
-    fn dispatch(&mut self, cmd: Command) -> Result<(), DispatchError> {
+    fn dispatch(&mut self, cmd: Command) -> Result<Vec<Event>, DispatchError> {
         debug!(event = "core.state.dispatch_started", command = ?cmd);
 
         let result = match cmd {
@@ -43,28 +44,31 @@ impl Store for CoreStore {
                     }
                     None => CreateSessionRequest::new(branch, agent, note),
                 };
-                session_ops::create_session(request, &self.config)?;
-                Ok(())
+                let session = session_ops::create_session(request, &self.config)?;
+                Ok(vec![Event::KildCreated {
+                    branch: session.branch,
+                    session_id: session.id,
+                }])
             }
             Command::DestroyKild { branch, force } => {
                 session_ops::destroy_session(&branch, force)?;
-                Ok(())
+                Ok(vec![Event::KildDestroyed { branch }])
             }
             Command::OpenKild { branch, agent } => {
                 session_ops::open_session(&branch, agent)?;
-                Ok(())
+                Ok(vec![Event::KildOpened { branch }])
             }
             Command::StopKild { branch } => {
                 session_ops::stop_session(&branch)?;
-                Ok(())
+                Ok(vec![Event::KildStopped { branch }])
             }
             Command::CompleteKild { branch, force } => {
                 session_ops::complete_session(&branch, force)?;
-                Ok(())
+                Ok(vec![Event::KildCompleted { branch }])
             }
             Command::RefreshSessions => {
                 session_ops::list_sessions()?;
-                Ok(())
+                Ok(vec![Event::SessionsRefreshed])
             }
             Command::AddProject { .. } => {
                 Err(DispatchError::NotImplemented("AddProject".to_string()))
@@ -78,7 +82,10 @@ impl Store for CoreStore {
         };
 
         match &result {
-            Ok(()) => info!(event = "core.state.dispatch_completed"),
+            Ok(events) => info!(
+                event = "core.state.dispatch_completed",
+                event_count = events.len()
+            ),
             Err(e) => error!(event = "core.state.dispatch_failed", error = %e),
         }
 

@@ -165,7 +165,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `process/` - PID tracking and process info
 - `logging/` - Tracing initialization with JSON output
 - `events/` - App lifecycle event helpers
-- `state/` - Command pattern for business operations (Command enum, Store trait)
+- `state/` - Command pattern for business operations (Command enum, Event enum, Store trait returns events)
 
 **Key modules in kild-ui:**
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
@@ -190,7 +190,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
-**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/types.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract. UI-specific state mutations use `UICommand` enum in `kild-ui/state/ui_commands.rs`.
+**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/types.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract, returning `Vec<Event>` on success to describe state changes. The `Event` enum in `kild-core/state/events.rs` defines all business state changes (kild lifecycle, project management, operation failures). UI-specific state mutations use `UICommand` enum in `kild-ui/state/ui_commands.rs`.
 
 ## Code Style Preferences
 
