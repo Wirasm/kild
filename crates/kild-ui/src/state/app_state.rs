@@ -104,12 +104,7 @@ impl AppState {
                     self.refresh_sessions();
                 }
                 kild_core::Event::KildDestroyed { branch } => {
-                    if self
-                        .selected_kild()
-                        .is_some_and(|s| s.session.branch == *branch)
-                    {
-                        self.clear_selection();
-                    }
+                    self.clear_selection_if_matches(branch);
                     self.close_dialog();
                     self.refresh_sessions();
                 }
@@ -120,12 +115,7 @@ impl AppState {
                     self.refresh_sessions();
                 }
                 kild_core::Event::KildCompleted { branch } => {
-                    if self
-                        .selected_kild()
-                        .is_some_and(|s| s.session.branch == *branch)
-                    {
-                        self.clear_selection();
-                    }
+                    self.clear_selection_if_matches(branch);
                     self.refresh_sessions();
                 }
                 kild_core::Event::SessionsRefreshed => {
@@ -137,6 +127,16 @@ impl AppState {
                     // Not yet dispatched — project commands return NotImplemented
                 }
             }
+        }
+    }
+
+    /// Clear selection if the currently selected kild matches the given branch.
+    fn clear_selection_if_matches(&mut self, branch: &str) {
+        if self
+            .selected_kild()
+            .is_some_and(|s| s.session.branch == branch)
+        {
+            self.clear_selection();
         }
     }
 
@@ -1082,30 +1082,45 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_kild_opened_refreshes() {
+    fn test_apply_kild_opened_preserves_selection_and_dialog() {
         let mut state = AppState::test_new();
-        // Just verifying it doesn't panic and doesn't change dialog/selection
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Stopped,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
         state.set_dialog(DialogState::open_create());
 
         state.apply_events(&[Event::KildOpened {
-            branch: "test".to_string(),
+            branch: "branch-1".to_string(),
         }]);
 
-        // Dialog should remain open — KildOpened doesn't close dialogs
         assert!(state.dialog().is_create());
+        assert!(state.has_selection());
+        assert_eq!(state.selected_id(), Some("id-1"));
     }
 
     #[test]
-    fn test_apply_kild_stopped_refreshes() {
+    fn test_apply_kild_stopped_preserves_selection_and_dialog() {
         let mut state = AppState::test_new();
+        state.sessions.set_displays(vec![SessionInfo {
+            session: make_session_for_event_test("id-1", "branch-1"),
+            process_status: ProcessStatus::Running,
+            git_status: GitStatus::Unknown,
+            diff_stats: None,
+        }]);
+        state.selection.select("id-1".to_string());
         state.set_dialog(DialogState::open_create());
 
         state.apply_events(&[Event::KildStopped {
-            branch: "test".to_string(),
+            branch: "branch-1".to_string(),
         }]);
 
-        // Dialog should remain open — KildStopped doesn't close dialogs
         assert!(state.dialog().is_create());
+        assert!(state.has_selection());
+        assert_eq!(state.selected_id(), Some("id-1"));
     }
 
     #[test]
