@@ -155,6 +155,10 @@ pub fn create_worktree(
         std::fs::create_dir_all(parent).map_err(io_error)?;
     }
 
+    // With kild/<branch> namespacing and WorktreeAddOptions::reference(), the worktree
+    // admin name is always kild-<sanitized_branch> regardless of the current branch.
+    // The previous use_current optimization is no longer needed.
+
     // Branch name: kild/<user_branch> (git-native namespace)
     let kild_branch = operations::kild_branch_name(&validated_branch);
 
@@ -408,7 +412,8 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
             std::fs::remove_dir_all(worktree_path).map_err(|e| GitError::IoError { source: e })?;
         }
 
-        // Delete associated branch if it exists and follows worktree naming pattern
+        // Delete associated branch if it exists and follows worktree naming pattern.
+        // Accepts both kild/ (current) and kild_ (legacy) prefixes for backward compatibility.
         if let Some(ref branch_name) = branch_name
             && (branch_name.starts_with(operations::KILD_BRANCH_PREFIX)
                 || branch_name.starts_with("kild_"))
@@ -696,6 +701,151 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_create_worktree_no_orphaned_branch() {
+        let temp_dir = create_temp_test_dir("kild_test_no_orphan");
+        init_test_repo(&temp_dir);
+
+        let project = ProjectInfo::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            temp_dir.clone(),
+            None,
+        );
+
+        let base_dir = create_temp_test_dir("kild_test_no_orphan_base");
+        let result = create_worktree(&base_dir, &project, "my-feature", None);
+        assert!(result.is_ok(), "create_worktree should succeed");
+
+        let repo = Repository::open(&temp_dir).unwrap();
+
+        // kild/my-feature branch MUST exist
+        assert!(
+            repo.find_branch("kild/my-feature", git2::BranchType::Local)
+                .is_ok(),
+            "kild/my-feature branch should exist"
+        );
+
+        // my-feature branch must NOT exist (the core fix for #200)
+        assert!(
+            repo.find_branch("my-feature", git2::BranchType::Local)
+                .is_err(),
+            "orphaned my-feature branch should not exist"
+        );
+
+        // Worktree should be checked out on kild/my-feature
+        let worktree_info = result.unwrap();
+        let wt_repo = Repository::open(&worktree_info.path).unwrap();
+        let head = wt_repo.head().unwrap();
+        assert_eq!(
+            head.shorthand().unwrap(),
+            "kild/my-feature",
+            "worktree HEAD should be on kild/my-feature"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_remove_worktree_cleans_up_legacy_kild_prefix() {
+        let repo_dir = create_temp_test_dir("kild_test_legacy_repo");
+        let worktree_base = create_temp_test_dir("kild_test_legacy_wt");
+        init_test_repo(&repo_dir);
+
+        let repo = Repository::open(&repo_dir).unwrap();
+        let head = repo.head().unwrap();
+        let head_commit = head.peel_to_commit().unwrap();
+
+        // Create a legacy kild_feature branch
+        repo.branch("kild_feature", &head_commit, false).unwrap();
+
+        // Create a worktree using the legacy branch, outside the main repo
+        let worktree_path = worktree_base.join("kild_feature");
+        let branch_ref = repo
+            .find_branch("kild_feature", git2::BranchType::Local)
+            .unwrap()
+            .into_reference();
+        let mut opts = WorktreeAddOptions::new();
+        opts.reference(Some(&branch_ref));
+        repo.worktree("kild_feature", &worktree_path, Some(&opts))
+            .unwrap();
+
+        // Verify the worktree and branch exist
+        assert!(worktree_path.exists());
+        assert!(
+            repo.find_branch("kild_feature", git2::BranchType::Local)
+                .is_ok()
+        );
+
+        // Canonicalize the path so it matches git2's internal path storage.
+        // On macOS, /tmp symlinks to /private/tmp; git2 stores canonicalized paths.
+        let canonical_worktree_path = worktree_path.canonicalize().unwrap();
+
+        // Remove via remove_worktree_by_path
+        let result = remove_worktree_by_path(&canonical_worktree_path);
+        assert!(result.is_ok(), "remove_worktree_by_path should succeed");
+
+        // Reopen repo to see branch changes
+        let repo = Repository::open(&repo_dir).unwrap();
+
+        // Legacy kild_feature branch should be cleaned up
+        assert!(
+            repo.find_branch("kild_feature", git2::BranchType::Local)
+                .is_err(),
+            "legacy kild_feature branch should be deleted during cleanup"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo_dir);
+        let _ = std::fs::remove_dir_all(&worktree_base);
+    }
+
+    #[test]
+    fn test_create_worktree_slashed_branch_admin_name_decoupling() {
+        let temp_dir = create_temp_test_dir("kild_test_slashed");
+        init_test_repo(&temp_dir);
+
+        let project = ProjectInfo::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            temp_dir.clone(),
+            None,
+        );
+
+        let base_dir = create_temp_test_dir("kild_test_slashed_base");
+        let result = create_worktree(&base_dir, &project, "feature/auth", None);
+        assert!(result.is_ok(), "create_worktree should succeed");
+
+        let repo = Repository::open(&temp_dir).unwrap();
+
+        // kild/feature/auth branch should exist (slashes preserved in branch name)
+        assert!(
+            repo.find_branch("kild/feature/auth", git2::BranchType::Local)
+                .is_ok(),
+            "kild/feature/auth branch should exist"
+        );
+
+        // Admin name should be sanitized: .git/worktrees/kild-feature-auth
+        let admin_path = temp_dir.join(".git/worktrees/kild-feature-auth");
+        assert!(
+            admin_path.exists(),
+            "worktree admin dir .git/worktrees/kild-feature-auth should exist"
+        );
+
+        // Worktree should be checked out on kild/feature/auth
+        let worktree_info = result.unwrap();
+        let wt_repo = Repository::open(&worktree_info.path).unwrap();
+        let head = wt_repo.head().unwrap();
+        assert_eq!(
+            head.shorthand().unwrap(),
+            "kild/feature/auth",
+            "worktree HEAD should be on kild/feature/auth"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
     }
 
     #[test]

@@ -31,7 +31,9 @@ pub fn kild_branch_name(branch: &str) -> String {
 /// The admin name is used for the `.git/worktrees/<name>` directory, which does not
 /// support slashes. This is decoupled from the branch name via `WorktreeAddOptions::reference()`.
 ///
-/// Example: `"feature/auth"` → `"kild-feature-auth"`
+/// Examples:
+/// - `"my-feature"` → `"kild-my-feature"`
+/// - `"feature/auth"` → `"kild-feature-auth"`
 pub fn kild_worktree_admin_name(branch: &str) -> String {
     format!("kild-{}", sanitize_for_path(branch))
 }
