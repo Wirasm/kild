@@ -424,12 +424,10 @@ impl MainView {
         let branch = branch.to_string();
 
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let branch_for_action = branch.clone();
             let result = cx
                 .background_executor()
-                .spawn({
-                    let branch = branch.clone();
-                    async move { actions::open_kild(branch, None) }
-                })
+                .spawn(async move { actions::open_kild(branch_for_action, None) })
                 .await;
 
             if let Err(e) = this.update(cx, |view, cx| {
@@ -466,12 +464,10 @@ impl MainView {
         let branch = branch.to_string();
 
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let branch_for_action = branch.clone();
             let result = cx
                 .background_executor()
-                .spawn({
-                    let branch = branch.clone();
-                    async move { actions::stop_kild(branch) }
-                })
+                .spawn(async move { actions::stop_kild(branch_for_action) })
                 .await;
 
             if let Err(e) = this.update(cx, |view, cx| {
