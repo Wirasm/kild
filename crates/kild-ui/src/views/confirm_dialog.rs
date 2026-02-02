@@ -128,21 +128,19 @@ pub fn render_confirm_dialog(
                             view.on_confirm_cancel(cx);
                         })),
                 )
-                .child(
-                    Button::new(
-                        "confirm-destroy-btn",
-                        if loading {
-                            "Destroying..."
-                        } else {
-                            destroy_button_text
-                        },
-                    )
-                    .variant(ButtonVariant::Danger)
-                    .disabled(loading)
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.on_confirm_destroy(cx);
-                    })),
-                ),
+                .child({
+                    let button_text = if loading {
+                        "Destroying..."
+                    } else {
+                        destroy_button_text
+                    };
+                    Button::new("confirm-destroy-btn", button_text)
+                        .variant(ButtonVariant::Danger)
+                        .disabled(loading)
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.on_confirm_destroy(cx);
+                        }))
+                }),
         )
 }
 

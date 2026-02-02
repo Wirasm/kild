@@ -187,13 +187,14 @@ pub fn render_create_dialog(
                             view.on_dialog_cancel(cx);
                         })),
                 )
-                .child(
-                    Button::new("create-btn", if loading { "Creating..." } else { "Create" })
+                .child({
+                    let button_text = if loading { "Creating..." } else { "Create" };
+                    Button::new("create-btn", button_text)
                         .variant(ButtonVariant::Primary)
                         .disabled(loading)
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.on_dialog_submit(cx);
-                        })),
-                ),
+                        }))
+                }),
         )
 }
