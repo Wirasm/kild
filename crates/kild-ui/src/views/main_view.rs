@@ -298,7 +298,7 @@ impl MainView {
                 .spawn(async move { actions::create_kild(branch, agent, note, project_path) })
                 .await;
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -307,7 +307,12 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::warn!(
+                    event = "ui.dialog_submit.view_update_failed",
+                    error = ?e
+                );
+            }
         })
         .detach();
     }
@@ -378,7 +383,7 @@ impl MainView {
                 .spawn(async move { actions::destroy_kild(branch, force) })
                 .await;
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -387,7 +392,12 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::warn!(
+                    event = "ui.confirm_destroy.view_update_failed",
+                    error = ?e
+                );
+            }
         })
         .detach();
     }
@@ -414,13 +424,15 @@ impl MainView {
         let branch = branch.to_string();
 
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let branch_for_bg = branch.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { actions::open_kild(branch_for_bg, None) })
+                .spawn({
+                    let branch = branch.clone();
+                    async move { actions::open_kild(branch, None) }
+                })
                 .await;
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -435,7 +447,12 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::warn!(
+                    event = "ui.open_click.view_update_failed",
+                    error = ?e
+                );
+            }
         })
         .detach();
     }
@@ -449,13 +466,15 @@ impl MainView {
         let branch = branch.to_string();
 
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let branch_for_bg = branch.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { actions::stop_kild(branch_for_bg) })
+                .spawn({
+                    let branch = branch.clone();
+                    async move { actions::stop_kild(branch) }
+                })
                 .await;
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -470,75 +489,81 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::warn!(
+                    event = "ui.stop_click.view_update_failed",
+                    error = ?e
+                );
+            }
+        })
+        .detach();
+    }
+
+    /// Execute a bulk operation on the background executor.
+    ///
+    /// Shared pattern for open-all and stop-all. Clears existing errors,
+    /// runs the operation in the background, then updates state with results.
+    fn execute_bulk_operation_async<F>(
+        &mut self,
+        cx: &mut Context<Self>,
+        operation: F,
+        error_event: &'static str,
+    ) where
+        F: FnOnce(&[kild_core::SessionInfo]) -> (usize, Vec<crate::state::OperationError>)
+            + Send
+            + 'static,
+    {
+        self.state.clear_bulk_errors();
+        let displays = self.state.displays().to_vec();
+
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { operation(&displays) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                let (count, errors) = result;
+                for error in &errors {
+                    tracing::warn!(
+                        event = error_event,
+                        branch = error.branch,
+                        error = error.message
+                    );
+                }
+                view.state.set_bulk_errors(errors);
+                if count > 0 || view.state.has_bulk_errors() {
+                    view.state.refresh_sessions();
+                }
+                cx.notify();
+            }) {
+                tracing::warn!(
+                    event = "ui.bulk_operation.view_update_failed",
+                    error = ?e
+                );
+            }
         })
         .detach();
     }
 
     /// Handle click on the Open All button.
-    ///
-    /// Spawns the bulk open operation on the background executor.
     fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_all_clicked");
-        self.state.clear_bulk_errors();
-        let displays = self.state.displays().to_vec();
-
-        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { actions::open_all_stopped(&displays) })
-                .await;
-
-            let _ = this.update(cx, |view, cx| {
-                let (count, errors) = result;
-                for error in &errors {
-                    tracing::warn!(
-                        event = "ui.open_all.partial_failure",
-                        branch = error.branch,
-                        error = error.message
-                    );
-                }
-                view.state.set_bulk_errors(errors);
-                if count > 0 || view.state.has_bulk_errors() {
-                    view.state.refresh_sessions();
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.execute_bulk_operation_async(
+            cx,
+            actions::open_all_stopped,
+            "ui.open_all.partial_failure",
+        );
     }
 
     /// Handle click on the Stop All button.
-    ///
-    /// Spawns the bulk stop operation on the background executor.
     fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_all_clicked");
-        self.state.clear_bulk_errors();
-        let displays = self.state.displays().to_vec();
-
-        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { actions::stop_all_running(&displays) })
-                .await;
-
-            let _ = this.update(cx, |view, cx| {
-                let (count, errors) = result;
-                for error in &errors {
-                    tracing::warn!(
-                        event = "ui.stop_all.partial_failure",
-                        branch = error.branch,
-                        error = error.message
-                    );
-                }
-                view.state.set_bulk_errors(errors);
-                if count > 0 || view.state.has_bulk_errors() {
-                    view.state.refresh_sessions();
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.execute_bulk_operation_async(
+            cx,
+            actions::stop_all_running,
+            "ui.stop_all.partial_failure",
+        );
     }
 
     /// Handle click on the Copy Path button in a kild row.

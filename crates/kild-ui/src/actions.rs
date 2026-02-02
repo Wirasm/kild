@@ -37,8 +37,8 @@ pub fn create_kild(
 ) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.create_kild.started",
-        branch = &*branch,
-        agent = &*agent,
+        branch = %branch,
+        agent = %agent,
         note = ?note,
         project_path = ?project_path
     );
@@ -54,22 +54,17 @@ pub fn create_kild(
     let mut store = create_store()?;
 
     match store.dispatch(Command::CreateKild {
-        branch: branch.clone(),
-        agent: Some(agent.clone()),
+        branch,
+        agent: Some(agent),
         note,
         project_path,
     }) {
         Ok(events) => {
-            tracing::info!(event = "ui.create_kild.completed", branch = &*branch);
+            tracing::info!(event = "ui.create_kild.completed");
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(
-                event = "ui.create_kild.failed",
-                branch = &*branch,
-                agent = &*agent,
-                error = %e
-            );
+            tracing::error!(event = "ui.create_kild.failed", error = %e);
             Err(e.to_string())
         }
     }
@@ -110,22 +105,19 @@ pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
 pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.destroy_kild.started",
-        branch = &*branch,
+        branch = %branch,
         force = force
     );
 
     let mut store = create_store()?;
 
-    match store.dispatch(Command::DestroyKild {
-        branch: branch.clone(),
-        force,
-    }) {
+    match store.dispatch(Command::DestroyKild { branch, force }) {
         Ok(events) => {
-            tracing::info!(event = "ui.destroy_kild.completed", branch = &*branch);
+            tracing::info!(event = "ui.destroy_kild.completed");
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.destroy_kild.failed", branch = &*branch, error = %e);
+            tracing::error!(event = "ui.destroy_kild.failed", error = %e);
             Err(e.to_string())
         }
     }
@@ -137,20 +129,17 @@ pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
 /// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` and returns the resulting events on success.
 pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.open_kild.started", branch = &*branch, agent = ?agent);
+    tracing::info!(event = "ui.open_kild.started", branch = %branch, agent = ?agent);
 
     let mut store = create_store()?;
 
-    match store.dispatch(Command::OpenKild {
-        branch: branch.clone(),
-        agent,
-    }) {
+    match store.dispatch(Command::OpenKild { branch, agent }) {
         Ok(events) => {
-            tracing::info!(event = "ui.open_kild.completed", branch = &*branch);
+            tracing::info!(event = "ui.open_kild.completed");
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.open_kild.failed", branch = &*branch, error = %e);
+            tracing::error!(event = "ui.open_kild.failed", error = %e);
             Err(e.to_string())
         }
     }
@@ -162,19 +151,17 @@ pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, St
 /// Dispatches through `CoreStore` to route to kild-core's `stop_session`.
 /// The worktree and session file are preserved. The kild can be reopened with open_kild().
 pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.stop_kild.started", branch = &*branch);
+    tracing::info!(event = "ui.stop_kild.started", branch = %branch);
 
     let mut store = create_store()?;
 
-    match store.dispatch(Command::StopKild {
-        branch: branch.clone(),
-    }) {
+    match store.dispatch(Command::StopKild { branch }) {
         Ok(events) => {
-            tracing::info!(event = "ui.stop_kild.completed", branch = &*branch);
+            tracing::info!(event = "ui.stop_kild.completed");
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.stop_kild.failed", branch = &*branch, error = %e);
+            tracing::error!(event = "ui.stop_kild.failed", error = %e);
             Err(e.to_string())
         }
     }
