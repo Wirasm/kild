@@ -22,22 +22,41 @@ fn create_store() -> Result<CoreStore, String> {
     Ok(CoreStore::new(config))
 }
 
+/// Helper to execute a store command and map the result.
+///
+/// Handles the common pattern of logging start/completion/failure and converting errors to strings.
+fn dispatch_command(command: Command, event_prefix: &str) -> Result<Vec<Event>, String> {
+    let mut store = create_store()?;
+
+    match store.dispatch(command) {
+        Ok(events) => {
+            tracing::info!(event = event_prefix, state = "completed");
+            Ok(events)
+        }
+        Err(e) => {
+            tracing::error!(event = event_prefix, state = "failed", error = %e);
+            Err(e.to_string())
+        }
+    }
+}
+
 /// Create a new kild with the given branch name, agent, optional note, and optional project path.
 ///
 /// When `project_path` is provided (UI context), detects project from that path.
 /// When `None` (shouldn't happen in UI), falls back to current working directory detection.
 ///
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` and returns the resulting events on success.
 pub fn create_kild(
-    branch: &str,
-    agent: &str,
+    branch: String,
+    agent: String,
     note: Option<String>,
     project_path: Option<PathBuf>,
 ) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.create_kild.started",
-        branch = branch,
-        agent = agent,
+        branch = %branch,
+        agent = %agent,
         note = ?note,
         project_path = ?project_path
     );
@@ -50,28 +69,15 @@ pub fn create_kild(
         return Err("Branch name cannot be empty".to_string());
     }
 
-    let mut store = create_store()?;
-
-    match store.dispatch(Command::CreateKild {
-        branch: branch.to_string(),
-        agent: Some(agent.to_string()),
-        note,
-        project_path,
-    }) {
-        Ok(events) => {
-            tracing::info!(event = "ui.create_kild.completed", branch = branch);
-            Ok(events)
-        }
-        Err(e) => {
-            tracing::error!(
-                event = "ui.create_kild.failed",
-                branch = branch,
-                agent = agent,
-                error = %e
-            );
-            Err(e.to_string())
-        }
-    }
+    dispatch_command(
+        Command::CreateKild {
+            branch,
+            agent: Some(agent),
+            note,
+            project_path,
+        },
+        "ui.create_kild",
+    )
 }
 
 /// Refresh the list of sessions from disk.
@@ -101,78 +107,41 @@ pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
 /// Dispatches through `CoreStore` to route to kild-core's `destroy_session`, which handles
 /// terminal cleanup, process termination, worktree removal, and session file deletion.
 ///
+/// Takes owned parameters so this function can be called from background threads.
+///
 /// # Arguments
 /// * `branch` - Branch name of the kild to destroy
 /// * `force` - If true, bypasses git safety checks (e.g., uncommitted changes)
-pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
+pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.destroy_kild.started",
-        branch = branch,
+        branch = %branch,
         force = force
     );
 
-    let mut store = create_store()?;
-
-    match store.dispatch(Command::DestroyKild {
-        branch: branch.to_string(),
-        force,
-    }) {
-        Ok(events) => {
-            tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
-            Ok(events)
-        }
-        Err(e) => {
-            tracing::error!(event = "ui.destroy_kild.failed", branch = branch, error = %e);
-            Err(e.to_string())
-        }
-    }
+    dispatch_command(Command::DestroyKild { branch, force }, "ui.destroy_kild")
 }
 
 /// Open a new agent terminal in an existing kild (additive - doesn't close existing terminals).
 ///
 /// Unlike relaunch, this does NOT close existing terminals - multiple agents can run in the same kild.
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` and returns the resulting events on success.
-pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.open_kild.started", branch = branch, agent = ?agent);
+pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, String> {
+    tracing::info!(event = "ui.open_kild.started", branch = %branch, agent = ?agent);
 
-    let mut store = create_store()?;
-
-    match store.dispatch(Command::OpenKild {
-        branch: branch.to_string(),
-        agent,
-    }) {
-        Ok(events) => {
-            tracing::info!(event = "ui.open_kild.completed", branch = branch);
-            Ok(events)
-        }
-        Err(e) => {
-            tracing::error!(event = "ui.open_kild.failed", branch = branch, error = %e);
-            Err(e.to_string())
-        }
-    }
+    dispatch_command(Command::OpenKild { branch, agent }, "ui.open_kild")
 }
 
 /// Stop the agent process in a kild without destroying the kild.
 ///
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` to route to kild-core's `stop_session`.
 /// The worktree and session file are preserved. The kild can be reopened with open_kild().
-pub fn stop_kild(branch: &str) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.stop_kild.started", branch = branch);
+pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
+    tracing::info!(event = "ui.stop_kild.started", branch = %branch);
 
-    let mut store = create_store()?;
-
-    match store.dispatch(Command::StopKild {
-        branch: branch.to_string(),
-    }) {
-        Ok(events) => {
-            tracing::info!(event = "ui.stop_kild.completed", branch = branch);
-            Ok(events)
-        }
-        Err(e) => {
-            tracing::error!(event = "ui.stop_kild.failed", branch = branch, error = %e);
-            Err(e.to_string())
-        }
-    }
+    dispatch_command(Command::StopKild { branch }, "ui.stop_kild")
 }
 
 /// Open agents in all stopped kilds.
@@ -210,7 +179,7 @@ fn execute_bulk_operation(
     operation: impl Fn(&str) -> Result<(), String>,
     event_prefix: &str,
 ) -> (usize, Vec<OperationError>) {
-    tracing::info!(event = format!("{}.started", event_prefix));
+    tracing::info!(event = event_prefix, state = "started");
 
     let targets: Vec<_> = displays
         .iter()
@@ -225,14 +194,16 @@ fn execute_bulk_operation(
         match operation(branch) {
             Ok(()) => {
                 tracing::info!(
-                    event = format!("{}.kild_completed", event_prefix),
+                    event = event_prefix,
+                    state = "kild_completed",
                     branch = branch
                 );
                 success_count += 1;
             }
             Err(e) => {
                 tracing::error!(
-                    event = format!("{}.kild_failed", event_prefix),
+                    event = event_prefix,
+                    state = "kild_failed",
                     branch = branch,
                     error = %e
                 );
@@ -245,7 +216,8 @@ fn execute_bulk_operation(
     }
 
     tracing::info!(
-        event = format!("{}.completed", event_prefix),
+        event = event_prefix,
+        state = "completed",
         succeeded = success_count,
         failed = errors.len()
     );

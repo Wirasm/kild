@@ -260,6 +260,9 @@ impl MainView {
     }
 
     /// Handle dialog submit button click (create dialog).
+    ///
+    /// Spawns the blocking create_kild operation on the background executor
+    /// so the UI remains responsive during git worktree creation and terminal spawn.
     pub fn on_dialog_submit(&mut self, cx: &mut Context<Self>) {
         // Extract form data from dialog state
         let crate::state::DialogState::Create { form, .. } = self.state.dialog() else {
@@ -289,19 +292,29 @@ impl MainView {
             );
         }
 
-        match actions::create_kild(&branch, &agent, note, project_path) {
-            Ok(events) => self.state.apply_events(&events),
-            Err(e) => {
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions::create_kild(branch, agent, note, project_path) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                match result {
+                    Ok(events) => view.state.apply_events(&events),
+                    Err(e) => {
+                        tracing::warn!(event = "ui.dialog_submit.error_displayed", error = %e);
+                        view.state.set_dialog_error(e);
+                    }
+                }
+                cx.notify();
+            }) {
                 tracing::warn!(
-                    event = "ui.dialog_submit.error_displayed",
-                    branch = %branch,
-                    agent = %agent,
-                    error = %e
+                    event = "ui.dialog_submit.view_update_failed",
+                    error = ?e
                 );
-                self.state.set_dialog_error(e);
             }
-        }
-        cx.notify();
+        })
+        .detach();
     }
 
     /// Cycle to the next agent in the list.
@@ -342,6 +355,9 @@ impl MainView {
     }
 
     /// Handle confirm button click in destroy dialog.
+    ///
+    /// Spawns the blocking destroy_kild operation on the background executor
+    /// so the UI remains responsive during worktree removal and process termination.
     pub fn on_confirm_destroy(&mut self, cx: &mut Context<Self>) {
         // Extract branch and safety_info from dialog state
         let crate::state::DialogState::Confirm {
@@ -361,18 +377,29 @@ impl MainView {
             .map(|s| s.should_block())
             .unwrap_or(false);
 
-        match actions::destroy_kild(&branch, force) {
-            Ok(events) => self.state.apply_events(&events),
-            Err(e) => {
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions::destroy_kild(branch, force) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                match result {
+                    Ok(events) => view.state.apply_events(&events),
+                    Err(e) => {
+                        tracing::warn!(event = "ui.confirm_destroy.error_displayed", error = %e);
+                        view.state.set_dialog_error(e);
+                    }
+                }
+                cx.notify();
+            }) {
                 tracing::warn!(
-                    event = "ui.confirm_destroy.error_displayed",
-                    branch = %branch,
-                    error = %e
+                    event = "ui.confirm_destroy.view_update_failed",
+                    error = ?e
                 );
-                self.state.set_dialog_error(e);
             }
-        }
-        cx.notify();
+        })
+        .detach();
     }
 
     /// Handle cancel button click in destroy dialog.
@@ -389,91 +416,150 @@ impl MainView {
     }
 
     /// Handle click on the Open button [▶] in a kild row.
+    ///
+    /// Spawns the blocking open_kild operation on the background executor.
     pub fn on_open_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_clicked", branch = branch);
         self.state.clear_error(branch);
+        let branch = branch.to_string();
 
-        match actions::open_kild(branch, None) {
-            Ok(events) => self.state.apply_events(&events),
-            Err(e) => {
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let branch_for_action = branch.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions::open_kild(branch_for_action, None) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                match result {
+                    Ok(events) => view.state.apply_events(&events),
+                    Err(e) => {
+                        tracing::warn!(event = "ui.open_click.error_displayed", branch = %branch, error = %e);
+                        view.state.set_error(
+                            &branch,
+                            crate::state::OperationError {
+                                branch: branch.clone(),
+                                message: e,
+                            },
+                        );
+                    }
+                }
+                cx.notify();
+            }) {
                 tracing::warn!(
-                    event = "ui.open_click.error_displayed",
-                    branch = branch,
-                    error = %e
-                );
-                self.state.set_error(
-                    branch,
-                    crate::state::OperationError {
-                        branch: branch.to_string(),
-                        message: e,
-                    },
+                    event = "ui.open_click.view_update_failed",
+                    error = ?e
                 );
             }
-        }
-        cx.notify();
+        })
+        .detach();
     }
 
     /// Handle click on the Stop button [⏹] in a kild row.
+    ///
+    /// Spawns the blocking stop_kild operation on the background executor.
     pub fn on_stop_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_clicked", branch = branch);
         self.state.clear_error(branch);
+        let branch = branch.to_string();
 
-        match actions::stop_kild(branch) {
-            Ok(events) => self.state.apply_events(&events),
-            Err(e) => {
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let branch_for_action = branch.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { actions::stop_kild(branch_for_action) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                match result {
+                    Ok(events) => view.state.apply_events(&events),
+                    Err(e) => {
+                        tracing::warn!(event = "ui.stop_click.error_displayed", branch = %branch, error = %e);
+                        view.state.set_error(
+                            &branch,
+                            crate::state::OperationError {
+                                branch: branch.clone(),
+                                message: e,
+                            },
+                        );
+                    }
+                }
+                cx.notify();
+            }) {
                 tracing::warn!(
-                    event = "ui.stop_click.error_displayed",
-                    branch = branch,
-                    error = %e
-                );
-                self.state.set_error(
-                    branch,
-                    crate::state::OperationError {
-                        branch: branch.to_string(),
-                        message: e,
-                    },
+                    event = "ui.stop_click.view_update_failed",
+                    error = ?e
                 );
             }
-        }
-        cx.notify();
+        })
+        .detach();
+    }
+
+    /// Execute a bulk operation on the background executor.
+    ///
+    /// Shared pattern for open-all and stop-all. Clears existing errors,
+    /// runs the operation in the background, then updates state with results.
+    fn execute_bulk_operation_async<F>(
+        &mut self,
+        cx: &mut Context<Self>,
+        operation: F,
+        error_event: &'static str,
+    ) where
+        F: FnOnce(&[kild_core::SessionInfo]) -> (usize, Vec<crate::state::OperationError>)
+            + Send
+            + 'static,
+    {
+        self.state.clear_bulk_errors();
+        let displays = self.state.displays().to_vec();
+
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { operation(&displays) })
+                .await;
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                let (count, errors) = result;
+                for error in &errors {
+                    tracing::warn!(
+                        event = error_event,
+                        branch = error.branch,
+                        error = error.message
+                    );
+                }
+                view.state.set_bulk_errors(errors);
+                if count > 0 || view.state.has_bulk_errors() {
+                    view.state.refresh_sessions();
+                }
+                cx.notify();
+            }) {
+                tracing::warn!(
+                    event = "ui.bulk_operation.view_update_failed",
+                    error = ?e
+                );
+            }
+        })
+        .detach();
     }
 
     /// Handle click on the Open All button.
     fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_all_clicked");
-        self.handle_bulk_operation(actions::open_all_stopped, "ui.open_all.partial_failure", cx);
+        self.execute_bulk_operation_async(
+            cx,
+            actions::open_all_stopped,
+            "ui.open_all.partial_failure",
+        );
     }
 
     /// Handle click on the Stop All button.
     fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_all_clicked");
-        self.handle_bulk_operation(actions::stop_all_running, "ui.stop_all.partial_failure", cx);
-    }
-
-    /// Common handler for bulk operations (open all / stop all).
-    fn handle_bulk_operation(
-        &mut self,
-        operation: impl Fn(&[kild_core::SessionInfo]) -> (usize, Vec<crate::state::OperationError>),
-        error_event: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.state.clear_bulk_errors();
-
-        let (count, errors) = operation(self.state.displays());
-
-        for error in &errors {
-            tracing::warn!(
-                event = error_event,
-                branch = error.branch,
-                error = error.message
-            );
-        }
-        self.state.set_bulk_errors(errors);
-
-        if count > 0 || self.state.has_bulk_errors() {
-            self.state.refresh_sessions();
-        }
-        cx.notify();
+        self.execute_bulk_operation_async(
+            cx,
+            actions::stop_all_running,
+            "ui.stop_all.partial_failure",
+        );
     }
 
     /// Handle click on the Copy Path button in a kild row.
