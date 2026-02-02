@@ -7,6 +7,7 @@
 pub mod app_state;
 pub mod dialog;
 pub mod errors;
+pub mod loading;
 pub mod selection;
 pub mod sessions;
 pub mod ui_commands;
@@ -17,3 +18,4 @@ pub use dialog::{
     AddProjectDialogField, AddProjectFormState, CreateDialogField, CreateFormState, DialogState,
 };
 pub use errors::OperationError;
+pub use loading::Operation;

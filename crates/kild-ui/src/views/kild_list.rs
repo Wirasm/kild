@@ -127,6 +127,12 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
             let displays = filtered;
             let errors = state.errors_clone();
             let selected_kild_id = state.selected_id().map(|s| s.to_string());
+            // Pre-compute loading state per branch for capture into closure
+            let loading_branches: std::collections::HashSet<String> = displays
+                .iter()
+                .filter(|d| state.is_loading(&d.session.branch))
+                .map(|d| d.session.branch.clone())
+                .collect();
 
             div().flex_1().h_full().child(
                 uniform_list(
@@ -150,6 +156,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
 
                                 // Show Open button when stopped, Stop button when running
                                 let is_running = display.process_status == ProcessStatus::Running;
+                                let is_loading = loading_branches.contains(&branch);
 
                                 // Clone data for use in closures
                                 let branch_for_open = branch.clone();
@@ -347,26 +354,30 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                             .when(!is_running, |row| {
                                                 let br = branch_for_open.clone();
                                                 row.child(
-                                                    Button::new(("open-btn", ix), "▶")
-                                                        .variant(ButtonVariant::Success)
-                                                        .on_click(cx.listener(
-                                                            move |view, _, _, cx| {
-                                                                view.on_open_click(&br, cx);
-                                                            },
-                                                        )),
+                                                    Button::new(
+                                                        ("open-btn", ix),
+                                                        if is_loading { "..." } else { "▶" },
+                                                    )
+                                                    .variant(ButtonVariant::Success)
+                                                    .disabled(is_loading)
+                                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                                        view.on_open_click(&br, cx);
+                                                    })),
                                                 )
                                             })
                                             // Stop button [⏹] - shown when running - Warning variant
                                             .when(is_running, |row| {
                                                 let br = branch_for_stop.clone();
                                                 row.child(
-                                                    Button::new(("stop-btn", ix), "⏹")
-                                                        .variant(ButtonVariant::Warning)
-                                                        .on_click(cx.listener(
-                                                            move |view, _, _, cx| {
-                                                                view.on_stop_click(&br, cx);
-                                                            },
-                                                        )),
+                                                    Button::new(
+                                                        ("stop-btn", ix),
+                                                        if is_loading { "..." } else { "⏹" },
+                                                    )
+                                                    .variant(ButtonVariant::Warning)
+                                                    .disabled(is_loading)
+                                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                                        view.on_stop_click(&br, cx);
+                                                    })),
                                                 )
                                             })
                                             // Destroy button [×] - Danger variant
@@ -374,6 +385,7 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                                 let br = branch_for_destroy.clone();
                                                 Button::new(("destroy-btn", ix), "×")
                                                     .variant(ButtonVariant::Danger)
+                                                    .disabled(is_loading)
                                                     .on_click(cx.listener(move |view, _, _, cx| {
                                                         view.on_destroy_click(&br, cx);
                                                     }))

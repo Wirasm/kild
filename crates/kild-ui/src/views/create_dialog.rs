@@ -28,7 +28,11 @@ pub fn agent_options() -> Vec<&'static str> {
 /// # Invalid State Handling
 /// If called with a non-`DialogState::Create` state, logs an error and
 /// displays "Internal error: invalid dialog state" to the user.
-pub fn render_create_dialog(dialog: &DialogState, cx: &mut Context<MainView>) -> impl IntoElement {
+pub fn render_create_dialog(
+    dialog: &DialogState,
+    loading: bool,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
     let (form, create_error) = match dialog {
         DialogState::Create { form, error } => (form, error.clone()),
         _ => {
@@ -184,8 +188,9 @@ pub fn render_create_dialog(dialog: &DialogState, cx: &mut Context<MainView>) ->
                         })),
                 )
                 .child(
-                    Button::new("create-btn", "Create")
+                    Button::new("create-btn", if loading { "Creating..." } else { "Create" })
                         .variant(ButtonVariant::Primary)
+                        .disabled(loading)
                         .on_click(cx.listener(|view, _, _, cx| {
                             view.on_dialog_submit(cx);
                         })),

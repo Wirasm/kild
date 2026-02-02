@@ -27,7 +27,11 @@ use crate::views::MainView;
 /// # Invalid State Handling
 /// If called with a non-`DialogState::Confirm` state, logs an error and
 /// displays "Internal error: invalid dialog state" to the user.
-pub fn render_confirm_dialog(dialog: &DialogState, cx: &mut Context<MainView>) -> impl IntoElement {
+pub fn render_confirm_dialog(
+    dialog: &DialogState,
+    loading: bool,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
     let (branch, safety_info, confirm_error) = match dialog {
         DialogState::Confirm {
             branch,
@@ -125,11 +129,19 @@ pub fn render_confirm_dialog(dialog: &DialogState, cx: &mut Context<MainView>) -
                         })),
                 )
                 .child(
-                    Button::new("confirm-destroy-btn", destroy_button_text)
-                        .variant(ButtonVariant::Danger)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_confirm_destroy(cx);
-                        })),
+                    Button::new(
+                        "confirm-destroy-btn",
+                        if loading {
+                            "Destroying..."
+                        } else {
+                            destroy_button_text
+                        },
+                    )
+                    .variant(ButtonVariant::Danger)
+                    .disabled(loading)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.on_confirm_destroy(cx);
+                    })),
                 ),
         )
 }

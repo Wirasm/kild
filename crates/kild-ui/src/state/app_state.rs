@@ -3,6 +3,7 @@ use kild_core::projects::{Project, ProjectError, ProjectManager};
 
 use super::dialog::DialogState;
 use super::errors::{OperationError, OperationErrors};
+use super::loading::{LoadingState, Operation};
 use super::selection::SelectionState;
 use super::sessions::SessionStore;
 
@@ -29,6 +30,9 @@ pub struct AppState {
 
     /// Startup errors that should be shown to the user (migration failures, load errors).
     startup_errors: Vec<String>,
+
+    /// In-progress operation tracking (prevents double-dispatch).
+    loading: LoadingState,
 }
 
 impl AppState {
@@ -60,6 +64,7 @@ impl AppState {
             selection: SelectionState::default(),
             projects,
             startup_errors,
+            loading: LoadingState::new(),
         }
     }
 
@@ -352,6 +357,55 @@ impl AppState {
     }
 
     // =========================================================================
+    // Loading facade methods
+    // =========================================================================
+
+    /// Mark a branch as having an in-flight operation.
+    pub fn set_loading(&mut self, branch: &str, op: Operation) {
+        self.loading.set_branch(branch, op);
+    }
+
+    /// Clear the in-flight operation for a branch.
+    pub fn clear_loading(&mut self, branch: &str) {
+        self.loading.clear_branch(branch);
+    }
+
+    /// Check if a branch has an in-flight operation.
+    pub fn is_loading(&self, branch: &str) -> bool {
+        self.loading.is_branch_loading(branch)
+    }
+
+    /// Mark a bulk operation as in-flight.
+    pub fn set_bulk_loading(&mut self) {
+        self.loading.set_bulk();
+    }
+
+    /// Clear the bulk operation flag.
+    pub fn clear_bulk_loading(&mut self) {
+        self.loading.clear_bulk();
+    }
+
+    /// Check if a bulk operation is in-flight.
+    pub fn is_bulk_loading(&self) -> bool {
+        self.loading.is_bulk()
+    }
+
+    /// Mark a dialog operation as in-flight.
+    pub fn set_dialog_loading(&mut self) {
+        self.loading.set_dialog();
+    }
+
+    /// Clear the dialog operation flag.
+    pub fn clear_dialog_loading(&mut self) {
+        self.loading.clear_dialog();
+    }
+
+    /// Check if a dialog operation is in-flight.
+    pub fn is_dialog_loading(&self) -> bool {
+        self.loading.is_dialog()
+    }
+
+    // =========================================================================
     // Selection facade methods
     // =========================================================================
 
@@ -459,6 +513,7 @@ impl AppState {
             selection: SelectionState::default(),
             projects: ProjectManager::new(),
             startup_errors: Vec::new(),
+            loading: LoadingState::new(),
         }
     }
 
@@ -472,6 +527,7 @@ impl AppState {
             selection: SelectionState::default(),
             projects: ProjectManager::new(),
             startup_errors: Vec::new(),
+            loading: LoadingState::new(),
         }
     }
 
