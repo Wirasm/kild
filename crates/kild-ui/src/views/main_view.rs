@@ -237,18 +237,25 @@ impl MainView {
         }
     }
 
+    /// Apply a state mutation and notify GPUI to re-render.
+    ///
+    /// Use for simple handlers where the entire body is a single state mutation.
+    /// For handlers with branching logic or multiple mutations, use explicit `cx.notify()`.
+    fn mutate_state(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppState)) {
+        f(&mut self.state);
+        cx.notify();
+    }
+
     /// Handle click on the Create button in header.
     fn on_create_button_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.create_dialog.opened");
-        self.state.open_create_dialog();
-        cx.notify();
+        self.mutate_state(cx, |s| s.open_create_dialog());
     }
 
     /// Handle dialog cancel button click (create dialog).
     pub fn on_dialog_cancel(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.create_dialog.cancelled");
-        self.state.close_dialog();
-        cx.notify();
+        self.mutate_state(cx, |s| s.close_dialog());
     }
 
     /// Handle dialog submit button click (create dialog).
@@ -323,15 +330,14 @@ impl MainView {
     /// Handle click on the Refresh button in header.
     fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.refresh_clicked");
-        self.state.refresh_sessions();
-        cx.notify();
+        self.mutate_state(cx, |s| s.refresh_sessions());
     }
 
     /// Handle click on the destroy button [×] in a kild row.
     pub fn on_destroy_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.destroy_dialog.opened", branch = branch);
-        self.state.open_confirm_dialog(branch.to_string());
-        cx.notify();
+        let branch = branch.to_string();
+        self.mutate_state(cx, |s| s.open_confirm_dialog(branch));
     }
 
     /// Handle confirm button click in destroy dialog.
@@ -371,15 +377,14 @@ impl MainView {
     /// Handle cancel button click in destroy dialog.
     pub fn on_confirm_cancel(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.confirm_dialog.cancelled");
-        self.state.close_dialog();
-        cx.notify();
+        self.mutate_state(cx, |s| s.close_dialog());
     }
 
     /// Handle kild row click - select for detail panel.
     pub fn on_kild_select(&mut self, session_id: &str, cx: &mut Context<Self>) {
         tracing::debug!(event = "ui.kild.selected", session_id = session_id);
-        self.state.select_kild(session_id.to_string());
-        cx.notify();
+        let id = session_id.to_string();
+        self.mutate_state(cx, |s| s.select_kild(id));
     }
 
     /// Handle click on the Open button [▶] in a kild row.
@@ -480,7 +485,6 @@ impl MainView {
         );
         let path_str = worktree_path.display().to_string();
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(path_str));
-        cx.notify();
     }
 
     /// Handle click on the Open Editor button in a kild row.
@@ -553,8 +557,6 @@ impl MainView {
         if let Err(e) = kild_core::terminal_ops::focus_terminal(tt, wid) {
             let message = format!("Failed to focus terminal: {}", e);
             self.record_error(branch, &message, cx);
-        } else {
-            cx.notify();
         }
     }
 
@@ -578,15 +580,13 @@ impl MainView {
     /// Clear bulk operation errors (called when user dismisses the banner).
     fn on_dismiss_bulk_errors(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.bulk_errors.dismissed");
-        self.state.clear_bulk_errors();
-        cx.notify();
+        self.mutate_state(cx, |s| s.clear_bulk_errors());
     }
 
     /// Clear startup errors (called when user dismisses the banner).
     fn on_dismiss_errors(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.errors.dismissed");
-        self.state.dismiss_errors();
-        cx.notify();
+        self.mutate_state(cx, |s| s.dismiss_errors());
     }
 
     // --- Project management handlers ---
@@ -594,15 +594,13 @@ impl MainView {
     /// Handle click on Add Project button.
     pub fn on_add_project_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.add_project_dialog.opened");
-        self.state.open_add_project_dialog();
-        cx.notify();
+        self.mutate_state(cx, |s| s.open_add_project_dialog());
     }
 
     /// Handle add project dialog cancel.
     pub fn on_add_project_cancel(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.add_project_dialog.cancelled");
-        self.state.close_dialog();
-        cx.notify();
+        self.mutate_state(cx, |s| s.close_dialog());
     }
 
     /// Handle add project dialog submit.
