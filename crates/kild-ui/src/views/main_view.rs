@@ -240,7 +240,8 @@ impl MainView {
     /// Apply a state mutation and notify GPUI to re-render.
     ///
     /// Use for simple handlers where the entire body is a single state mutation.
-    /// For handlers with branching logic or multiple mutations, use explicit `cx.notify()`.
+    /// For handlers with branching logic, early returns, or multiple mutations,
+    /// use explicit `cx.notify()`.
     fn mutate_state(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppState)) {
         f(&mut self.state);
         cx.notify();
