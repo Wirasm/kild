@@ -147,6 +147,10 @@ pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
 ///
 /// Iterates stopped kilds and dispatches `Command::OpenKild` for each.
 /// Returns (opened_count, errors) where errors contains operation errors with branch names.
+///
+/// Events from individual dispatches are intentionally discarded. The caller
+/// does a single `refresh_sessions()` after all operations complete, which is
+/// more efficient than applying N individual events (each would trigger its own refresh).
 pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,
@@ -169,6 +173,10 @@ pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>
 ///
 /// Iterates running kilds and dispatches `Command::StopKild` for each.
 /// Returns (stopped_count, errors) where errors contains operation errors with branch names.
+///
+/// Events from individual dispatches are intentionally discarded. The caller
+/// does a single `refresh_sessions()` after all operations complete, which is
+/// more efficient than applying N individual events (each would trigger its own refresh).
 pub fn stop_all_running(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,

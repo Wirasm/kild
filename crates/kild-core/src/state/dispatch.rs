@@ -147,7 +147,20 @@ impl Store for CoreStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::projects::persistence::test_helpers::*;
     use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    /// Create a temp directory with an initialized git repo.
+    fn create_temp_git_repo() -> TempDir {
+        let temp_dir = TempDir::new().unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .output()
+            .expect("git init failed");
+        temp_dir
+    }
 
     #[test]
     fn test_core_store_implements_store_trait() {
@@ -218,5 +231,252 @@ mod tests {
         assert_eq!(request.agent, Some("claude".to_string()));
         assert_eq!(request.note, None);
         assert_eq!(request.project_path, None);
+    }
+
+    // --- Project dispatch integration tests ---
+
+    #[test]
+    fn test_add_project_persists_and_emits_event() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        let events = store
+            .dispatch(Command::AddProject {
+                path: repo.path().to_path_buf(),
+                name: Some("Test Project".to_string()),
+            })
+            .expect("AddProject should succeed");
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::ProjectAdded { name, .. } if name == "Test Project"));
+
+        // Verify persisted to disk
+        let loaded = load_projects();
+        assert_eq!(loaded.projects.len(), 1);
+        assert_eq!(loaded.projects[0].name(), "Test Project");
+
+        // First project should be auto-selected
+        assert_eq!(loaded.active, Some(repo.path().canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn test_add_project_derives_name_from_path_when_none() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        let events = store
+            .dispatch(Command::AddProject {
+                path: repo.path().to_path_buf(),
+                name: None,
+            })
+            .expect("AddProject should succeed");
+
+        // Name should be derived from the directory name
+        let expected_name = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(matches!(&events[0], Event::ProjectAdded { name, .. } if name == &expected_name));
+    }
+
+    #[test]
+    fn test_add_project_duplicate_path_fails() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo.path().to_path_buf(),
+                name: Some("First".to_string()),
+            })
+            .expect("First add should succeed");
+
+        let result = store.dispatch(Command::AddProject {
+            path: repo.path().to_path_buf(),
+            name: Some("Duplicate".to_string()),
+        });
+        assert!(result.is_err(), "Duplicate path should fail");
+    }
+
+    #[test]
+    fn test_add_project_does_not_change_active_when_not_first() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo1 = create_temp_git_repo();
+        let repo2 = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo1.path().to_path_buf(),
+                name: Some("First".to_string()),
+            })
+            .unwrap();
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo2.path().to_path_buf(),
+                name: Some("Second".to_string()),
+            })
+            .unwrap();
+
+        // Active should still be the first project
+        let loaded = load_projects();
+        assert_eq!(loaded.projects.len(), 2);
+        assert_eq!(loaded.active, Some(repo1.path().canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn test_remove_project_persists_and_adjusts_active() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo1 = create_temp_git_repo();
+        let repo2 = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo1.path().to_path_buf(),
+                name: Some("First".to_string()),
+            })
+            .unwrap();
+        store
+            .dispatch(Command::AddProject {
+                path: repo2.path().to_path_buf(),
+                name: Some("Second".to_string()),
+            })
+            .unwrap();
+
+        // Remove the active (first) project
+        let canonical1 = repo1.path().canonicalize().unwrap();
+        let events = store
+            .dispatch(Command::RemoveProject {
+                path: canonical1.clone(),
+            })
+            .expect("RemoveProject should succeed");
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::ProjectRemoved { path } if path == &canonical1));
+
+        // Active should switch to the remaining project
+        let loaded = load_projects();
+        assert_eq!(loaded.projects.len(), 1);
+        assert_eq!(loaded.active, Some(repo2.path().canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_project_fails() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::RemoveProject {
+            path: PathBuf::from("/does/not/exist"),
+        });
+        assert!(result.is_err(), "Should fail for nonexistent project");
+    }
+
+    #[test]
+    fn test_select_project_persists_to_disk() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo1 = create_temp_git_repo();
+        let repo2 = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo1.path().to_path_buf(),
+                name: Some("First".to_string()),
+            })
+            .unwrap();
+        store
+            .dispatch(Command::AddProject {
+                path: repo2.path().to_path_buf(),
+                name: Some("Second".to_string()),
+            })
+            .unwrap();
+
+        // Select the second project
+        let canonical2 = repo2.path().canonicalize().unwrap();
+        let events = store
+            .dispatch(Command::SelectProject {
+                path: Some(canonical2.clone()),
+            })
+            .expect("SelectProject should succeed");
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::ActiveProjectChanged { path: Some(p) } if p == &canonical2
+        ));
+
+        // Verify persisted
+        let loaded = load_projects();
+        assert_eq!(loaded.active, Some(canonical2));
+    }
+
+    #[test]
+    fn test_select_project_none_clears_active() {
+        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let projects_file = temp_dir.path().join("projects.json");
+        let _guard = ProjectsFileEnvGuard::new(&projects_file);
+
+        let repo = create_temp_git_repo();
+        let mut store = CoreStore::new(KildConfig::default());
+
+        store
+            .dispatch(Command::AddProject {
+                path: repo.path().to_path_buf(),
+                name: Some("Project".to_string()),
+            })
+            .unwrap();
+
+        // Select "all projects" (None)
+        let events = store
+            .dispatch(Command::SelectProject { path: None })
+            .expect("Select all should succeed");
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::ActiveProjectChanged { path: None }
+        ));
+
+        // Verify persisted
+        let loaded = load_projects();
+        assert!(loaded.active.is_none());
     }
 }
