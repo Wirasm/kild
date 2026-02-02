@@ -27,17 +27,18 @@ fn create_store() -> Result<CoreStore, String> {
 /// When `project_path` is provided (UI context), detects project from that path.
 /// When `None` (shouldn't happen in UI), falls back to current working directory detection.
 ///
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` and returns the resulting events on success.
 pub fn create_kild(
-    branch: &str,
-    agent: &str,
+    branch: String,
+    agent: String,
     note: Option<String>,
     project_path: Option<PathBuf>,
 ) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.create_kild.started",
-        branch = branch,
-        agent = agent,
+        branch = &*branch,
+        agent = &*agent,
         note = ?note,
         project_path = ?project_path
     );
@@ -53,20 +54,20 @@ pub fn create_kild(
     let mut store = create_store()?;
 
     match store.dispatch(Command::CreateKild {
-        branch: branch.to_string(),
-        agent: Some(agent.to_string()),
+        branch: branch.clone(),
+        agent: Some(agent.clone()),
         note,
         project_path,
     }) {
         Ok(events) => {
-            tracing::info!(event = "ui.create_kild.completed", branch = branch);
+            tracing::info!(event = "ui.create_kild.completed", branch = &*branch);
             Ok(events)
         }
         Err(e) => {
             tracing::error!(
                 event = "ui.create_kild.failed",
-                branch = branch,
-                agent = agent,
+                branch = &*branch,
+                agent = &*agent,
                 error = %e
             );
             Err(e.to_string())
@@ -101,28 +102,30 @@ pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
 /// Dispatches through `CoreStore` to route to kild-core's `destroy_session`, which handles
 /// terminal cleanup, process termination, worktree removal, and session file deletion.
 ///
+/// Takes owned parameters so this function can be called from background threads.
+///
 /// # Arguments
 /// * `branch` - Branch name of the kild to destroy
 /// * `force` - If true, bypasses git safety checks (e.g., uncommitted changes)
-pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
+pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.destroy_kild.started",
-        branch = branch,
+        branch = &*branch,
         force = force
     );
 
     let mut store = create_store()?;
 
     match store.dispatch(Command::DestroyKild {
-        branch: branch.to_string(),
+        branch: branch.clone(),
         force,
     }) {
         Ok(events) => {
-            tracing::info!(event = "ui.destroy_kild.completed", branch = branch);
+            tracing::info!(event = "ui.destroy_kild.completed", branch = &*branch);
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.destroy_kild.failed", branch = branch, error = %e);
+            tracing::error!(event = "ui.destroy_kild.failed", branch = &*branch, error = %e);
             Err(e.to_string())
         }
     }
@@ -131,22 +134,23 @@ pub fn destroy_kild(branch: &str, force: bool) -> Result<Vec<Event>, String> {
 /// Open a new agent terminal in an existing kild (additive - doesn't close existing terminals).
 ///
 /// Unlike relaunch, this does NOT close existing terminals - multiple agents can run in the same kild.
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` and returns the resulting events on success.
-pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.open_kild.started", branch = branch, agent = ?agent);
+pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, String> {
+    tracing::info!(event = "ui.open_kild.started", branch = &*branch, agent = ?agent);
 
     let mut store = create_store()?;
 
     match store.dispatch(Command::OpenKild {
-        branch: branch.to_string(),
+        branch: branch.clone(),
         agent,
     }) {
         Ok(events) => {
-            tracing::info!(event = "ui.open_kild.completed", branch = branch);
+            tracing::info!(event = "ui.open_kild.completed", branch = &*branch);
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.open_kild.failed", branch = branch, error = %e);
+            tracing::error!(event = "ui.open_kild.failed", branch = &*branch, error = %e);
             Err(e.to_string())
         }
     }
@@ -154,22 +158,23 @@ pub fn open_kild(branch: &str, agent: Option<String>) -> Result<Vec<Event>, Stri
 
 /// Stop the agent process in a kild without destroying the kild.
 ///
+/// Takes owned parameters so this function can be called from background threads.
 /// Dispatches through `CoreStore` to route to kild-core's `stop_session`.
 /// The worktree and session file are preserved. The kild can be reopened with open_kild().
-pub fn stop_kild(branch: &str) -> Result<Vec<Event>, String> {
-    tracing::info!(event = "ui.stop_kild.started", branch = branch);
+pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
+    tracing::info!(event = "ui.stop_kild.started", branch = &*branch);
 
     let mut store = create_store()?;
 
     match store.dispatch(Command::StopKild {
-        branch: branch.to_string(),
+        branch: branch.clone(),
     }) {
         Ok(events) => {
-            tracing::info!(event = "ui.stop_kild.completed", branch = branch);
+            tracing::info!(event = "ui.stop_kild.completed", branch = &*branch);
             Ok(events)
         }
         Err(e) => {
-            tracing::error!(event = "ui.stop_kild.failed", branch = branch, error = %e);
+            tracing::error!(event = "ui.stop_kild.failed", branch = &*branch, error = %e);
             Err(e.to_string())
         }
     }
