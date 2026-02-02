@@ -481,7 +481,7 @@ fn cleanup_stale_sessions(session_ids: &[String]) -> Result<Vec<String>, Cleanup
             session_id = session_id
         );
 
-        match sessions::operations::remove_session_file(&config.sessions_dir(), session_id) {
+        match sessions::persistence::remove_session_file(&config.sessions_dir(), session_id) {
             Ok(()) => {
                 info!(
                     event = "core.cleanup.session_delete_completed",

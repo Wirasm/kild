@@ -5,7 +5,7 @@ use crate::config::{Config, KildConfig};
 use crate::git;
 use crate::git::operations::get_worktree_status;
 use crate::process::{delete_pid_file, get_pid_file_path};
-use crate::sessions::{errors::SessionError, operations, types::*};
+use crate::sessions::{errors::SessionError, persistence, ports, types::*, validation};
 use crate::terminal;
 use crate::terminal::types::SpawnResult;
 
@@ -71,7 +71,7 @@ pub fn create_session(
     );
 
     // 1. Validate input (pure)
-    let validated = operations::validate_session_request(&request.branch, &agent_command, &agent)?;
+    let validated = validation::validate_session_request(&request.branch, &agent_command, &agent)?;
 
     // 2. Detect git project (I/O)
     // Use explicit project path if provided (UI context), otherwise use cwd (CLI context)
@@ -96,13 +96,13 @@ pub fn create_session(
 
     // 3. Create worktree (I/O)
     let config = Config::new();
-    let session_id = operations::generate_session_id(&project.id, &validated.name);
+    let session_id = ports::generate_session_id(&project.id, &validated.name);
 
     // Ensure sessions directory exists
-    operations::ensure_sessions_directory(&config.sessions_dir())?;
+    persistence::ensure_sessions_directory(&config.sessions_dir())?;
 
     // 4. Allocate port range (I/O)
-    let (port_start, port_end) = operations::allocate_port_range(
+    let (port_start, port_end) = ports::allocate_port_range(
         &config.sessions_dir(),
         config.default_port_count,
         config.base_port_range,
@@ -191,7 +191,7 @@ pub fn create_session(
     };
 
     // 7. Save session to file
-    operations::save_session_to_file(&session, &config.sessions_dir())?;
+    persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
         event = "core.session.create_completed",
@@ -209,7 +209,7 @@ pub fn list_sessions() -> Result<Vec<Session>, SessionError> {
     info!(event = "core.session.list_started");
 
     let config = Config::new();
-    let (sessions, skipped_count) = operations::load_sessions_from_files(&config.sessions_dir())?;
+    let (sessions, skipped_count) = persistence::load_sessions_from_files(&config.sessions_dir())?;
 
     if skipped_count > 0 {
         tracing::warn!(
@@ -231,7 +231,7 @@ pub fn get_session(name: &str) -> Result<Session, SessionError> {
     info!(event = "core.session.get_started", name = name);
 
     let config = Config::new();
-    let session = operations::load_session_from_file(name, &config.sessions_dir())?;
+    let session = persistence::load_session_from_file(name, &config.sessions_dir())?;
 
     info!(
         event = "core.session.get_completed",
@@ -267,7 +267,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     // 1. Find session by name (branch name)
     let session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -370,7 +370,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     }
 
     // 6. Remove session file (automatically frees port range)
-    operations::remove_session_file(&config.sessions_dir(), &session.id)?;
+    persistence::remove_session_file(&config.sessions_dir(), &session.id)?;
 
     info!(
         event = "core.session.port_deallocated",
@@ -418,7 +418,7 @@ pub fn complete_session(name: &str, force: bool) -> Result<CompleteResult, Sessi
 
     // 1. Find session by name to get branch info
     let session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -647,7 +647,7 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
 
     // 1. Find session by name (branch name)
     let session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -802,7 +802,7 @@ pub fn restart_session(
 
     // 1. Find session by name (branch name)
     let mut session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -933,7 +933,7 @@ pub fn restart_session(
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
     // 7. Save updated session to file
-    operations::save_session_to_file(&session, &config.sessions_dir())?;
+    persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
         event = "core.session.restart_completed",
@@ -976,7 +976,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
 
     // 1. Find session by name (branch name)
     let mut session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -1051,7 +1051,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
     // 7. Save updated session
-    operations::save_session_to_file(&session, &config.sessions_dir())?;
+    persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
         event = "core.session.open_completed",
@@ -1072,7 +1072,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     // 1. Find session by name (branch name)
     let mut session =
-        operations::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
+        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
@@ -1150,7 +1150,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
     // 6. Save updated session (keep worktree, keep session file)
-    operations::save_session_to_file(&session, &config.sessions_dir())?;
+    persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
         event = "core.session.stop_completed",
@@ -1172,7 +1172,7 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
 
         // Test with empty directory
-        let (sessions, skipped) = operations::load_sessions_from_files(&temp_dir).unwrap();
+        let (sessions, skipped) = persistence::load_sessions_from_files(&temp_dir).unwrap();
         assert_eq!(sessions.len(), 0);
         assert_eq!(skipped, 0);
 
@@ -1258,7 +1258,7 @@ mod tests {
         // This tests the core persistence logic without git/terminal dependencies
 
         // 1. Create a test session manually
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
 
         let session = Session {
@@ -1286,33 +1286,33 @@ mod tests {
         fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
 
         // 2. Save session to file
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // 3. List sessions - should contain our session
         let (sessions, skipped) =
-            operations::load_sessions_from_files(&sessions_dir).expect("Failed to load sessions");
+            persistence::load_sessions_from_files(&sessions_dir).expect("Failed to load sessions");
         assert_eq!(sessions.len(), 1);
         assert_eq!(skipped, 0);
         assert_eq!(sessions[0].id, session.id);
         assert_eq!(sessions[0].branch, "test-branch");
 
         // 4. Find session by name
-        let found_session = operations::find_session_by_name(&sessions_dir, "test-branch")
+        let found_session = persistence::find_session_by_name(&sessions_dir, "test-branch")
             .expect("Failed to find session")
             .expect("Session not found");
         assert_eq!(found_session.id, session.id);
 
         // 5. Remove session file
-        operations::remove_session_file(&sessions_dir, &session.id)
+        persistence::remove_session_file(&sessions_dir, &session.id)
             .expect("Failed to remove session");
 
         // 6. List sessions - should be empty
-        let (sessions_after, _) = operations::load_sessions_from_files(&sessions_dir)
+        let (sessions_after, _) = persistence::load_sessions_from_files(&sessions_dir)
             .expect("Failed to load sessions after removal");
         assert_eq!(sessions_after.len(), 0);
 
         // 7. Try to find removed session - should return None
-        let not_found = operations::find_session_by_name(&sessions_dir, "test-branch")
+        let not_found = persistence::find_session_by_name(&sessions_dir, "test-branch")
             .expect("Failed to search for removed session");
         assert!(not_found.is_none());
 
@@ -1322,7 +1322,7 @@ mod tests {
 
     #[test]
     fn test_session_with_terminal_type_persistence() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
         use std::fs;
@@ -1382,10 +1382,10 @@ mod tests {
                 note: None,
             };
 
-            operations::save_session_to_file(&session, &sessions_dir)
+            persistence::save_session_to_file(&session, &sessions_dir)
                 .expect("Failed to save session");
 
-            let loaded = operations::find_session_by_name(&sessions_dir, branch_name)
+            let loaded = persistence::find_session_by_name(&sessions_dir, branch_name)
                 .expect("Failed to find session")
                 .expect("Session not found");
 
@@ -1403,7 +1403,7 @@ mod tests {
 
     #[test]
     fn test_destroy_session_with_terminal_type_calls_close() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
         use std::fs;
@@ -1456,20 +1456,20 @@ mod tests {
             note: None,
         };
 
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Verify session exists
-        let found = operations::find_session_by_name(&sessions_dir, "destroy-test")
+        let found = persistence::find_session_by_name(&sessions_dir, "destroy-test")
             .expect("Failed to find session")
             .expect("Session should exist");
         assert_eq!(found.terminal_type, Some(TerminalType::ITerm));
 
         // Remove session file (simulating destroy flow without git worktree dependency)
-        operations::remove_session_file(&sessions_dir, &session.id)
+        persistence::remove_session_file(&sessions_dir, &session.id)
             .expect("Failed to remove session");
 
         // Verify session is gone
-        let not_found = operations::find_session_by_name(&sessions_dir, "destroy-test")
+        let not_found = persistence::find_session_by_name(&sessions_dir, "destroy-test")
             .expect("Failed to search");
         assert!(not_found.is_none(), "Session should be removed");
 
@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn test_destroy_session_without_terminal_type_backward_compat() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use std::fs;
 
@@ -1525,10 +1525,10 @@ mod tests {
             note: None,
         };
 
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Verify session can be loaded with terminal_type = None
-        let found = operations::find_session_by_name(&sessions_dir, "compat-test")
+        let found = persistence::find_session_by_name(&sessions_dir, "compat-test")
             .expect("Failed to find session")
             .expect("Session should exist");
         assert_eq!(
@@ -1537,11 +1537,11 @@ mod tests {
         );
 
         // Remove session (simulating destroy flow)
-        operations::remove_session_file(&sessions_dir, &session.id)
+        persistence::remove_session_file(&sessions_dir, &session.id)
             .expect("Failed to remove session");
 
         // Verify session is gone
-        let not_found = operations::find_session_by_name(&sessions_dir, "compat-test")
+        let not_found = persistence::find_session_by_name(&sessions_dir, "compat-test")
             .expect("Failed to search");
         assert!(not_found.is_none());
 
@@ -1551,7 +1551,7 @@ mod tests {
 
     #[test]
     fn test_session_terminal_type_updated_on_restart() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
         use std::fs;
@@ -1598,18 +1598,18 @@ mod tests {
             note: None,
         };
 
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Simulate what restart_session does: update terminal_type and save
         session.terminal_type = Some(TerminalType::Ghostty);
         session.status = SessionStatus::Active;
         session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
-        operations::save_session_to_file(&session, &sessions_dir)
+        persistence::save_session_to_file(&session, &sessions_dir)
             .expect("Failed to save updated session");
 
         // Verify the updated terminal_type persists
-        let loaded = operations::find_session_by_name(&sessions_dir, "restart-test")
+        let loaded = persistence::find_session_by_name(&sessions_dir, "restart-test")
             .expect("Failed to find session")
             .expect("Session should exist");
 
@@ -1646,7 +1646,7 @@ mod tests {
 
     #[test]
     fn test_stop_session_clears_process_info_and_sets_stopped_status() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
         use std::fs;
@@ -1693,10 +1693,10 @@ mod tests {
             note: None,
         };
 
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // Verify session exists with Active status
-        let before = operations::find_session_by_name(&sessions_dir, "stop-test")
+        let before = persistence::find_session_by_name(&sessions_dir, "stop-test")
             .expect("Failed to find session")
             .expect("Session should exist");
         assert_eq!(before.status, SessionStatus::Active);
@@ -1709,11 +1709,11 @@ mod tests {
         stopped_session.process_start_time = None;
         stopped_session.status = SessionStatus::Stopped;
         stopped_session.last_activity = Some(chrono::Utc::now().to_rfc3339());
-        operations::save_session_to_file(&stopped_session, &sessions_dir)
+        persistence::save_session_to_file(&stopped_session, &sessions_dir)
             .expect("Failed to save stopped session");
 
         // Verify state changes persisted
-        let after = operations::find_session_by_name(&sessions_dir, "stop-test")
+        let after = persistence::find_session_by_name(&sessions_dir, "stop-test")
             .expect("Failed to find session")
             .expect("Session should exist");
         assert_eq!(
@@ -1885,7 +1885,7 @@ mod tests {
     /// 3. Operation-level validation would return `WorktreeNotFound`
     #[test]
     fn test_session_with_missing_worktree_fails_operation_validation() {
-        use crate::sessions::operations;
+        use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
         use std::fs;
 
@@ -1927,11 +1927,11 @@ mod tests {
         };
 
         // Save the session
-        operations::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
         // 1. Verify session CAN be loaded (the fix for issue #102)
         let (sessions, skipped) =
-            operations::load_sessions_from_files(&sessions_dir).expect("Failed to load sessions");
+            persistence::load_sessions_from_files(&sessions_dir).expect("Failed to load sessions");
         assert_eq!(
             sessions.len(),
             1,

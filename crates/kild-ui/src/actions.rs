@@ -3,12 +3,11 @@
 //! This module contains functions that interact with kild-core
 //! to perform operations like creating, destroying, relaunching, and listing kilds.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use kild_core::{Command, CoreStore, Event, KildConfig, Store, session_ops};
 
 use crate::state::OperationError;
-use kild_core::projects::{Project, ProjectError, load_projects, save_projects};
 use kild_core::{ProcessStatus, SessionInfo};
 
 /// Load config and create a CoreStore instance.
@@ -146,15 +145,21 @@ pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
 
 /// Open agents in all stopped kilds.
 ///
+/// Iterates stopped kilds and dispatches `Command::OpenKild` for each.
 /// Returns (opened_count, errors) where errors contains operation errors with branch names.
 pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,
         ProcessStatus::Stopped,
         |branch| {
-            session_ops::open_session(branch, None)
-                .map(|_| ())
-                .map_err(|e| e.to_string())
+            dispatch_command(
+                Command::OpenKild {
+                    branch: branch.to_string(),
+                    agent: None,
+                },
+                "ui.open_all_stopped.dispatch",
+            )
+            .map(|_| ())
         },
         "ui.open_all_stopped",
     )
@@ -162,12 +167,21 @@ pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>
 
 /// Stop all running kilds.
 ///
+/// Iterates running kilds and dispatches `Command::StopKild` for each.
 /// Returns (stopped_count, errors) where errors contains operation errors with branch names.
 pub fn stop_all_running(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
     execute_bulk_operation(
         displays,
         ProcessStatus::Running,
-        |branch| session_ops::stop_session(branch).map_err(|e| e.to_string()),
+        |branch| {
+            dispatch_command(
+                Command::StopKild {
+                    branch: branch.to_string(),
+                },
+                "ui.stop_all_running.dispatch",
+            )
+            .map(|_| ())
+        },
         "ui.stop_all_running",
     )
 }
@@ -225,132 +239,54 @@ fn execute_bulk_operation(
     (success_count, errors)
 }
 
-// --- Project Management Actions ---
+// --- Project Management Actions (dispatch-based) ---
 
-/// Add a new project after validation.
+/// Add a project via Store dispatch.
 ///
-/// Returns the added project on success, or an error message if validation fails.
-/// The path is canonicalized to ensure consistent hashing for filtering.
-pub fn add_project(path: PathBuf, name: Option<String>) -> Result<Project, String> {
+/// Validates the path, creates a Project, persists to disk, and returns events.
+/// Path normalization (tilde expansion) should be done by the caller before invoking.
+pub fn dispatch_add_project(path: PathBuf, name: Option<String>) -> Result<Vec<Event>, String> {
     tracing::info!(
-        event = "ui.add_project.started",
+        event = "ui.dispatch_add_project.started",
         path = %path.display()
     );
 
-    let mut data = load_projects();
-
-    // Create validated project with canonical path
-    let project = Project::new(path.clone(), name).map_err(|e| {
-        let path_display = path.display();
-        match e {
-            ProjectError::NotADirectory => format!("'{}' is not a directory", path_display),
-            ProjectError::NotAGitRepo => format!("'{}' is not a git repository", path_display),
-            ProjectError::CanonicalizationFailed { source } => {
-                format!("Cannot access '{}': {}", path_display, source)
-            }
-            ProjectError::GitCommandFailed { source } => {
-                format!(
-                    "Cannot verify if '{}' is a git repository: {}. Is git installed?",
-                    path_display, source
-                )
-            }
-            // These errors shouldn't occur in Project::new(), but handle explicitly
-            // so new variants force a review of user-facing messages
-            ProjectError::NotFound
-            | ProjectError::AlreadyExists
-            | ProjectError::SaveFailed { .. }
-            | ProjectError::LoadCorrupted { .. } => e.to_string(),
-        }
-    })?;
-
-    // Check if project already exists (by canonical path)
-    if data.projects.iter().any(|p| p.path() == project.path()) {
-        return Err("Project already exists".to_string());
-    }
-
-    let canonical_path = project.path().to_path_buf();
-    data.projects.push(project.clone());
-
-    // If this is the first project, make it active
-    if data.projects.len() == 1 {
-        data.active = Some(canonical_path.clone());
-    }
-
-    save_projects(&data).map_err(|e| e.to_string())?;
-
-    tracing::info!(
-        event = "ui.add_project.completed",
-        path = %canonical_path.display(),
-        name = %project.name()
-    );
-
-    Ok(project)
+    dispatch_command(
+        Command::AddProject { path, name },
+        "ui.dispatch_add_project",
+    )
 }
 
-/// Remove a project from the list (doesn't affect kilds).
-pub fn remove_project(path: &Path) -> Result<(), String> {
+/// Remove a project via Store dispatch.
+pub fn dispatch_remove_project(path: PathBuf) -> Result<Vec<Event>, String> {
     tracing::info!(
-        event = "ui.remove_project.started",
+        event = "ui.dispatch_remove_project.started",
         path = %path.display()
     );
 
-    let mut data = load_projects();
-
-    let original_len = data.projects.len();
-    data.projects.retain(|p| p.path() != path);
-
-    if data.projects.len() == original_len {
-        return Err("Project not found".to_string());
-    }
-
-    // Clear active project if it was removed, select first remaining if any
-    if data.active.as_deref() == Some(path) {
-        data.active = data.projects.first().map(|p| p.path().to_path_buf());
-    }
-
-    save_projects(&data).map_err(|e| e.to_string())?;
-
-    tracing::info!(
-        event = "ui.remove_project.completed",
-        path = %path.display()
-    );
-
-    Ok(())
+    dispatch_command(
+        Command::RemoveProject { path },
+        "ui.dispatch_remove_project",
+    )
 }
 
-/// Set the active project.
-pub fn set_active_project(path: Option<PathBuf>) -> Result<(), String> {
+/// Set the active project via Store dispatch.
+///
+/// Pass `None` to select "all projects" view.
+pub fn dispatch_set_active_project(path: Option<PathBuf>) -> Result<Vec<Event>, String> {
     tracing::info!(
-        event = "ui.set_active_project.started",
+        event = "ui.dispatch_set_active_project.started",
         path = ?path
     );
 
-    let mut data = load_projects();
-
-    // Validate that the project exists if a path is provided
-    if let Some(p) = &path {
-        let project_exists = data.projects.iter().any(|proj| proj.path() == p.as_path());
-        if !project_exists {
-            return Err("Project not found".to_string());
-        }
-    }
-
-    data.active = path;
-    save_projects(&data).map_err(|e| e.to_string())?;
-
-    tracing::info!(
-        event = "ui.set_active_project.completed",
-        path = ?data.active
-    );
-
-    Ok(())
+    dispatch_command(
+        Command::SelectProject { path },
+        "ui.dispatch_set_active_project",
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use kild_core::projects::persistence::test_helpers::{
-        PROJECTS_FILE_ENV_LOCK, ProjectsFileEnvGuard,
-    };
     use kild_core::sessions::types::SessionStatus;
     use kild_core::{GitStatus, ProcessStatus, Session, SessionInfo};
     use std::path::PathBuf;
@@ -631,116 +567,6 @@ mod tests {
         assert_eq!(editor, "zed");
 
         restore_env_var("EDITOR", original);
-    }
-
-    // --- add_project validation tests ---
-
-    #[test]
-    fn test_add_project_returns_error_for_nonexistent_path() {
-        let path = PathBuf::from("/nonexistent/path/that/does/not/exist");
-        let result = super::add_project(path, None);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("Cannot access"),
-            "Expected 'Cannot access' error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_add_project_returns_error_for_file_not_directory() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("test.txt");
-        std::fs::write(&file_path, "test").unwrap();
-
-        let result = super::add_project(file_path.clone(), None);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("is not a directory"),
-            "Expected 'not a directory' error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_add_project_returns_error_for_non_git_directory() {
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path().to_path_buf();
-
-        let result = super::add_project(path, None);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("is not a git repository"),
-            "Expected 'not a git repository' error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_add_project_uses_provided_name() {
-        use tempfile::TempDir;
-
-        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
-
-        // Use isolated projects file for test
-        let projects_dir = TempDir::new().unwrap();
-        let projects_file = projects_dir.path().join("projects.json");
-        let _guard = ProjectsFileEnvGuard::new(&projects_file);
-
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Initialize git repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .output()
-            .expect("git init failed");
-
-        let result = super::add_project(path.to_path_buf(), Some("Custom Name".to_string()));
-
-        let project = result.expect("add_project should succeed");
-        assert_eq!(project.name(), "Custom Name");
-    }
-
-    #[test]
-    fn test_add_project_derives_name_from_path() {
-        use tempfile::TempDir;
-
-        let _lock = PROJECTS_FILE_ENV_LOCK.lock().unwrap();
-
-        // Use isolated projects file for test
-        let projects_dir = TempDir::new().unwrap();
-        let projects_file = projects_dir.path().join("projects.json");
-        let _guard = ProjectsFileEnvGuard::new(&projects_file);
-
-        // Create a temp dir with a specific name
-        let temp_dir = TempDir::new().unwrap();
-        let path = temp_dir.path();
-
-        // Initialize git repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .output()
-            .expect("git init failed");
-
-        let result = super::add_project(path.to_path_buf(), None);
-
-        let project = result.expect("add_project should succeed");
-        // Name should be the directory name (temp dir names are random)
-        assert!(!project.name().is_empty());
-        assert_ne!(project.name(), "unknown");
     }
 
     // --- Validation function tests ---

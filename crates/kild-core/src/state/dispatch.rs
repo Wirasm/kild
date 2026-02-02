@@ -1,6 +1,7 @@
 use tracing::{debug, error, info};
 
 use crate::config::KildConfig;
+use crate::projects::{Project, load_projects, save_projects};
 use crate::sessions::handler as session_ops;
 use crate::sessions::types::CreateSessionRequest;
 use crate::state::errors::DispatchError;
@@ -13,8 +14,6 @@ use crate::state::types::Command;
 /// Holds a `KildConfig` used only by the `CreateKild` command. Other session
 /// commands (`DestroyKild`, `OpenKild`, `StopKild`, `CompleteKild`) load their
 /// own config internally via their handlers.
-///
-/// Project operations are not yet wired and return `NotImplemented` errors.
 pub struct CoreStore {
     config: KildConfig,
 }
@@ -70,14 +69,66 @@ impl Store for CoreStore {
                 session_ops::list_sessions()?;
                 Ok(vec![Event::SessionsRefreshed])
             }
-            Command::AddProject { .. } => {
-                Err(DispatchError::NotImplemented("AddProject".to_string()))
+            Command::AddProject { path, name } => {
+                let project = Project::new(path.clone(), name)?;
+                let mut data = load_projects();
+
+                if data.projects.iter().any(|p| p.path() == project.path()) {
+                    return Err(DispatchError::Project(
+                        crate::projects::ProjectError::AlreadyExists,
+                    ));
+                }
+
+                let canonical_path = project.path().to_path_buf();
+                let project_name = project.name().to_string();
+
+                // Auto-select first project
+                if data.projects.is_empty() {
+                    data.active = Some(canonical_path.clone());
+                }
+                data.projects.push(project);
+                save_projects(&data)?;
+
+                Ok(vec![Event::ProjectAdded {
+                    path: canonical_path,
+                    name: project_name,
+                }])
             }
-            Command::RemoveProject { .. } => {
-                Err(DispatchError::NotImplemented("RemoveProject".to_string()))
+            Command::RemoveProject { path } => {
+                let mut data = load_projects();
+
+                let original_len = data.projects.len();
+                data.projects.retain(|p| p.path() != path);
+
+                if data.projects.len() == original_len {
+                    return Err(DispatchError::Project(
+                        crate::projects::ProjectError::NotFound,
+                    ));
+                }
+
+                // Clear active if removed, select first remaining
+                if data.active.as_deref() == Some(&path) {
+                    data.active = data.projects.first().map(|p| p.path().to_path_buf());
+                }
+                save_projects(&data)?;
+
+                Ok(vec![Event::ProjectRemoved { path }])
             }
-            Command::SelectProject { .. } => {
-                Err(DispatchError::NotImplemented("SelectProject".to_string()))
+            Command::SelectProject { path } => {
+                let mut data = load_projects();
+
+                if let Some(p) = &path
+                    && !data.projects.iter().any(|proj| proj.path() == p.as_path())
+                {
+                    return Err(DispatchError::Project(
+                        crate::projects::ProjectError::NotFound,
+                    ));
+                }
+
+                data.active = path.clone();
+                save_projects(&data)?;
+
+                Ok(vec![Event::ActiveProjectChanged { path }])
             }
         };
 
@@ -107,50 +158,42 @@ mod tests {
     }
 
     #[test]
-    fn test_core_store_add_project_returns_not_implemented() {
+    fn test_core_store_add_project_validates_path() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::AddProject {
-            path: PathBuf::from("/tmp/project"),
-            name: "Test".to_string(),
+            path: PathBuf::from("/nonexistent/path/that/does/not/exist"),
+            name: Some("Test".to_string()),
         });
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Command not implemented: AddProject"
-        );
+        assert!(result.is_err(), "Should fail for nonexistent path");
     }
 
     #[test]
-    fn test_core_store_remove_project_returns_not_implemented() {
+    fn test_core_store_remove_project_validates_path() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::RemoveProject {
-            path: PathBuf::from("/tmp/project"),
+            path: PathBuf::from("/nonexistent/project"),
         });
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Command not implemented: RemoveProject"
-        );
+        assert!(result.is_err(), "Should fail for nonexistent project");
     }
 
     #[test]
-    fn test_core_store_select_project_returns_not_implemented() {
+    fn test_core_store_select_project_validates_path() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::SelectProject {
-            path: Some(PathBuf::from("/tmp/project")),
+            path: Some(PathBuf::from("/nonexistent/project")),
         });
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Command not implemented: SelectProject"
-        );
+        assert!(result.is_err(), "Should fail for nonexistent project");
     }
 
     #[test]
-    fn test_core_store_select_project_none_returns_not_implemented() {
+    fn test_core_store_select_project_none_succeeds() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::SelectProject { path: None });
-        assert!(result.is_err());
+        assert!(result.is_ok(), "Select all should succeed");
+        assert_eq!(
+            result.unwrap(),
+            vec![Event::ActiveProjectChanged { path: None }]
+        );
     }
 
     #[test]

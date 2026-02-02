@@ -9,12 +9,6 @@ pub struct SelectionState {
 }
 
 impl SelectionState {
-    /// Create a new empty selection state.
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Select a kild by ID.
     pub fn select(&mut self, id: String) {
         self.selected_id = Some(id);

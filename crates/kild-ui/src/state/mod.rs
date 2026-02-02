@@ -10,7 +10,6 @@ pub mod errors;
 pub mod loading;
 pub mod selection;
 pub mod sessions;
-pub mod ui_commands;
 
 // Re-export all public types at module level so consumers use `crate::state::*`
 pub use app_state::AppState;

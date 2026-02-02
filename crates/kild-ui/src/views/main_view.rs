@@ -783,27 +783,9 @@ impl MainView {
             }
         };
 
-        match actions::add_project(path.clone(), name) {
-            Ok(project) => {
-                tracing::info!(
-                    event = "ui.add_project.succeeded",
-                    path = %path.display(),
-                    name = %project.name()
-                );
-                // Update local state with new project
-                // Note: ProjectManager.add() auto-selects first project
-                if let Err(e) = self.state.add_project(project) {
-                    tracing::error!(
-                        event = "ui.add_project.state_sync_failed",
-                        path = %path.display(),
-                        error = %e,
-                        "Project persisted but local state update failed, reloading from disk"
-                    );
-                    self.state.reload_projects();
-                }
-                self.state.close_dialog();
-                // Refresh sessions to filter by new active project
-                self.state.refresh_sessions();
+        match actions::dispatch_add_project(path.clone(), name) {
+            Ok(events) => {
+                self.state.apply_events(&events);
             }
             Err(e) => {
                 tracing::warn!(
@@ -824,23 +806,13 @@ impl MainView {
             path = %path.display()
         );
 
-        if let Err(e) = actions::set_active_project(Some(path.clone())) {
-            tracing::error!(event = "ui.project_select.failed", error = %e);
-            self.state
-                .push_error(format!("Failed to select project: {}", e));
-            cx.notify();
-            return;
-        }
-
-        // Update local state - select() should not fail since persistence succeeded
-        if let Err(e) = self.state.select_project(&path) {
-            tracing::error!(
-                event = "ui.project_select.state_sync_failed",
-                path = %path.display(),
-                error = %e,
-                "Project selection persisted but local state update failed, reloading from disk"
-            );
-            self.state.reload_projects();
+        match actions::dispatch_set_active_project(Some(path)) {
+            Ok(events) => self.state.apply_events(&events),
+            Err(e) => {
+                tracing::error!(event = "ui.project_select.failed", error = %e);
+                self.state
+                    .push_error(format!("Failed to select project: {}", e));
+            }
         }
         cx.notify();
     }
@@ -849,15 +821,14 @@ impl MainView {
     pub fn on_project_select_all(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.project_selected_all");
 
-        if let Err(e) = actions::set_active_project(None) {
-            tracing::error!(event = "ui.project_select_all.failed", error = %e);
-            self.state
-                .push_error(format!("Failed to update project selection: {}", e));
-            cx.notify();
-            return;
+        match actions::dispatch_set_active_project(None) {
+            Ok(events) => self.state.apply_events(&events),
+            Err(e) => {
+                tracing::error!(event = "ui.project_select_all.failed", error = %e);
+                self.state
+                    .push_error(format!("Failed to update project selection: {}", e));
+            }
         }
-
-        self.state.select_all_projects();
         cx.notify();
     }
 
@@ -868,23 +839,13 @@ impl MainView {
             path = %path.display()
         );
 
-        if let Err(e) = actions::remove_project(&path) {
-            tracing::error!(event = "ui.remove_project.failed", error = %e);
-            self.state
-                .push_error(format!("Failed to remove project: {}", e));
-            cx.notify();
-            return;
-        }
-
-        // Update local state - remove() handles active_index adjustment
-        if let Err(e) = self.state.remove_project(&path) {
-            tracing::error!(
-                event = "ui.remove_project.state_sync_failed",
-                path = %path.display(),
-                error = %e,
-                "Project removal persisted but local state update failed, reloading from disk"
-            );
-            self.state.reload_projects();
+        match actions::dispatch_remove_project(path) {
+            Ok(events) => self.state.apply_events(&events),
+            Err(e) => {
+                tracing::error!(event = "ui.remove_project.failed", error = %e);
+                self.state
+                    .push_error(format!("Failed to remove project: {}", e));
+            }
         }
         cx.notify();
     }

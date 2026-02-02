@@ -83,9 +83,10 @@ mod tests {
                         Ok(vec![Event::KildCompleted { branch }])
                     }
                     Command::RefreshSessions => Ok(vec![Event::SessionsRefreshed]),
-                    Command::AddProject { path, name } => {
-                        Ok(vec![Event::ProjectAdded { path, name }])
-                    }
+                    Command::AddProject { path, name } => Ok(vec![Event::ProjectAdded {
+                        path,
+                        name: name.unwrap_or_default(),
+                    }]),
                     Command::RemoveProject { path } => Ok(vec![Event::ProjectRemoved { path }]),
                     Command::SelectProject { path } => {
                         Ok(vec![Event::ActiveProjectChanged { path }])
@@ -145,7 +146,7 @@ mod tests {
         let events = store
             .dispatch(Command::AddProject {
                 path: PathBuf::from("/tmp"),
-                name: "Test".to_string(),
+                name: Some("Test".to_string()),
             })
             .unwrap();
         assert!(matches!(&events[0], Event::ProjectAdded { name, .. } if name == "Test"));
@@ -185,9 +186,10 @@ mod tests {
                     Command::StopKild { .. } => Ok(vec![Event::KildStopped { branch }]),
                     Command::CompleteKild { .. } => Ok(vec![Event::KildCompleted { branch }]),
                     Command::RefreshSessions => Ok(vec![Event::SessionsRefreshed]),
-                    Command::AddProject { path, name } => {
-                        Ok(vec![Event::ProjectAdded { path, name }])
-                    }
+                    Command::AddProject { path, name } => Ok(vec![Event::ProjectAdded {
+                        path,
+                        name: name.unwrap_or_default(),
+                    }]),
                     Command::RemoveProject { path } => Ok(vec![Event::ProjectRemoved { path }]),
                     Command::SelectProject { path } => {
                         Ok(vec![Event::ActiveProjectChanged { path }])
@@ -222,7 +224,7 @@ mod tests {
             Command::RefreshSessions,
             Command::AddProject {
                 path: PathBuf::from("/tmp"),
-                name: "T".to_string(),
+                name: Some("T".to_string()),
             },
             Command::RemoveProject {
                 path: PathBuf::from("/tmp"),

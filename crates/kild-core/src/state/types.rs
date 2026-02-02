@@ -39,8 +39,8 @@ pub enum Command {
     CompleteKild { branch: String, force: bool },
     /// Refresh the session list from disk.
     RefreshSessions,
-    /// Add a project to the project list.
-    AddProject { path: PathBuf, name: String },
+    /// Add a project to the project list. Name is derived from path if `None`.
+    AddProject { path: PathBuf, name: Option<String> },
     /// Remove a project from the project list.
     RemoveProject { path: PathBuf },
     /// Select a project as active. `None` path means select all projects.
@@ -91,7 +91,7 @@ mod tests {
             Command::RefreshSessions,
             Command::AddProject {
                 path: PathBuf::from("/projects/app"),
-                name: "App".to_string(),
+                name: Some("App".to_string()),
             },
             Command::RemoveProject {
                 path: PathBuf::from("/projects/app"),
@@ -137,7 +137,7 @@ mod tests {
             Command::RefreshSessions,
             Command::AddProject {
                 path: PathBuf::from("/tmp"),
-                name: "Tmp".to_string(),
+                name: Some("Tmp".to_string()),
             },
             Command::RemoveProject {
                 path: PathBuf::from("/tmp"),

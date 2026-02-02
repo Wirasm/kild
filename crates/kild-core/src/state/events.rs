@@ -26,16 +26,10 @@ pub enum Event {
     SessionsRefreshed,
 
     /// A project was added to the project list.
-    ///
-    /// Not yet emitted — `AddProject` command returns `NotImplemented`.
     ProjectAdded { path: PathBuf, name: String },
     /// A project was removed from the project list.
-    ///
-    /// Not yet emitted — `RemoveProject` command returns `NotImplemented`.
     ProjectRemoved { path: PathBuf },
     /// The active project selection changed.
-    ///
-    /// Not yet emitted — `SelectProject` command returns `NotImplemented`.
     ActiveProjectChanged { path: Option<PathBuf> },
 }
 

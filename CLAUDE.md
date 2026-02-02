@@ -170,7 +170,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 **Key modules in kild-ui:**
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
 - `components/` - Reusable UI components (Button, StatusIndicator, Modal, TextInput with themed variants)
-- `state/` - Type-safe state modules with encapsulated AppState facade (app_state.rs, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs, ui_commands.rs)
+- `state/` - Type-safe state modules with encapsulated AppState facade (app_state.rs, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
 - `views/` - GPUI components (main view with 3-column layout: sidebar, kild list, detail panel)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
@@ -186,11 +186,16 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
-**Module pattern:** Each domain starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `operations.rs`/`handler.rs` for sessions, `manager.rs`/`persistence.rs` for projects).
+**Module pattern:** Each domain starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects).
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
-**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/types.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract, returning `Vec<Event>` on success to describe state changes. The `Event` enum in `kild-core/state/events.rs` defines all business state changes (kild lifecycle, project management, operation failures). UI-specific state mutations use `UICommand` enum in `kild-ui/state/ui_commands.rs`.
+**Command pattern:** Business operations are defined as `Command` enum variants in `kild-core/state/types.rs`. The `Store` trait in `kild-core/state/store.rs` provides the dispatch contract, returning `Vec<Event>` on success to describe state changes. The `Event` enum in `kild-core/state/events.rs` defines all business state changes (kild lifecycle, project management).
+
+**Dispatch vs direct-call guidance:**
+- **UI state-mutating operations**: Always dispatch through Store. All operations use `Command` → `CoreStore::dispatch` → `Event` → `apply_events`. This ensures consistent event-driven state updates.
+- **CLI operations**: Call handler functions directly (e.g., `session_ops::create_session`). The CLI is synchronous and doesn't need event-driven updates.
+- **Read-only queries**: Call handler functions directly from both CLI and UI. Queries like `list_sessions`, `get_session`, `get_destroy_safety_info` don't mutate state and don't need dispatch.
 
 ## Code Style Preferences
 
