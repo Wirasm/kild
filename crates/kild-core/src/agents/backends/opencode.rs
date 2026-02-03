@@ -1,8 +1,8 @@
-//! OpenCode agent backend implementation.
+//! OpenCode CLI agent backend implementation.
 
 use crate::agents::traits::AgentBackend;
 
-/// Backend implementation for OpenCode TUI.
+/// Backend implementation for OpenCode CLI.
 pub struct OpenCodeBackend;
 
 impl AgentBackend for OpenCodeBackend {
