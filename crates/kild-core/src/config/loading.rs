@@ -208,8 +208,9 @@ pub fn get_agent_command(
         agents::get_default_command(agent_name).ok_or_else(|| {
             format!(
                 "No command found for agent '{}'. Configure a startup_command in your config file \
-                or use a known agent (claude, kiro, gemini, codex, aether).",
-                agent_name
+                or use a known agent ({}).",
+                agent_name,
+                agents::supported_agents_string()
             )
         })?
     };

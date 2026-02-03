@@ -156,7 +156,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 **Key modules in kild-core:**
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app)
-- `agents/` - Agent backend system (amp, claude, kiro, gemini, codex)
+- `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode)
 - `git/` - Git worktree operations via git2
 - `config/` - Hierarchical TOML config (defaults → user → project → CLI)
 - `projects/` - Project management (types, validation, persistence, manager)

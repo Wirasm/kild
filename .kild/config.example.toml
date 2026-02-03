@@ -15,7 +15,7 @@
 
 [agent]
 # Default agent when --agent is not specified
-# Options: amp, claude, codex, gemini, kiro
+# Options: amp, claude, codex, gemini, kiro, opencode
 default = "claude"
 
 # Global startup command (used if agent has no specific command)
@@ -62,6 +62,9 @@ startup_command = "gemini-cli"
 
 [agents.codex]
 startup_command = "codex"
+
+[agents.opencode]
+startup_command = "opencode"
 
 [agents.aider]
 startup_command = "aider"

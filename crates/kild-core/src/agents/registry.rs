@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use super::backends::{AmpBackend, ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend};
+use super::backends::{
+    AmpBackend, ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend, OpenCodeBackend,
+};
 use super::traits::AgentBackend;
 use super::types::AgentType;
 
@@ -26,6 +28,7 @@ impl AgentRegistry {
         backends.insert(AgentType::Kiro, Box::new(KiroBackend));
         backends.insert(AgentType::Gemini, Box::new(GeminiBackend));
         backends.insert(AgentType::Codex, Box::new(CodexBackend));
+        backends.insert(AgentType::OpenCode, Box::new(OpenCodeBackend));
         Self { backends }
     }
 
@@ -146,6 +149,7 @@ mod tests {
         assert!(is_valid_agent("kiro"));
         assert!(is_valid_agent("gemini"));
         assert!(is_valid_agent("codex"));
+        assert!(is_valid_agent("opencode"));
 
         // Now case-insensitive
         assert!(is_valid_agent("Claude"));
@@ -158,8 +162,8 @@ mod tests {
     #[test]
     fn test_valid_agent_names() {
         let names = valid_agent_names();
-        assert_eq!(names.len(), 5);
-        for agent in ["amp", "claude", "kiro", "gemini", "codex"] {
+        assert_eq!(names.len(), 6);
+        for agent in ["amp", "claude", "kiro", "gemini", "codex", "opencode"] {
             assert!(names.contains(&agent));
         }
     }
@@ -181,6 +185,7 @@ mod tests {
         assert_eq!(get_default_command("kiro"), Some("kiro-cli chat"));
         assert_eq!(get_default_command("gemini"), Some("gemini"));
         assert_eq!(get_default_command("codex"), Some("codex"));
+        assert_eq!(get_default_command("opencode"), Some("opencode"));
         assert_eq!(get_default_command("unknown"), None);
     }
 
@@ -215,7 +220,7 @@ mod tests {
     #[test]
     fn test_registry_contains_all_agents() {
         // Ensure all expected agents are registered
-        let expected_agents = ["amp", "claude", "kiro", "gemini", "codex"];
+        let expected_agents = ["amp", "claude", "kiro", "gemini", "codex", "opencode"];
         for agent in expected_agents {
             assert!(
                 is_valid_agent(agent),
@@ -233,6 +238,7 @@ mod tests {
         assert!(s.contains("kiro"));
         assert!(s.contains("gemini"));
         assert!(s.contains("codex"));
+        assert!(s.contains("opencode"));
         // Verify it's comma-separated
         assert!(s.contains(", "));
         // Verify removed agents are NOT present

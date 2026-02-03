@@ -14,6 +14,7 @@ pub enum AgentType {
     Kiro,
     Gemini,
     Codex,
+    OpenCode,
 }
 
 impl AgentType {
@@ -25,6 +26,7 @@ impl AgentType {
             AgentType::Kiro => "kiro",
             AgentType::Gemini => "gemini",
             AgentType::Codex => "codex",
+            AgentType::OpenCode => "opencode",
         }
     }
 
@@ -36,6 +38,7 @@ impl AgentType {
             "kiro" => Some(AgentType::Kiro),
             "gemini" => Some(AgentType::Gemini),
             "codex" => Some(AgentType::Codex),
+            "opencode" => Some(AgentType::OpenCode),
             _ => None,
         }
     }
@@ -48,6 +51,7 @@ impl AgentType {
             AgentType::Kiro,
             AgentType::Gemini,
             AgentType::Codex,
+            AgentType::OpenCode,
         ]
     }
 }
@@ -84,6 +88,7 @@ mod tests {
         assert_eq!(AgentType::Kiro.as_str(), "kiro");
         assert_eq!(AgentType::Gemini.as_str(), "gemini");
         assert_eq!(AgentType::Codex.as_str(), "codex");
+        assert_eq!(AgentType::OpenCode.as_str(), "opencode");
     }
 
     #[test]
@@ -99,12 +104,13 @@ mod tests {
     #[test]
     fn test_agent_type_all() {
         let all = AgentType::all();
-        assert_eq!(all.len(), 5);
+        assert_eq!(all.len(), 6);
         assert!(all.contains(&AgentType::Amp));
         assert!(all.contains(&AgentType::Claude));
         assert!(all.contains(&AgentType::Kiro));
         assert!(all.contains(&AgentType::Gemini));
         assert!(all.contains(&AgentType::Codex));
+        assert!(all.contains(&AgentType::OpenCode));
     }
 
     #[test]
