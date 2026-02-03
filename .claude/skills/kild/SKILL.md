@@ -85,7 +85,7 @@ Creates an isolated workspace with:
 - Process tracking (PID, name, start time)
 - Session metadata saved to `~/.kild/sessions/`
 
-**Supported agents** - claude, kiro, gemini, codex, aether
+**Supported agents** - claude, kiro, gemini, codex, amp, opencode
 **Supported terminals** - ghostty, iterm, terminal, native
 
 **Examples**
