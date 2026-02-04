@@ -209,7 +209,7 @@ mod tests {
             "claude".to_string(),
         );
 
-        let title = "kild-test-session";
+        let _title = "kild-test-session";
         let cd_command = build_cd_command(config.working_directory(), config.command());
 
         // Command should contain the path and command
@@ -220,14 +220,13 @@ mod tests {
     #[test]
     fn test_is_window_open_returns_option_type() {
         let backend = AlacrittyBackend;
-        // The method should return without panic
         let result = backend.is_window_open("nonexistent-window-title");
-        // Result type should be Result<Option<bool>, _>
-        assert!(result.is_ok());
-        // For a non-existent window on non-Linux or without Hyprland,
-        // should return None or Some(false)
-        let value = result.unwrap();
-        assert!(value.is_none() || value == Some(false));
+        match result {
+            // Non-Linux returns Ok(None), Linux with Hyprland returns Ok(Some(false))
+            Ok(value) => assert!(value.is_none() || value == Some(false)),
+            // Linux without Hyprland: hyprctl not available
+            Err(_) => {}
+        }
     }
 
     #[cfg(not(target_os = "linux"))]

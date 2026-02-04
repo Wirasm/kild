@@ -244,9 +244,13 @@ mod tests {
 
     #[test]
     fn test_window_exists_nonexistent() {
-        // On non-Linux or without Hyprland, should return Ok(None) or Ok(Some(false))
         let result = window_exists_by_title("nonexistent-window-12345");
-        assert!(result.is_ok());
+        match result {
+            // Non-Linux returns Ok(None), Linux with Hyprland returns Ok(Some(false))
+            Ok(value) => assert!(value.is_none() || value == Some(false)),
+            // Linux without Hyprland: hyprctl not available
+            Err(_) => {}
+        }
     }
 
     #[cfg(target_os = "linux")]
