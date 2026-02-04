@@ -181,13 +181,26 @@ pub fn create_worktree(
             branch = kild_branch
         );
 
-        // Fetch latest base branch from remote if configured
-        if git_config.fetch_before_create() {
+        // Fetch latest base branch from remote if configured and remote exists
+        let remote_exists = repo.find_remote(git_config.remote()).is_ok();
+
+        if git_config.fetch_before_create() && remote_exists {
             fetch_remote(&project.path, git_config.remote(), git_config.base_branch())?;
+        } else if git_config.fetch_before_create() && !remote_exists {
+            info!(
+                event = "core.git.fetch_skipped",
+                remote = git_config.remote(),
+                reason = "remote not configured"
+            );
+            eprintln!(
+                "Note: Remote '{}' not found, branching from local HEAD.",
+                git_config.remote()
+            );
         }
 
         // Resolve base commit: prefer remote tracking branch, fall back to HEAD
-        let fetched = git_config.fetch_before_create();
+        // Only consider fetch "enabled" if remote actually exists — no warning for local repos
+        let fetched = git_config.fetch_before_create() && remote_exists;
         let base_commit = resolve_base_commit(&repo, git_config, fetched)?;
 
         repo.branch(&kild_branch, &base_commit, false)
@@ -1116,8 +1129,8 @@ mod tests {
     }
 
     #[test]
-    fn test_create_worktree_fails_when_fetch_fails() {
-        // fetch_before_create=true with nonexistent remote should propagate FetchFailed
+    fn test_create_worktree_succeeds_with_nonexistent_remote() {
+        // fetch_before_create=true with nonexistent remote should skip fetch and succeed
         let temp_dir = create_temp_test_dir("kild_test_fetch_fail");
         init_test_repo(&temp_dir);
 
@@ -1136,23 +1149,47 @@ mod tests {
         };
 
         let result = create_worktree(&base_dir, &project, "test-branch", None, &git_config);
-        assert!(result.is_err(), "should fail when fetch fails");
-        let err = result.unwrap_err();
         assert!(
-            matches!(err, GitError::FetchFailed { .. }),
-            "expected FetchFailed, got: {:?}",
-            err
+            result.is_ok(),
+            "should succeed when remote doesn't exist (fetch skipped): {:?}",
+            result.err()
         );
 
-        // Verify no worktree directory was created
-        let worktree_path = crate::git::operations::calculate_worktree_path(
-            &base_dir,
-            "test-project",
-            "test-branch",
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_create_worktree_succeeds_without_remote() {
+        // fetch_before_create=true (default) but no remote configured should succeed
+        let temp_dir = create_temp_test_dir("kild_test_no_remote");
+        init_test_repo(&temp_dir);
+
+        let project = ProjectInfo::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            temp_dir.clone(),
+            None,
         );
+
+        let base_dir = create_temp_test_dir("kild_test_no_remote_base");
+        let git_config = GitConfig::default(); // fetch_before_create defaults to true
+
+        let result = create_worktree(&base_dir, &project, "test-branch", None, &git_config);
         assert!(
-            !worktree_path.exists(),
-            "worktree directory should not exist after fetch failure"
+            result.is_ok(),
+            "should succeed in repo without remote even with fetch enabled: {:?}",
+            result.err()
+        );
+
+        // Verify worktree was created and is on the correct branch
+        let worktree_info = result.unwrap();
+        let wt_repo = Repository::open(&worktree_info.path).unwrap();
+        let head = wt_repo.head().unwrap();
+        assert_eq!(
+            head.shorthand().unwrap(),
+            "kild/test-branch",
+            "worktree HEAD should be on kild/test-branch"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
