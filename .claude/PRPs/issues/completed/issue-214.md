@@ -90,10 +90,14 @@ if git_config.fetch_before_create() && remote_exists {
         remote = git_config.remote(),
         reason = "remote not configured"
     );
+    eprintln!(
+        "Note: Remote '{}' not found, branching from local HEAD.",
+        git_config.remote()
+    );
 }
 ```
 
-**Why**: Uses git2's `find_remote()` to check if the configured remote exists before attempting to fetch. This mirrors the existing pattern at `handler.rs:30-33` used in `detect_project()`. When the remote doesn't exist, the fetch is silently skipped (with an info log) and execution continues to `resolve_base_commit()` which already falls back to HEAD.
+**Why**: Uses git2's `find_remote()` to check if the configured remote exists before attempting to fetch. This mirrors the existing pattern at `handler.rs:30-33` used in `detect_project()`. When the remote doesn't exist, the user is informed and execution continues to `resolve_base_commit()` which falls back to HEAD.
 
 ### Step 2: Pass remote_exists to resolve_base_commit for correct warning behavior
 
