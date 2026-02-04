@@ -212,7 +212,7 @@ Configure additional patterns in `[include_patterns]` section. Your patterns ext
 
 **Agent Settings**: Configure default agent, startup commands, and flags per agent.
 
-**Terminal Preferences**: Set preferred terminal emulator (Ghostty, iTerm2, Terminal.app).
+**Terminal Preferences**: Set preferred terminal emulator (Ghostty, iTerm2, Terminal.app on macOS; Alacritty on Linux).
 
 ## How It Works
 
@@ -226,7 +226,7 @@ Configure additional patterns in `[include_patterns]` section. Your patterns ext
 
 - Rust 1.89.0 or later
 - Git repository (kild must be run from within a Git repository)
-- Native terminal emulator (Terminal.app on macOS, gnome-terminal/konsole on Linux, etc.)
+- Native terminal emulator (Ghostty/iTerm2/Terminal.app on macOS, Alacritty + Hyprland on Linux)
 
 ## Agent Integration
 

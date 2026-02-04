@@ -30,8 +30,10 @@ default = "claude"
 
 [terminal]
 # Preferred terminal emulator
-# Options: ghostty, iterm2, iterm, terminal, native, auto
-# "auto" detects Ghostty if available, otherwise uses Terminal.app
+# Options: ghostty, iterm2, iterm, terminal, alacritty, native, auto
+# "auto" detects available terminal per platform:
+#   macOS: Ghostty > iTerm > Terminal.app
+#   Linux: Alacritty (requires Hyprland window manager)
 preferred = "ghostty"
 
 # Delay in milliseconds after spawning terminal (for process detection)

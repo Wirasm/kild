@@ -155,7 +155,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 
 **Key modules in kild-core:**
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
-- `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app)
+- `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode)
 - `git/` - Git worktree operations via git2
 - `config/` - Hierarchical TOML config (defaults → user → project → CLI)
@@ -327,9 +327,11 @@ pub trait TerminalBackend: Send + Sync {
 }
 ```
 
-Backends registered in `terminal/registry.rs`. Detection preference: Ghostty > iTerm > Terminal.app.
+Backends registered in `terminal/registry.rs`. Detection preference varies by platform:
+- macOS: Ghostty > iTerm > Terminal.app
+- Linux: Alacritty (requires Hyprland window manager)
 
-Status detection uses PID tracking by default. Ghostty uses window-based detection as fallback when PID is unavailable.
+Status detection uses PID tracking by default. Ghostty uses window-based detection as fallback when PID is unavailable. Alacritty on Linux uses Hyprland IPC for window management.
 
 ## Configuration Hierarchy
 

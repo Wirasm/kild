@@ -175,7 +175,15 @@ pub fn window_exists_by_title(title: &str) -> Result<Option<bool>, TerminalError
     // The JSON is an array of client objects, each with a "title" field
     match serde_json::from_str::<Vec<HyprlandClient>>(&stdout) {
         Ok(clients) => {
-            let found = clients.iter().any(|c| c.title.contains(title));
+            let match_count = clients.iter().filter(|c| c.title.contains(title)).count();
+            if match_count > 1 {
+                warn!(
+                    event = "core.terminal.hyprland_window_multiple_matches",
+                    title = %title,
+                    match_count = match_count,
+                );
+            }
+            let found = match_count > 0;
             debug!(
                 event = "core.terminal.hyprland_window_check_completed",
                 title = %title,

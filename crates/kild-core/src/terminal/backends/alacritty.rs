@@ -94,8 +94,7 @@ impl TerminalBackend for AlacrittyBackend {
             message = "Alacritty process spawned, window should be visible"
         );
 
-        // Return the actual window title used (may be the provided window_title or
-        // the default "kild-session") as identifier for close_window/focus_window
+        // Return the resolved window title for use as identifier in close_window/focus_window
         Ok(Some(title.to_string()))
     }
 
@@ -200,6 +199,7 @@ mod tests {
         backend.close_window(None);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_alacritty_spawn_command_structure() {
         // Verify the structure of what would be passed to alacritty
