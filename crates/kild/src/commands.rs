@@ -1370,43 +1370,6 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     }
 }
 
-/// Rebase a worktree onto the given base branch.
-///
-/// Returns Ok(()) on success, Err with a user-facing message on conflict or error.
-fn rebase_worktree(worktree_path: &std::path::Path, base_branch: &str) -> Result<(), String> {
-    let output = std::process::Command::new("git")
-        .current_dir(worktree_path)
-        .args(["rebase", base_branch])
-        .output()
-        .map_err(|e| format!("Failed to execute git: {}", e))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let code = output.status.code().unwrap_or(-1);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if code == 1 || stderr.contains("CONFLICT") {
-        // Rebase conflict — abort to leave worktree clean, report to user
-        let _ = std::process::Command::new("git")
-            .current_dir(worktree_path)
-            .args(["rebase", "--abort"])
-            .output();
-        Err(format!(
-            "conflicts rebasing onto {base_branch}\n     \
-             Resolve manually: git -C {} rebase {base_branch}",
-            worktree_path.display()
-        ))
-    } else {
-        Err(format!(
-            "git rebase failed (exit {}): {}",
-            code,
-            stderr.trim()
-        ))
-    }
-}
-
 fn handle_rebase_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("all") {
         let base_override = matches.get_one::<String>("base").cloned();
@@ -1428,8 +1391,6 @@ fn handle_rebase_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         .get_one::<String>("base")
         .map(|s| s.as_str())
         .unwrap_or_else(|| config.git.base_branch());
-    // Validate base branch to prevent injection
-    kild_core::git::handler::validate_git_arg(base_branch, "base branch")?;
 
     info!(
         event = "cli.rebase_started",
@@ -1447,26 +1408,15 @@ fn handle_rebase_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         }
     };
 
-    match rebase_worktree(&session.worktree_path, base_branch) {
-        Ok(()) => {
-            println!("✅ {}: rebased onto {}", branch, base_branch);
-            info!(
-                event = "cli.rebase_completed",
-                branch = branch,
-                base = base_branch
-            );
-            Ok(())
-        }
-        Err(msg) => {
-            eprintln!("⚠️  {}: {}", branch, msg);
-            error!(
-                event = "cli.rebase_conflicts",
-                branch = branch,
-                base = base_branch
-            );
-            Err(format!("Rebase failed for '{}'", branch).into())
-        }
-    }
+    kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch)?;
+
+    println!("✅ {}: rebased onto {}", branch, base_branch);
+    info!(
+        event = "cli.rebase_completed",
+        branch = branch,
+        base = base_branch
+    );
+    Ok(())
 }
 
 fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -1476,7 +1426,6 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
     let base_branch = base_override
         .as_deref()
         .unwrap_or_else(|| config.git.base_branch());
-    kild_core::git::handler::validate_git_arg(base_branch, "base branch")?;
 
     let sessions = session_handler::list_sessions()?;
 
@@ -1490,7 +1439,7 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
-        match rebase_worktree(&session.worktree_path, base_branch) {
+        match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
                 println!("✅ {}: rebased onto {}", session.branch, base_branch);
                 info!(
@@ -1500,14 +1449,16 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
                 );
                 rebased.push(session.branch.clone());
             }
-            Err(msg) => {
-                eprintln!("⚠️  {}: {}", session.branch, msg);
+            Err(e) => {
+                eprintln!("⚠️  {}: {}", session.branch, e);
                 error!(
                     event = "cli.rebase_failed",
                     branch = session.branch,
-                    base = base_branch
+                    base = base_branch,
+                    path = %session.worktree_path.display(),
+                    error = %e
                 );
-                errors.push((session.branch.clone(), msg));
+                errors.push((session.branch.clone(), e.to_string()));
             }
         }
     }
@@ -1549,8 +1500,6 @@ fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         .unwrap_or_else(|| config.git.base_branch());
     let remote = config.git.remote();
 
-    kild_core::git::handler::validate_git_arg(base_branch, "base branch")?;
-
     info!(
         event = "cli.sync_started",
         branch = branch,
@@ -1570,45 +1519,38 @@ fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
     // Fetch from remote — use the project repo path (worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;
-    match kild_core::git::handler::fetch_remote(&project.path, remote, base_branch) {
-        Ok(()) => {}
-        Err(e) => {
-            warn!(
-                event = "cli.sync_fetch_failed",
-                branch = branch,
-                remote = remote,
-                error = %e
-            );
-            eprintln!(
-                "⚠️  Fetch failed ({}), proceeding with local state: {}",
-                remote, e
-            );
-        }
+    let fetch_succeeded =
+        kild_core::git::handler::fetch_remote(&project.path, remote, base_branch).is_ok();
+
+    if !fetch_succeeded {
+        warn!(
+            event = "cli.sync_fetch_failed",
+            branch = branch,
+            remote = remote
+        );
+        eprintln!("⚠️  Fetch failed ({}), proceeding with local state", remote);
     }
 
-    match rebase_worktree(&session.worktree_path, base_branch) {
-        Ok(()) => {
-            println!(
-                "✅ {}: synced (fetched + rebased onto {})",
-                branch, base_branch
-            );
-            info!(
-                event = "cli.sync_completed",
-                branch = branch,
-                base = base_branch
-            );
-            Ok(())
-        }
-        Err(msg) => {
-            eprintln!("⚠️  {}: {}", branch, msg);
-            error!(
-                event = "cli.sync_conflicts",
-                branch = branch,
-                base = base_branch
-            );
-            Err(format!("Sync failed for '{}'", branch).into())
-        }
+    kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch)?;
+
+    if fetch_succeeded {
+        println!(
+            "✅ {}: synced (fetched + rebased onto {})",
+            branch, base_branch
+        );
+    } else {
+        println!(
+            "⚠️  {}: rebased onto {} (local only, fetch failed)",
+            branch, base_branch
+        );
     }
+
+    info!(
+        event = "cli.sync_completed",
+        branch = branch,
+        base = base_branch
+    );
+    Ok(())
 }
 
 fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -1620,29 +1562,20 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
         .unwrap_or_else(|| config.git.base_branch());
     let remote = config.git.remote();
 
-    kild_core::git::handler::validate_git_arg(base_branch, "base branch")?;
-
     // Fetch once at repo level (all worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;
-    match kild_core::git::handler::fetch_remote(&project.path, remote, base_branch) {
-        Ok(()) => {
-            info!(
-                event = "cli.sync_all_fetch_completed",
-                remote = remote,
-                base = base_branch
-            );
-        }
-        Err(e) => {
-            warn!(
-                event = "cli.sync_all_fetch_failed",
-                remote = remote,
-                error = %e
-            );
-            eprintln!(
-                "⚠️  Fetch failed ({}), proceeding with local state: {}",
-                remote, e
-            );
-        }
+    let fetch_succeeded =
+        kild_core::git::handler::fetch_remote(&project.path, remote, base_branch).is_ok();
+
+    if fetch_succeeded {
+        info!(
+            event = "cli.sync_all_fetch_completed",
+            remote = remote,
+            base = base_branch
+        );
+    } else {
+        warn!(event = "cli.sync_all_fetch_failed", remote = remote);
+        eprintln!("⚠️  Fetch failed ({}), proceeding with local state", remote);
     }
 
     let sessions = session_handler::list_sessions()?;
@@ -1657,9 +1590,16 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
-        match rebase_worktree(&session.worktree_path, base_branch) {
+        match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
-                println!("✅ {}: rebased onto {}", session.branch, base_branch);
+                if fetch_succeeded {
+                    println!("✅ {}: rebased onto {}", session.branch, base_branch);
+                } else {
+                    println!(
+                        "⚠️  {}: rebased onto {} (local only, fetch failed)",
+                        session.branch, base_branch
+                    );
+                }
                 info!(
                     event = "cli.sync_completed",
                     branch = session.branch,
@@ -1667,14 +1607,16 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
                 );
                 synced.push(session.branch.clone());
             }
-            Err(msg) => {
-                eprintln!("⚠️  {}: {}", session.branch, msg);
+            Err(e) => {
+                eprintln!("⚠️  {}: {}", session.branch, e);
                 error!(
                     event = "cli.sync_failed",
                     branch = session.branch,
-                    base = base_branch
+                    base = base_branch,
+                    path = %session.worktree_path.display(),
+                    error = %e
                 );
-                errors.push((session.branch.clone(), msg));
+                errors.push((session.branch.clone(), e.to_string()));
             }
         }
     }

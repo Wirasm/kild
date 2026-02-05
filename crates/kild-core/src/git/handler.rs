@@ -357,6 +357,113 @@ pub fn fetch_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<(), 
     }
 }
 
+/// Rebase a worktree onto the given base branch.
+///
+/// On conflict, auto-aborts the rebase to leave the worktree clean,
+/// then returns `GitError::RebaseConflict` so the user can resolve manually.
+pub fn rebase_worktree(worktree_path: &Path, base_branch: &str) -> Result<(), GitError> {
+    validate_git_arg(base_branch, "base branch")?;
+
+    info!(
+        event = "core.git.rebase_started",
+        base = base_branch,
+        path = %worktree_path.display()
+    );
+
+    let output = std::process::Command::new("git")
+        .current_dir(worktree_path)
+        .args(["rebase", base_branch])
+        .output()
+        .map_err(|e| GitError::OperationFailed {
+            message: format!("Failed to execute git rebase: {}", e),
+        })?;
+
+    if output.status.success() {
+        info!(
+            event = "core.git.rebase_completed",
+            base = base_branch,
+            path = %worktree_path.display()
+        );
+        return Ok(());
+    }
+
+    let code = output.status.code().unwrap_or(-1);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Detect conflicts: exit code 1 with conflict markers in stderr
+    let is_conflict = code == 1
+        && (stderr.contains("CONFLICT")
+            || stderr.contains("failed to merge")
+            || stderr.contains("could not apply"));
+
+    if is_conflict {
+        // Auto-abort to leave worktree clean
+        let abort_result = std::process::Command::new("git")
+            .current_dir(worktree_path)
+            .args(["rebase", "--abort"])
+            .output();
+
+        match abort_result {
+            Ok(abort_output) if abort_output.status.success() => {
+                info!(
+                    event = "core.git.rebase_abort_completed",
+                    base = base_branch,
+                    path = %worktree_path.display()
+                );
+            }
+            Ok(abort_output) => {
+                let abort_stderr = String::from_utf8_lossy(&abort_output.stderr);
+                error!(
+                    event = "core.git.rebase_abort_failed",
+                    base = base_branch,
+                    path = %worktree_path.display(),
+                    stderr = %abort_stderr.trim()
+                );
+                return Err(GitError::RebaseAbortFailed {
+                    base_branch: base_branch.to_string(),
+                    worktree_path: worktree_path.to_path_buf(),
+                    message: abort_stderr.trim().to_string(),
+                });
+            }
+            Err(e) => {
+                error!(
+                    event = "core.git.rebase_abort_failed",
+                    base = base_branch,
+                    path = %worktree_path.display(),
+                    error = %e
+                );
+                return Err(GitError::RebaseAbortFailed {
+                    base_branch: base_branch.to_string(),
+                    worktree_path: worktree_path.to_path_buf(),
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        warn!(
+            event = "core.git.rebase_conflicts",
+            base = base_branch,
+            path = %worktree_path.display()
+        );
+        return Err(GitError::RebaseConflict {
+            base_branch: base_branch.to_string(),
+            worktree_path: worktree_path.to_path_buf(),
+        });
+    }
+
+    // Non-conflict failure
+    error!(
+        event = "core.git.rebase_failed",
+        base = base_branch,
+        path = %worktree_path.display(),
+        code = code,
+        stderr = %stderr.trim()
+    );
+    Err(GitError::OperationFailed {
+        message: format!("git rebase failed (exit {}): {}", code, stderr.trim()),
+    })
+}
+
 /// Resolve the base commit for a new branch.
 ///
 /// Tries the remote tracking branch first (e.g., `origin/main`),

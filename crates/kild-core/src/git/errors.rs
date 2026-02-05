@@ -38,6 +38,19 @@ pub enum GitError {
         source: git2::Error,
     },
 
+    #[error("Rebase conflict onto '{base_branch}' in worktree")]
+    RebaseConflict {
+        base_branch: String,
+        worktree_path: std::path::PathBuf,
+    },
+
+    #[error("Rebase abort failed: {message}")]
+    RebaseAbortFailed {
+        base_branch: String,
+        worktree_path: std::path::PathBuf,
+        message: String,
+    },
+
     #[error("IO error during git operation: {source}")]
     IoError {
         #[from]
@@ -58,6 +71,8 @@ impl KildError for GitError {
             GitError::InvalidPath { .. } => "INVALID_PATH",
             GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
             GitError::FetchFailed { .. } => "GIT_FETCH_FAILED",
+            GitError::RebaseConflict { .. } => "GIT_REBASE_CONFLICT",
+            GitError::RebaseAbortFailed { .. } => "GIT_REBASE_ABORT_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",
         }
@@ -70,6 +85,7 @@ impl KildError for GitError {
                 | GitError::BranchAlreadyExists { .. }
                 | GitError::BranchNotFound { .. }
                 | GitError::WorktreeAlreadyExists { .. }
+                | GitError::RebaseConflict { .. }
         )
     }
 }
