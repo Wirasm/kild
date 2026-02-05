@@ -38,7 +38,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("key", sub_matches)) => handle_key_command(sub_matches),
         Some(("assert", sub_matches)) => handle_assert_command(sub_matches),
         _ => {
-            error!(event = "cli.command_unknown");
+            error!(event = "peek.cli.command_unknown");
             Err("Unknown command".into())
         }
     }
@@ -49,7 +49,7 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         Some(("windows", sub_matches)) => handle_list_windows(sub_matches),
         Some(("monitors", sub_matches)) => handle_list_monitors(sub_matches),
         _ => {
-            error!(event = "cli.list_subcommand_unknown");
+            error!(event = "peek.cli.list_subcommand_unknown");
             Err("Unknown list subcommand".into())
         }
     }
@@ -60,7 +60,7 @@ fn handle_list_windows(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let app_filter = matches.get_one::<String>("app");
 
     info!(
-        event = "cli.list_windows_started",
+        event = "peek.cli.list_windows_started",
         json_output = json_output,
         app_filter = ?app_filter
     );
@@ -79,12 +79,15 @@ fn handle_list_windows(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 table::print_windows_table(&filtered);
             }
 
-            info!(event = "cli.list_windows_completed", count = filtered.len());
+            info!(
+                event = "peek.cli.list_windows_completed",
+                count = filtered.len()
+            );
             Ok(())
         }
         Err(e) => {
             eprintln!("Failed to list windows: {}", e);
-            error!(event = "cli.list_windows_failed", error = %e);
+            error!(event = "peek.cli.list_windows_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -110,7 +113,7 @@ fn apply_app_filter(
 /// Print appropriate message when no windows are found
 fn print_no_windows_message(app_filter: Option<&String>) {
     if let Some(app) = app_filter {
-        info!(event = "cli.list_windows_app_filter_empty", app = app);
+        info!(event = "peek.cli.list_windows_app_filter_empty", app = app);
         println!("No windows found for app filter.");
     } else {
         println!("No visible windows found.");
@@ -121,7 +124,7 @@ fn handle_list_monitors(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let json_output = matches.get_flag("json");
 
     info!(
-        event = "cli.list_monitors_started",
+        event = "peek.cli.list_monitors_started",
         json_output = json_output
     );
 
@@ -137,14 +140,14 @@ fn handle_list_monitors(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
             }
 
             info!(
-                event = "cli.list_monitors_completed",
+                event = "peek.cli.list_monitors_completed",
                 count = monitors.len()
             );
             Ok(())
         }
         Err(e) => {
             eprintln!("Failed to list monitors: {}", e);
-            error!(event = "cli.list_monitors_failed", error = %e);
+            error!(event = "peek.cli.list_monitors_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -183,7 +186,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
     };
 
     info!(
-        event = "cli.screenshot_started",
+        event = "peek.cli.screenshot_started",
         window_title = ?window_title,
         window_id = ?window_id,
         app_name = ?app_name,
@@ -221,7 +224,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
             }
 
             info!(
-                event = "cli.screenshot_completed",
+                event = "peek.cli.screenshot_completed",
                 width = result.width(),
                 height = result.height()
             );
@@ -229,7 +232,7 @@ fn handle_screenshot_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         }
         Err(e) => {
             eprintln!("Failed to capture screenshot: {}", e);
-            error!(event = "cli.screenshot_failed", error = %e);
+            error!(event = "peek.cli.screenshot_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -252,7 +255,7 @@ fn build_capture_request_with_wait(
     if wait {
         if let Some(id) = window_id {
             warn!(
-                event = "cli.screenshot_wait_ignored",
+                event = "peek.cli.screenshot_wait_ignored",
                 window_id = id,
                 reason = "window-id targets are already resolved"
             );
@@ -261,7 +264,7 @@ fn build_capture_request_with_wait(
             );
         } else if let Some(index) = monitor_index {
             warn!(
-                event = "cli.screenshot_wait_ignored",
+                event = "peek.cli.screenshot_wait_ignored",
                 monitor_index = index,
                 reason = "monitor targets are already resolved"
             );
@@ -339,7 +342,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let threshold = (threshold_percent as f64) / 100.0;
 
     info!(
-        event = "cli.diff_started",
+        event = "peek.cli.diff_started",
         image1 = image1,
         image2 = image2,
         threshold = threshold,
@@ -371,7 +374,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             }
 
             info!(
-                event = "cli.diff_completed",
+                event = "peek.cli.diff_completed",
                 similarity = result.similarity(),
                 is_similar = result.is_similar()
             );
@@ -385,7 +388,7 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         }
         Err(e) => {
             eprintln!("Failed to compare images: {}", e);
-            error!(event = "cli.diff_failed", error = %e);
+            error!(event = "peek.cli.diff_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -446,7 +449,7 @@ fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
-        event = "cli.elements_started",
+        event = "peek.cli.elements_started",
         target = ?target,
         tree = tree_output,
         wait = wait_flag,
@@ -478,12 +481,15 @@ fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
                 }
             }
 
-            info!(event = "cli.elements_completed", count = result.count());
+            info!(
+                event = "peek.cli.elements_completed",
+                count = result.count()
+            );
             Ok(())
         }
         Err(e) => {
             eprintln!("Elements listing failed: {}", e);
-            error!(event = "cli.elements_failed", error = %e);
+            error!(event = "peek.cli.elements_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -499,7 +505,7 @@ fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
-        event = "cli.find_started",
+        event = "peek.cli.find_started",
         text = text.as_str(),
         regex = regex_flag,
         target = ?target,
@@ -537,7 +543,7 @@ fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             }
 
             info!(
-                event = "cli.find_completed",
+                event = "peek.cli.find_completed",
                 text = text.as_str(),
                 role = element.role()
             );
@@ -545,7 +551,7 @@ fn handle_find_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         }
         Err(e) => {
             eprintln!("Find failed: {}", e);
-            error!(event = "cli.find_failed", error = %e);
+            error!(event = "peek.cli.find_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -587,7 +593,7 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let (x, y) = parse_coordinates(at_str)?;
 
     info!(
-        event = "cli.interact.click_started",
+        event = "peek.cli.interact.click_started",
         x = x,
         y = y,
         modifier = ?modifier,
@@ -618,12 +624,12 @@ fn handle_click_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
                 }
             }
 
-            info!(event = "cli.interact.click_completed", x = x, y = y, modifier = ?modifier);
+            info!(event = "peek.cli.interact.click_completed", x = x, y = y, modifier = ?modifier);
             Ok(())
         }
         Err(e) => {
             eprintln!("Click failed: {}", e);
-            error!(event = "cli.interact.click_failed", error = %e);
+            error!(event = "peek.cli.interact.click_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -639,7 +645,7 @@ fn handle_click_text(
     label: &'static str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(
-        event = "cli.interact.click_text_started",
+        event = "peek.cli.interact.click_text_started",
         text = text,
         modifier = ?modifier,
         target = ?target,
@@ -671,12 +677,12 @@ fn handle_click_text(
                 }
             }
 
-            info!(event = "cli.interact.click_text_completed", text = text, modifier = ?modifier);
+            info!(event = "peek.cli.interact.click_text_completed", text = text, modifier = ?modifier);
             Ok(())
         }
         Err(e) => {
             eprintln!("Click by text failed: {}", e);
-            error!(event = "cli.interact.click_text_failed", error = %e);
+            error!(event = "peek.cli.interact.click_text_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -691,7 +697,7 @@ fn handle_type_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
-        event = "cli.interact.type_started",
+        event = "peek.cli.interact.type_started",
         text_len = text.len(),
         target = ?target,
         wait = wait_flag,
@@ -717,12 +723,15 @@ fn handle_type_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 }
             }
 
-            info!(event = "cli.interact.type_completed", text_len = text.len());
+            info!(
+                event = "peek.cli.interact.type_completed",
+                text_len = text.len()
+            );
             Ok(())
         }
         Err(e) => {
             eprintln!("Type failed: {}", e);
-            error!(event = "cli.interact.type_failed", error = %e);
+            error!(event = "peek.cli.interact.type_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -737,7 +746,7 @@ fn handle_key_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Er
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
 
     info!(
-        event = "cli.interact.key_started",
+        event = "peek.cli.interact.key_started",
         combo = combo.as_str(),
         target = ?target,
         wait = wait_flag,
@@ -763,12 +772,15 @@ fn handle_key_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Er
                 }
             }
 
-            info!(event = "cli.interact.key_completed", combo = combo.as_str());
+            info!(
+                event = "peek.cli.interact.key_completed",
+                combo = combo.as_str()
+            );
             Ok(())
         }
         Err(e) => {
             eprintln!("Key failed: {}", e);
-            error!(event = "cli.interact.key_failed", error = %e);
+            error!(event = "peek.cli.interact.key_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -787,7 +799,7 @@ fn handle_drag_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     let (to_x, to_y) = parse_coordinates(to_str)?;
 
     info!(
-        event = "cli.interact.drag_started",
+        event = "peek.cli.interact.drag_started",
         from_x = from_x,
         from_y = from_y,
         to_x = to_x,
@@ -819,7 +831,7 @@ fn handle_drag_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             }
 
             info!(
-                event = "cli.interact.drag_completed",
+                event = "peek.cli.interact.drag_completed",
                 from_x = from_x,
                 from_y = from_y,
                 to_x = to_x,
@@ -829,7 +841,7 @@ fn handle_drag_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         }
         Err(e) => {
             eprintln!("Drag failed: {}", e);
-            error!(event = "cli.interact.drag_failed", error = %e);
+            error!(event = "peek.cli.interact.drag_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -862,7 +874,7 @@ fn handle_scroll_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
     let at_str = matches.get_one::<String>("at");
 
     info!(
-        event = "cli.interact.scroll_started",
+        event = "peek.cli.interact.scroll_started",
         delta_x = delta_x,
         delta_y = delta_y,
         at = ?at_str,
@@ -907,7 +919,7 @@ fn handle_scroll_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             }
 
             info!(
-                event = "cli.interact.scroll_completed",
+                event = "peek.cli.interact.scroll_completed",
                 delta_x = delta_x,
                 delta_y = delta_y
             );
@@ -915,7 +927,7 @@ fn handle_scroll_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         }
         Err(e) => {
             eprintln!("Scroll failed: {}", e);
-            error!(event = "cli.interact.scroll_failed", error = %e);
+            error!(event = "peek.cli.interact.scroll_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -943,7 +955,7 @@ fn handle_hover_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     let (x, y) = parse_coordinates(at_str)?;
 
     info!(
-        event = "cli.interact.hover_started",
+        event = "peek.cli.interact.hover_started",
         x = x,
         y = y,
         target = ?target,
@@ -969,12 +981,12 @@ fn handle_hover_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
                 }
             }
 
-            info!(event = "cli.interact.hover_completed", x = x, y = y);
+            info!(event = "peek.cli.interact.hover_completed", x = x, y = y);
             Ok(())
         }
         Err(e) => {
             eprintln!("Hover failed: {}", e);
-            error!(event = "cli.interact.hover_failed", error = %e);
+            error!(event = "peek.cli.interact.hover_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -988,7 +1000,7 @@ fn handle_hover_text(
     timeout_ms: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(
-        event = "cli.interact.hover_text_started",
+        event = "peek.cli.interact.hover_text_started",
         text = text,
         target = ?target,
         timeout_ms = ?timeout_ms
@@ -1019,12 +1031,15 @@ fn handle_hover_text(
                 }
             }
 
-            info!(event = "cli.interact.hover_text_completed", text = text);
+            info!(
+                event = "peek.cli.interact.hover_text_completed",
+                text = text
+            );
             Ok(())
         }
         Err(e) => {
             eprintln!("Hover by text failed: {}", e);
-            error!(event = "cli.interact.hover_text_failed", error = %e);
+            error!(event = "peek.cli.interact.hover_text_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -1074,7 +1089,7 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         return Err("One of --exists, --visible, or --similar must be specified".into());
     };
 
-    info!(event = "cli.assert_started", assertion = ?assertion);
+    info!(event = "peek.cli.assert_started", assertion = ?assertion);
 
     match run_assertion(&assertion) {
         Ok(result) => {
@@ -1089,7 +1104,7 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 println!("  {}", result.message);
             }
 
-            info!(event = "cli.assert_completed", passed = result.passed);
+            info!(event = "peek.cli.assert_completed", passed = result.passed);
 
             // Exit with code 1 if assertion failed
             if !result.passed {
@@ -1100,7 +1115,7 @@ fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         }
         Err(e) => {
             eprintln!("Assertion error: {}", e);
-            error!(event = "cli.assert_failed", error = %e);
+            error!(event = "peek.cli.assert_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }
@@ -1177,7 +1192,7 @@ fn log_window_resolution_error(
     window_title: Option<&String>,
 ) {
     error!(
-        event = "cli.assert_window_resolution_failed",
+        event = "peek.cli.assert_window_resolution_failed",
         app = ?app_name,
         title = ?window_title,
         error = %error,
@@ -1285,7 +1300,7 @@ fn log_capture_window_resolution_error(
     window_title: Option<&String>,
 ) {
     error!(
-        event = "cli.assert_similar_window_resolution_failed",
+        event = "peek.cli.assert_similar_window_resolution_failed",
         app = ?app_name,
         title = ?window_title,
         error = %error,
