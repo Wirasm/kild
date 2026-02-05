@@ -268,6 +268,16 @@ pub struct Session {
 #[serde(into = "AgentProcessData")]
 pub struct AgentProcess {
     agent: String,
+    /// Unique identifier for this agent spawn within the session.
+    ///
+    /// Format: `{session_id}_{spawn_index}` (e.g., `"abc123_0"`, `"abc123_1"`).
+    /// Used for per-agent PID file isolation and Ghostty window title generation.
+    /// Computed by `compute_spawn_id()` in the session handler.
+    ///
+    /// Empty string for legacy sessions created before per-agent spawn tracking.
+    /// Code handling spawn_id must check `spawn_id().is_empty()` and fall back
+    /// to session-level PID files for backward compatibility.
+    spawn_id: String,
     process_id: Option<u32>,
     process_name: Option<String>,
     process_start_time: Option<u64>,
@@ -282,6 +292,9 @@ pub struct AgentProcess {
 #[derive(Serialize, Deserialize)]
 struct AgentProcessData {
     agent: String,
+    /// See [`AgentProcess`] `spawn_id` field. Defaults to empty for backward compat.
+    #[serde(default)]
+    spawn_id: String,
     process_id: Option<u32>,
     process_name: Option<String>,
     process_start_time: Option<u64>,
@@ -295,6 +308,7 @@ impl From<AgentProcess> for AgentProcessData {
     fn from(ap: AgentProcess) -> Self {
         Self {
             agent: ap.agent,
+            spawn_id: ap.spawn_id,
             process_id: ap.process_id,
             process_name: ap.process_name,
             process_start_time: ap.process_start_time,
@@ -312,6 +326,7 @@ impl TryFrom<AgentProcessData> for AgentProcess {
     fn try_from(data: AgentProcessData) -> Result<Self, Self::Error> {
         AgentProcess::new(
             data.agent,
+            data.spawn_id,
             data.process_id,
             data.process_name,
             data.process_start_time,
@@ -342,6 +357,7 @@ impl AgentProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent: String,
+        spawn_id: String,
         process_id: Option<u32>,
         process_name: Option<String>,
         process_start_time: Option<u64>,
@@ -360,6 +376,7 @@ impl AgentProcess {
 
         Ok(Self {
             agent,
+            spawn_id,
             process_id,
             process_name,
             process_start_time,
@@ -372,6 +389,10 @@ impl AgentProcess {
 
     pub fn agent(&self) -> &str {
         &self.agent
+    }
+
+    pub fn spawn_id(&self) -> &str {
+        &self.spawn_id
     }
 
     pub fn process_id(&self) -> Option<u32> {
@@ -1121,6 +1142,7 @@ mod tests {
         // pid without name/time
         let result = AgentProcess::new(
             "claude".to_string(),
+            String::new(),
             Some(12345),
             None,
             None,
@@ -1134,6 +1156,7 @@ mod tests {
         // pid + name without time
         let result = AgentProcess::new(
             "claude".to_string(),
+            String::new(),
             Some(12345),
             Some("claude-code".to_string()),
             None,
@@ -1147,6 +1170,7 @@ mod tests {
         // all None is valid
         let result = AgentProcess::new(
             "claude".to_string(),
+            String::new(),
             None,
             None,
             None,
@@ -1160,6 +1184,7 @@ mod tests {
         // all Some is valid
         let result = AgentProcess::new(
             "claude".to_string(),
+            String::new(),
             Some(12345),
             Some("claude-code".to_string()),
             Some(1705318200),
@@ -1175,6 +1200,7 @@ mod tests {
     fn test_agent_process_serialization_roundtrip() {
         let agent = AgentProcess::new(
             "claude".to_string(),
+            "test_0".to_string(),
             Some(12345),
             Some("claude-code".to_string()),
             Some(1705318200),
@@ -1236,6 +1262,7 @@ mod tests {
             agents: vec![
                 AgentProcess::new(
                     "claude".to_string(),
+                    "test_0".to_string(),
                     Some(12345),
                     Some("claude-code".to_string()),
                     Some(1234567890),
@@ -1247,6 +1274,7 @@ mod tests {
                 .unwrap(),
                 AgentProcess::new(
                     "kiro".to_string(),
+                    "test_1".to_string(),
                     Some(67890),
                     Some("kiro-cli".to_string()),
                     Some(1234567900),

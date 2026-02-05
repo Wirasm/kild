@@ -339,6 +339,7 @@ mod tests {
     fn make_agent(agent: &str, pid: Option<u32>) -> crate::sessions::types::AgentProcess {
         crate::sessions::types::AgentProcess::new(
             agent.to_string(),
+            String::new(),
             pid,
             pid.map(|_| "test-process".to_string()),
             pid.map(|_| 1234567890),

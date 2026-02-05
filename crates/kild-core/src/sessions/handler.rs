@@ -9,6 +9,15 @@ use crate::sessions::{errors::SessionError, persistence, ports, types::*, valida
 use crate::terminal;
 use crate::terminal::types::SpawnResult;
 
+/// Compute a unique spawn ID for a given session and spawn index.
+///
+/// Each agent spawn within a session gets its own spawn ID, which is used for
+/// per-agent PID file paths and window titles. This prevents race conditions
+/// where `kild open` on a running kild would read the wrong PID.
+fn compute_spawn_id(session_id: &str, spawn_index: usize) -> String {
+    format!("{}_{}", session_id, spawn_index)
+}
+
 /// Capture process metadata from spawn result for PID reuse protection.
 ///
 /// Attempts to get fresh process info from the OS. Falls back to spawn result metadata
@@ -42,6 +51,61 @@ fn capture_process_metadata(
         spawn_result.process_name.clone(),
         spawn_result.process_start_time,
     )
+}
+
+/// Clean up PID files for a session (best-effort).
+///
+/// Handles both multi-agent sessions (per-agent spawn ID PID files) and
+/// legacy sessions (session-level PID file). Failures are logged at debug
+/// level since PID file cleanup is best-effort.
+fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, operation: &str) {
+    if session.has_agents() {
+        for agent_proc in session.agents() {
+            // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
+            let pid_key = match agent_proc.spawn_id().is_empty() {
+                true => session.id.clone(), // Backward compat: old sessions without spawn_id
+                false => agent_proc.spawn_id().to_string(),
+            };
+            let pid_file = get_pid_file_path(kild_dir, &pid_key);
+            match delete_pid_file(&pid_file) {
+                Ok(()) => {
+                    debug!(
+                        event = %format!("core.session.{}_pid_file_cleaned", operation),
+                        session_id = session.id,
+                        pid_file = %pid_file.display()
+                    );
+                }
+                Err(e) => {
+                    debug!(
+                        event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                        session_id = session.id,
+                        pid_file = %pid_file.display(),
+                        error = %e
+                    );
+                }
+            }
+        }
+    } else {
+        // Fallback: session-level PID file for old sessions with empty agents vec
+        let pid_file = get_pid_file_path(kild_dir, &session.id);
+        match delete_pid_file(&pid_file) {
+            Ok(()) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleaned", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display()
+                );
+            }
+            Err(e) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display(),
+                    error = %e
+                );
+            }
+        }
+    }
 }
 
 pub fn create_session(
@@ -156,12 +220,13 @@ pub fn create_session(
         branch = worktree.branch
     );
 
-    // 5. Launch terminal (I/O) - pass session_id for unique Ghostty window titles and PID tracking
+    // 5. Launch terminal (I/O) - pass spawn_id for unique PID files and Ghostty window titles
+    let spawn_id = compute_spawn_id(&session_id, 0);
     let spawn_result = terminal::handler::spawn_terminal(
         &worktree.path,
         &validated.command,
         kild_config,
-        Some(&session_id),
+        Some(&spawn_id),
         Some(&base_config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -175,6 +240,7 @@ pub fn create_session(
     };
     let initial_agent = AgentProcess::new(
         validated.agent.clone(),
+        spawn_id,
         spawn_result.process_id,
         spawn_result.process_name.clone(),
         spawn_result.process_start_time,
@@ -447,22 +513,8 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         worktree_path = %session.worktree_path.display()
     );
 
-    // 5. Clean up PID file (best-effort, don't fail if missing)
-    let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
-    if let Err(e) = delete_pid_file(&pid_file) {
-        warn!(
-            event = "core.session.destroy_pid_file_cleanup_failed",
-            session_id = session.id,
-            pid_file = %pid_file.display(),
-            error = %e
-        );
-    } else {
-        info!(
-            event = "core.session.destroy_pid_file_cleaned",
-            session_id = session.id,
-            pid_file = %pid_file.display()
-        );
-    }
+    // 5. Clean up PID files (best-effort, don't fail if missing)
+    cleanup_session_pid_files(&session, &config.kild_dir, "destroy");
 
     // 6. Remove session file (automatically frees port range)
     persistence::remove_session_file(&config.sessions_dir(), &session.id)?;
@@ -998,11 +1050,12 @@ pub fn restart_session(
     // 5. Relaunch terminal in existing worktree
     info!(event = "core.session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
+    let spawn_id = compute_spawn_id(&session.id, 0);
     let spawn_result = terminal::handler::spawn_terminal(
         &session.worktree_path,
         &agent_command,
         &kild_config,
-        Some(&session.id),
+        Some(&spawn_id),
         Some(&base_config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -1018,6 +1071,24 @@ pub fn restart_session(
     let (process_name, process_start_time) = capture_process_metadata(&spawn_result, "restart");
 
     // 6. Update session with new process info
+    let now = chrono::Utc::now().to_rfc3339();
+    let command = if spawn_result.command_executed.trim().is_empty() {
+        format!("{} (command not captured)", agent)
+    } else {
+        spawn_result.command_executed.clone()
+    };
+    let new_agent = AgentProcess::new(
+        agent.clone(),
+        spawn_id,
+        spawn_result.process_id,
+        process_name.clone(),
+        process_start_time,
+        Some(spawn_result.terminal_type.clone()),
+        spawn_result.terminal_window_id.clone(),
+        command,
+        now.clone(),
+    )?;
+
     session.agent = agent;
     session.process_id = spawn_result.process_id;
     session.process_name = process_name;
@@ -1025,7 +1096,9 @@ pub fn restart_session(
     session.terminal_type = Some(spawn_result.terminal_type.clone());
     session.terminal_window_id = spawn_result.terminal_window_id.clone();
     session.status = SessionStatus::Active;
-    session.last_activity = Some(chrono::Utc::now().to_rfc3339());
+    session.last_activity = Some(now);
+    session.clear_agents();
+    session.add_agent(new_agent);
 
     // 7. Save updated session to file
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
@@ -1114,15 +1187,18 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
             })?;
 
     // 5. Spawn NEW terminal (additive - don't touch existing)
+    let spawn_index = session.agent_count();
+    let spawn_id = compute_spawn_id(&session.id, spawn_index);
     info!(
         event = "core.session.open_spawn_started",
-        worktree = %session.worktree_path.display()
+        worktree = %session.worktree_path.display(),
+        spawn_id = %spawn_id
     );
     let spawn_result = terminal::handler::spawn_terminal(
         &session.worktree_path,
         &agent_command,
         &kild_config,
-        Some(&session.id),
+        Some(&spawn_id),
         Some(&config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -1139,6 +1215,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
     };
     let new_agent = AgentProcess::new(
         agent.clone(),
+        spawn_id,
         spawn_result.process_id,
         process_name.clone(),
         process_start_time,
@@ -1305,25 +1382,8 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         }
     }
 
-    // 3. Delete PID file so next open() won't read stale PID (best-effort)
-    let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
-    match delete_pid_file(&pid_file) {
-        Ok(()) => {
-            debug!(
-                event = "core.session.stop_pid_file_cleaned",
-                session_id = session.id,
-                pid_file = %pid_file.display()
-            );
-        }
-        Err(e) => {
-            debug!(
-                event = "core.session.stop_pid_file_cleanup_failed",
-                session_id = session.id,
-                pid_file = %pid_file.display(),
-                error = %e
-            );
-        }
-    }
+    // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
+    cleanup_session_pid_files(&session, &config.kild_dir, "stop");
 
     // 4. Clear process info and set status to Stopped
     session.clear_agents();
