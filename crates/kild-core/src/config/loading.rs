@@ -189,39 +189,52 @@ pub fn get_agent_command(
     config: &KildConfig,
     agent_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Check agent-specific settings first
-    if let Some(agent_settings) = config.agents.get(agent_name)
-        && let Some(command) = &agent_settings.startup_command
-    {
-        let mut full_command = command.clone();
-        if let Some(flags) = &agent_settings.flags {
-            full_command.push(' ');
-            full_command.push_str(flags);
-        }
-        return Ok(full_command);
-    }
-
-    // Fall back to global agent config or built-in default
-    let base_command = if let Some(cmd) = &config.agent.startup_command {
-        cmd.as_str()
+    // Resolve base command and flags based on agent-specific vs global settings
+    let (base_command, flags) = if let Some(agent_settings) = config.agents.get(agent_name) {
+        // Agent-specific settings: resolve base command, use agent-specific flags
+        let base = resolve_base_command(
+            agent_settings.startup_command.as_deref(),
+            config.agent.startup_command.as_deref(),
+            agent_name,
+        )?;
+        (base, agent_settings.flags.as_deref())
     } else {
-        agents::get_default_command(agent_name).ok_or_else(|| {
+        // No agent-specific settings: use global config
+        let base = resolve_base_command(None, config.agent.startup_command.as_deref(), agent_name)?;
+        (base, config.agent.flags.as_deref())
+    };
+
+    // Build full command with optional flags
+    Ok(build_command(&base_command, flags))
+}
+
+/// Resolve the base command for an agent from available sources.
+fn resolve_base_command(
+    agent_specific: Option<&str>,
+    global: Option<&str>,
+    agent_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let base = agent_specific
+        .or(global)
+        .or_else(|| agents::get_default_command(agent_name))
+        .ok_or_else(|| {
             format!(
                 "No command found for agent '{}'. Configure a startup_command in your config file \
                 or use a known agent ({}).",
                 agent_name,
                 agents::supported_agents_string()
             )
-        })?
-    };
+        })?;
 
-    let mut full_command = base_command.to_string();
-    if let Some(flags) = &config.agent.flags {
-        full_command.push(' ');
-        full_command.push_str(flags);
+    Ok(base.to_string())
+}
+
+/// Build a command string from base command and optional flags.
+fn build_command(base: &str, flags: Option<&str>) -> String {
+    match flags {
+        Some(f) => format!("{} {}", base, f),
+        None => base.to_string(),
     }
-
-    Ok(full_command)
 }
 
 #[cfg(test)]
@@ -230,6 +243,14 @@ mod tests {
     use crate::config::types::AgentSettings;
     use std::env;
     use std::fs;
+
+    /// Helper to create AgentSettings for tests
+    fn make_agent_settings(startup_command: Option<&str>, flags: Option<&str>) -> AgentSettings {
+        AgentSettings {
+            startup_command: startup_command.map(String::from),
+            flags: flags.map(String::from),
+        }
+    }
 
     #[test]
     fn test_get_agent_command_defaults() {
@@ -261,13 +282,97 @@ mod tests {
     }
 
     #[test]
+    fn test_get_agent_command_per_agent_flags_without_startup_command() {
+        let mut config = KildConfig::default();
+        config.agents.insert(
+            "claude".to_string(),
+            make_agent_settings(None, Some("--dangerously-skip-permissions")),
+        );
+
+        assert_eq!(
+            get_agent_command(&config, "claude").unwrap(),
+            "claude --dangerously-skip-permissions"
+        );
+    }
+
+    #[test]
+    fn test_get_agent_command_per_agent_flags_use_builtin_default() {
+        let mut config = KildConfig::default();
+        config.agents.insert(
+            "kiro".to_string(),
+            make_agent_settings(None, Some("--fast")),
+        );
+
+        // Should use kiro's built-in default "kiro-cli chat" + per-agent flags
+        assert_eq!(
+            get_agent_command(&config, "kiro").unwrap(),
+            "kiro-cli chat --fast"
+        );
+    }
+
+    #[test]
+    fn test_get_agent_command_per_agent_flags_override_global_flags() {
+        let mut config = KildConfig::default();
+        config.agent.flags = Some("--global-flag".to_string());
+        config.agents.insert(
+            "claude".to_string(),
+            make_agent_settings(None, Some("--agent-flag")),
+        );
+
+        // Per-agent flags should be used, not global flags
+        assert_eq!(
+            get_agent_command(&config, "claude").unwrap(),
+            "claude --agent-flag"
+        );
+    }
+
+    #[test]
+    fn test_get_agent_command_per_agent_no_flags_no_command() {
+        let mut config = KildConfig::default();
+        config
+            .agents
+            .insert("claude".to_string(), make_agent_settings(None, None));
+
+        // Should still resolve to built-in default with no flags
+        assert_eq!(get_agent_command(&config, "claude").unwrap(), "claude");
+    }
+
+    #[test]
+    fn test_get_agent_command_per_agent_flags_with_global_startup_command() {
+        let mut config = KildConfig::default();
+        config.agent.startup_command = Some("custom-claude-cli".to_string());
+        config.agents.insert(
+            "claude".to_string(),
+            make_agent_settings(None, Some("--experimental")),
+        );
+
+        // Should use global startup_command + per-agent flags
+        assert_eq!(
+            get_agent_command(&config, "claude").unwrap(),
+            "custom-claude-cli --experimental"
+        );
+    }
+
+    #[test]
+    fn test_get_agent_command_unknown_agent_with_flags_fails() {
+        let mut config = KildConfig::default();
+        config.agents.insert(
+            "unknown_agent".to_string(),
+            make_agent_settings(None, Some("--verbose")),
+        );
+
+        let result = get_agent_command(&config, "unknown_agent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No command found"));
+    }
+
+    #[test]
     fn test_get_agent_command_specific_agent() {
         let mut config = KildConfig::default();
-        let agent_settings = AgentSettings {
-            startup_command: Some("cc".to_string()),
-            flags: Some("--dangerous".to_string()),
-        };
-        config.agents.insert("claude".to_string(), agent_settings);
+        config.agents.insert(
+            "claude".to_string(),
+            make_agent_settings(Some("cc"), Some("--dangerous")),
+        );
 
         assert_eq!(
             get_agent_command(&config, "claude").unwrap(),
@@ -279,11 +384,10 @@ mod tests {
     #[test]
     fn test_get_agent_command_unknown_with_custom_command() {
         let mut config = KildConfig::default();
-        let agent_settings = AgentSettings {
-            startup_command: Some("my-custom-agent".to_string()),
-            flags: None,
-        };
-        config.agents.insert("custom".to_string(), agent_settings);
+        config.agents.insert(
+            "custom".to_string(),
+            make_agent_settings(Some("my-custom-agent"), None),
+        );
 
         // Unknown agent with configured command should succeed
         assert_eq!(
