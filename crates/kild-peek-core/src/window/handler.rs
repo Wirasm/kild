@@ -210,7 +210,27 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, WindowError> {
         .into_iter()
         .enumerate()
         .filter_map(|(idx, m)| {
-            let name = m.name().unwrap_or_else(|_| format!("Monitor {}", idx));
+            // Use catch_unwind to protect against xcap/objc2-app-kit panics
+            // when NSScreen.localizedName returns NULL on headless macOS (e.g. CI)
+            let name = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| m.name())) {
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => {
+                    debug!(
+                        event = "core.monitor.property_access_failed",
+                        property = "name",
+                        monitor_index = idx,
+                        error = %e
+                    );
+                    format!("Monitor {}", idx)
+                }
+                Err(_) => {
+                    debug!(
+                        event = "core.monitor.name_panic_caught",
+                        monitor_index = idx,
+                    );
+                    format!("Monitor {}", idx)
+                }
+            };
 
             let x = match m.x() {
                 Ok(x) => x,
