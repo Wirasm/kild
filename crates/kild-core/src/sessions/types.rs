@@ -176,6 +176,11 @@ pub struct Session {
     pub project_id: String,
     pub branch: String,
     pub worktree_path: PathBuf,
+    /// The agent type for this session (e.g. "claude", "kiro").
+    ///
+    /// Updated by handlers to match the latest entry in `agents` when a new
+    /// agent is opened. Must be kept in sync with `agents.last()` by callers
+    /// of `open_session`.
     pub agent: String,
     pub status: SessionStatus,
     pub created_at: String,

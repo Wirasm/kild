@@ -59,6 +59,35 @@ fn capture_process_metadata(
 /// legacy sessions (session-level PID file). Failures are logged at debug
 /// level since PID file cleanup is best-effort.
 fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, operation: &str) {
+    if !session.has_agents() {
+        // Legacy session (pre-multi-agent) — attempt session-level PID file cleanup
+        warn!(
+            event = "core.session.pid_cleanup_no_agents",
+            session_id = session.id,
+            operation = operation,
+            "Session has no tracked agents, attempting session-level PID file cleanup"
+        );
+        let pid_file = get_pid_file_path(kild_dir, &session.id);
+        match delete_pid_file(&pid_file) {
+            Ok(()) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleaned", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display()
+                );
+            }
+            Err(e) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display(),
+                    error = %e
+                );
+            }
+        }
+        return;
+    }
+
     for agent_proc in session.agents() {
         // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
         let pid_key = match agent_proc.spawn_id().is_empty() {
@@ -337,6 +366,15 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     // 2. Close all terminal windows and kill all processes
     {
+        if !session.has_agents() {
+            warn!(
+                event = "core.session.destroy_no_agents",
+                session_id = session.id,
+                branch = name,
+                "Session has no tracked agents — skipping process/terminal cleanup"
+            );
+        }
+
         // Close all terminal windows (fire-and-forget)
         for agent_proc in session.agents() {
             if let (Some(terminal_type), Some(window_id)) =
@@ -1187,6 +1225,15 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     // 2. Close all terminal windows and kill all processes
     {
+        if !session.has_agents() {
+            warn!(
+                event = "core.session.stop_no_agents",
+                session_id = session.id,
+                branch = session.branch,
+                "Session has no tracked agents — skipping process/terminal cleanup"
+            );
+        }
+
         // Iterate all tracked agents
         for agent_proc in session.agents() {
             if let (Some(terminal_type), Some(window_id)) =

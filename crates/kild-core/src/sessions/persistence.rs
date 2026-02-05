@@ -104,6 +104,16 @@ pub fn load_sessions_from_files(
             }
         };
 
+        if !session.has_agents() && session.status == super::types::SessionStatus::Active {
+            tracing::warn!(
+                event = "core.session.load_legacy_no_agents",
+                file = %path.display(),
+                session_id = session.id,
+                branch = session.branch,
+                "Active session has no tracked agents (legacy format) — operations may be degraded"
+            );
+        }
+
         if let Err(validation_error) = super::validation::validate_session_structure(&session) {
             skipped_count += 1;
             tracing::warn!(
