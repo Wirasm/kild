@@ -836,14 +836,16 @@ fn parse_review_status(value: &serde_json::Value) -> (super::types::ReviewStatus
         }
     }
 
-    let parts: Vec<String> = [
-        (approved > 0).then(|| format!("{} approved", approved)),
-        (changes_requested > 0).then(|| format!("{} changes requested", changes_requested)),
-        (pending_reviews > 0).then(|| format!("{} pending", pending_reviews)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let mut parts = Vec::new();
+    if approved > 0 {
+        parts.push(format!("{} approved", approved));
+    }
+    if changes_requested > 0 {
+        parts.push(format!("{} changes requested", changes_requested));
+    }
+    if pending_reviews > 0 {
+        parts.push(format!("{} pending", pending_reviews));
+    }
 
     let summary = if parts.is_empty() {
         None
