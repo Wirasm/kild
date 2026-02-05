@@ -58,8 +58,8 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
     );
 
     // The window_id is embedded in the sh -c command line via the ANSI title escape.
-    // The matching process is sh (not ghostty), so find any candidate whose parent is
-    // a Ghostty process, and return the Ghostty parent PID for focus_by_pid.
+    // pgrep -f may match either the Ghostty process itself or the sh child process.
+    // For sh matches, traverse to the Ghostty parent PID for focus_by_pid.
     let found_pid = pids.into_iter().find_map(|pid| {
         if is_ghostty_process(pid) {
             // Candidate is itself a Ghostty process
@@ -88,12 +88,34 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
 /// Get the parent PID of a process.
 #[cfg(target_os = "macos")]
 fn get_parent_pid(pid: u32) -> Option<u32> {
-    let output = std::process::Command::new("ps")
+    let output = match std::process::Command::new("ps")
         .args(["-o", "ppid=", "-p", &pid.to_string()])
         .output()
-        .ok()?;
+    {
+        Ok(output) => output,
+        Err(e) => {
+            debug!(
+                event = "core.terminal.get_parent_pid_failed",
+                pid = pid,
+                error = %e
+            );
+            return None;
+        }
+    };
 
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    let raw = String::from_utf8_lossy(&output.stdout);
+    match raw.trim().parse() {
+        Ok(ppid) => Some(ppid),
+        Err(e) => {
+            debug!(
+                event = "core.terminal.get_parent_pid_parse_failed",
+                pid = pid,
+                output = %raw.trim(),
+                error = %e
+            );
+            None
+        }
+    }
 }
 
 /// Check if a process is a Ghostty process by examining its executable name.
