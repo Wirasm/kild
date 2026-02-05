@@ -40,6 +40,9 @@ const KEY_EVENT_DELAY: Duration = Duration::from_millis(10);
 /// Delay between drag events (down, move, up)
 const DRAG_EVENT_DELAY: Duration = Duration::from_millis(25);
 
+/// Delay between individual character events when typing text
+const CHAR_EVENT_DELAY: Duration = Duration::from_millis(5);
+
 /// Check if the current process has accessibility permissions
 fn check_accessibility_permission() -> Result<(), InteractionError> {
     let trusted = unsafe { AXIsProcessTrusted() };
@@ -315,9 +318,10 @@ pub fn click(request: &ClickRequest) -> Result<InteractionResult, InteractionErr
 
 /// Type text into the focused element of a window
 ///
-/// Focuses the target window, then sends the text as a unicode string via a
-/// single CGEvent (keycode 0 with unicode string set). This handles special
-/// characters and international input correctly.
+/// Focuses the target window, then sends each character as an individual
+/// CGEvent with a small delay between them. GPUI and other Metal-based apps
+/// only read the first character from a CGEvent's unicode string, so we must
+/// send one event per character.
 ///
 /// # Errors
 ///
@@ -337,18 +341,20 @@ pub fn type_text(request: &TypeRequest) -> Result<InteractionResult, Interaction
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|()| InteractionError::EventSourceFailed)?;
 
-    // Create a keyboard event with keycode 0 and set the unicode string.
-    // This sends text as a unicode string rather than individual key events,
-    // which correctly handles special characters and international input.
-    let event = CGEvent::new_keyboard_event(source, 0, true)
-        .map_err(|()| InteractionError::KeyboardEventFailed { keycode: 0 })?;
-
-    event.set_string(request.text());
+    // Send each character as an individual keyboard event.
+    // GPUI and other Metal-based apps only read the first character from a
+    // CGEvent's unicode string, so we must send one event per character.
     debug!(
         event = "peek.core.interact.type_posting",
         text_len = request.text().len()
     );
-    event.post(CGEventTapLocation::HID);
+    for ch in request.text().chars() {
+        let event = CGEvent::new_keyboard_event(source.clone(), 0, true)
+            .map_err(|()| InteractionError::KeyboardEventFailed { keycode: 0 })?;
+        event.set_string(&ch.to_string());
+        event.post(CGEventTapLocation::HID);
+        thread::sleep(CHAR_EVENT_DELAY);
+    }
 
     info!(
         event = "peek.core.interact.type_completed",
