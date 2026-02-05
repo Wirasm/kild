@@ -61,11 +61,10 @@ fn capture_process_metadata(
 fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, operation: &str) {
     if session.has_agents() {
         for agent_proc in session.agents() {
-            let pid_key = if agent_proc.spawn_id().is_empty() {
-                // Backward compat: old sessions without spawn_id use session-level PID file
-                session.id.clone()
-            } else {
-                agent_proc.spawn_id().to_string()
+            // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
+            let pid_key = match agent_proc.spawn_id().is_empty() {
+                true => session.id.clone(), // Backward compat: old sessions without spawn_id
+                false => agent_proc.spawn_id().to_string(),
             };
             let pid_file = get_pid_file_path(kild_dir, &pid_key);
             match delete_pid_file(&pid_file) {
