@@ -106,27 +106,21 @@ mod tests {
     use std::path::PathBuf;
 
     fn create_session_with_ports(start: u16, end: u16) -> Session {
-        Session {
-            id: format!("test/{}-{}", start, end),
-            project_id: "test".to_string(),
-            branch: format!("branch-{}-{}", start, end),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: start,
-            port_range_end: end,
-            port_count: end - start + 1,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        }
+        Session::new(
+            format!("test/{}-{}", start, end),
+            "test".to_string(),
+            format!("branch-{}-{}", start, end),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            start,
+            end,
+            end - start + 1,
+            None,
+            None,
+            vec![],
+        )
     }
 
     #[test]

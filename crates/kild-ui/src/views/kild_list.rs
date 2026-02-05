@@ -174,13 +174,11 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                 let terminal_type_for_focus = display
                                     .session
                                     .latest_agent()
-                                    .and_then(|a| a.terminal_type().cloned())
-                                    .or_else(|| display.session.terminal_type.clone());
+                                    .and_then(|a| a.terminal_type().cloned());
                                 let window_id_for_focus = display
                                     .session
                                     .latest_agent()
-                                    .and_then(|a| a.terminal_window_id().map(|s| s.to_string()))
-                                    .or_else(|| display.session.terminal_window_id.clone());
+                                    .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
                                 let branch_for_focus = branch.clone();
 
                                 // Selection state
@@ -477,27 +475,21 @@ mod tests {
         use std::path::PathBuf;
 
         // Create a kild display (simulating CLI-created kild)
-        let session = Session {
-            id: "test-id".to_string(),
-            branch: "test-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            "test-branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
 
         let state = AppState::test_with_displays(vec![SessionInfo {
             session,

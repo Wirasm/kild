@@ -66,12 +66,10 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
     let branch_for_focus = branch.clone();
     let terminal_type_for_focus = session
         .latest_agent()
-        .and_then(|a| a.terminal_type().cloned())
-        .or_else(|| session.terminal_type.clone());
+        .and_then(|a| a.terminal_type().cloned());
     let window_id_for_focus = session
         .latest_agent()
-        .and_then(|a| a.terminal_window_id().map(|s| s.to_string()))
-        .or_else(|| session.terminal_window_id.clone());
+        .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
     let branch_for_action = branch.clone();
     let branch_for_destroy = branch.clone();
     let is_running = kild.process_status == ProcessStatus::Running;

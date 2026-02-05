@@ -579,7 +579,18 @@ pub async fn create_session(
         None
     };
 
-    // 7. Create session record
+    // 7. Create session record with agent process tracking
+    let agent_process = if let Some(info) = process_info {
+        AgentProcess {
+            agent: agent_name.to_string(),
+            process_id: info.process_id,
+            process_name: info.process_name,
+            process_start_time: info.process_start_time,
+            terminal_window_id: info.terminal_window_id,
+            opened_at: chrono::Utc::now().to_rfc3339(),
+        }
+    };
+
     let session = Session {
         name: branch.to_string(),
         branch: format!("shard_{}", generate_hash(branch)),
@@ -592,9 +603,7 @@ pub async fn create_session(
         } else {
             SessionStatus::Interactive
         },
-        process_id: process_info.as_ref().map(|p| p.process_id),
-        process_name: process_info.as_ref().and_then(|p| p.process_name.clone()),
-        process_start_time: process_info.as_ref().and_then(|p| p.process_start_time),
+        agents: if agent_process.is_some() { vec![agent_process.unwrap()] } else { vec![] },
         created_at: chrono::Utc::now(),
         command: terminal_command,  // Store for reference
     };
@@ -841,17 +850,9 @@ pub struct Session {
 
     // --- EXISTING FIELDS ---
 
-    /// Process ID (of terminal or agent)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<u32>,
-
-    /// Process name for validation
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_name: Option<String>,
-
-    /// Process start time for PID reuse protection
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_start_time: Option<u64>,
+    /// All agent processes opened in this session (tracks multiple concurrent agents)
+    #[serde(default)]
+    pub agents: Vec<AgentProcess>,
 
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
@@ -917,9 +918,16 @@ pub enum SessionStatus {
   ],
   "status": "Interactive",
   "command": "claude --resume 550e8400-e29b-41d4-a716-446655440000",
-  "process_id": 12345,
-  "process_name": "claude",
-  "process_start_time": 1705487400,
+  "agents": [
+    {
+      "agent": "claude",
+      "process_id": 12345,
+      "process_name": "claude",
+      "process_start_time": 1705487400,
+      "terminal_window_id": "window-123",
+      "opened_at": "2025-01-17T10:30:00Z"
+    }
+  ],
   "created_at": "2025-01-17T10:30:00Z",
   "port_range_start": 8100,
   "port_count": 10

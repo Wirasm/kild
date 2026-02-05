@@ -180,27 +180,21 @@ mod tests {
 
     #[test]
     fn test_process_status_from_session_no_pid() {
-        let session = Session {
-            id: "test-id".to_string(),
-            branch: "test-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/nonexistent-test-path"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            "test-branch".to_string(),
+            PathBuf::from("/tmp/nonexistent-test-path"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
 
         let display = SessionInfo::from_session(session);
         assert_eq!(display.process_status, ProcessStatus::Stopped);
@@ -210,30 +204,37 @@ mod tests {
 
     #[test]
     fn test_process_status_from_session_with_window_id_no_pid() {
+        use kild_core::sessions::types::AgentProcess;
         use kild_core::terminal::types::TerminalType;
 
         // Session with terminal_window_id but no process_id (Ghostty case)
-        let session = Session {
-            id: "test-id".to_string(),
-            branch: "test-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/nonexistent-test-path"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: Some(TerminalType::Ghostty),
-            terminal_window_id: Some("kild-test-window".to_string()),
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            String::new(),
+            None,
+            None,
+            None,
+            Some(TerminalType::Ghostty),
+            Some("kild-test-window".to_string()),
+            String::new(),
+            "2024-01-01T00:00:00Z".to_string(),
+        )
+        .unwrap();
+        let session = Session::new(
+            "test-id".to_string(),
+            "test-project".to_string(),
+            "test-branch".to_string(),
+            PathBuf::from("/tmp/nonexistent-test-path"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![agent],
+        );
 
         let display = SessionInfo::from_session(session);
         // With window detection fallback, should attempt to check window
@@ -284,27 +285,21 @@ mod tests {
         // Make it dirty (unstaged changes)
         std::fs::write(path.join("test.txt"), "line1\nline2\nline3\n").unwrap();
 
-        let session = Session {
-            id: "test".to_string(),
-            branch: "test".to_string(),
-            worktree_path: path.to_path_buf(),
-            agent: "claude".to_string(),
-            project_id: "test".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test".to_string(),
+            "test".to_string(),
+            "test".to_string(),
+            path.to_path_buf(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
 
         let display = SessionInfo::from_session(session);
 
@@ -335,74 +330,78 @@ mod tests {
 
     #[test]
     fn test_update_statuses_only_updates_process_status() {
-        // Create a session with a PID that doesn't exist (should become Stopped)
-        let session_with_dead_pid = Session {
-            id: "test-dead".to_string(),
-            branch: "dead-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: Some(999999), // Non-existent PID
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        use kild_core::sessions::types::AgentProcess;
+
+        let make_agent_with_pid = |pid: Option<u32>| -> Vec<AgentProcess> {
+            match pid {
+                Some(p) => vec![
+                    AgentProcess::new(
+                        "claude".to_string(),
+                        String::new(),
+                        Some(p),
+                        Some("test-process".to_string()),
+                        Some(1234567890),
+                        None,
+                        None,
+                        String::new(),
+                        "2024-01-01T00:00:00Z".to_string(),
+                    )
+                    .unwrap(),
+                ],
+                None => vec![],
+            }
         };
+
+        // Create a session with a PID that doesn't exist (should become Stopped)
+        let session_with_dead_pid = Session::new(
+            "test-dead".to_string(),
+            "test-project".to_string(),
+            "dead-branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            make_agent_with_pid(Some(999999)), // Non-existent PID
+        );
 
         // Create a session with our own PID (should be Running)
-        let session_with_live_pid = Session {
-            id: "test-live".to_string(),
-            branch: "live-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: Some(std::process::id()), // Current process PID
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_with_live_pid = Session::new(
+            "test-live".to_string(),
+            "test-project".to_string(),
+            "live-branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            make_agent_with_pid(Some(std::process::id())), // Current process PID
+        );
 
         // Create a session with no PID (should remain Stopped)
-        let session_no_pid = Session {
-            id: "test-no-pid".to_string(),
-            branch: "no-pid-branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_no_pid = Session::new(
+            "test-no-pid".to_string(),
+            "test-project".to_string(),
+            "no-pid-branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            make_agent_with_pid(None),
+        );
 
         let mut store = SessionStore::from_data(Vec::new(), None);
         store.set_displays(vec![
@@ -473,26 +472,22 @@ mod tests {
 
     #[test]
     fn test_stopped_and_running_counts() {
-        let make_session = |id: &str, branch: &str| Session {
-            id: id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, branch: &str| {
+            Session::new(
+                id.to_string(),
+                "test-project".to_string(),
+                branch.to_string(),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut store = SessionStore::from_data(Vec::new(), None);

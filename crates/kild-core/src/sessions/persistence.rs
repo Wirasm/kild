@@ -104,6 +104,16 @@ pub fn load_sessions_from_files(
             }
         };
 
+        if !session.has_agents() && session.status == super::types::SessionStatus::Active {
+            tracing::warn!(
+                event = "core.session.load_legacy_no_agents",
+                file = %path.display(),
+                session_id = session.id,
+                branch = session.branch,
+                "Active session has no tracked agents (legacy format) — operations may be degraded"
+            );
+        }
+
         if let Err(validation_error) = super::validation::validate_session_structure(&session) {
             skipped_count += 1;
             tracing::warn!(
@@ -201,27 +211,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save session
         assert!(save_session_to_file(&session, &temp_dir).is_ok());
@@ -251,27 +255,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/atomic".to_string(),
-            project_id: "test".to_string(),
-            branch: "atomic".to_string(),
+        let session = Session::new(
+            "test/atomic".to_string(),
+            "test".to_string(),
+            "atomic".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save session
         assert!(save_session_to_file(&session, &temp_dir).is_ok());
@@ -303,27 +301,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/atomic-behavior".to_string(),
-            project_id: "test".to_string(),
-            branch: "atomic-behavior".to_string(),
+        let session = Session::new(
+            "test/atomic-behavior".to_string(),
+            "test".to_string(),
+            "atomic-behavior".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         let session_file = temp_dir.join("test_atomic-behavior.json");
 
@@ -358,27 +350,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/cleanup".to_string(),
-            project_id: "test".to_string(),
-            branch: "cleanup".to_string(),
+        let session = Session::new(
+            "test/cleanup".to_string(),
+            "test".to_string(),
+            "cleanup".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Create a directory where the final file should be to force rename failure
         let session_file = temp_dir.join("test_cleanup.json");
@@ -418,49 +404,37 @@ mod tests {
         std::fs::create_dir_all(&worktree1).unwrap();
         std::fs::create_dir_all(&worktree2).unwrap();
 
-        let session1 = Session {
-            id: "test/branch1".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch1".to_string(),
-            worktree_path: worktree1,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session1 = Session::new(
+            "test/branch1".to_string(),
+            "test".to_string(),
+            "branch1".to_string(),
+            worktree1,
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
-        let session2 = Session {
-            id: "test/branch2".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch2".to_string(),
-            worktree_path: worktree2,
-            agent: "kiro".to_string(),
-            status: SessionStatus::Stopped,
-            created_at: "2024-01-02T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session2 = Session::new(
+            "test/branch2".to_string(),
+            "test".to_string(),
+            "branch2".to_string(),
+            worktree2,
+            "kiro".to_string(),
+            SessionStatus::Stopped,
+            "2024-01-02T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save sessions
         save_session_to_file(&session1, &temp_dir).unwrap();
@@ -504,27 +478,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/feature-branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "feature-branch".to_string(),
+        let session = Session::new(
+            "test/feature-branch".to_string(),
+            "test".to_string(),
+            "feature-branch".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save session
         save_session_to_file(&session, &temp_dir).unwrap();
@@ -554,27 +522,21 @@ mod tests {
         let worktree_path = temp_dir.join("worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save session
         save_session_to_file(&session, &temp_dir).unwrap();
@@ -605,27 +567,21 @@ mod tests {
         let worktree_path = temp_dir.join("valid_worktree");
         std::fs::create_dir_all(&worktree_path).unwrap();
 
-        let valid_session = Session {
-            id: "test/valid".to_string(),
-            project_id: "test".to_string(),
-            branch: "valid".to_string(),
+        let valid_session = Session::new(
+            "test/valid".to_string(),
+            "test".to_string(),
+            "valid".to_string(),
             worktree_path,
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
         save_session_to_file(&valid_session, &temp_dir).unwrap();
 
         // Create invalid JSON file
@@ -664,27 +620,21 @@ mod tests {
 
         let nonexistent_worktree = temp_dir.join("worktree_that_does_not_exist");
 
-        let session_missing_worktree = Session {
-            id: "test/orphaned".to_string(),
-            project_id: "test".to_string(),
-            branch: "orphaned".to_string(),
-            worktree_path: nonexistent_worktree.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Stopped,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session_missing_worktree = Session::new(
+            "test/orphaned".to_string(),
+            "test".to_string(),
+            "orphaned".to_string(),
+            nonexistent_worktree.clone(),
+            "claude".to_string(),
+            SessionStatus::Stopped,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         let session_file = temp_dir.join("test_orphaned.json");
         let json = serde_json::to_string_pretty(&session_missing_worktree).unwrap();
@@ -725,50 +675,38 @@ mod tests {
         let missing_worktree = temp_dir.join("missing_worktree");
 
         // Session 1: valid worktree
-        let session_valid = Session {
-            id: "test/valid-session".to_string(),
-            project_id: "test".to_string(),
-            branch: "valid-session".to_string(),
-            worktree_path: valid_worktree.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: Some(12345),
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "claude".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session_valid = Session::new(
+            "test/valid-session".to_string(),
+            "test".to_string(),
+            "valid-session".to_string(),
+            valid_worktree.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Session 2: missing worktree
-        let session_missing = Session {
-            id: "test/missing-session".to_string(),
-            project_id: "test".to_string(),
-            branch: "missing-session".to_string(),
-            worktree_path: missing_worktree.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Stopped,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 3010,
-            port_range_end: 3019,
-            port_count: 10,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "claude".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session_missing = Session::new(
+            "test/missing-session".to_string(),
+            "test".to_string(),
+            "missing-session".to_string(),
+            missing_worktree.clone(),
+            "claude".to_string(),
+            SessionStatus::Stopped,
+            "2024-01-01T00:00:00Z".to_string(),
+            3010,
+            3019,
+            10,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         // Save both sessions
         let valid_file = temp_dir.join("test_valid-session.json");

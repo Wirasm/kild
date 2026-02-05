@@ -99,20 +99,18 @@ impl DestroySafetyInfo {
         // Skip if status check failed (already showed critical message)
         if self.git_status.has_uncommitted_changes && !self.git_status.status_check_failed {
             let message = if let Some(details) = &self.git_status.uncommitted_details {
-                // Build detailed message with file counts
-                let mut parts = Vec::new();
-                if details.staged_files > 0 {
-                    parts.push(format!("{} staged", details.staged_files));
-                }
-                if details.modified_files > 0 {
-                    parts.push(format!("{} modified", details.modified_files));
-                }
-                if details.untracked_files > 0 {
-                    parts.push(format!("{} untracked", details.untracked_files));
-                }
+                let parts: Vec<String> = [
+                    (details.staged_files > 0).then(|| format!("{} staged", details.staged_files)),
+                    (details.modified_files > 0)
+                        .then(|| format!("{} modified", details.modified_files)),
+                    (details.untracked_files > 0)
+                        .then(|| format!("{} untracked", details.untracked_files)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
                 format!("Uncommitted changes: {}", parts.join(", "))
             } else {
-                // Fallback when details unavailable
                 "Uncommitted changes detected".to_string()
             };
             messages.push(message);
@@ -121,15 +119,8 @@ impl DestroySafetyInfo {
         // Unpushed commits (warning only)
         if self.git_status.unpushed_commit_count > 0 {
             let count = self.git_status.unpushed_commit_count;
-
-            // Use correct singular/plural form
-            let message = if count == 1 {
-                format!("{} unpushed commit will be lost", count)
-            } else {
-                format!("{} unpushed commits will be lost", count)
-            };
-
-            messages.push(message);
+            let commit_word = if count == 1 { "commit" } else { "commits" };
+            messages.push(format!("{} unpushed {} will be lost", count, commit_word));
         }
 
         // Never pushed (warning only) - skip if status check failed or has unpushed commits
@@ -176,6 +167,11 @@ pub struct Session {
     pub project_id: String,
     pub branch: String,
     pub worktree_path: PathBuf,
+    /// The agent type for this session (e.g. "claude", "kiro").
+    ///
+    /// Updated by handlers to match the latest entry in `agents` when a new
+    /// agent is opened. Must be kept in sync with `agents.last()` by callers
+    /// of `open_session`.
     pub agent: String,
     pub status: SessionStatus,
     pub created_at: String,
@@ -185,47 +181,6 @@ pub struct Session {
     pub port_range_end: u16,
     #[serde(default = "default_port_count")]
     pub port_count: u16,
-
-    /// Process ID of the spawned terminal/agent process.
-    ///
-    /// This is `None` if:
-    /// - The session was created before PID tracking was implemented
-    /// - The terminal spawn failed to capture the PID
-    /// - The session is in a stopped state
-    ///
-    /// Note: PIDs can be reused by the OS, so this should be validated
-    /// against process name/start time before use.
-    pub process_id: Option<u32>,
-
-    /// Process name captured at spawn time for PID reuse protection
-    pub process_name: Option<String>,
-
-    /// Process start time captured at spawn time for PID reuse protection
-    pub process_start_time: Option<u64>,
-
-    /// Terminal type used to launch this session (iTerm, Terminal.app, Ghostty)
-    ///
-    /// Used to close the terminal window during destroy.
-    /// None for sessions created before this field was added.
-    #[serde(default)]
-    pub terminal_type: Option<TerminalType>,
-
-    /// Terminal window ID for closing the correct window on destroy.
-    ///
-    /// For iTerm2/Terminal.app: The AppleScript window ID (e.g., "1596")
-    /// For Ghostty: The unique title set via ANSI escape sequence
-    /// None for: sessions created before this field, or spawn failed to capture ID
-    #[serde(default)]
-    pub terminal_window_id: Option<String>,
-
-    /// The full command that was executed to start the agent
-    ///
-    /// This is the actual command passed to the terminal, e.g.,
-    /// "kiro-cli chat --trust-all-tools" or "claude-code"
-    ///
-    /// Empty string for sessions created before this field was added.
-    #[serde(default)]
-    pub command: String,
 
     /// Timestamp of last detected activity for health monitoring.
     ///
@@ -249,11 +204,8 @@ pub struct Session {
     /// Populated by `kild create` (initial agent) and `kild open` (additional agents).
     /// `kild stop` clears this vec. Each open operation appends an entry.
     /// Empty for sessions created before multi-agent tracking was added.
-    ///
-    /// Prefer accessor methods (`agents()`, `add_agent()`, `clear_agents()`,
-    /// `latest_agent()`, `has_agents()`, `agent_count()`) over direct field access.
     #[serde(default)]
-    pub agents: Vec<AgentProcess>,
+    agents: Vec<AgentProcess>,
 }
 
 /// Represents a single agent process spawned within a kild session.
@@ -425,6 +377,40 @@ impl AgentProcess {
 }
 
 impl Session {
+    /// Create a new Session.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: String,
+        project_id: String,
+        branch: String,
+        worktree_path: PathBuf,
+        agent: String,
+        status: SessionStatus,
+        created_at: String,
+        port_range_start: u16,
+        port_range_end: u16,
+        port_count: u16,
+        last_activity: Option<String>,
+        note: Option<String>,
+        agents: Vec<AgentProcess>,
+    ) -> Self {
+        Self {
+            id,
+            project_id,
+            branch,
+            worktree_path,
+            agent,
+            status,
+            created_at,
+            port_range_start,
+            port_range_end,
+            port_count,
+            last_activity,
+            note,
+            agents,
+        }
+    }
+
     /// Returns true if the session's worktree path exists on disk.
     ///
     /// Sessions with missing worktrees are still valid session files
@@ -584,36 +570,30 @@ mod tests {
 
     #[test]
     fn test_session_creation() {
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "claude-code".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
 
         assert_eq!(session.branch, "branch");
         assert_eq!(session.status, SessionStatus::Active);
-        assert_eq!(session.command, "claude-code");
     }
 
     #[test]
     fn test_session_backward_compatibility() {
         // Test that sessions without last_activity field can be deserialized
+        // (old JSON may contain removed fields like process_id, etc. - serde ignores unknown fields)
         let json_without_last_activity = r#"{
             "id": "test/branch",
             "project_id": "test",
@@ -624,11 +604,7 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "port_range_start": 3000,
             "port_range_end": 3009,
-            "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code"
+            "port_count": 10
         }"#;
 
         let session: Session = serde_json::from_str(json_without_last_activity).unwrap();
@@ -649,11 +625,7 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "port_range_start": 3000,
             "port_range_end": 3009,
-            "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code"
+            "port_count": 10
         }"#;
 
         let session: Session = serde_json::from_str(json_without_note).unwrap();
@@ -675,10 +647,6 @@ mod tests {
             "port_range_start": 3000,
             "port_range_end": 3009,
             "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code",
             "note": "Implementing auth feature with OAuth2 support"
         }"#;
 
@@ -737,39 +705,47 @@ mod tests {
     }
 
     #[test]
-    fn test_session_with_terminal_type() {
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: Some(12345),
-            process_name: Some("claude-code".to_string()),
-            process_start_time: Some(1234567890),
-            terminal_type: Some(TerminalType::ITerm),
-            terminal_window_id: Some("1596".to_string()),
-            command: "claude-code".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+    fn test_session_with_terminal_type_in_agent() {
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test_0".to_string(),
+            Some(12345),
+            Some("claude-code".to_string()),
+            Some(1234567890),
+            Some(TerminalType::ITerm),
+            Some("1596".to_string()),
+            "claude-code".to_string(),
+            "2024-01-01T00:00:00Z".to_string(),
+        )
+        .unwrap();
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![agent],
+        );
 
         // Test serialization round-trip
         let json = serde_json::to_string(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.terminal_type, Some(TerminalType::ITerm));
-        assert_eq!(deserialized.terminal_window_id, Some("1596".to_string()));
+        let latest = deserialized.latest_agent().unwrap();
+        assert_eq!(latest.terminal_type(), Some(&TerminalType::ITerm));
+        assert_eq!(latest.terminal_window_id(), Some("1596"));
     }
 
     #[test]
     fn test_session_backward_compatibility_terminal_type() {
-        // Test that sessions without terminal_type field can be deserialized
+        // Test that old session JSON (with removed fields) can still be deserialized
+        // serde ignores unknown fields by default
         let json_without_terminal_type = r#"{
             "id": "test/branch",
             "project_id": "test",
@@ -780,22 +756,17 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "port_range_start": 3000,
             "port_range_end": 3009,
-            "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code"
+            "port_count": 10
         }"#;
 
         let session: Session = serde_json::from_str(json_without_terminal_type).unwrap();
-        assert_eq!(session.terminal_type, None);
-        assert_eq!(session.terminal_window_id, None);
+        assert!(!session.has_agents());
     }
 
     #[test]
     fn test_session_backward_compatibility_terminal_window_id() {
-        // Test that sessions without terminal_window_id field can be deserialized
-        // (sessions created before window ID tracking was added)
+        // Test that old session JSON with removed fields still deserializes
+        // (serde ignores unknown fields like terminal_type, process_id, etc.)
         let json_without_window_id = r#"{
             "id": "test/branch",
             "project_id": "test",
@@ -806,17 +777,12 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "port_range_start": 3000,
             "port_range_end": 3009,
-            "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "terminal_type": "ITerm",
-            "command": "claude-code"
+            "port_count": 10
         }"#;
 
         let session: Session = serde_json::from_str(json_without_window_id).unwrap();
-        assert_eq!(session.terminal_type, Some(TerminalType::ITerm));
-        assert_eq!(session.terminal_window_id, None);
+        assert_eq!(session.branch, "branch");
+        assert!(!session.has_agents());
     }
 
     #[test]
@@ -848,27 +814,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
 
         assert!(session.is_worktree_valid());
 
@@ -878,27 +838,21 @@ mod tests {
 
     #[test]
     fn test_is_worktree_valid_with_missing_path() {
-        let session = Session {
-            id: "test/orphaned".to_string(),
-            project_id: "test".to_string(),
-            branch: "orphaned".to_string(),
-            worktree_path: PathBuf::from("/nonexistent/path/that/does/not/exist"),
-            agent: "claude".to_string(),
-            status: SessionStatus::Stopped,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test/orphaned".to_string(),
+            "test".to_string(),
+            "orphaned".to_string(),
+            PathBuf::from("/nonexistent/path/that/does/not/exist"),
+            "claude".to_string(),
+            SessionStatus::Stopped,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
 
         assert!(!session.is_worktree_valid());
     }
@@ -1228,11 +1182,7 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "port_range_start": 3000,
             "port_range_end": 3009,
-            "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code"
+            "port_count": 10
         }"#;
         let session: Session = serde_json::from_str(json).unwrap();
         assert!(!session.has_agents());
@@ -1240,26 +1190,20 @@ mod tests {
 
     #[test]
     fn test_session_with_multiple_agents_serialization() {
-        let session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: Some(12345),
-            process_name: Some("claude-code".to_string()),
-            process_start_time: Some(1234567890),
-            terminal_type: Some(TerminalType::Ghostty),
-            terminal_window_id: Some("kild-test".to_string()),
-            command: "claude-code".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![
                 AgentProcess::new(
                     "claude".to_string(),
                     "test_0".to_string(),
@@ -1285,7 +1229,7 @@ mod tests {
                 )
                 .unwrap(),
             ],
-        };
+        );
         let json = serde_json::to_string_pretty(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.agent_count(), 2);
@@ -1361,10 +1305,6 @@ mod tests {
             "port_range_start": 3000,
             "port_range_end": 3009,
             "port_count": 10,
-            "process_id": null,
-            "process_name": null,
-            "process_start_time": null,
-            "command": "claude-code",
             "agents": [
                 {
                     "agent": "claude",

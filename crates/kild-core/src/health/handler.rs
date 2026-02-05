@@ -71,21 +71,6 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
 
     let (process_metrics, process_running) = if let Some(pid) = running_pid {
         (get_metrics_for_pid(pid, &session.branch), true)
-    } else if let Some(pid) = session.process_id {
-        // Fallback to singular field for old sessions
-        match process::is_process_running(pid) {
-            Ok(true) => (get_metrics_for_pid(pid, &session.branch), true),
-            Ok(false) => (None, false),
-            Err(e) => {
-                warn!(
-                    event = "core.health.process_check_failed",
-                    pid = pid,
-                    session_branch = &session.branch,
-                    error = %e
-                );
-                (None, false)
-            }
-        }
     } else {
         (None, false)
     };

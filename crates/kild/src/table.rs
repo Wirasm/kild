@@ -52,7 +52,7 @@ impl TableFormatter {
 
     fn print_row(&self, session: &Session) {
         let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
-        let process_status = if session.has_agents() {
+        let process_status = {
             let mut running = 0;
             let mut errored = 0;
             for agent_proc in session.agents() {
@@ -74,27 +74,13 @@ impl TableFormatter {
                 }
             }
             let total = session.agent_count();
-            if errored > 0 {
+            if total == 0 {
+                "No PID".to_string()
+            } else if errored > 0 {
                 format!("{}run,{}err/{}", running, errored, total)
             } else {
                 format!("Run({}/{})", running, total)
             }
-        } else {
-            session.process_id.map_or("No PID".to_string(), |pid| {
-                match kild_core::process::is_process_running(pid) {
-                    Ok(true) => format!("Run({})", pid),
-                    Ok(false) => format!("Stop({})", pid),
-                    Err(e) => {
-                        tracing::warn!(
-                            event = "cli.list_process_check_failed",
-                            pid = pid,
-                            session_branch = &session.branch,
-                            error = %e
-                        );
-                        format!("Err({})", pid)
-                    }
-                }
-            })
         };
         let note_display = session.note.as_deref().unwrap_or("");
 
@@ -119,7 +105,10 @@ impl TableFormatter {
             truncate(&session.created_at, self.created_width),
             truncate(&port_range, self.port_width),
             truncate(&process_status, self.process_width),
-            truncate(&session.command, self.command_width),
+            truncate(
+                session.latest_agent().map_or("", |a| a.command()),
+                self.command_width
+            ),
             truncate(note_display, self.note_width),
             width_branch = self.branch_width,
             width_agent = self.agent_width,

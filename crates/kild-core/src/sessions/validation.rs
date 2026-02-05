@@ -130,51 +130,39 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Valid session with existing worktree path
-        let valid_session = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let valid_session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
         assert!(validate_session_structure(&valid_session).is_ok());
 
         // Invalid session - empty id
-        let invalid_session = Session {
-            id: "".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let invalid_session = Session::new(
+            "".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
         let result = validate_session_structure(&invalid_session);
         assert!(result.is_err());
         assert!(matches!(
@@ -183,27 +171,21 @@ mod tests {
         ));
 
         // Invalid session - empty worktree path
-        let invalid_session2 = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: PathBuf::new(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let invalid_session2 = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::new(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
         let result2 = validate_session_structure(&invalid_session2);
         assert!(result2.is_err());
         assert!(matches!(
@@ -214,27 +196,21 @@ mod tests {
         // Sessions with non-existing worktrees should pass structural validation.
         // Worktree existence is checked at operation time, not during loading.
         let nonexistent_path = temp_dir.join("nonexistent");
-        let session_missing_worktree = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: nonexistent_path.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some("2024-01-01T00:00:00Z".to_string()),
-            note: None,
-            agents: vec![],
-        };
+        let session_missing_worktree = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            nonexistent_path.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+        );
         assert!(validate_session_structure(&session_missing_worktree).is_ok());
 
         // Clean up
@@ -250,27 +226,21 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Test empty project_id
-        let session_empty_project = Session {
-            id: "test/branch".to_string(),
-            project_id: "".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_empty_project = Session::new(
+            "test/branch".to_string(),
+            "".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
         let result = validate_session_structure(&session_empty_project);
         assert!(matches!(
             result.unwrap_err(),
@@ -278,27 +248,21 @@ mod tests {
         ));
 
         // Test empty branch
-        let session_empty_branch = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_empty_branch = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
         let result = validate_session_structure(&session_empty_branch);
         assert!(matches!(
             result.unwrap_err(),
@@ -306,27 +270,21 @@ mod tests {
         ));
 
         // Test empty agent
-        let session_empty_agent = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_empty_agent = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
         let result = validate_session_structure(&session_empty_agent);
         assert!(matches!(
             result.unwrap_err(),
@@ -334,27 +292,21 @@ mod tests {
         ));
 
         // Test empty created_at
-        let session_empty_created_at = Session {
-            id: "test/branch".to_string(),
-            project_id: "test".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: temp_dir.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Active,
-            created_at: "".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        };
+        let session_empty_created_at = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            temp_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        );
         let result = validate_session_structure(&session_empty_created_at);
         assert!(matches!(
             result.unwrap_err(),

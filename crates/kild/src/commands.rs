@@ -534,12 +534,15 @@ fn handle_restart_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         Ok(session) => {
             println!("✅ KILD '{}' restarted successfully!", branch);
             println!("   Agent: {}", session.agent);
-            println!("   Process ID: {:?}", session.process_id);
+            println!(
+                "   Process ID: {:?}",
+                session.latest_agent().and_then(|a| a.process_id())
+            );
             println!("   Worktree: {}", session.worktree_path.display());
             info!(
                 event = "cli.restart_completed",
                 branch = branch,
-                process_id = session.process_id
+                process_id = session.latest_agent().and_then(|a| a.process_id())
             );
             Ok(())
         }
@@ -571,7 +574,7 @@ fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         Ok(session) => {
             println!("✅ Opened new agent in kild '{}'", branch);
             println!("   Agent: {}", session.agent);
-            if let Some(pid) = session.process_id {
+            if let Some(pid) = session.latest_agent().and_then(|a| a.process_id()) {
                 println!("   PID: {}", pid);
             }
             info!(
@@ -860,18 +863,16 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
         }
     };
 
-    // 2. Get terminal type and window ID (prefer latest agent from agents vec)
-    let (term_type, window_id) = if let Some(latest) = session.latest_agent() {
-        (
-            latest.terminal_type().cloned(),
-            latest.terminal_window_id().map(|s| s.to_string()),
-        )
-    } else {
-        (
-            session.terminal_type.clone(),
-            session.terminal_window_id.clone(),
-        )
-    };
+    // 2. Get terminal type and window ID from latest agent
+    let (term_type, window_id) = session
+        .latest_agent()
+        .map(|latest| {
+            (
+                latest.terminal_type().cloned(),
+                latest.terminal_window_id().map(|s| s.to_string()),
+            )
+        })
+        .unwrap_or((None, None));
 
     let terminal_type = term_type.ok_or_else(|| {
         eprintln!("❌ No terminal type recorded for kild '{}'", branch);
@@ -1096,7 +1097,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 info!(
                     event = "cli.status_completed",
                     branch = branch,
-                    process_id = session.process_id
+                    agent_count = session.agent_count()
                 );
                 return Ok(());
             }
@@ -1140,31 +1141,8 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                     println!("│   {}. {:<6} {:<38} │", i + 1, agent_proc.agent(), status);
                 }
             } else {
-                // Fallback: singular field display for old sessions
                 println!("│ Agent:       {:<47} │", session.agent);
-                if let Some(pid) = session.process_id {
-                    match process::is_process_running(pid) {
-                        Ok(true) => {
-                            println!("│ Process:     {:<47} │", format!("Running (PID: {})", pid));
-                        }
-                        Ok(false) => {
-                            println!("│ Process:     {:<47} │", format!("Stopped (PID: {})", pid));
-                        }
-                        Err(e) => {
-                            warn!(
-                                event = "cli.status.process_check_failed",
-                                pid = pid,
-                                error = %e
-                            );
-                            println!(
-                                "│ Process:     {:<47} │",
-                                format!("Error checking PID {}: {}", pid, e)
-                            );
-                        }
-                    }
-                } else {
-                    println!("│ Process:     {:<47} │", "No PID tracked");
-                }
+                println!("│ Process:     {:<47} │", "No agents tracked");
             }
 
             println!("└─────────────────────────────────────────────────────────────┘");
@@ -1172,7 +1150,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
             info!(
                 event = "cli.status_completed",
                 branch = branch,
-                process_id = session.process_id
+                agent_count = session.agent_count()
             );
 
             Ok(())

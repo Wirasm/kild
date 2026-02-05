@@ -318,27 +318,21 @@ mod tests {
     }
 
     fn make_session(id: &str, branch: &str) -> Session {
-        Session {
-            id: id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        }
+        Session::new(
+            id.to_string(),
+            "test-project".to_string(),
+            branch.to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        )
     }
 
     fn make_display(id: &str, branch: &str, process_status: ProcessStatus) -> SessionInfo {

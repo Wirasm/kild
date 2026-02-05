@@ -642,26 +642,22 @@ mod tests {
 
     #[test]
     fn test_filtered_displays_no_active_project() {
-        let make_session = |id: &str, project_id: &str| Session {
-            id: id.to_string(),
-            branch: format!("branch-{}", id),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: project_id.to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, project_id: &str| {
+            Session::new(
+                id.to_string(),
+                project_id.to_string(),
+                format!("branch-{}", id),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -693,26 +689,22 @@ mod tests {
         let project_id_b =
             kild_core::projects::generate_project_id(&PathBuf::from("/other/project"));
 
-        let make_session = |id: &str, project_id: &str| Session {
-            id: id.to_string(),
-            branch: format!("branch-{}", id),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: project_id.to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, project_id: &str| {
+            Session::new(
+                id.to_string(),
+                project_id.to_string(),
+                format!("branch-{}", id),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -756,26 +748,22 @@ mod tests {
 
     #[test]
     fn test_filtered_displays_returns_empty_when_no_matching_project() {
-        let make_session = |id: &str, project_id: &str| Session {
-            id: id.to_string(),
-            branch: format!("branch-{}", id),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: project_id.to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, project_id: &str| {
+            Session::new(
+                id.to_string(),
+                project_id.to_string(),
+                format!("branch-{}", id),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -801,26 +789,22 @@ mod tests {
 
     #[test]
     fn test_selected_kild_returns_none_when_kild_removed_after_refresh() {
-        let make_session = |id: &str| Session {
-            id: id.to_string(),
-            branch: format!("branch-{}", id),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str| {
+            Session::new(
+                id.to_string(),
+                "test-project".to_string(),
+                format!("branch-{}", id),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -848,26 +832,22 @@ mod tests {
 
     #[test]
     fn test_selected_kild_persists_after_refresh_when_kild_still_exists() {
-        let make_session = |id: &str| Session {
-            id: id.to_string(),
-            branch: format!("branch-{}", id),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str| {
+            Session::new(
+                id.to_string(),
+                "test-project".to_string(),
+                format!("branch-{}", id),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -913,26 +893,22 @@ mod tests {
 
     #[test]
     fn test_destroy_should_clear_selection_when_selected_kild_destroyed() {
-        let make_session = |id: &str, branch: &str| Session {
-            id: id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, branch: &str| {
+            Session::new(
+                id.to_string(),
+                "test-project".to_string(),
+                branch.to_string(),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -975,26 +951,22 @@ mod tests {
 
     #[test]
     fn test_destroy_preserves_selection_when_different_kild_destroyed() {
-        let make_session = |id: &str, branch: &str| Session {
-            id: id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
+        let make_session = |id: &str, branch: &str| {
+            Session::new(
+                id.to_string(),
+                "test-project".to_string(),
+                branch.to_string(),
+                PathBuf::from("/tmp/test"),
+                "claude".to_string(),
+                SessionStatus::Active,
+                "2024-01-01T00:00:00Z".to_string(),
+                0,
+                0,
+                0,
+                None,
+                None,
+                vec![],
+            )
         };
 
         let mut state = AppState::test_new();
@@ -1039,27 +1011,21 @@ mod tests {
     // --- apply_events tests ---
 
     fn make_session_for_event_test(id: &str, branch: &str) -> Session {
-        Session {
-            id: id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            agent: "claude".to_string(),
-            project_id: "test-project".to_string(),
-            status: SessionStatus::Active,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            port_range_start: 0,
-            port_range_end: 0,
-            port_count: 0,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: String::new(),
-            last_activity: None,
-            note: None,
-            agents: vec![],
-        }
+        Session::new(
+            id.to_string(),
+            "test-project".to_string(),
+            branch.to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+        )
     }
 
     #[test]

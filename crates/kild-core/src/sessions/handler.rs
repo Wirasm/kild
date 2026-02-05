@@ -34,9 +34,7 @@ fn capture_process_metadata(
     };
 
     match crate::process::get_process_info(pid) {
-        Ok(info) => {
-            return (Some(info.name), Some(info.start_time));
-        }
+        Ok(info) => (Some(info.name), Some(info.start_time)),
         Err(e) => {
             warn!(
                 event = %format!("core.session.{}_process_info_failed", event_prefix),
@@ -44,13 +42,12 @@ fn capture_process_metadata(
                 error = %e,
                 "Failed to get process metadata after spawn - using spawn result metadata"
             );
+            (
+                spawn_result.process_name.clone(),
+                spawn_result.process_start_time,
+            )
         }
     }
-
-    (
-        spawn_result.process_name.clone(),
-        spawn_result.process_start_time,
-    )
 }
 
 /// Clean up PID files for a session (best-effort).
@@ -59,35 +56,43 @@ fn capture_process_metadata(
 /// legacy sessions (session-level PID file). Failures are logged at debug
 /// level since PID file cleanup is best-effort.
 fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, operation: &str) {
-    if session.has_agents() {
-        for agent_proc in session.agents() {
-            // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
-            let pid_key = match agent_proc.spawn_id().is_empty() {
-                true => session.id.clone(), // Backward compat: old sessions without spawn_id
-                false => agent_proc.spawn_id().to_string(),
-            };
-            let pid_file = get_pid_file_path(kild_dir, &pid_key);
-            match delete_pid_file(&pid_file) {
-                Ok(()) => {
-                    debug!(
-                        event = %format!("core.session.{}_pid_file_cleaned", operation),
-                        session_id = session.id,
-                        pid_file = %pid_file.display()
-                    );
-                }
-                Err(e) => {
-                    debug!(
-                        event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
-                        session_id = session.id,
-                        pid_file = %pid_file.display(),
-                        error = %e
-                    );
-                }
+    if !session.has_agents() {
+        // Legacy session (pre-multi-agent) — attempt session-level PID file cleanup
+        warn!(
+            event = "core.session.pid_cleanup_no_agents",
+            session_id = session.id,
+            operation = operation,
+            "Session has no tracked agents, attempting session-level PID file cleanup"
+        );
+        let pid_file = get_pid_file_path(kild_dir, &session.id);
+        match delete_pid_file(&pid_file) {
+            Ok(()) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleaned", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display()
+                );
+            }
+            Err(e) => {
+                debug!(
+                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                    session_id = session.id,
+                    pid_file = %pid_file.display(),
+                    error = %e
+                );
             }
         }
-    } else {
-        // Fallback: session-level PID file for old sessions with empty agents vec
-        let pid_file = get_pid_file_path(kild_dir, &session.id);
+        return;
+    }
+
+    for agent_proc in session.agents() {
+        // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
+        let pid_key = if agent_proc.spawn_id().is_empty() {
+            session.id.clone() // Backward compat: old sessions without spawn_id
+        } else {
+            agent_proc.spawn_id().to_string()
+        };
+        let pid_file = get_pid_file_path(kild_dir, &pid_key);
         match delete_pid_file(&pid_file) {
             Ok(()) => {
                 debug!(
@@ -249,27 +254,21 @@ pub fn create_session(
         command.clone(),
         now.clone(),
     )?;
-    let session = Session {
-        id: session_id.clone(),
-        project_id: project.id,
-        branch: validated.name.clone(),
-        worktree_path: worktree.path,
-        agent: validated.agent.clone(),
-        status: SessionStatus::Active,
-        created_at: now.clone(),
-        last_activity: Some(now),
-        port_range_start: port_start,
-        port_range_end: port_end,
-        port_count: config.default_port_count,
-        process_id: spawn_result.process_id,
-        process_name: spawn_result.process_name.clone(),
-        process_start_time: spawn_result.process_start_time,
-        terminal_type: Some(spawn_result.terminal_type.clone()),
-        terminal_window_id: spawn_result.terminal_window_id.clone(),
-        command,
-        note: request.note.clone(),
-        agents: vec![initial_agent],
-    };
+    let session = Session::new(
+        session_id.clone(),
+        project.id,
+        validated.name.clone(),
+        worktree.path,
+        validated.agent.clone(),
+        SessionStatus::Active,
+        now.clone(),
+        port_start,
+        port_end,
+        config.default_port_count,
+        Some(now),
+        request.note.clone(),
+        vec![initial_agent],
+    );
 
     // 7. Save session to file
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
@@ -279,8 +278,8 @@ pub fn create_session(
         session_id = session_id,
         branch = validated.name,
         agent = session.agent,
-        process_id = session.process_id,
-        process_name = ?session.process_name
+        process_id = session.latest_agent().and_then(|a| a.process_id()),
+        process_name = ?session.latest_agent().map(|a| a.process_name())
     );
 
     Ok(session)
@@ -360,12 +359,21 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         worktree_path = %session.worktree_path.display(),
         port_range_start = session.port_range_start,
         port_range_end = session.port_range_end,
-        process_id = session.process_id
+        agent_count = session.agent_count()
     );
 
     // 2. Close all terminal windows and kill all processes
-    if session.has_agents() {
-        // Multi-agent path: close all terminal windows (fire-and-forget)
+    {
+        if !session.has_agents() {
+            warn!(
+                event = "core.session.destroy_no_agents",
+                session_id = session.id,
+                branch = name,
+                "Session has no tracked agents — skipping process/terminal cleanup"
+            );
+        }
+
+        // Close all terminal windows (fire-and-forget)
         for agent_proc in session.agents() {
             if let (Some(terminal_type), Some(window_id)) =
                 (agent_proc.terminal_type(), agent_proc.terminal_window_id())
@@ -447,50 +455,6 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 pid: first_pid,
                 message,
             });
-        }
-    } else {
-        // Fallback: singular-field logic for old sessions with empty agents vec
-        if let Some(ref terminal_type) = session.terminal_type {
-            info!(
-                event = "core.session.destroy_close_terminal",
-                terminal_type = %terminal_type,
-                window_id = ?session.terminal_window_id
-            );
-            terminal::handler::close_terminal(terminal_type, session.terminal_window_id.as_deref());
-        }
-
-        if let Some(pid) = session.process_id {
-            info!(event = "core.session.destroy_kill_started", pid = pid);
-            match crate::process::kill_process(
-                pid,
-                session.process_name.as_deref(),
-                session.process_start_time,
-            ) {
-                Ok(()) => {
-                    info!(event = "core.session.destroy_kill_completed", pid = pid);
-                }
-                Err(crate::process::ProcessError::NotFound { .. }) => {
-                    info!(event = "core.session.destroy_kill_already_dead", pid = pid);
-                }
-                Err(e) => {
-                    if force {
-                        warn!(
-                            event = "core.session.destroy_kill_failed_force_continue",
-                            pid = pid,
-                            error = %e
-                        );
-                    } else {
-                        error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
-                        return Err(SessionError::ProcessKillFailed {
-                            pid,
-                            message: format!(
-                                "Process still running. Kill it manually or use --force flag: {}",
-                                e
-                            ),
-                        });
-                    }
-                }
-            }
         }
     }
 
@@ -959,18 +923,17 @@ pub fn restart_session(
         event = "core.session.restart_found",
         session_id = session.id,
         current_agent = session.agent,
-        process_id = session.process_id
+        agent_count = session.agent_count()
     );
 
-    // 2. Kill process if PID is tracked
-    if let Some(pid) = session.process_id {
+    // 2. Kill process if PID is tracked (use latest agent from agents vec)
+    if let Some(latest) = session.latest_agent()
+        && let Some(pid) = latest.process_id()
+    {
         info!(event = "core.session.restart_kill_started", pid = pid);
 
-        match crate::process::kill_process(
-            pid,
-            session.process_name.as_deref(),
-            session.process_start_time,
-        ) {
+        match crate::process::kill_process(pid, latest.process_name(), latest.process_start_time())
+        {
             Ok(()) => info!(event = "core.session.restart_kill_completed", pid = pid),
             Err(crate::process::ProcessError::NotFound { .. }) => {
                 info!(
@@ -1090,11 +1053,6 @@ pub fn restart_session(
     )?;
 
     session.agent = agent;
-    session.process_id = spawn_result.process_id;
-    session.process_name = process_name;
-    session.process_start_time = process_start_time;
-    session.terminal_type = Some(spawn_result.terminal_type.clone());
-    session.terminal_window_id = spawn_result.terminal_window_id.clone();
     session.status = SessionStatus::Active;
     session.last_activity = Some(now);
     session.clear_agents();
@@ -1108,7 +1066,7 @@ pub fn restart_session(
         session_id = session.id,
         branch = name,
         agent = session.agent,
-        process_id = session.process_id,
+        process_id = session.latest_agent().and_then(|a| a.process_id()),
         duration_ms = start_time.elapsed().as_millis()
     );
 
@@ -1225,18 +1183,8 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
         now.clone(),
     )?;
 
-    // Keep singular fields updated to latest for backward compat
-    session.process_id = spawn_result.process_id;
-    session.process_name = process_name;
-    session.process_start_time = process_start_time;
-    session.terminal_type = Some(spawn_result.terminal_type.clone());
-    session.terminal_window_id = spawn_result.terminal_window_id.clone();
-    session.command = command;
-    session.agent = agent.clone();
     session.status = SessionStatus::Active;
     session.last_activity = Some(now);
-
-    // Track all agents for proper cleanup
     session.add_agent(new_agent);
 
     // 7. Save updated session
@@ -1245,7 +1193,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
     info!(
         event = "core.session.open_completed",
         session_id = session.id,
-        process_id = session.process_id
+        agent_count = session.agent_count()
     );
 
     Ok(session)
@@ -1274,8 +1222,17 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     );
 
     // 2. Close all terminal windows and kill all processes
-    if session.has_agents() {
-        // Multi-agent path: iterate all tracked agents
+    {
+        if !session.has_agents() {
+            warn!(
+                event = "core.session.stop_no_agents",
+                session_id = session.id,
+                branch = session.branch,
+                "Session has no tracked agents — skipping process/terminal cleanup"
+            );
+        }
+
+        // Iterate all tracked agents
         for agent_proc in session.agents() {
             if let (Some(terminal_type), Some(window_id)) =
                 (agent_proc.terminal_type(), agent_proc.terminal_window_id())
@@ -1348,38 +1305,6 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                 message,
             });
         }
-    } else {
-        // Fallback: singular-field logic for old sessions with empty agents vec
-        if let Some(ref terminal_type) = session.terminal_type {
-            info!(
-                event = "core.session.stop_close_terminal",
-                terminal_type = ?terminal_type
-            );
-            terminal::handler::close_terminal(terminal_type, session.terminal_window_id.as_deref());
-        }
-
-        if let Some(pid) = session.process_id {
-            info!(event = "core.session.stop_kill_started", pid = pid);
-            match crate::process::kill_process(
-                pid,
-                session.process_name.as_deref(),
-                session.process_start_time,
-            ) {
-                Ok(()) => {
-                    info!(event = "core.session.stop_kill_completed", pid = pid);
-                }
-                Err(crate::process::ProcessError::NotFound { .. }) => {
-                    info!(event = "core.session.stop_kill_already_dead", pid = pid);
-                }
-                Err(e) => {
-                    error!(event = "core.session.stop_kill_failed", pid = pid, error = %e);
-                    return Err(SessionError::ProcessKillFailed {
-                        pid,
-                        message: e.to_string(),
-                    });
-                }
-            }
-        }
     }
 
     // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
@@ -1387,9 +1312,6 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     // 4. Clear process info and set status to Stopped
     session.clear_agents();
-    session.process_id = None;
-    session.process_name = None;
-    session.process_start_time = None;
     session.status = SessionStatus::Stopped;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
@@ -1505,27 +1427,21 @@ mod tests {
         use crate::sessions::persistence;
         use crate::sessions::types::{Session, SessionStatus};
 
-        let session = Session {
-            id: "test-project_test-branch".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "test-branch".to_string(),
-            worktree_path: temp_dir.join("worktree").to_path_buf(),
-            agent: "test-agent".to_string(),
-            status: SessionStatus::Active,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test-project_test-branch".to_string(),
+            "test-project".to_string(),
+            "test-branch".to_string(),
+            temp_dir.join("worktree").to_path_buf(),
+            "test-agent".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![],
+        );
 
         // Create worktree directory so validation passes
         fs::create_dir_all(&session.worktree_path).expect("Failed to create worktree dir");
@@ -1606,27 +1522,33 @@ mod tests {
 
         for (terminal_type, branch_name) in &terminal_test_cases {
             // Use underscore in id to avoid filesystem issues with slash
-            let session = Session {
-                id: format!("test-project_{}", branch_name),
-                project_id: "test-project".to_string(),
-                branch: branch_name.to_string(),
-                worktree_path: worktree_dir.clone(),
-                agent: "test-agent".to_string(),
-                status: SessionStatus::Active,
-                created_at: chrono::Utc::now().to_rfc3339(),
-                port_range_start: 3000,
-                port_range_end: 3009,
-                port_count: 10,
-                process_id: Some(12345),
-                process_name: Some("test-agent".to_string()),
-                process_start_time: Some(1234567890),
-                terminal_type: Some(terminal_type.clone()),
-                terminal_window_id: Some("1596".to_string()),
-                command: "test-command".to_string(),
-                last_activity: Some(chrono::Utc::now().to_rfc3339()),
-                note: None,
-                agents: vec![],
-            };
+            let agent = AgentProcess::new(
+                "test-agent".to_string(),
+                format!("test-project_{}_{}", branch_name, 0),
+                Some(12345),
+                Some("test-agent".to_string()),
+                Some(1234567890),
+                Some(terminal_type.clone()),
+                Some("1596".to_string()),
+                "test-command".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+            let session = Session::new(
+                format!("test-project_{}", branch_name),
+                "test-project".to_string(),
+                branch_name.to_string(),
+                worktree_dir.clone(),
+                "test-agent".to_string(),
+                SessionStatus::Active,
+                chrono::Utc::now().to_rfc3339(),
+                3000,
+                3009,
+                10,
+                Some(chrono::Utc::now().to_rfc3339()),
+                None,
+                vec![agent],
+            );
 
             persistence::save_session_to_file(&session, &sessions_dir)
                 .expect("Failed to save session");
@@ -1635,8 +1557,11 @@ mod tests {
                 .expect("Failed to find session")
                 .expect("Session not found");
 
+            let loaded_terminal_type = loaded
+                .latest_agent()
+                .and_then(|a| a.terminal_type().cloned());
             assert_eq!(
-                loaded.terminal_type,
+                loaded_terminal_type,
                 Some(terminal_type.clone()),
                 "terminal_type {:?} must round-trip correctly",
                 terminal_type
@@ -1680,28 +1605,34 @@ mod tests {
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
         fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
 
-        // Create session with terminal_type (simulating what create_session does)
-        let session = Session {
-            id: "test-project_destroy-test".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "destroy-test".to_string(),
-            worktree_path: worktree_dir.clone(),
-            agent: "test-agent".to_string(),
-            status: SessionStatus::Active,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: None, // No process to kill
-            process_name: None,
-            process_start_time: None,
-            terminal_type: Some(TerminalType::ITerm), // Key: terminal_type is set
-            terminal_window_id: Some("1596".to_string()),
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        // Create session with terminal_type in agent (simulating what create_session does)
+        let agent = AgentProcess::new(
+            "test-agent".to_string(),
+            "test-project_destroy-test_0".to_string(),
+            None, // No process to kill
+            None,
+            None,
+            Some(TerminalType::ITerm), // Key: terminal_type is set
+            Some("1596".to_string()),
+            "test-command".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        let session = Session::new(
+            "test-project_destroy-test".to_string(),
+            "test-project".to_string(),
+            "destroy-test".to_string(),
+            worktree_dir.clone(),
+            "test-agent".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![agent],
+        );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
@@ -1709,7 +1640,12 @@ mod tests {
         let found = persistence::find_session_by_name(&sessions_dir, "destroy-test")
             .expect("Failed to find session")
             .expect("Session should exist");
-        assert_eq!(found.terminal_type, Some(TerminalType::ITerm));
+        assert_eq!(
+            found
+                .latest_agent()
+                .and_then(|a| a.terminal_type().cloned()),
+            Some(TerminalType::ITerm)
+        );
 
         // Remove session file (simulating destroy flow without git worktree dependency)
         persistence::remove_session_file(&sessions_dir, &session.id)
@@ -1750,39 +1686,30 @@ mod tests {
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
         fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
 
-        // Create an "old" session WITHOUT terminal_type (simulating pre-feature sessions)
-        let session = Session {
-            id: "test-project_compat-test".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "compat-test".to_string(),
-            worktree_path: worktree_dir.clone(),
-            agent: "test-agent".to_string(),
-            status: SessionStatus::Active,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None, // Key: terminal_type is NOT set (old session)
-            terminal_window_id: None, // Key: terminal_window_id is NOT set (old session)
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        // Create an "old" session WITHOUT agents (simulating pre-feature sessions)
+        let session = Session::new(
+            "test-project_compat-test".to_string(),
+            "test-project".to_string(),
+            "compat-test".to_string(),
+            worktree_dir.clone(),
+            "test-agent".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![], // No agents (old session)
+        );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
-        // Verify session can be loaded with terminal_type = None
+        // Verify session can be loaded without agents
         let found = persistence::find_session_by_name(&sessions_dir, "compat-test")
             .expect("Failed to find session")
             .expect("Session should exist");
-        assert_eq!(
-            found.terminal_type, None,
-            "Old sessions should have terminal_type = None"
-        );
+        assert!(!found.has_agents(), "Old sessions should have no agents");
 
         // Remove session (simulating destroy flow)
         persistence::remove_session_file(&sessions_dir, &session.id)
@@ -1824,35 +1751,54 @@ mod tests {
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
         fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
 
-        // Create a session with ITerm
-        let mut session = Session {
-            id: "test-project_restart-test".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "restart-test".to_string(),
-            worktree_path: worktree_dir.clone(),
-            agent: "test-agent".to_string(),
-            status: SessionStatus::Active,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: Some(12345),
-            process_name: Some("test-agent".to_string()),
-            process_start_time: Some(1234567890),
-            terminal_type: Some(TerminalType::ITerm),
-            terminal_window_id: Some("1596".to_string()),
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        // Create a session with ITerm agent
+        let iterm_agent = AgentProcess::new(
+            "test-agent".to_string(),
+            "test-project_restart-test_0".to_string(),
+            Some(12345),
+            Some("test-agent".to_string()),
+            Some(1234567890),
+            Some(TerminalType::ITerm),
+            Some("1596".to_string()),
+            "test-command".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        let mut session = Session::new(
+            "test-project_restart-test".to_string(),
+            "test-project".to_string(),
+            "restart-test".to_string(),
+            worktree_dir.clone(),
+            "test-agent".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![iterm_agent],
+        );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
-        // Simulate what restart_session does: update terminal_type and save
-        session.terminal_type = Some(TerminalType::Ghostty);
+        // Simulate what restart_session does: clear agents, add new agent with Ghostty
+        let ghostty_agent = AgentProcess::new(
+            "test-agent".to_string(),
+            "test-project_restart-test_0".to_string(),
+            Some(12345),
+            Some("test-agent".to_string()),
+            Some(1234567890),
+            Some(TerminalType::Ghostty),
+            Some("kild-restart-test".to_string()),
+            "test-command".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
         session.status = SessionStatus::Active;
         session.last_activity = Some(chrono::Utc::now().to_rfc3339());
+        session.clear_agents();
+        session.add_agent(ghostty_agent);
 
         persistence::save_session_to_file(&session, &sessions_dir)
             .expect("Failed to save updated session");
@@ -1863,7 +1809,9 @@ mod tests {
             .expect("Session should exist");
 
         assert_eq!(
-            loaded.terminal_type,
+            loaded
+                .latest_agent()
+                .and_then(|a| a.terminal_type().cloned()),
             Some(TerminalType::Ghostty),
             "terminal_type should be updated to Ghostty after restart"
         );
@@ -1920,28 +1868,34 @@ mod tests {
         fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
         fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
 
-        // Create a session with Active status and process info
-        let session = Session {
-            id: "test-project_stop-test".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "stop-test".to_string(),
-            worktree_path: worktree_dir.clone(),
-            agent: "test-agent".to_string(),
-            status: SessionStatus::Active,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: Some(99999), // Fake PID that won't exist
-            process_name: Some("fake-process".to_string()),
-            process_start_time: Some(1234567890),
-            terminal_type: Some(TerminalType::Ghostty),
-            terminal_window_id: Some("test-window".to_string()),
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        // Create a session with Active status and process info in agent
+        let agent = AgentProcess::new(
+            "test-agent".to_string(),
+            "test-project_stop-test_0".to_string(),
+            Some(99999), // Fake PID that won't exist
+            Some("fake-process".to_string()),
+            Some(1234567890),
+            Some(TerminalType::Ghostty),
+            Some("test-window".to_string()),
+            "test-command".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        let session = Session::new(
+            "test-project_stop-test".to_string(),
+            "test-project".to_string(),
+            "stop-test".to_string(),
+            worktree_dir.clone(),
+            "test-agent".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![agent],
+        );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
 
@@ -1950,13 +1904,11 @@ mod tests {
             .expect("Failed to find session")
             .expect("Session should exist");
         assert_eq!(before.status, SessionStatus::Active);
-        assert!(before.process_id.is_some());
+        assert!(before.has_agents());
 
         // Simulate stop by directly updating session (avoids process kill complexity)
         let mut stopped_session = before;
-        stopped_session.process_id = None;
-        stopped_session.process_name = None;
-        stopped_session.process_start_time = None;
+        stopped_session.clear_agents();
         stopped_session.status = SessionStatus::Stopped;
         stopped_session.last_activity = Some(chrono::Utc::now().to_rfc3339());
         persistence::save_session_to_file(&stopped_session, &sessions_dir)
@@ -1971,12 +1923,7 @@ mod tests {
             SessionStatus::Stopped,
             "Status should be Stopped"
         );
-        assert!(after.process_id.is_none(), "process_id should be None");
-        assert!(after.process_name.is_none(), "process_name should be None");
-        assert!(
-            after.process_start_time.is_none(),
-            "process_start_time should be None"
-        );
+        assert!(!after.has_agents(), "agents should be cleared");
         // Worktree should still exist
         assert!(worktree_dir.exists(), "Worktree should be preserved");
 
@@ -2155,27 +2102,21 @@ mod tests {
 
         // Create a session pointing to a worktree that does NOT exist
         let missing_worktree = temp_dir.join("worktree_does_not_exist");
-        let session = Session {
-            id: "test-project_orphaned-session".to_string(),
-            project_id: "test-project".to_string(),
-            branch: "orphaned-session".to_string(),
-            worktree_path: missing_worktree.clone(),
-            agent: "claude".to_string(),
-            status: SessionStatus::Stopped,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            port_range_start: 3000,
-            port_range_end: 3009,
-            port_count: 10,
-            process_id: None,
-            process_name: None,
-            process_start_time: None,
-            terminal_type: None,
-            terminal_window_id: None,
-            command: "test-command".to_string(),
-            last_activity: Some(chrono::Utc::now().to_rfc3339()),
-            note: None,
-            agents: vec![],
-        };
+        let session = Session::new(
+            "test-project_orphaned-session".to_string(),
+            "test-project".to_string(),
+            "orphaned-session".to_string(),
+            missing_worktree.clone(),
+            "claude".to_string(),
+            SessionStatus::Stopped,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            Some(chrono::Utc::now().to_rfc3339()),
+            None,
+            vec![],
+        );
 
         // Save the session
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
