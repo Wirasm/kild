@@ -881,9 +881,11 @@ fn build_terminal_editor_command(
 ) -> String {
     let escaped_path =
         kild_core::terminal::common::escape::shell_escape(&worktree_path.display().to_string());
-    match flags {
-        Some(flags) => format!("{} {} {}", editor, flags, escaped_path),
-        None => format!("{} {}", editor, escaped_path),
+
+    if let Some(flags) = flags {
+        format!("{} {} {}", editor, flags, escaped_path)
+    } else {
+        format!("{} {}", editor, escaped_path)
     }
 }
 
@@ -943,7 +945,6 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
     // 4. Spawn editor
     if config.editor.terminal() {
-        // Terminal-based editor: spawn inside a terminal window
         let editor_command =
             build_terminal_editor_command(&editor, config.editor.flags(), &session.worktree_path);
 
@@ -979,7 +980,6 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             }
         }
     } else {
-        // GUI editor: spawn directly
         let mut cmd =
             build_gui_editor_command(&editor, config.editor.flags(), &session.worktree_path);
 
