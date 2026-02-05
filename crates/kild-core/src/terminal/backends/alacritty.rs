@@ -158,6 +158,23 @@ impl TerminalBackend for AlacrittyBackend {
     }
 
     #[cfg(target_os = "linux")]
+    fn hide_window(&self, window_id: &str) -> Result<(), TerminalError> {
+        debug!(
+            event = "core.terminal.hide_alacritty_started",
+            window_id = %window_id
+        );
+
+        hyprland::hide_window_by_title(window_id)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn hide_window(&self, _window_id: &str) -> Result<(), TerminalError> {
+        Err(TerminalError::HideFailed {
+            message: "Alacritty hide not supported on this platform".to_string(),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
     fn is_window_open(&self, window_id: &str) -> Result<Option<bool>, TerminalError> {
         debug!(
             event = "core.terminal.alacritty_window_check_started",

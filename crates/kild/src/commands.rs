@@ -63,6 +63,29 @@ fn collect_git_stats(worktree_path: &std::path::Path, branch: &str) -> Option<Gi
 /// Branch name and error message for a failed operation
 type FailedOperation = (String, String);
 
+/// Extract terminal type and window ID from a session's latest agent.
+///
+/// Returns a tuple of (TerminalType, window_id) or an error message if either is missing.
+fn get_terminal_info(
+    session: &kild_core::Session,
+) -> Result<(kild_core::terminal::types::TerminalType, String), String> {
+    let latest = session
+        .latest_agent()
+        .ok_or_else(|| "No agent recorded for this kild".to_string())?;
+
+    let terminal_type = latest
+        .terminal_type()
+        .cloned()
+        .ok_or_else(|| "No terminal type recorded".to_string())?;
+
+    let window_id = latest
+        .terminal_window_id()
+        .ok_or_else(|| "No window ID recorded".to_string())?
+        .to_string();
+
+    Ok((terminal_type, window_id))
+}
+
 /// Load configuration with warning on errors.
 ///
 /// Falls back to defaults if config loading fails, but notifies the user via:
@@ -115,6 +138,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("stop", sub_matches)) => handle_stop_command(sub_matches),
         Some(("code", sub_matches)) => handle_code_command(sub_matches),
         Some(("focus", sub_matches)) => handle_focus_command(sub_matches),
+        Some(("hide", sub_matches)) => handle_hide_command(sub_matches),
         Some(("diff", sub_matches)) => handle_diff_command(sub_matches),
         Some(("commits", sub_matches)) => handle_commits_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
@@ -228,6 +252,7 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                     git_stats: Option<GitStatsResponse>,
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
+                    terminal_window_title: Option<String>,
                 }
 
                 let enriched: Vec<EnrichedSession> = sessions
@@ -235,11 +260,15 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                     .map(|session| {
                         let git_stats = collect_git_stats(&session.worktree_path, &session.branch);
                         let status_info = session_handler::read_agent_status(&session.id);
+                        let terminal_window_title = session
+                            .latest_agent()
+                            .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
                         EnrichedSession {
                             session,
                             git_stats,
                             agent_status: status_info.as_ref().map(|i| i.status.to_string()),
                             agent_status_updated_at: status_info.map(|i| i.updated_at),
+                            terminal_window_title,
                         }
                     })
                     .collect();
@@ -1077,6 +1106,131 @@ fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     }
 }
 
+fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    if matches.get_flag("all") {
+        return handle_hide_all();
+    }
+
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required (or use --all)")?;
+
+    info!(event = "cli.hide_started", branch = branch);
+
+    let session = match session_handler::get_session(branch) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            error!(event = "cli.hide_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            return Err(e.into());
+        }
+    };
+
+    let (terminal_type, window_id) = match get_terminal_info(&session) {
+        Ok(info) => info,
+        Err(msg) => {
+            eprintln!("❌ {}: {}", msg, branch);
+            error!(event = "cli.hide_failed", branch = branch, error = %msg);
+            return Err(msg.into());
+        }
+    };
+
+    match kild_core::terminal_ops::hide_terminal(&terminal_type, &window_id) {
+        Ok(()) => {
+            println!("✅ Hidden kild '{}' terminal window", branch);
+            info!(event = "cli.hide_completed", branch = branch);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to hide terminal for '{}': {}", branch, e);
+            error!(event = "cli.hide_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Handle `kild hide --all` - hide all active kild terminal windows
+fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
+    info!(event = "cli.hide_all_started");
+
+    let sessions = session_handler::list_sessions()?;
+    let active: Vec<_> = sessions
+        .into_iter()
+        .filter(|s| s.status == SessionStatus::Active)
+        .collect();
+
+    if active.is_empty() {
+        println!("No kild windows to hide.");
+        info!(event = "cli.hide_all_completed", hidden = 0, failed = 0);
+        return Ok(());
+    }
+
+    let mut hidden: Vec<String> = Vec::new();
+    let mut errors: Vec<FailedOperation> = Vec::new();
+
+    for session in active {
+        let (terminal_type, window_id) = match get_terminal_info(&session) {
+            Ok(info) => info,
+            Err(msg) => {
+                warn!(
+                    event = "cli.hide_skipped",
+                    branch = session.branch,
+                    reason = %msg
+                );
+                errors.push((session.branch.clone(), msg));
+                continue;
+            }
+        };
+
+        match kild_core::terminal_ops::hide_terminal(&terminal_type, &window_id) {
+            Ok(()) => {
+                info!(event = "cli.hide_completed", branch = session.branch);
+                hidden.push(session.branch);
+            }
+            Err(e) => {
+                error!(
+                    event = "cli.hide_failed",
+                    branch = session.branch,
+                    error = %e
+                );
+                errors.push((session.branch, e.to_string()));
+            }
+        }
+    }
+
+    // Report successes
+    if !hidden.is_empty() {
+        println!("Hidden {} kild(s):", hidden.len());
+        for branch in &hidden {
+            println!("   {}", branch);
+        }
+    }
+
+    // Report failures
+    if !errors.is_empty() {
+        eprintln!("Failed to hide {} kild(s):", errors.len());
+        for (branch, err) in &errors {
+            eprintln!("   {}: {}", branch, err);
+        }
+    }
+
+    info!(
+        event = "cli.hide_all_completed",
+        hidden = hidden.len(),
+        failed = errors.len()
+    );
+
+    // Return error if any failures (for exit code)
+    if !errors.is_empty() {
+        let total_count = hidden.len() + errors.len();
+        return Err(format_partial_failure_error("hide", errors.len(), total_count).into());
+    }
+
+    Ok(())
+}
+
 fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
@@ -1327,13 +1481,18 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                     git_stats: Option<&'a GitStatsResponse>,
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
+                    terminal_window_title: Option<String>,
                 }
 
+                let terminal_window_title = session
+                    .latest_agent()
+                    .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
                 let enriched = EnrichedStatus {
                     session: &session,
                     git_stats: git_stats.as_ref(),
                     agent_status: status_info.as_ref().map(|i| i.status.to_string()),
                     agent_status_updated_at: status_info.as_ref().map(|i| i.updated_at.clone()),
+                    terminal_window_title,
                 };
                 println!("{}", serde_json::to_string_pretty(&enriched)?);
                 info!(

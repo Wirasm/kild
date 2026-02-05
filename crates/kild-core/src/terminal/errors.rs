@@ -29,6 +29,9 @@ pub enum TerminalError {
     #[error("Failed to focus terminal window: {message}")]
     FocusFailed { message: String },
 
+    #[error("Failed to hide terminal window: {message}")]
+    HideFailed { message: String },
+
     #[error("IO error during terminal operation: {source}")]
     IoError {
         #[from]
@@ -48,6 +51,7 @@ impl KildError for TerminalError {
             TerminalError::AppleScriptFailed { .. } => "APPLESCRIPT_FAILED",
             TerminalError::HyprlandIpcFailed { .. } => "HYPRLAND_IPC_FAILED",
             TerminalError::FocusFailed { .. } => "TERMINAL_FOCUS_FAILED",
+            TerminalError::HideFailed { .. } => "TERMINAL_HIDE_FAILED",
             TerminalError::IoError { .. } => "TERMINAL_IO_ERROR",
         }
     }
@@ -62,6 +66,7 @@ impl KildError for TerminalError {
                 | TerminalError::AppleScriptFailed { .. }
                 | TerminalError::HyprlandIpcFailed { .. }
                 | TerminalError::FocusFailed { .. }
+                | TerminalError::HideFailed { .. }
         )
     }
 }
@@ -124,6 +129,19 @@ mod tests {
             error.to_string(),
             "Working directory does not exist: /tmp/missing"
         );
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_hide_failed() {
+        let error = TerminalError::HideFailed {
+            message: "Window not found".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Failed to hide terminal window: Window not found"
+        );
+        assert_eq!(error.error_code(), "TERMINAL_HIDE_FAILED");
         assert!(error.is_user_error());
     }
 

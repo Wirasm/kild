@@ -176,6 +176,83 @@ pub fn focus_applescript_window(
     })
 }
 
+/// Hide/minimize a window via AppleScript.
+///
+/// Like `focus_applescript_window`, this returns a Result so callers can report
+/// hide failures to the user.
+#[cfg(target_os = "macos")]
+pub fn hide_applescript_window(
+    script: &str,
+    terminal_name: &str,
+    window_id: &str,
+) -> Result<(), crate::terminal::errors::TerminalError> {
+    use crate::terminal::errors::TerminalError;
+    use tracing::{error, info};
+
+    debug!(
+        event = "core.terminal.hide_started",
+        terminal = terminal_name,
+        window_id = %window_id
+    );
+
+    match std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            info!(
+                event = "core.terminal.hide_completed",
+                terminal = terminal_name,
+                window_id = %window_id
+            );
+            Ok(())
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                event = "core.terminal.hide_failed",
+                terminal = terminal_name,
+                window_id = %window_id,
+                stderr = %stderr.trim()
+            );
+            Err(TerminalError::HideFailed {
+                message: format!(
+                    "{} hide failed for window {}: {}",
+                    terminal_name,
+                    window_id,
+                    stderr.trim()
+                ),
+            })
+        }
+        Err(e) => {
+            error!(
+                event = "core.terminal.hide_failed",
+                terminal = terminal_name,
+                window_id = %window_id,
+                error = %e
+            );
+            Err(TerminalError::HideFailed {
+                message: format!(
+                    "Failed to execute osascript for {} hide: {}",
+                    terminal_name, e
+                ),
+            })
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn hide_applescript_window(
+    _script: &str,
+    _terminal_name: &str,
+    _window_id: &str,
+) -> Result<(), crate::terminal::errors::TerminalError> {
+    Err(crate::terminal::errors::TerminalError::HideFailed {
+        message: "Hide not supported on this platform".to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

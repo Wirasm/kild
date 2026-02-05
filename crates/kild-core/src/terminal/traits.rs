@@ -54,6 +54,16 @@ pub trait TerminalBackend: Send + Sync {
     /// * `Err(TerminalError)` - Focus failed (window not found, permission denied, etc.)
     fn focus_window(&self, window_id: &str) -> Result<(), TerminalError>;
 
+    /// Hide/minimize a terminal window.
+    ///
+    /// # Arguments
+    /// * `window_id` - The window ID (for iTerm/Terminal.app) or title (for Ghostty/Alacritty)
+    ///
+    /// # Returns
+    /// * `Ok(())` - Window was hidden successfully
+    /// * `Err(TerminalError)` - Hide failed (window not found, permission denied, etc.)
+    fn hide_window(&self, window_id: &str) -> Result<(), TerminalError>;
+
     /// Check if a terminal window is open (by window ID or title).
     ///
     /// # Returns
@@ -102,6 +112,10 @@ mod tests {
         fn close_window(&self, _window_id: Option<&str>) {}
 
         fn focus_window(&self, _window_id: &str) -> Result<(), TerminalError> {
+            Ok(())
+        }
+
+        fn hide_window(&self, _window_id: &str) -> Result<(), TerminalError> {
             Ok(())
         }
     }

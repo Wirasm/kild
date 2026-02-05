@@ -271,6 +271,41 @@ pub fn focus_terminal_window(
     })
 }
 
+/// Hide/minimize a terminal window by terminal type and window ID.
+///
+/// This function delegates to the appropriate backend via the registry.
+///
+/// # Arguments
+/// * `terminal_type` - The type of terminal (iTerm, Terminal.app, Ghostty, Alacritty)
+/// * `window_id` - The window ID or title for window identification
+///
+/// # Returns
+/// * `Ok(())` - Window was hidden successfully
+/// * `Err(TerminalError)` - Hide failed (window not found, permission denied, etc.)
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn hide_terminal_window(
+    terminal_type: &TerminalType,
+    window_id: &str,
+) -> Result<(), TerminalError> {
+    let resolved_type = match terminal_type {
+        TerminalType::Native => registry::detect_terminal()?,
+        t => t.clone(),
+    };
+
+    let backend = registry::get_backend(&resolved_type).ok_or(TerminalError::NoTerminalFound)?;
+    backend.hide_window(window_id)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn hide_terminal_window(
+    _terminal_type: &TerminalType,
+    _window_id: &str,
+) -> Result<(), TerminalError> {
+    Err(TerminalError::HideFailed {
+        message: "Hide not supported on this platform".to_string(),
+    })
+}
+
 /// Check if a terminal window is open.
 ///
 /// Returns `Ok(Some(true/false))` if the terminal supports window detection,

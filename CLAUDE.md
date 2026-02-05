@@ -76,6 +76,8 @@ cargo run -p kild -- open --all --no-agent       # Open bare terminals in all st
 cargo run -p kild -- code my-branch              # Open worktree in editor (config > $EDITOR > zed)
 cargo run -p kild -- code my-branch --editor vim # Override editor
 cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
+cargo run -p kild -- hide my-branch              # Minimize/hide terminal window
+cargo run -p kild -- hide --all                  # Hide all active kild windows
 cargo run -p kild -- diff my-branch              # Show git diff for worktree
 cargo run -p kild -- diff my-branch --staged     # Show only staged changes
 cargo run -p kild -- diff my-branch --stat       # Show diffstat summary
@@ -333,6 +335,7 @@ pub trait TerminalBackend: Send + Sync {
     fn execute_spawn(&self, config: &SpawnConfig, window_title: Option<&str>)
         -> Result<Option<String>, TerminalError>;
     fn focus_window(&self, window_id: Option<&str>) -> Result<(), TerminalError>;
+    fn hide_window(&self, window_id: &str) -> Result<(), TerminalError>;
     fn close_window(&self, window_id: Option<&str>);
     fn is_window_open(&self, window_id: &str) -> Result<Option<bool>, TerminalError>;
 }

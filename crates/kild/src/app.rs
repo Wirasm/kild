@@ -206,6 +206,23 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("hide")
+                .about("Minimize/hide a kild's terminal window")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild to hide")
+                        .index(1)
+                        .required_unless_present("all")
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Hide all active kild terminal windows")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("branch")
+                )
+        )
+        .subcommand(
             Command::new("diff")
                 .about("Show git diff for a kild's worktree")
                 .arg(
@@ -780,6 +797,47 @@ mod tests {
     fn test_cli_focus_requires_branch() {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "focus"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_hide_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "hide", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hide_matches = matches.subcommand_matches("hide").unwrap();
+        assert_eq!(
+            hide_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert!(!hide_matches.get_flag("all"));
+    }
+
+    #[test]
+    fn test_cli_hide_all_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "hide", "--all"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let hide_matches = matches.subcommand_matches("hide").unwrap();
+        assert!(hide_matches.get_flag("all"));
+        assert!(hide_matches.get_one::<String>("branch").is_none());
+    }
+
+    #[test]
+    fn test_cli_hide_all_conflicts_with_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "hide", "--all", "some-branch"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_hide_requires_branch_or_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "hide"]);
         assert!(matches.is_err());
     }
 

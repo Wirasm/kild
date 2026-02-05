@@ -9,7 +9,7 @@ use crate::terminal::{
 
 #[cfg(target_os = "macos")]
 use crate::terminal::common::{
-    applescript::{close_applescript_window, execute_spawn_script},
+    applescript::{close_applescript_window, execute_spawn_script, hide_applescript_window},
     escape::{applescript_escape, build_cd_command},
 };
 
@@ -38,6 +38,12 @@ const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
 const ITERM_FOCUS_SCRIPT: &str = r#"tell application "iTerm"
         activate
         set frontmost of window id {window_id} to true
+    end tell"#;
+
+/// AppleScript template for iTerm window hiding (minimize).
+#[cfg(target_os = "macos")]
+const ITERM_HIDE_SCRIPT: &str = r#"tell application "iTerm"
+        set miniaturized of window id {window_id} to true
     end tell"#;
 
 /// Backend implementation for iTerm2 terminal.
@@ -118,6 +124,19 @@ impl TerminalBackend for ITermBackend {
     fn focus_window(&self, _window_id: &str) -> Result<(), TerminalError> {
         Err(TerminalError::FocusFailed {
             message: "Focus not supported on this platform".to_string(),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn hide_window(&self, window_id: &str) -> Result<(), TerminalError> {
+        let script = ITERM_HIDE_SCRIPT.replace("{window_id}", window_id);
+        hide_applescript_window(&script, self.display_name(), window_id)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn hide_window(&self, _window_id: &str) -> Result<(), TerminalError> {
+        Err(TerminalError::HideFailed {
+            message: "Hide not supported on this platform".to_string(),
         })
     }
 }

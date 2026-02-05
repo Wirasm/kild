@@ -78,6 +78,52 @@ pub fn focus_window_by_title(_title: &str) -> Result<(), TerminalError> {
     })
 }
 
+/// Hide a window by its title using Hyprland IPC.
+///
+/// Uses `hyprctl dispatch movetoworkspacesilent special` to move the window
+/// to the special (hidden) workspace.
+#[cfg(target_os = "linux")]
+pub fn hide_window_by_title(title: &str) -> Result<(), TerminalError> {
+    debug!(
+        event = "core.terminal.hyprland_hide_started",
+        title = %title
+    );
+
+    let output = std::process::Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("movetoworkspacesilent")
+        .arg(format!("special,title:{}", title))
+        .output()
+        .map_err(|e| TerminalError::HyprlandIpcFailed {
+            message: format!("Failed to execute hyprctl: {}", e),
+        })?;
+
+    if output.status.success() {
+        debug!(
+            event = "core.terminal.hyprland_hide_completed",
+            title = %title
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            event = "core.terminal.hyprland_hide_failed",
+            title = %title,
+            stderr = %stderr.trim()
+        );
+        Err(TerminalError::HideFailed {
+            message: format!("Hyprland hide failed for '{}': {}", title, stderr.trim()),
+        })
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn hide_window_by_title(_title: &str) -> Result<(), TerminalError> {
+    Err(TerminalError::HideFailed {
+        message: "Hyprland hide not supported on this platform".to_string(),
+    })
+}
+
 /// Close a window by its title using Hyprland IPC.
 ///
 /// Uses `hyprctl dispatch closewindow title:X` to close the window.
@@ -234,6 +280,12 @@ mod tests {
     #[test]
     fn test_hyprland_not_available_on_non_linux() {
         assert!(!is_hyprland_available());
+    }
+
+    #[test]
+    fn test_hide_window_does_not_panic() {
+        // hide_window_by_title returns Result - should not panic on any platform
+        let _result = hide_window_by_title("nonexistent-window-12345");
     }
 
     #[test]

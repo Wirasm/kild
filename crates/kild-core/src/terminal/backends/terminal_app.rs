@@ -9,7 +9,7 @@ use crate::terminal::{
 
 #[cfg(target_os = "macos")]
 use crate::terminal::common::{
-    applescript::{close_applescript_window, execute_spawn_script},
+    applescript::{close_applescript_window, execute_spawn_script, hide_applescript_window},
     escape::{applescript_escape, build_cd_command},
 };
 
@@ -35,6 +35,12 @@ const TERMINAL_CLOSE_SCRIPT: &str = r#"tell application "Terminal"
 const TERMINAL_FOCUS_SCRIPT: &str = r#"tell application "Terminal"
         activate
         set frontmost of window id {window_id} to true
+    end tell"#;
+
+/// AppleScript template for Terminal.app window hiding (minimize).
+#[cfg(target_os = "macos")]
+const TERMINAL_HIDE_SCRIPT: &str = r#"tell application "Terminal"
+        set miniaturized of window id {window_id} to true
     end tell"#;
 
 /// Backend implementation for Terminal.app.
@@ -115,6 +121,19 @@ impl TerminalBackend for TerminalAppBackend {
     fn focus_window(&self, _window_id: &str) -> Result<(), TerminalError> {
         Err(TerminalError::FocusFailed {
             message: "Focus not supported on this platform".to_string(),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn hide_window(&self, window_id: &str) -> Result<(), TerminalError> {
+        let script = TERMINAL_HIDE_SCRIPT.replace("{window_id}", window_id);
+        hide_applescript_window(&script, self.display_name(), window_id)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn hide_window(&self, _window_id: &str) -> Result<(), TerminalError> {
+        Err(TerminalError::HideFailed {
+            message: "Hide not supported on this platform".to_string(),
         })
     }
 }
