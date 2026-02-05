@@ -643,12 +643,15 @@ fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
     match session_handler::open_session(branch, mode.clone()) {
         Ok(session) => {
-            if matches!(mode, kild_core::OpenMode::BareShell) {
-                println!("✅ Opened bare terminal in kild '{}'", branch);
-                println!("   Agent: (none - bare shell)");
-            } else {
-                println!("✅ Opened new agent in kild '{}'", branch);
-                println!("   Agent: {}", session.agent);
+            match mode {
+                kild_core::OpenMode::BareShell => {
+                    println!("✅ Opened bare terminal in kild '{}'", branch);
+                    println!("   Agent: (none - bare shell)");
+                }
+                _ => {
+                    println!("✅ Opened new agent in kild '{}'", branch);
+                    println!("   Agent: {}", session.agent);
+                }
             }
             if let Some(pid) = session.latest_agent().and_then(|a| a.process_id()) {
                 println!("   PID: {}", pid);
