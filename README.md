@@ -43,7 +43,7 @@ See the [PRD](.claude/PRPs/prds/gpui-native-terminal-ui.prd.md) for the developm
 ## Installation
 
 ```bash
-cargo install --path .
+cargo install --path crates/kild
 ```
 
 ## Usage
