@@ -1175,25 +1175,21 @@ fn handle_agent_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::
     let targets: Vec<&String> = matches.get_many::<String>("target").unwrap().collect();
 
     // Parse branch and status from positional args
-    let (branch, status_str) = if use_self {
-        // --self mode: only one positional (the status)
-        if targets.len() != 1 {
-            return Err("Usage: kild agent-status --self <status>".into());
+    let (branch, status_str) = match (use_self, targets.as_slice()) {
+        (true, [status]) => {
+            let cwd = std::env::current_dir()?;
+            let session =
+                session_handler::find_session_by_worktree_path(&cwd)?.ok_or_else(|| {
+                    format!(
+                        "No kild session found for current directory: {}",
+                        cwd.display()
+                    )
+                })?;
+            (session.branch, status.as_str())
         }
-        let cwd = std::env::current_dir()?;
-        let session = session_handler::find_session_by_worktree_path(&cwd)?.ok_or_else(|| {
-            format!(
-                "No kild session found for current directory: {}",
-                cwd.display()
-            )
-        })?;
-        (session.branch.clone(), targets[0].as_str())
-    } else {
-        // Explicit branch mode: two positionals (branch, status)
-        if targets.len() != 2 {
-            return Err("Usage: kild agent-status <branch> <status>".into());
-        }
-        (targets[0].clone(), targets[1].as_str())
+        (false, [branch, status]) => ((*branch).clone(), status.as_str()),
+        (true, _) => return Err("Usage: kild agent-status --self <status>".into()),
+        (false, _) => return Err("Usage: kild agent-status <branch> <status>".into()),
     };
 
     let status: AgentStatus = status_str.parse().map_err(|_| {
@@ -1204,16 +1200,13 @@ fn handle_agent_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::
 
     info!(event = "cli.agent_status_started", branch = %branch, status = %status);
 
-    match session_handler::update_agent_status(&branch, status) {
-        Ok(()) => {
-            info!(event = "cli.agent_status_completed", branch = %branch, status = %status);
-            Ok(())
-        }
-        Err(e) => {
-            error!(event = "cli.agent_status_failed", error = %e);
-            Err(e.into())
-        }
-    }
+    session_handler::update_agent_status(&branch, status).map_err(|e| {
+        error!(event = "cli.agent_status_failed", error = %e);
+        e
+    })?;
+
+    info!(event = "cli.agent_status_completed", branch = %branch, status = %status);
+    Ok(())
 }
 
 fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {

@@ -1263,12 +1263,10 @@ pub fn find_session_by_worktree_path(
 ) -> Result<Option<Session>, SessionError> {
     let config = Config::new();
     let (sessions, _) = persistence::load_sessions_from_files(&config.sessions_dir())?;
-    for session in sessions {
-        if worktree_path.starts_with(&session.worktree_path) {
-            return Ok(Some(session));
-        }
-    }
-    Ok(None)
+
+    Ok(sessions
+        .into_iter()
+        .find(|session| worktree_path.starts_with(&session.worktree_path)))
 }
 
 pub fn stop_session(name: &str) -> Result<(), SessionError> {

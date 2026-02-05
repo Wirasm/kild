@@ -87,9 +87,8 @@ impl TableFormatter {
             }
         };
         let note_display = session.note.as_deref().unwrap_or("");
-        let activity_display = status_info
-            .map(|i| i.status.to_string())
-            .unwrap_or_else(|| "-".to_string());
+        let activity_display =
+            status_info.map_or_else(|| "-".to_string(), |i| i.status.to_string());
 
         println!(
             "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_activity$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │ {:<width_note$} │",
