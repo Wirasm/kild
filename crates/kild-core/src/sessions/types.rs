@@ -99,20 +99,18 @@ impl DestroySafetyInfo {
         // Skip if status check failed (already showed critical message)
         if self.git_status.has_uncommitted_changes && !self.git_status.status_check_failed {
             let message = if let Some(details) = &self.git_status.uncommitted_details {
-                // Build detailed message with file counts
-                let mut parts = Vec::new();
-                if details.staged_files > 0 {
-                    parts.push(format!("{} staged", details.staged_files));
-                }
-                if details.modified_files > 0 {
-                    parts.push(format!("{} modified", details.modified_files));
-                }
-                if details.untracked_files > 0 {
-                    parts.push(format!("{} untracked", details.untracked_files));
-                }
+                let parts: Vec<String> = [
+                    (details.staged_files > 0).then(|| format!("{} staged", details.staged_files)),
+                    (details.modified_files > 0)
+                        .then(|| format!("{} modified", details.modified_files)),
+                    (details.untracked_files > 0)
+                        .then(|| format!("{} untracked", details.untracked_files)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
                 format!("Uncommitted changes: {}", parts.join(", "))
             } else {
-                // Fallback when details unavailable
                 "Uncommitted changes detected".to_string()
             };
             messages.push(message);
@@ -121,15 +119,8 @@ impl DestroySafetyInfo {
         // Unpushed commits (warning only)
         if self.git_status.unpushed_commit_count > 0 {
             let count = self.git_status.unpushed_commit_count;
-
-            // Use correct singular/plural form
-            let message = if count == 1 {
-                format!("{} unpushed commit will be lost", count)
-            } else {
-                format!("{} unpushed commits will be lost", count)
-            };
-
-            messages.push(message);
+            let commit_word = if count == 1 { "commit" } else { "commits" };
+            messages.push(format!("{} unpushed {} will be lost", count, commit_word));
         }
 
         // Never pushed (warning only) - skip if status check failed or has unpushed commits

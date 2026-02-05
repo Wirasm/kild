@@ -44,18 +44,16 @@ impl SessionInfo {
         };
 
         let diff_stats = if git_status == GitStatus::Dirty {
-            match get_diff_stats(&session.worktree_path) {
-                Ok(stats) => Some(stats),
-                Err(e) => {
+            get_diff_stats(&session.worktree_path)
+                .map_err(|e| {
                     tracing::warn!(
                         event = "core.session.diff_stats_failed",
                         path = %session.worktree_path.display(),
                         error = %e,
                         "Failed to compute diff stats"
                     );
-                    None
-                }
-            }
+                })
+                .ok()
         } else {
             None
         };

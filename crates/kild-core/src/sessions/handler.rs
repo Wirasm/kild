@@ -34,9 +34,7 @@ fn capture_process_metadata(
     };
 
     match crate::process::get_process_info(pid) {
-        Ok(info) => {
-            return (Some(info.name), Some(info.start_time));
-        }
+        Ok(info) => (Some(info.name), Some(info.start_time)),
         Err(e) => {
             warn!(
                 event = %format!("core.session.{}_process_info_failed", event_prefix),
@@ -44,13 +42,12 @@ fn capture_process_metadata(
                 error = %e,
                 "Failed to get process metadata after spawn - using spawn result metadata"
             );
+            (
+                spawn_result.process_name.clone(),
+                spawn_result.process_start_time,
+            )
         }
     }
-
-    (
-        spawn_result.process_name.clone(),
-        spawn_result.process_start_time,
-    )
 }
 
 /// Clean up PID files for a session (best-effort).
@@ -90,9 +87,10 @@ fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, oper
 
     for agent_proc in session.agents() {
         // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
-        let pid_key = match agent_proc.spawn_id().is_empty() {
-            true => session.id.clone(), // Backward compat: old sessions without spawn_id
-            false => agent_proc.spawn_id().to_string(),
+        let pid_key = if agent_proc.spawn_id().is_empty() {
+            session.id.clone() // Backward compat: old sessions without spawn_id
+        } else {
+            agent_proc.spawn_id().to_string()
         };
         let pid_file = get_pid_file_path(kild_dir, &pid_key);
         match delete_pid_file(&pid_file) {
