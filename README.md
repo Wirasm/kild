@@ -101,11 +101,17 @@ kild open <branch>
 # Open with different agent
 kild open <branch> --agent <agent>
 
+# Open bare terminal with $SHELL instead of an agent
+kild open <branch> --no-agent
+
 # Open agents in all stopped kilds
 kild open --all
 
 # Open all stopped kilds with specific agent
 kild open --all --agent <agent>
+
+# Open bare terminals in all stopped kilds
+kild open --all --no-agent
 ```
 
 ### Open kild in code editor

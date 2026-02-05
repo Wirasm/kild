@@ -69,8 +69,10 @@ cargo run -p kild -- -v list                     # Verbose mode (enable JSON log
 cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (additive)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
+cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
+cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
 cargo run -p kild -- code my-branch              # Open worktree in editor
 cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
 cargo run -p kild -- diff my-branch              # Show git diff for worktree
