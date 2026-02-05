@@ -97,6 +97,12 @@ pub struct WorktreeStatus {
     /// Details about uncommitted changes (file counts by category).
     /// None when no uncommitted changes exist or when status check failed.
     pub uncommitted_details: Option<UncommittedDetails>,
+    /// Whether the behind-count check failed and `behind_commit_count` is unreliable.
+    ///
+    /// When true, `behind_commit_count` is 0 but this does NOT mean the branch is
+    /// up-to-date — we simply couldn't determine the actual count. The CLI should
+    /// surface this uncertainty to the user.
+    pub behind_count_failed: bool,
     /// Whether the status check encountered errors and returned degraded results.
     ///
     /// When true, the status information may be incomplete. The fallback behavior
@@ -253,6 +259,7 @@ mod tests {
         assert_eq!(status.behind_commit_count, 0);
         assert!(!status.has_remote_branch);
         assert!(status.uncommitted_details.is_none());
+        assert!(!status.behind_count_failed);
         assert!(!status.status_check_failed);
     }
 
@@ -294,6 +301,7 @@ mod tests {
                 modified_files: 2,
                 untracked_files: 1,
             }),
+            behind_count_failed: false,
             status_check_failed: false,
         };
         let value = serde_json::to_value(&status).expect("WorktreeStatus should serialize");
@@ -301,6 +309,7 @@ mod tests {
         assert_eq!(value["unpushed_commit_count"], 4);
         assert_eq!(value["behind_commit_count"], 2);
         assert_eq!(value["has_remote_branch"], true);
+        assert_eq!(value["behind_count_failed"], false);
         assert_eq!(value["status_check_failed"], false);
 
         let details = &value["uncommitted_details"];

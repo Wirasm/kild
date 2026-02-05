@@ -191,8 +191,28 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                     .into_iter()
                     .map(|session| {
                         let git_stats = if session.worktree_path.exists() {
-                            let diff = get_diff_stats(&session.worktree_path).ok();
-                            let status = get_worktree_status(&session.worktree_path).ok();
+                            let diff = match get_diff_stats(&session.worktree_path) {
+                                Ok(d) => Some(d),
+                                Err(e) => {
+                                    warn!(
+                                        event = "cli.list.diff_stats_failed",
+                                        branch = session.branch,
+                                        error = %e
+                                    );
+                                    None
+                                }
+                            };
+                            let status = match get_worktree_status(&session.worktree_path) {
+                                Ok(s) => Some(s),
+                                Err(e) => {
+                                    warn!(
+                                        event = "cli.list.worktree_status_failed",
+                                        branch = session.branch,
+                                        error = %e
+                                    );
+                                    None
+                                }
+                            };
                             Some(GitStatsResponse {
                                 diff_stats: diff,
                                 worktree_status: status,
@@ -1143,8 +1163,28 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         Ok(session) => {
             // Compute git stats if worktree exists
             let git_stats = if session.worktree_path.exists() {
-                let diff = get_diff_stats(&session.worktree_path).ok();
-                let status = get_worktree_status(&session.worktree_path).ok();
+                let diff = match get_diff_stats(&session.worktree_path) {
+                    Ok(d) => Some(d),
+                    Err(e) => {
+                        warn!(
+                            event = "cli.status.diff_stats_failed",
+                            branch = branch,
+                            error = %e
+                        );
+                        None
+                    }
+                };
+                let status = match get_worktree_status(&session.worktree_path) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        warn!(
+                            event = "cli.status.worktree_status_failed",
+                            branch = branch,
+                            error = %e
+                        );
+                        None
+                    }
+                };
                 Some(GitStatsResponse {
                     diff_stats: diff,
                     worktree_status: status,
@@ -1208,18 +1248,24 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 }
 
                 if let Some(ref ws) = stats.worktree_status {
-                    println!(
-                        "│ Commits:     {:<47} │",
+                    let commits_line = if ws.behind_count_failed {
+                        format!(
+                            "{} ahead, ? behind (check failed)",
+                            ws.unpushed_commit_count
+                        )
+                    } else {
                         format!(
                             "{} ahead, {} behind",
                             ws.unpushed_commit_count, ws.behind_commit_count
                         )
-                    );
+                    };
+                    println!("│ Commits:     {:<47} │", commits_line);
                     let remote_status = if ws.has_remote_branch {
-                        if ws.unpushed_commit_count == 0 {
-                            "Pushed"
-                        } else {
-                            "Unpushed changes"
+                        match (ws.unpushed_commit_count, ws.behind_commit_count) {
+                            (0, 0) if !ws.behind_count_failed => "Up to date",
+                            (0, _) => "Behind remote",
+                            (_, 0) if !ws.behind_count_failed => "Unpushed changes",
+                            _ => "Diverged",
                         }
                     } else {
                         "Never pushed"

@@ -187,7 +187,8 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
     let (uncommitted_result, status_check_failed) = check_uncommitted_changes(&repo);
 
     // 2. Count unpushed/behind commits and check remote branch existence
-    let (unpushed_count, behind_count, has_remote) = count_unpushed_commits(&repo);
+    let (unpushed_count, behind_count, has_remote, behind_count_failed) =
+        count_unpushed_commits(&repo);
 
     // Determine if there are uncommitted changes
     // Conservative fallback: assume dirty if check failed
@@ -203,6 +204,7 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
         behind_commit_count: behind_count,
         has_remote_branch: has_remote,
         uncommitted_details: uncommitted_result,
+        behind_count_failed,
         status_check_failed,
     })
 }
@@ -276,14 +278,15 @@ fn check_uncommitted_changes(repo: &Repository) -> (Option<UncommittedDetails>, 
 
 /// Count unpushed and behind commits and check if remote tracking branch exists.
 ///
-/// Returns (unpushed_commit_count, behind_commit_count, has_remote_branch).
+/// Returns (unpushed_commit_count, behind_commit_count, has_remote_branch, behind_count_failed).
 ///
 /// Return values:
-/// - `(ahead, behind, true)` - Branch has remote, ahead/behind counts
-/// - `(0, 0, false)` - Branch has no upstream (never pushed)
-/// - `(0, 0, false)` - Detached HEAD state (no branch to push)
-/// - `(0, 0, true)` - Error counting commits (remote exists but count failed)
-fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
+/// - `(ahead, behind, true, false)` - Branch has remote, ahead/behind counts
+/// - `(0, 0, false, false)` - Branch has no upstream (never pushed)
+/// - `(0, 0, false, false)` - Detached HEAD state (no branch to push)
+/// - `(0, 0, true, false)` - Error counting ahead commits (remote exists but count failed)
+/// - `(ahead, 0, true, true)` - Ahead count succeeded but behind count failed
+fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool, bool) {
     // Get current branch reference
     let head = match repo.head() {
         Ok(h) => h,
@@ -293,7 +296,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 error = %e,
                 "Failed to read HEAD - cannot count unpushed commits"
             );
-            return (0, 0, false);
+            return (0, 0, false, false);
         }
     };
 
@@ -306,7 +309,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 event = "core.git.detached_head",
                 "Repository is in detached HEAD state"
             );
-            return (0, 0, false);
+            return (0, 0, false, false);
         }
     };
 
@@ -320,7 +323,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 error = %e,
                 "Could not find local branch"
             );
-            return (0, 0, false);
+            return (0, 0, false, false);
         }
     };
 
@@ -335,7 +338,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 branch = branch_name,
                 "Branch has no upstream - never pushed"
             );
-            return (0, 0, false);
+            return (0, 0, false, false);
         }
     };
 
@@ -348,7 +351,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 branch = branch_name,
                 "HEAD has no target OID"
             );
-            return (0, 0, true);
+            return (0, 0, true, false);
         }
     };
 
@@ -360,7 +363,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 branch = branch_name,
                 "Upstream branch has no target OID"
             );
-            return (0, 0, true);
+            return (0, 0, true, false);
         }
     };
 
@@ -373,7 +376,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 error = %e,
                 "Failed to create revwalk - cannot count unpushed commits"
             );
-            return (0, 0, true);
+            return (0, 0, true, false);
         }
     };
 
@@ -383,7 +386,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
             error = %e,
             "Failed to push local commit to revwalk"
         );
-        return (0, 0, true);
+        return (0, 0, true, false);
     }
     if let Err(e) = ahead_walk.hide(upstream_oid) {
         warn!(
@@ -391,7 +394,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
             error = %e,
             "Failed to hide upstream commit - history may have diverged"
         );
-        return (0, 0, true);
+        return (0, 0, true, false);
     }
 
     let unpushed_count = ahead_walk.count();
@@ -405,7 +408,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
                 error = %e,
                 "Failed to create revwalk for behind count"
             );
-            return (unpushed_count, 0, true);
+            return (unpushed_count, 0, true, true);
         }
     };
 
@@ -415,7 +418,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
             error = %e,
             "Failed to push upstream commit to behind revwalk"
         );
-        return (unpushed_count, 0, true);
+        return (unpushed_count, 0, true, true);
     }
     if let Err(e) = behind_walk.hide(local_oid) {
         warn!(
@@ -423,12 +426,12 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
             error = %e,
             "Failed to hide local commit in behind revwalk"
         );
-        return (unpushed_count, 0, true);
+        return (unpushed_count, 0, true, true);
     }
 
     let behind_count = behind_walk.count();
 
-    (unpushed_count, behind_count, true)
+    (unpushed_count, behind_count, true, false)
 }
 
 #[cfg(test)]
@@ -860,10 +863,11 @@ mod tests {
             .unwrap();
 
         let repo = Repository::open(dir.path()).unwrap();
-        let (ahead, behind, has_remote) = count_unpushed_commits(&repo);
+        let (ahead, behind, has_remote, behind_failed) = count_unpushed_commits(&repo);
         assert_eq!(ahead, 0);
         assert_eq!(behind, 0);
         assert!(!has_remote);
+        assert!(!behind_failed);
     }
 
     #[test]
@@ -888,5 +892,262 @@ mod tests {
         assert_eq!(status.behind_commit_count, 0);
         assert_eq!(status.unpushed_commit_count, 0);
         assert!(!status.has_remote_branch);
+        assert!(!status.behind_count_failed);
+    }
+
+    /// Helper: git add all + commit with message
+    fn git_add_commit(dir: &Path, msg: &str) {
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", msg])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+    }
+
+    #[test]
+    fn test_count_unpushed_commits_behind_remote() {
+        // Setup: local repo → bare origin → clone; push from clone, fetch in local
+        let local_dir = TempDir::new().unwrap();
+        init_git_repo(local_dir.path());
+
+        // Initial commit in local
+        fs::write(local_dir.path().join("file.txt"), "initial").unwrap();
+        git_add_commit(local_dir.path(), "initial");
+
+        // Create bare "origin" and push
+        let bare_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(bare_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", bare_dir.path().to_str().unwrap()])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        // Determine the default branch name (may be main or master)
+        let branch_output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        let branch_name = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+        Command::new("git")
+            .args(["push", "-u", "origin", &branch_name])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        // Clone into another dir and push a new commit
+        let other_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args([
+                "clone",
+                bare_dir.path().to_str().unwrap(),
+                other_dir.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        // Configure git user in clone
+        Command::new("git")
+            .args(["config", "user.email", "other@test.com"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Other"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        fs::write(other_dir.path().join("other.txt"), "remote change").unwrap();
+        git_add_commit(other_dir.path(), "remote commit");
+        Command::new("git")
+            .args(["push"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+
+        // Fetch in local so it sees the remote commit
+        Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repository::open(local_dir.path()).unwrap();
+        let (ahead, behind, has_remote, behind_failed) = count_unpushed_commits(&repo);
+
+        assert_eq!(ahead, 0, "local should not be ahead");
+        assert_eq!(behind, 1, "local should be 1 commit behind");
+        assert!(has_remote, "should have remote tracking branch");
+        assert!(!behind_failed, "behind count should succeed");
+    }
+
+    #[test]
+    fn test_count_unpushed_commits_ahead_and_behind() {
+        // Local has 1 commit not on remote, remote has 1 commit not on local → diverged
+        let local_dir = TempDir::new().unwrap();
+        init_git_repo(local_dir.path());
+
+        fs::write(local_dir.path().join("file.txt"), "initial").unwrap();
+        git_add_commit(local_dir.path(), "initial");
+
+        let bare_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(bare_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", bare_dir.path().to_str().unwrap()])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        let branch_output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        let branch_name = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+        Command::new("git")
+            .args(["push", "-u", "origin", &branch_name])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        // Push a commit from a clone
+        let other_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args([
+                "clone",
+                bare_dir.path().to_str().unwrap(),
+                other_dir.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "other@test.com"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Other"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        fs::write(other_dir.path().join("remote.txt"), "remote").unwrap();
+        git_add_commit(other_dir.path(), "remote commit");
+        Command::new("git")
+            .args(["push"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+
+        // Make a local commit (diverging from remote)
+        fs::write(local_dir.path().join("local.txt"), "local").unwrap();
+        git_add_commit(local_dir.path(), "local commit");
+
+        // Fetch so local knows about remote
+        Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repository::open(local_dir.path()).unwrap();
+        let (ahead, behind, has_remote, behind_failed) = count_unpushed_commits(&repo);
+
+        assert_eq!(ahead, 1, "local should be 1 ahead");
+        assert_eq!(behind, 1, "local should be 1 behind");
+        assert!(has_remote, "should have remote tracking branch");
+        assert!(!behind_failed, "behind count should succeed");
+    }
+
+    #[test]
+    fn test_worktree_status_behind_with_remote() {
+        // End-to-end: get_worktree_status should report behind_commit_count > 0
+        let local_dir = TempDir::new().unwrap();
+        init_git_repo(local_dir.path());
+
+        fs::write(local_dir.path().join("file.txt"), "initial").unwrap();
+        git_add_commit(local_dir.path(), "initial");
+
+        let bare_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(bare_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", bare_dir.path().to_str().unwrap()])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        let branch_output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+        let branch_name = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+        Command::new("git")
+            .args(["push", "-u", "origin", &branch_name])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        // Push 2 commits from a clone
+        let other_dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args([
+                "clone",
+                bare_dir.path().to_str().unwrap(),
+                other_dir.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "other@test.com"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Other"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+        fs::write(other_dir.path().join("a.txt"), "a").unwrap();
+        git_add_commit(other_dir.path(), "remote commit 1");
+        fs::write(other_dir.path().join("b.txt"), "b").unwrap();
+        git_add_commit(other_dir.path(), "remote commit 2");
+        Command::new("git")
+            .args(["push"])
+            .current_dir(other_dir.path())
+            .output()
+            .unwrap();
+
+        // Fetch in local
+        Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(local_dir.path())
+            .output()
+            .unwrap();
+
+        let status = get_worktree_status(local_dir.path()).unwrap();
+        assert_eq!(status.behind_commit_count, 2);
+        assert_eq!(status.unpushed_commit_count, 0);
+        assert!(status.has_remote_branch);
+        assert!(!status.behind_count_failed);
     }
 }
