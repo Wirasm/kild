@@ -292,7 +292,7 @@ pub fn create_worktree(
 /// - Dash-prefixed values (git interprets as flags)
 /// - Control characters (invisible, could confuse terminal)
 /// - `::` sequences (git pseudo-URL refspec syntax)
-fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
+pub fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
     if value.starts_with('-') {
         return Err(GitError::OperationFailed {
             message: format!("Invalid {label}: '{value}' (must not start with '-')"),
@@ -315,7 +315,7 @@ fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
 ///
 /// Uses `git fetch` CLI to inherit the user's existing auth setup
 /// (SSH agent, credential helpers, etc.) with zero auth code.
-fn fetch_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
+pub fn fetch_remote(repo_path: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
     validate_git_arg(remote, "remote name")?;
     validate_git_arg(branch, "branch name")?;
 

@@ -289,6 +289,52 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("rebase")
+                .about("Rebase a kild's branch onto the base branch")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild to rebase")
+                        .index(1)
+                        .required_unless_present("all")
+                )
+                .arg(
+                    Arg::new("base")
+                        .long("base")
+                        .short('b')
+                        .help("Base branch to rebase onto (overrides config, default: main)")
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Rebase all active kilds")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("branch")
+                )
+        )
+        .subcommand(
+            Command::new("sync")
+                .about("Fetch from remote and rebase a kild's branch onto the base branch")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild to sync")
+                        .index(1)
+                        .required_unless_present("all")
+                )
+                .arg(
+                    Arg::new("base")
+                        .long("base")
+                        .short('b')
+                        .help("Base branch to rebase onto (overrides config, default: main)")
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Fetch and rebase all active kilds")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("branch")
+                )
+        )
+        .subcommand(
             Command::new("cleanup")
                 .about("Clean up orphaned resources (branches, worktrees, sessions)")
                 .arg(
@@ -1092,6 +1138,125 @@ mod tests {
     fn test_cli_agent_status_requires_at_least_one_target() {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "agent-status"]);
+        assert!(matches.is_err());
+    }
+
+    // --- rebase command tests ---
+
+    #[test]
+    fn test_cli_rebase_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "rebase", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("rebase").unwrap();
+        assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
+        assert!(!sub.get_flag("all"));
+        assert!(sub.get_one::<String>("base").is_none());
+    }
+
+    #[test]
+    fn test_cli_rebase_requires_branch_or_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "rebase"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_rebase_with_base() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "rebase", "test-branch", "--base", "dev"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("rebase").unwrap();
+        assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
+        assert_eq!(sub.get_one::<String>("base").unwrap(), "dev");
+    }
+
+    #[test]
+    fn test_cli_rebase_with_base_short() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "rebase", "test-branch", "-b", "dev"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("rebase").unwrap();
+        assert_eq!(sub.get_one::<String>("base").unwrap(), "dev");
+    }
+
+    #[test]
+    fn test_cli_rebase_all_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "rebase", "--all"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("rebase").unwrap();
+        assert!(sub.get_flag("all"));
+        assert!(sub.get_one::<String>("branch").is_none());
+    }
+
+    #[test]
+    fn test_cli_rebase_all_conflicts_with_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "rebase", "--all", "some-branch"]);
+        assert!(matches.is_err());
+    }
+
+    // --- sync command tests ---
+
+    #[test]
+    fn test_cli_sync_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "sync", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("sync").unwrap();
+        assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
+        assert!(!sub.get_flag("all"));
+        assert!(sub.get_one::<String>("base").is_none());
+    }
+
+    #[test]
+    fn test_cli_sync_requires_branch_or_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "sync"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_sync_with_base() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "sync", "test-branch", "--base", "dev"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("sync").unwrap();
+        assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
+        assert_eq!(sub.get_one::<String>("base").unwrap(), "dev");
+    }
+
+    #[test]
+    fn test_cli_sync_all_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "sync", "--all"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("sync").unwrap();
+        assert!(sub.get_flag("all"));
+        assert!(sub.get_one::<String>("branch").is_none());
+    }
+
+    #[test]
+    fn test_cli_sync_all_conflicts_with_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "sync", "--all", "some-branch"]);
         assert!(matches.is_err());
     }
 }
