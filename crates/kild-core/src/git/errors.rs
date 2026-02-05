@@ -38,6 +38,19 @@ pub enum GitError {
         source: git2::Error,
     },
 
+    #[error("Rebase conflict onto '{base_branch}' in worktree at {}", worktree_path.display())]
+    RebaseConflict {
+        base_branch: String,
+        worktree_path: std::path::PathBuf,
+    },
+
+    #[error("Rebase abort failed for '{base_branch}' at {}: {message}", worktree_path.display())]
+    RebaseAbortFailed {
+        base_branch: String,
+        worktree_path: std::path::PathBuf,
+        message: String,
+    },
+
     #[error("IO error during git operation: {source}")]
     IoError {
         #[from]
@@ -58,6 +71,8 @@ impl KildError for GitError {
             GitError::InvalidPath { .. } => "INVALID_PATH",
             GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
             GitError::FetchFailed { .. } => "GIT_FETCH_FAILED",
+            GitError::RebaseConflict { .. } => "GIT_REBASE_CONFLICT",
+            GitError::RebaseAbortFailed { .. } => "GIT_REBASE_ABORT_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",
         }
@@ -70,6 +85,9 @@ impl KildError for GitError {
                 | GitError::BranchAlreadyExists { .. }
                 | GitError::BranchNotFound { .. }
                 | GitError::WorktreeAlreadyExists { .. }
+                // RebaseConflict is a user error: user must resolve conflicts manually.
+                // RebaseAbortFailed is NOT — it's an internal failure to clean up after conflict.
+                | GitError::RebaseConflict { .. }
         )
     }
 }
@@ -99,6 +117,43 @@ mod tests {
         };
         assert_eq!(not_found_error.to_string(), "Branch 'missing' not found");
         assert!(not_found_error.is_user_error());
+    }
+
+    #[test]
+    fn test_rebase_conflict_error() {
+        let error = GitError::RebaseConflict {
+            base_branch: "main".to_string(),
+            worktree_path: std::path::PathBuf::from("/tmp/test-worktree"),
+        };
+        let display = error.to_string();
+        assert!(display.contains("main"), "should include base_branch");
+        assert!(
+            display.contains("/tmp/test-worktree"),
+            "should include worktree_path"
+        );
+        assert_eq!(error.error_code(), "GIT_REBASE_CONFLICT");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_rebase_abort_failed_error() {
+        let error = GitError::RebaseAbortFailed {
+            base_branch: "main".to_string(),
+            worktree_path: std::path::PathBuf::from("/tmp/test-worktree"),
+            message: "working tree has changes".to_string(),
+        };
+        let display = error.to_string();
+        assert!(display.contains("main"), "should include base_branch");
+        assert!(
+            display.contains("/tmp/test-worktree"),
+            "should include worktree_path"
+        );
+        assert!(
+            display.contains("working tree has changes"),
+            "should include message"
+        );
+        assert_eq!(error.error_code(), "GIT_REBASE_ABORT_FAILED");
+        assert!(!error.is_user_error());
     }
 
     #[test]
