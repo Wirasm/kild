@@ -9,6 +9,15 @@ use crate::sessions::{errors::SessionError, persistence, ports, types::*, valida
 use crate::terminal;
 use crate::terminal::types::SpawnResult;
 
+/// Compute a unique spawn ID for a given session and spawn index.
+///
+/// Each agent spawn within a session gets its own spawn ID, which is used for
+/// per-agent PID file paths and window titles. This prevents race conditions
+/// where `kild open` on a running kild would read the wrong PID.
+fn compute_spawn_id(session_id: &str, spawn_index: usize) -> String {
+    format!("{}_{}", session_id, spawn_index)
+}
+
 /// Capture process metadata from spawn result for PID reuse protection.
 ///
 /// Attempts to get fresh process info from the OS. Falls back to spawn result metadata
@@ -156,12 +165,13 @@ pub fn create_session(
         branch = worktree.branch
     );
 
-    // 5. Launch terminal (I/O) - pass session_id for unique Ghostty window titles and PID tracking
+    // 5. Launch terminal (I/O) - pass spawn_id for unique PID files and Ghostty window titles
+    let spawn_id = compute_spawn_id(&session_id, 0);
     let spawn_result = terminal::handler::spawn_terminal(
         &worktree.path,
         &validated.command,
         kild_config,
-        Some(&session_id),
+        Some(&spawn_id),
         Some(&base_config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -175,6 +185,7 @@ pub fn create_session(
     };
     let initial_agent = AgentProcess::new(
         validated.agent.clone(),
+        spawn_id,
         spawn_result.process_id,
         spawn_result.process_name.clone(),
         spawn_result.process_start_time,
@@ -447,21 +458,46 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         worktree_path = %session.worktree_path.display()
     );
 
-    // 5. Clean up PID file (best-effort, don't fail if missing)
-    let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
-    if let Err(e) = delete_pid_file(&pid_file) {
-        warn!(
-            event = "core.session.destroy_pid_file_cleanup_failed",
-            session_id = session.id,
-            pid_file = %pid_file.display(),
-            error = %e
-        );
+    // 5. Clean up PID files (best-effort, don't fail if missing)
+    if session.has_agents() {
+        for agent_proc in session.agents() {
+            let pid_key = if agent_proc.spawn_id().is_empty() {
+                session.id.clone()
+            } else {
+                agent_proc.spawn_id().to_string()
+            };
+            let pid_file = get_pid_file_path(&config.kild_dir, &pid_key);
+            if let Err(e) = delete_pid_file(&pid_file) {
+                warn!(
+                    event = "core.session.destroy_pid_file_cleanup_failed",
+                    session_id = session.id,
+                    pid_file = %pid_file.display(),
+                    error = %e
+                );
+            } else {
+                info!(
+                    event = "core.session.destroy_pid_file_cleaned",
+                    session_id = session.id,
+                    pid_file = %pid_file.display()
+                );
+            }
+        }
     } else {
-        info!(
-            event = "core.session.destroy_pid_file_cleaned",
-            session_id = session.id,
-            pid_file = %pid_file.display()
-        );
+        let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
+        if let Err(e) = delete_pid_file(&pid_file) {
+            warn!(
+                event = "core.session.destroy_pid_file_cleanup_failed",
+                session_id = session.id,
+                pid_file = %pid_file.display(),
+                error = %e
+            );
+        } else {
+            info!(
+                event = "core.session.destroy_pid_file_cleaned",
+                session_id = session.id,
+                pid_file = %pid_file.display()
+            );
+        }
     }
 
     // 6. Remove session file (automatically frees port range)
@@ -998,11 +1034,12 @@ pub fn restart_session(
     // 5. Relaunch terminal in existing worktree
     info!(event = "core.session.restart_spawn_started", worktree_path = %session.worktree_path.display());
 
+    let spawn_id = compute_spawn_id(&session.id, 0);
     let spawn_result = terminal::handler::spawn_terminal(
         &session.worktree_path,
         &agent_command,
         &kild_config,
-        Some(&session.id),
+        Some(&spawn_id),
         Some(&base_config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -1114,15 +1151,18 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
             })?;
 
     // 5. Spawn NEW terminal (additive - don't touch existing)
+    let spawn_index = session.agent_count();
+    let spawn_id = compute_spawn_id(&session.id, spawn_index);
     info!(
         event = "core.session.open_spawn_started",
-        worktree = %session.worktree_path.display()
+        worktree = %session.worktree_path.display(),
+        spawn_id = %spawn_id
     );
     let spawn_result = terminal::handler::spawn_terminal(
         &session.worktree_path,
         &agent_command,
         &kild_config,
-        Some(&session.id),
+        Some(&spawn_id),
         Some(&config.kild_dir),
     )
     .map_err(|e| SessionError::TerminalError { source: e })?;
@@ -1139,6 +1179,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
     };
     let new_agent = AgentProcess::new(
         agent.clone(),
+        spawn_id,
         spawn_result.process_id,
         process_name.clone(),
         process_start_time,
@@ -1305,23 +1346,53 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         }
     }
 
-    // 3. Delete PID file so next open() won't read stale PID (best-effort)
-    let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
-    match delete_pid_file(&pid_file) {
-        Ok(()) => {
-            debug!(
-                event = "core.session.stop_pid_file_cleaned",
-                session_id = session.id,
-                pid_file = %pid_file.display()
-            );
+    // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
+    if session.has_agents() {
+        for agent_proc in session.agents() {
+            let pid_key = if agent_proc.spawn_id().is_empty() {
+                // Backward compat: old sessions without spawn_id use session-level PID file
+                session.id.clone()
+            } else {
+                agent_proc.spawn_id().to_string()
+            };
+            let pid_file = get_pid_file_path(&config.kild_dir, &pid_key);
+            match delete_pid_file(&pid_file) {
+                Ok(()) => {
+                    debug!(
+                        event = "core.session.stop_pid_file_cleaned",
+                        session_id = session.id,
+                        pid_file = %pid_file.display()
+                    );
+                }
+                Err(e) => {
+                    debug!(
+                        event = "core.session.stop_pid_file_cleanup_failed",
+                        session_id = session.id,
+                        pid_file = %pid_file.display(),
+                        error = %e
+                    );
+                }
+            }
         }
-        Err(e) => {
-            debug!(
-                event = "core.session.stop_pid_file_cleanup_failed",
-                session_id = session.id,
-                pid_file = %pid_file.display(),
-                error = %e
-            );
+    } else {
+        // Fallback: session-level PID file for old sessions with empty agents vec
+        let pid_file = get_pid_file_path(&config.kild_dir, &session.id);
+        match delete_pid_file(&pid_file) {
+            Ok(()) => {
+                debug!(
+                    event = "core.session.stop_pid_file_cleaned",
+                    session_id = session.id,
+                    pid_file = %pid_file.display()
+                );
+            }
+            Err(e) => {
+                debug!(
+                    event = "core.session.stop_pid_file_cleanup_failed",
+                    session_id = session.id,
+                    pid_file = %pid_file.display(),
+                    error = %e
+                );
+            }
         }
     }
 
