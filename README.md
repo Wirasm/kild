@@ -116,11 +116,18 @@ kild open --all --no-agent
 
 ### Open kild in code editor
 ```bash
-# Open worktree in editor (uses $EDITOR or defaults to 'zed')
+# Open worktree in editor
+# Precedence: --editor flag > config default > $EDITOR > "zed"
 kild code <branch>
 
-# Use specific editor
+# Use specific editor (overrides config and $EDITOR)
 kild code <branch> --editor vim
+
+# Configure default editor in ~/.kild/config.toml or ./.kild/config.toml
+# [editor]
+# default = "code"
+# flags = "--new-window"
+# terminal = false  # Set to true for terminal editors (nvim, vim, helix)
 ```
 
 ### Focus on a kild
@@ -222,6 +229,8 @@ Configure additional patterns in `[include_patterns]` section. Your patterns ext
 **Agent Settings**: Configure default agent, startup commands, and flags per agent.
 
 **Terminal Preferences**: Set preferred terminal emulator (Ghostty, iTerm2, Terminal.app on macOS; Alacritty on Linux).
+
+**Editor Settings**: Configure default editor for `kild code` command with optional flags and terminal mode for terminal-based editors.
 
 ## How It Works
 

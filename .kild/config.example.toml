@@ -119,3 +119,33 @@ patterns = [
 # Maximum file size to copy (skip larger files with warning)
 # Supports: "10MB", "1GB", etc.
 # max_file_size = "10MB"
+
+# =============================================================================
+# EDITOR CONFIGURATION
+# =============================================================================
+
+[editor]
+# Default editor for `kild code` command
+# Precedence: CLI --editor flag > config default > $EDITOR > "zed"
+# default = "zed"
+
+# Flags passed to the editor before the worktree path
+# Useful for GUI editors that need flags like --new-window
+# flags = "--new-window"
+
+# Whether to spawn the editor inside a terminal window
+# Required for terminal-based editors (nvim, vim, helix)
+# Default: false
+# terminal = false
+
+# Example: VS Code
+# [editor]
+# default = "code"
+# flags = "--new-window"
+# terminal = false
+
+# Example: Neovim
+# [editor]
+# default = "nvim"
+# flags = "--nofork"
+# terminal = true

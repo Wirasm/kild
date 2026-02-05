@@ -73,7 +73,8 @@ cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHEL
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
-cargo run -p kild -- code my-branch              # Open worktree in editor
+cargo run -p kild -- code my-branch              # Open worktree in editor (config > $EDITOR > zed)
+cargo run -p kild -- code my-branch --editor vim # Override editor
 cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
 cargo run -p kild -- diff my-branch              # Show git diff for worktree
 cargo run -p kild -- diff my-branch --staged     # Show only staged changes
