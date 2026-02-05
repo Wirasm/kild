@@ -136,6 +136,15 @@ kild code <branch> --editor vim
 kild focus <branch>
 ```
 
+### Hide a kild
+```bash
+# Minimize/hide terminal window
+kild hide <branch>
+
+# Hide all active kild windows
+kild hide --all
+```
+
 ### View git changes in a kild
 ```bash
 # Show uncommitted changes
