@@ -57,9 +57,24 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
         candidate_count = pids.len()
     );
 
-    // Find the first Ghostty process among candidates by checking each process's
-    // executable name (via ps -o comm=) for "ghostty"
-    let found_pid = pids.into_iter().find(|&pid| is_ghostty_process(pid));
+    // The window_id is embedded in the sh -c command line via the ANSI title escape.
+    // pgrep -f may match either the Ghostty process itself or the sh child process.
+    // For sh matches, traverse to the Ghostty parent PID for focus_by_pid.
+    let found_pid = pids.into_iter().find_map(|pid| {
+        // First check if the candidate is itself a Ghostty process
+        if is_ghostty_process(pid) {
+            return Some(pid);
+        }
+
+        // Not a Ghostty process - check if its parent is Ghostty
+        if let Some(ppid) = get_parent_pid(pid)
+            && is_ghostty_process(ppid)
+        {
+            return Some(ppid);
+        }
+
+        None
+    });
 
     if let Some(pid) = found_pid {
         debug!(
@@ -75,6 +90,31 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
     }
 
     found_pid
+}
+
+/// Get the parent PID of a process.
+#[cfg(target_os = "macos")]
+fn get_parent_pid(pid: u32) -> Option<u32> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+
+    match trimmed.parse() {
+        Ok(ppid) => Some(ppid),
+        Err(e) => {
+            debug!(
+                event = "core.terminal.get_parent_pid_parse_failed",
+                pid = pid,
+                output = %trimmed,
+                error = %e
+            );
+            None
+        }
+    }
 }
 
 /// Check if a process is a Ghostty process by examining its executable name.
@@ -297,10 +337,14 @@ impl TerminalBackend for GhosttyBackend {
 
         // Escape regex metacharacters in the window title to avoid matching wrong processes
         let escaped_id = escape_regex(id);
-        // Use pkill to kill Ghostty processes that contain our session identifier
+        // Kill the shell process that hosts our window. The window_id is embedded in the
+        // sh -c command line via the ANSI title escape sequence (printf '\033]2;{id}\007').
+        // We match just the window_id (not "Ghostty.*{id}") because the Ghostty app process
+        // doesn't contain the window_id, and the sh process doesn't contain "Ghostty".
+        // Window IDs are specific enough (kild-{hash}-{branch}_{index}) to avoid false matches.
         let result = std::process::Command::new("pkill")
             .arg("-f")
-            .arg(format!("Ghostty.*{}", escaped_id))
+            .arg(&escaped_id)
             .output();
 
         match result {
@@ -608,12 +652,14 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn test_ghostty_pkill_pattern_escaping() {
-        // Verify the pattern format used in close_window
+        // Verify the pattern format used in close_window - matches just the window_id
+        // (no "Ghostty" prefix since the sh process doesn't contain "Ghostty")
         let session_id = "my-kild.test";
         let escaped = escape_regex(session_id);
-        let pattern = format!("Ghostty.*{}", escaped);
         // The pattern should escape the dot to avoid matching any character
-        assert_eq!(pattern, "Ghostty.*my-kild\\.test");
+        assert_eq!(escaped, "my-kild\\.test");
+        // Pattern should NOT contain "Ghostty" prefix
+        assert!(!escaped.contains("Ghostty"));
     }
 
     #[cfg(target_os = "macos")]
@@ -718,5 +764,31 @@ mod tests {
                 "Should report window not found when app not running"
             );
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_get_parent_pid_for_current_process() {
+        let current_pid = std::process::id();
+        let parent = get_parent_pid(current_pid);
+        assert!(parent.is_some(), "Current process should have a parent PID");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_get_parent_pid_nonexistent_process() {
+        let result = get_parent_pid(99999999);
+        // Non-existent PID should return None (ps will fail or return empty)
+        assert!(result.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_close_window_pkill_pattern_no_ghostty_prefix() {
+        // Verify the pkill pattern matches the window_id without requiring "Ghostty" prefix
+        let window_id = "kild-project123-my-branch_0";
+        let escaped = escape_regex(window_id);
+        assert_eq!(escaped, "kild-project123-my-branch_0");
+        assert!(!escaped.contains("Ghostty"));
     }
 }
