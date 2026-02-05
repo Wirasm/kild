@@ -1077,11 +1077,14 @@ pub fn restart_session(
 ///
 /// This is the preferred way to add agents to a kild. Unlike restart, this does NOT
 /// close existing terminals - multiple agents can run in the same kild.
-pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Session, SessionError> {
+pub fn open_session(
+    name: &str,
+    mode: crate::state::types::OpenMode,
+) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
         name = name,
-        agent_override = ?agent_override
+        mode = ?mode
     );
 
     let config = Config::new();
@@ -1121,30 +1124,71 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
         });
     }
 
-    // 3. Determine agent
-    let agent = agent_override.unwrap_or_else(|| session.agent.clone());
-    info!(event = "core.session.open_agent_selected", agent = agent);
+    // 3. Determine agent and command based on OpenMode
+    let is_bare_shell = matches!(mode, crate::state::types::OpenMode::BareShell);
+    let (agent, agent_command) =
+        match mode {
+            crate::state::types::OpenMode::BareShell => {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                    let fallback = "/bin/sh".to_string();
+                    warn!(
+                        event = "core.session.shell_env_missing",
+                        fallback = %fallback,
+                        "$SHELL not set, falling back to /bin/sh"
+                    );
+                    eprintln!("Warning: $SHELL not set. Using /bin/sh as fallback.");
+                    fallback
+                });
+                info!(event = "core.session.open_shell_selected", shell = %shell);
+                // Keep the session's original agent — no agent is actually running
+                (session.agent.clone(), shell)
+            }
+            crate::state::types::OpenMode::Agent(name) => {
+                info!(event = "core.session.open_agent_selected", agent = name);
 
-    // Warn if agent CLI is not available in PATH
-    if let Some(false) = agents::is_agent_available(&agent) {
-        warn!(
-            event = "core.session.agent_not_available",
-            agent = %agent,
-            session_id = %session.id,
-            "Agent CLI '{}' not found in PATH - session may fail to start",
-            agent
-        );
-    }
+                // Warn if agent CLI is not available in PATH
+                if let Some(false) = agents::is_agent_available(&name) {
+                    warn!(
+                        event = "core.session.agent_not_available",
+                        agent = %name,
+                        session_id = %session.id,
+                        "Agent CLI '{}' not found in PATH - session may fail to start",
+                        name
+                    );
+                }
 
-    // 4. Build command
-    let agent_command =
-        kild_config
-            .get_agent_command(&agent)
-            .map_err(|e| SessionError::ConfigError {
-                message: e.to_string(),
-            })?;
+                let command = kild_config.get_agent_command(&name).map_err(|e| {
+                    SessionError::ConfigError {
+                        message: e.to_string(),
+                    }
+                })?;
+                (name, command)
+            }
+            crate::state::types::OpenMode::DefaultAgent => {
+                let agent = session.agent.clone();
+                info!(event = "core.session.open_agent_selected", agent = agent);
 
-    // 5. Spawn NEW terminal (additive - don't touch existing)
+                // Warn if agent CLI is not available in PATH
+                if let Some(false) = agents::is_agent_available(&agent) {
+                    warn!(
+                        event = "core.session.agent_not_available",
+                        agent = %agent,
+                        session_id = %session.id,
+                        "Agent CLI '{}' not found in PATH - session may fail to start",
+                        agent
+                    );
+                }
+
+                let command = kild_config.get_agent_command(&agent).map_err(|e| {
+                    SessionError::ConfigError {
+                        message: e.to_string(),
+                    }
+                })?;
+                (agent, command)
+            }
+        };
+
+    // 4. Spawn NEW terminal (additive - don't touch existing)
     let spawn_index = session.agent_count();
     let spawn_id = compute_spawn_id(&session.id, spawn_index);
     info!(
@@ -1164,7 +1208,7 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
     // Capture process metadata immediately for PID reuse protection
     let (process_name, process_start_time) = capture_process_metadata(&spawn_result, "open");
 
-    // 6. Update session with new process info
+    // 5. Update session with new process info
     let now = chrono::Utc::now().to_rfc3339();
     let command = if spawn_result.command_executed.trim().is_empty() {
         format!("{} (command not captured)", agent)
@@ -1183,11 +1227,15 @@ pub fn open_session(name: &str, agent_override: Option<String>) -> Result<Sessio
         now.clone(),
     )?;
 
-    session.status = SessionStatus::Active;
+    // When bare shell, keep session Stopped (no agent is running).
+    // Otherwise, mark as Active.
+    if !is_bare_shell {
+        session.status = SessionStatus::Active;
+    }
     session.last_activity = Some(now);
     session.add_agent(new_agent);
 
-    // 7. Save updated session
+    // 6. Save updated session
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
@@ -1883,7 +1931,7 @@ mod tests {
 
     #[test]
     fn test_open_session_not_found() {
-        let result = open_session("non-existent", None);
+        let result = open_session("non-existent", crate::state::types::OpenMode::DefaultAgent);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
     }

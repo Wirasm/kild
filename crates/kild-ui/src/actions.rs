@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use kild_core::{Command, CoreStore, Event, KildConfig, Store, session_ops};
+use kild_core::{Command, CoreStore, Event, KildConfig, OpenMode, Store, session_ops};
 
 use crate::state::OperationError;
 use kild_core::{ProcessStatus, SessionInfo};
@@ -129,7 +129,12 @@ pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
 pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.open_kild.started", branch = %branch, agent = ?agent);
 
-    dispatch_command(Command::OpenKild { branch, agent }, "ui.open_kild")
+    let mode = match agent {
+        Some(a) => OpenMode::Agent(a),
+        None => OpenMode::DefaultAgent,
+    };
+
+    dispatch_command(Command::OpenKild { branch, mode }, "ui.open_kild")
 }
 
 /// Stop the agent process in a kild without destroying the kild.
@@ -159,7 +164,7 @@ pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>
             dispatch_command(
                 Command::OpenKild {
                     branch: branch.to_string(),
-                    agent: None,
+                    mode: OpenMode::DefaultAgent,
                 },
                 "ui.open_all_stopped.dispatch",
             )

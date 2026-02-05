@@ -148,6 +148,13 @@ pub fn build_cli() -> Command {
                         .value_parser(["amp", "claude", "kiro", "gemini", "codex", "opencode"])
                 )
                 .arg(
+                    Arg::new("no-agent")
+                        .long("no-agent")
+                        .help("Open a bare terminal with default shell instead of an agent")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("agent")
+                )
+                .arg(
                     Arg::new("all")
                         .long("all")
                         .help("Open agents in all stopped kild")
@@ -962,6 +969,59 @@ mod tests {
             open_matches.get_one::<String>("branch").unwrap(),
             "my-branch"
         );
+    }
+
+    #[test]
+    fn test_cli_open_no_agent_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "open", "my-branch", "--no-agent"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let open_matches = matches.subcommand_matches("open").unwrap();
+        assert!(open_matches.get_flag("no-agent"));
+        assert!(!open_matches.get_flag("all"));
+    }
+
+    #[test]
+    fn test_cli_open_no_agent_conflicts_with_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "open",
+            "my-branch",
+            "--no-agent",
+            "--agent",
+            "claude",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_open_no_agent_with_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "open", "my-branch", "--no-agent"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let open_matches = matches.subcommand_matches("open").unwrap();
+        assert!(open_matches.get_flag("no-agent"));
+        assert_eq!(
+            open_matches.get_one::<String>("branch").unwrap(),
+            "my-branch"
+        );
+    }
+
+    #[test]
+    fn test_cli_open_no_agent_with_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "open", "--all", "--no-agent"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let open_matches = matches.subcommand_matches("open").unwrap();
+        assert!(open_matches.get_flag("no-agent"));
+        assert!(open_matches.get_flag("all"));
     }
 
     #[test]

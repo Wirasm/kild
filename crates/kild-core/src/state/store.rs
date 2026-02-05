@@ -126,7 +126,7 @@ mod tests {
         let events = store
             .dispatch(Command::OpenKild {
                 branch: "feat".to_string(),
-                agent: None,
+                mode: crate::state::types::OpenMode::DefaultAgent,
             })
             .unwrap();
         assert!(matches!(&events[0], Event::KildOpened { branch, .. } if branch == "feat"));
@@ -225,7 +225,7 @@ mod tests {
             },
             Command::OpenKild {
                 branch: "b".to_string(),
-                agent: None,
+                mode: crate::state::types::OpenMode::DefaultAgent,
             },
             Command::StopKild {
                 branch: "b".to_string(),
