@@ -317,3 +317,67 @@ fn test_list_json_is_parseable_for_scripting() {
         }
     }
 }
+
+/// Verify that 'kild list --json' includes git_stats per session
+#[test]
+fn test_list_json_includes_git_stats() {
+    let output = run_kild_list_json();
+
+    if !output.status.success() {
+        return;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let sessions: Vec<serde_json::Value> =
+        serde_json::from_str(&stdout).expect("list output should be valid JSON");
+
+    // If there are sessions, verify git_stats key exists
+    if let Some(first) = sessions.first() {
+        assert!(
+            first.get("git_stats").is_some(),
+            "Each session in list --json should have 'git_stats' field. Got: {}",
+            serde_json::to_string_pretty(first).unwrap()
+        );
+    }
+}
+
+/// Verify that 'kild status <branch> --json' includes git_stats
+#[test]
+fn test_status_json_includes_git_stats() {
+    let list_output = run_kild_list_json();
+
+    if !list_output.status.success() {
+        return;
+    }
+
+    let stdout = String::from_utf8_lossy(&list_output.stdout);
+    let sessions: Vec<serde_json::Value> =
+        serde_json::from_str(&stdout).expect("list output should be valid JSON");
+
+    if sessions.is_empty() {
+        return;
+    }
+
+    let branch = sessions[0]["branch"]
+        .as_str()
+        .expect("Session should have branch field");
+
+    let status_output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["status", branch, "--json"])
+        .output()
+        .expect("Failed to execute 'kild status --json'");
+
+    if !status_output.status.success() {
+        return;
+    }
+
+    let status_stdout = String::from_utf8_lossy(&status_output.stdout);
+    let session: serde_json::Value =
+        serde_json::from_str(&status_stdout).expect("status stdout should be valid JSON");
+
+    assert!(
+        session.get("git_stats").is_some(),
+        "status --json should include 'git_stats' field. Got: {}",
+        status_stdout
+    );
+}

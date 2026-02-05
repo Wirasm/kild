@@ -220,6 +220,12 @@ pub fn build_cli() -> Command {
                         .help("Show only staged changes (git diff --staged)")
                         .action(ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("stat")
+                        .long("stat")
+                        .help("Show unstaged diffstat summary instead of full diff")
+                        .action(ArgAction::SetTrue)
+                )
         )
         .subcommand(
             Command::new("commits")
@@ -749,6 +755,22 @@ mod tests {
             "test-branch"
         );
         assert!(diff_matches.get_flag("staged"));
+    }
+
+    #[test]
+    fn test_cli_diff_with_stat_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "diff", "test-branch", "--stat"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let diff_matches = matches.subcommand_matches("diff").unwrap();
+        assert_eq!(
+            diff_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert!(diff_matches.get_flag("stat"));
+        assert!(!diff_matches.get_flag("staged"));
     }
 
     #[test]

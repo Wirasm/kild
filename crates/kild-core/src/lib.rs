@@ -28,7 +28,7 @@ pub mod terminal;
 
 // Re-export commonly used types at crate root for convenience
 pub use config::KildConfig;
-pub use git::types::{UncommittedDetails, WorktreeStatus};
+pub use git::types::{DiffStats, UncommittedDetails, WorktreeStatus};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{

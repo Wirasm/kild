@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::path::PathBuf;
 
 /// Git diff statistics for a worktree.
@@ -5,7 +6,7 @@ use std::path::PathBuf;
 /// Represents the number of lines added, removed, and files changed
 /// between the index (staging area) and the working directory.
 /// This captures **unstaged changes only**, not staged changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct DiffStats {
     /// Number of lines added
     pub insertions: usize,
@@ -66,7 +67,7 @@ impl WorktreeInfo {
 /// or inaccurate. In this case, the fallback behavior is conservative:
 /// - `has_uncommitted_changes` is set to true (assume dirty)
 /// - Users should be warned that the check failed
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct WorktreeStatus {
     /// Whether there are uncommitted changes (staged, modified, or untracked).
     ///
@@ -83,6 +84,13 @@ pub struct WorktreeStatus {
     /// there's no baseline to compare against. Use the "never pushed" warning
     /// via `has_remote_branch` instead.
     pub unpushed_commit_count: usize,
+    /// Number of commits behind the remote tracking branch.
+    ///
+    /// Zero when:
+    /// - Branch tracks a remote and is up-to-date
+    /// - Branch has no remote tracking branch (check `has_remote_branch`)
+    /// - Status check failed (check `status_check_failed`)
+    pub behind_commit_count: usize,
     /// Whether a remote tracking branch exists for this branch.
     /// False means the branch has never been pushed.
     pub has_remote_branch: bool,
@@ -97,7 +105,7 @@ pub struct WorktreeStatus {
 }
 
 /// Detailed breakdown of uncommitted changes.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct UncommittedDetails {
     /// Number of files staged for commit.
     pub staged_files: usize,
@@ -242,6 +250,7 @@ mod tests {
         let status = WorktreeStatus::default();
         assert!(!status.has_uncommitted_changes);
         assert_eq!(status.unpushed_commit_count, 0);
+        assert_eq!(status.behind_commit_count, 0);
         assert!(!status.has_remote_branch);
         assert!(status.uncommitted_details.is_none());
         assert!(!status.status_check_failed);
@@ -256,5 +265,60 @@ mod tests {
         };
         assert!(status.has_uncommitted_changes);
         assert!(status.status_check_failed);
+    }
+
+    // --- Serialization tests ---
+
+    #[test]
+    fn test_diff_stats_serializes_to_json() {
+        let stats = DiffStats {
+            insertions: 42,
+            deletions: 10,
+            files_changed: 5,
+        };
+        let value = serde_json::to_value(&stats).expect("DiffStats should serialize");
+        assert_eq!(value["insertions"], 42);
+        assert_eq!(value["deletions"], 10);
+        assert_eq!(value["files_changed"], 5);
+    }
+
+    #[test]
+    fn test_worktree_status_serializes_to_json() {
+        let status = WorktreeStatus {
+            has_uncommitted_changes: true,
+            unpushed_commit_count: 4,
+            behind_commit_count: 2,
+            has_remote_branch: true,
+            uncommitted_details: Some(UncommittedDetails {
+                staged_files: 3,
+                modified_files: 2,
+                untracked_files: 1,
+            }),
+            status_check_failed: false,
+        };
+        let value = serde_json::to_value(&status).expect("WorktreeStatus should serialize");
+        assert_eq!(value["has_uncommitted_changes"], true);
+        assert_eq!(value["unpushed_commit_count"], 4);
+        assert_eq!(value["behind_commit_count"], 2);
+        assert_eq!(value["has_remote_branch"], true);
+        assert_eq!(value["status_check_failed"], false);
+
+        let details = &value["uncommitted_details"];
+        assert_eq!(details["staged_files"], 3);
+        assert_eq!(details["modified_files"], 2);
+        assert_eq!(details["untracked_files"], 1);
+    }
+
+    #[test]
+    fn test_uncommitted_details_serializes_to_json() {
+        let details = UncommittedDetails {
+            staged_files: 1,
+            modified_files: 2,
+            untracked_files: 3,
+        };
+        let value = serde_json::to_value(&details).expect("UncommittedDetails should serialize");
+        assert_eq!(value["staged_files"], 1);
+        assert_eq!(value["modified_files"], 2);
+        assert_eq!(value["untracked_files"], 3);
     }
 }

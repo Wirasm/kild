@@ -186,8 +186,8 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
     // 1. Check for uncommitted changes using git2 status
     let (uncommitted_result, status_check_failed) = check_uncommitted_changes(&repo);
 
-    // 2. Count unpushed commits and check remote branch existence
-    let (unpushed_count, has_remote) = count_unpushed_commits(&repo);
+    // 2. Count unpushed/behind commits and check remote branch existence
+    let (unpushed_count, behind_count, has_remote) = count_unpushed_commits(&repo);
 
     // Determine if there are uncommitted changes
     // Conservative fallback: assume dirty if check failed
@@ -200,6 +200,7 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
     Ok(WorktreeStatus {
         has_uncommitted_changes: has_uncommitted,
         unpushed_commit_count: unpushed_count,
+        behind_commit_count: behind_count,
         has_remote_branch: has_remote,
         uncommitted_details: uncommitted_result,
         status_check_failed,
@@ -273,16 +274,16 @@ fn check_uncommitted_changes(repo: &Repository) -> (Option<UncommittedDetails>, 
     (Some(details), false)
 }
 
-/// Count unpushed commits and check if remote tracking branch exists.
+/// Count unpushed and behind commits and check if remote tracking branch exists.
 ///
-/// Returns (unpushed_commit_count, has_remote_branch).
+/// Returns (unpushed_commit_count, behind_commit_count, has_remote_branch).
 ///
 /// Return values:
-/// - `(n, true)` - Branch has remote, n commits unpushed
-/// - `(0, false)` - Branch has no upstream (never pushed)
-/// - `(0, false)` - Detached HEAD state (no branch to push)
-/// - `(0, true)` - Error counting commits (remote exists but count failed)
-fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
+/// - `(ahead, behind, true)` - Branch has remote, ahead/behind counts
+/// - `(0, 0, false)` - Branch has no upstream (never pushed)
+/// - `(0, 0, false)` - Detached HEAD state (no branch to push)
+/// - `(0, 0, true)` - Error counting commits (remote exists but count failed)
+fn count_unpushed_commits(repo: &Repository) -> (usize, usize, bool) {
     // Get current branch reference
     let head = match repo.head() {
         Ok(h) => h,
@@ -292,7 +293,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 error = %e,
                 "Failed to read HEAD - cannot count unpushed commits"
             );
-            return (0, false);
+            return (0, 0, false);
         }
     };
 
@@ -305,7 +306,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 event = "core.git.detached_head",
                 "Repository is in detached HEAD state"
             );
-            return (0, false);
+            return (0, 0, false);
         }
     };
 
@@ -319,7 +320,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 error = %e,
                 "Could not find local branch"
             );
-            return (0, false);
+            return (0, 0, false);
         }
     };
 
@@ -334,7 +335,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 branch = branch_name,
                 "Branch has no upstream - never pushed"
             );
-            return (0, false);
+            return (0, 0, false);
         }
     };
 
@@ -347,7 +348,7 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 branch = branch_name,
                 "HEAD has no target OID"
             );
-            return (0, true);
+            return (0, 0, true);
         }
     };
 
@@ -359,12 +360,12 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 branch = branch_name,
                 "Upstream branch has no target OID"
             );
-            return (0, true);
+            return (0, 0, true);
         }
     };
 
-    // Count commits in local that aren't in upstream (local..upstream reversed)
-    let mut revwalk = match repo.revwalk() {
+    // Count commits ahead (local has, upstream doesn't)
+    let mut ahead_walk = match repo.revwalk() {
         Ok(rw) => rw,
         Err(e) => {
             warn!(
@@ -372,32 +373,62 @@ fn count_unpushed_commits(repo: &Repository) -> (usize, bool) {
                 error = %e,
                 "Failed to create revwalk - cannot count unpushed commits"
             );
-            return (0, true);
+            return (0, 0, true);
         }
     };
 
-    // Push the local commit and hide the upstream commit
-    if let Err(e) = revwalk.push(local_oid) {
+    if let Err(e) = ahead_walk.push(local_oid) {
         warn!(
             event = "core.git.revwalk_push_failed",
             error = %e,
             "Failed to push local commit to revwalk"
         );
-        return (0, true);
+        return (0, 0, true);
     }
-    if let Err(e) = revwalk.hide(upstream_oid) {
-        // Diverged history - can't accurately count, warn user
+    if let Err(e) = ahead_walk.hide(upstream_oid) {
         warn!(
             event = "core.git.revwalk_hide_failed",
             error = %e,
             "Failed to hide upstream commit - history may have diverged"
         );
-        return (0, true);
+        return (0, 0, true);
     }
 
-    let unpushed_count = revwalk.count();
+    let unpushed_count = ahead_walk.count();
 
-    (unpushed_count, true)
+    // Count commits behind (upstream has, local doesn't)
+    let mut behind_walk = match repo.revwalk() {
+        Ok(rw) => rw,
+        Err(e) => {
+            warn!(
+                event = "core.git.behind_revwalk_init_failed",
+                error = %e,
+                "Failed to create revwalk for behind count"
+            );
+            return (unpushed_count, 0, true);
+        }
+    };
+
+    if let Err(e) = behind_walk.push(upstream_oid) {
+        warn!(
+            event = "core.git.behind_revwalk_push_failed",
+            error = %e,
+            "Failed to push upstream commit to behind revwalk"
+        );
+        return (unpushed_count, 0, true);
+    }
+    if let Err(e) = behind_walk.hide(local_oid) {
+        warn!(
+            event = "core.git.behind_revwalk_hide_failed",
+            error = %e,
+            "Failed to hide local commit in behind revwalk"
+        );
+        return (unpushed_count, 0, true);
+    }
+
+    let behind_count = behind_walk.count();
+
+    (unpushed_count, behind_count, true)
 }
 
 #[cfg(test)]
@@ -806,5 +837,56 @@ mod tests {
             !files_only.has_changes(),
             "has_changes() checks line counts only"
         );
+    }
+
+    // --- count_unpushed_commits / behind count tests ---
+
+    #[test]
+    fn test_count_unpushed_commits_no_remote_returns_zero_behind() {
+        // A repo with no remote should return (0, 0, false)
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        fs::write(dir.path().join("test.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let (ahead, behind, has_remote) = count_unpushed_commits(&repo);
+        assert_eq!(ahead, 0);
+        assert_eq!(behind, 0);
+        assert!(!has_remote);
+    }
+
+    #[test]
+    fn test_worktree_status_includes_behind_commit_count() {
+        // A clean repo with no remote should have behind_commit_count = 0
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        fs::write(dir.path().join("test.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let status = get_worktree_status(dir.path()).unwrap();
+        assert_eq!(status.behind_commit_count, 0);
+        assert_eq!(status.unpushed_commit_count, 0);
+        assert!(!status.has_remote_branch);
     }
 }
