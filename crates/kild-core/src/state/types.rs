@@ -52,6 +52,8 @@ pub enum Command {
     CompleteKild { branch: String },
     /// Update agent status for a kild session.
     UpdateAgentStatus { branch: String, status: AgentStatus },
+    /// Refresh PR status for a kild session from GitHub.
+    RefreshPrStatus { branch: String },
     /// Refresh the session list from disk.
     RefreshSessions,
     /// Add a project to the project list. Name is derived from path if `None`.
@@ -106,6 +108,9 @@ mod tests {
                 branch: "feature".to_string(),
                 status: AgentStatus::Working,
             },
+            Command::RefreshPrStatus {
+                branch: "feature".to_string(),
+            },
             Command::RefreshSessions,
             Command::AddProject {
                 path: PathBuf::from("/projects/app"),
@@ -154,6 +159,9 @@ mod tests {
             Command::UpdateAgentStatus {
                 branch: "feature".to_string(),
                 status: AgentStatus::Working,
+            },
+            Command::RefreshPrStatus {
+                branch: "feature".to_string(),
             },
             Command::RefreshSessions,
             Command::AddProject {

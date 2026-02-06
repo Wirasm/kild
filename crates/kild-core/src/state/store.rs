@@ -95,6 +95,9 @@ mod tests {
                         name: name.unwrap_or_default(),
                     }]),
                     Command::RemoveProject { path } => Ok(vec![Event::ProjectRemoved { path }]),
+                    Command::RefreshPrStatus { branch } => {
+                        Ok(vec![Event::PrStatusRefreshed { branch }])
+                    }
                     Command::SelectProject { path } => {
                         Ok(vec![Event::ActiveProjectChanged { path }])
                     }
@@ -204,6 +207,9 @@ mod tests {
                         name: name.unwrap_or_default(),
                     }]),
                     Command::RemoveProject { path } => Ok(vec![Event::ProjectRemoved { path }]),
+                    Command::RefreshPrStatus { branch } => {
+                        Ok(vec![Event::PrStatusRefreshed { branch }])
+                    }
                     Command::SelectProject { path } => {
                         Ok(vec![Event::ActiveProjectChanged { path }])
                     }
@@ -236,6 +242,9 @@ mod tests {
             Command::UpdateAgentStatus {
                 branch: "b".to_string(),
                 status: crate::sessions::types::AgentStatus::Working,
+            },
+            Command::RefreshPrStatus {
+                branch: "b".to_string(),
             },
             Command::RefreshSessions,
             Command::AddProject {

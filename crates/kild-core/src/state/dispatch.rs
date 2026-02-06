@@ -72,6 +72,23 @@ impl Store for CoreStore {
                 session_ops::update_agent_status(&branch, status)?;
                 Ok(vec![Event::AgentStatusUpdated { branch, status }])
             }
+            Command::RefreshPrStatus { branch } => {
+                // Look up session, fetch PR info, write sidecar
+                let session = session_ops::get_session(&branch)?;
+                let kild_branch = crate::git::operations::kild_branch_name(&branch);
+                if session_ops::has_remote_configured(&session.worktree_path)
+                    && let Some(pr_info) =
+                        session_ops::fetch_pr_info(&session.worktree_path, &kild_branch)
+                {
+                    let config = crate::config::Config::new();
+                    crate::sessions::persistence::write_pr_info(
+                        &config.sessions_dir(),
+                        &session.id,
+                        &pr_info,
+                    )?;
+                }
+                Ok(vec![Event::PrStatusRefreshed { branch }])
+            }
             Command::RefreshSessions => {
                 session_ops::list_sessions()?;
                 Ok(vec![Event::SessionsRefreshed])

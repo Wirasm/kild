@@ -83,6 +83,9 @@ cargo run -p kild -- diff my-branch --staged     # Show only staged changes
 cargo run -p kild -- diff my-branch --stat       # Show diffstat summary
 cargo run -p kild -- commits my-branch           # Show recent commits in kild's branch
 cargo run -p kild -- commits my-branch -n 5      # Show last 5 commits
+cargo run -p kild -- pr my-branch                # Show PR status for kild
+cargo run -p kild -- pr my-branch --json         # JSON output for PR status
+cargo run -p kild -- pr my-branch --refresh      # Force refresh PR data from GitHub
 cargo run -p kild -- rebase my-branch            # Rebase kild branch onto base branch
 cargo run -p kild -- rebase my-branch --base dev # Rebase onto custom base branch
 cargo run -p kild -- rebase --all                # Rebase all kilds onto base branch

@@ -141,6 +141,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("hide", sub_matches)) => handle_hide_command(sub_matches),
         Some(("diff", sub_matches)) => handle_diff_command(sub_matches),
         Some(("commits", sub_matches)) => handle_commits_command(sub_matches),
+        Some(("pr", sub_matches)) => handle_pr_command(sub_matches),
         Some(("status", sub_matches)) => handle_status_command(sub_matches),
         Some(("agent-status", sub_matches)) => handle_agent_status_command(sub_matches),
         Some(("rebase", sub_matches)) => handle_rebase_command(sub_matches),
@@ -253,6 +254,7 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
                     terminal_window_title: Option<String>,
+                    pr_info: Option<kild_core::PrInfo>,
                 }
 
                 let enriched: Vec<EnrichedSession> = sessions
@@ -263,12 +265,14 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                         let terminal_window_title = session
                             .latest_agent()
                             .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
+                        let pr_info = session_handler::read_pr_info(&session.id);
                         EnrichedSession {
                             session,
                             git_stats,
                             agent_status: status_info.as_ref().map(|i| i.status.to_string()),
                             agent_status_updated_at: status_info.map(|i| i.updated_at),
                             terminal_window_title,
+                            pr_info,
                         }
                     })
                     .collect();
@@ -282,8 +286,12 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                     .iter()
                     .map(|s| session_handler::read_agent_status(&s.id))
                     .collect();
+                let pr_infos: Vec<Option<kild_core::PrInfo>> = sessions
+                    .iter()
+                    .map(|s| session_handler::read_pr_info(&s.id))
+                    .collect();
                 let formatter = crate::table::TableFormatter::new(&sessions);
-                formatter.print_table(&sessions, &statuses);
+                formatter.print_table(&sessions, &statuses, &pr_infos);
             }
 
             info!(event = "cli.list_completed", count = session_count);
@@ -1456,6 +1464,113 @@ fn handle_agent_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::
     Ok(())
 }
 
+fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required")?;
+    let json_output = matches.get_flag("json");
+    let refresh = matches.get_flag("refresh");
+
+    if !is_valid_branch_name(branch) {
+        eprintln!("Invalid branch name: {}", branch);
+        error!(event = "cli.pr_invalid_branch", branch = branch);
+        return Err("Invalid branch name".into());
+    }
+
+    info!(
+        event = "cli.pr_started",
+        branch = branch,
+        json_output = json_output,
+        refresh = refresh
+    );
+
+    // 1. Look up session
+    let session = match session_handler::get_session(branch) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            error!(event = "cli.pr_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            return Err(e.into());
+        }
+    };
+
+    // 2. Check for remote
+    if !session_handler::has_remote_configured(&session.worktree_path) {
+        println!("No remote configured — PR tracking unavailable.");
+        info!(
+            event = "cli.pr_completed",
+            branch = branch,
+            result = "no_remote"
+        );
+        return Ok(());
+    }
+
+    let kild_branch = kild_core::git::operations::kild_branch_name(branch);
+
+    // 3. Get PR info: refresh or read from cache
+    let pr_info = if refresh || session_handler::read_pr_info(&session.id).is_none() {
+        // Fetch from GitHub and write sidecar
+        let fetched = session_handler::fetch_pr_info(&session.worktree_path, &kild_branch);
+        if let Some(ref info) = fetched {
+            let config = kild_core::config::Config::new();
+            if let Err(e) = kild_core::sessions::persistence::write_pr_info(
+                &config.sessions_dir(),
+                &session.id,
+                info,
+            ) {
+                warn!(
+                    event = "cli.pr_sidecar_write_failed",
+                    branch = branch,
+                    error = %e
+                );
+            }
+        }
+        fetched
+    } else {
+        session_handler::read_pr_info(&session.id)
+    };
+
+    // 4. Output
+    match pr_info {
+        Some(info) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                println!("PR #{}: {}", info.number, info.url);
+                println!("State:   {}", info.state);
+                println!(
+                    "CI:      {}",
+                    info.ci_summary
+                        .as_deref()
+                        .unwrap_or(&info.ci_status.to_string())
+                );
+                println!(
+                    "Reviews: {}",
+                    info.review_summary
+                        .as_deref()
+                        .unwrap_or(&info.review_status.to_string())
+                );
+            }
+            info!(
+                event = "cli.pr_completed",
+                branch = branch,
+                pr_number = info.number
+            );
+        }
+        None => {
+            println!("No PR found for branch 'kild/{}'", branch);
+            info!(
+                event = "cli.pr_completed",
+                branch = branch,
+                result = "no_pr"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
@@ -1472,6 +1587,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         Ok(session) => {
             let git_stats = collect_git_stats(&session.worktree_path, branch);
             let status_info = session_handler::read_agent_status(&session.id);
+            let pr_info = session_handler::read_pr_info(&session.id);
 
             if json_output {
                 #[derive(serde::Serialize)]
@@ -1482,6 +1598,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
                     terminal_window_title: Option<String>,
+                    pr_info: Option<&'a kild_core::PrInfo>,
                 }
 
                 let terminal_window_title = session
@@ -1493,6 +1610,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                     agent_status: status_info.as_ref().map(|i| i.status.to_string()),
                     agent_status_updated_at: status_info.as_ref().map(|i| i.updated_at.clone()),
                     terminal_window_title,
+                    pr_info: pr_info.as_ref(),
                 };
                 println!("{}", serde_json::to_string_pretty(&enriched)?);
                 info!(
@@ -1569,6 +1687,18 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                         "Never pushed"
                     };
                     println!("│ Remote:      {:<47} │", remote_status);
+                }
+            }
+
+            // Display PR info (if cached)
+            if let Some(ref pr) = pr_info {
+                let pr_line = format!("PR #{} ({})", pr.number, pr.state);
+                println!("│ PR:          {:<47} │", truncate(&pr_line, 47));
+                if let Some(ref ci) = pr.ci_summary {
+                    println!("│ CI:          {:<47} │", truncate(ci, 47));
+                }
+                if let Some(ref reviews) = pr.review_summary {
+                    println!("│ Reviews:     {:<47} │", truncate(reviews, 47));
                 }
             }
 

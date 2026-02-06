@@ -225,6 +225,70 @@ pub fn remove_agent_status_file(sessions_dir: &Path, session_id: &str) {
     }
 }
 
+/// Write PR info sidecar file atomically.
+pub fn write_pr_info(
+    sessions_dir: &Path,
+    session_id: &str,
+    pr_info: &super::types::PrInfo,
+) -> Result<(), SessionError> {
+    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    let content = serde_json::to_string(pr_info).map_err(|e| SessionError::IoError {
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+    })?;
+    let temp_file = sidecar_file.with_extension("pr.tmp");
+    if let Err(e) = fs::write(&temp_file, &content) {
+        cleanup_temp_file(&temp_file, &e);
+        return Err(SessionError::IoError { source: e });
+    }
+    if let Err(e) = fs::rename(&temp_file, &sidecar_file) {
+        cleanup_temp_file(&temp_file, &e);
+        return Err(SessionError::IoError { source: e });
+    }
+    Ok(())
+}
+
+/// Read PR info from sidecar file. Returns None if file doesn't exist or is corrupt.
+pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<super::types::PrInfo> {
+    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    let content = match fs::read_to_string(&sidecar_file) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            tracing::warn!(
+                event = "core.session.pr_info_read_failed",
+                session_id = %session_id,
+                error = %e,
+            );
+            return None;
+        }
+    };
+    match serde_json::from_str(&content) {
+        Ok(info) => Some(info),
+        Err(e) => {
+            tracing::warn!(
+                event = "core.session.pr_info_parse_failed",
+                session_id = %session_id,
+                error = %e,
+            );
+            None
+        }
+    }
+}
+
+/// Remove PR info sidecar file. Best-effort (logs warning on failure).
+pub fn remove_pr_info_file(sessions_dir: &Path, session_id: &str) {
+    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    if sidecar_file.exists()
+        && let Err(e) = fs::remove_file(&sidecar_file)
+    {
+        tracing::warn!(
+            event = "core.session.pr_info_file_remove_failed",
+            session_id = %session_id,
+            error = %e,
+        );
+    }
+}
+
 pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), SessionError> {
     let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
 
@@ -913,6 +977,114 @@ mod tests {
 
         // Should not panic or error
         remove_agent_status_file(&temp_dir, "nonexistent");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // --- PR info sidecar tests ---
+
+    #[test]
+    fn test_write_and_read_pr_info() {
+        use super::super::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_pr_info_write_read");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let info = PrInfo {
+            number: 42,
+            url: "https://github.com/org/repo/pull/42".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Passing,
+            ci_summary: Some("3/3 passing".to_string()),
+            review_status: ReviewStatus::Approved,
+            review_summary: Some("1 approved".to_string()),
+            updated_at: "2026-02-05T12:00:00Z".to_string(),
+        };
+
+        write_pr_info(&temp_dir, "test/branch", &info).unwrap();
+
+        let sidecar_file = temp_dir.join("test_branch.pr");
+        assert!(sidecar_file.exists());
+
+        let read_back = read_pr_info(&temp_dir, "test/branch");
+        assert_eq!(read_back, Some(info));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_read_pr_info_missing_file() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_pr_info_missing");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let result = read_pr_info(&temp_dir, "nonexistent");
+        assert_eq!(result, None);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_read_pr_info_corrupt_json() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_pr_info_corrupt");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let sidecar_file = temp_dir.join("bad_session.pr");
+        std::fs::write(&sidecar_file, "not json").unwrap();
+
+        let result = read_pr_info(&temp_dir, "bad_session");
+        assert_eq!(result, None);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_remove_pr_info_file_exists() {
+        use super::super::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_pr_info_remove");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let info = PrInfo {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Unknown,
+            ci_summary: None,
+            review_status: ReviewStatus::Unknown,
+            review_summary: None,
+            updated_at: "2026-02-05T12:00:00Z".to_string(),
+        };
+        write_pr_info(&temp_dir, "test/rm", &info).unwrap();
+
+        let sidecar_file = temp_dir.join("test_rm.pr");
+        assert!(sidecar_file.exists());
+
+        remove_pr_info_file(&temp_dir, "test/rm");
+        assert!(!sidecar_file.exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_remove_pr_info_file_missing_is_noop() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_pr_info_remove_missing");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Should not panic or error
+        remove_pr_info_file(&temp_dir, "nonexistent");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

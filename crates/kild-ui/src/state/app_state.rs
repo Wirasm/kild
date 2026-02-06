@@ -123,6 +123,9 @@ impl AppState {
                     self.clear_selection_if_matches(branch);
                     self.refresh_sessions();
                 }
+                kild_core::Event::PrStatusRefreshed { .. } => {
+                    // PR sidecar updated — sessions list will pick it up on next refresh
+                }
                 kild_core::Event::SessionsRefreshed => {
                     // Already handled by the refresh call that produced this event
                 }

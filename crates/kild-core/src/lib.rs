@@ -32,8 +32,9 @@ pub use git::types::{DiffStats, UncommittedDetails, WorktreeStatus};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{
-    AgentProcess, AgentStatus, AgentStatusInfo, CompleteResult, CreateSessionRequest,
-    DestroySafetyInfo, GitStatus, PrCheckResult, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatus, AgentStatusInfo, CiStatus, CompleteResult, CreateSessionRequest,
+    DestroySafetyInfo, GitStatus, PrCheckResult, PrInfo, PrState, ProcessStatus, ReviewStatus,
+    Session, SessionStatus,
 };
 pub use state::{Command, CoreStore, DispatchError, Event, OpenMode, Store};
 

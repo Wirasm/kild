@@ -280,6 +280,28 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("pr")
+                .about("Show PR status for a kild")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild")
+                        .required(true)
+                        .index(1)
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("refresh")
+                        .long("refresh")
+                        .help("Force refresh PR data from GitHub")
+                        .action(ArgAction::SetTrue)
+                )
+        )
+        .subcommand(
             Command::new("status")
                 .about("Show detailed status of a kild")
                 .arg(
@@ -1220,6 +1242,66 @@ mod tests {
         let create_matches = matches.subcommand_matches("create").unwrap();
         assert!(!create_matches.get_flag("no-fetch"));
         assert!(create_matches.get_one::<String>("base").is_none());
+    }
+
+    // --- pr command tests ---
+
+    #[test]
+    fn test_cli_pr_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "pr", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let pr_matches = matches.subcommand_matches("pr").unwrap();
+        assert_eq!(
+            pr_matches.get_one::<String>("branch").unwrap(),
+            "test-branch"
+        );
+        assert!(!pr_matches.get_flag("json"));
+        assert!(!pr_matches.get_flag("refresh"));
+    }
+
+    #[test]
+    fn test_cli_pr_with_json_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "pr", "test-branch", "--json"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let pr_matches = matches.subcommand_matches("pr").unwrap();
+        assert!(pr_matches.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_pr_with_refresh_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "pr", "test-branch", "--refresh"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let pr_matches = matches.subcommand_matches("pr").unwrap();
+        assert!(pr_matches.get_flag("refresh"));
+    }
+
+    #[test]
+    fn test_cli_pr_requires_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "pr"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_pr_with_json_and_refresh() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "pr", "test-branch", "--json", "--refresh"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let pr_matches = matches.subcommand_matches("pr").unwrap();
+        assert!(pr_matches.get_flag("json"));
+        assert!(pr_matches.get_flag("refresh"));
     }
 
     #[test]

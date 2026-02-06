@@ -167,6 +167,18 @@ kild commits <branch> -n 5
 kild commits <branch> --count 5
 ```
 
+### Show PR status
+```bash
+# Show cached PR status
+kild pr <branch>
+
+# Force refresh from GitHub
+kild pr <branch> --refresh
+
+# Machine-readable JSON output
+kild pr <branch> --json
+```
+
 ### Stop a kild
 ```bash
 # Stop agent, preserve worktree

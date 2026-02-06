@@ -1,5 +1,5 @@
 use kild_core::Session;
-use kild_core::sessions::types::AgentStatusInfo;
+use kild_core::sessions::types::{AgentStatusInfo, PrInfo};
 
 pub struct TableFormatter {
     branch_width: usize,
@@ -10,6 +10,7 @@ pub struct TableFormatter {
     port_width: usize,
     process_width: usize,
     command_width: usize,
+    pr_width: usize,
     note_width: usize,
 }
 
@@ -31,15 +32,22 @@ impl TableFormatter {
             port_width: 11,
             process_width: 11,
             command_width: 20,
+            pr_width: 8,
             note_width: 30,
         }
     }
 
-    pub fn print_table(&self, sessions: &[Session], statuses: &[Option<AgentStatusInfo>]) {
+    pub fn print_table(
+        &self,
+        sessions: &[Session],
+        statuses: &[Option<AgentStatusInfo>],
+        pr_infos: &[Option<PrInfo>],
+    ) {
         self.print_header();
         for (i, session) in sessions.iter().enumerate() {
             let status_info = statuses.get(i).and_then(|s| s.as_ref());
-            self.print_row(session, status_info);
+            let pr_info = pr_infos.get(i).and_then(|p| p.as_ref());
+            self.print_row(session, status_info, pr_info);
         }
         self.print_footer();
     }
@@ -54,7 +62,12 @@ impl TableFormatter {
         println!("{}", self.bottom_border());
     }
 
-    fn print_row(&self, session: &Session, status_info: Option<&AgentStatusInfo>) {
+    fn print_row(
+        &self,
+        session: &Session,
+        status_info: Option<&AgentStatusInfo>,
+        pr_info: Option<&PrInfo>,
+    ) {
         let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
         let process_status = {
             let mut running = 0;
@@ -89,9 +102,16 @@ impl TableFormatter {
         let note_display = session.note.as_deref().unwrap_or("");
         let activity_display =
             status_info.map_or_else(|| "-".to_string(), |i| i.status.to_string());
+        let pr_display = pr_info.map_or_else(
+            || "-".to_string(),
+            |pr| match pr.state {
+                kild_core::PrState::Merged => "Merged".to_string(),
+                _ => format!("PR #{}", pr.number),
+            },
+        );
 
         println!(
-            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_activity$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │ {:<width_note$} │",
+            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_activity$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │ {:<width_pr$} │ {:<width_note$} │",
             truncate(&session.branch, self.branch_width),
             truncate(
                 &if session.agent_count() > 1 {
@@ -116,6 +136,7 @@ impl TableFormatter {
                 session.latest_agent().map_or("", |a| a.command()),
                 self.command_width
             ),
+            truncate(&pr_display, self.pr_width),
             truncate(note_display, self.note_width),
             width_branch = self.branch_width,
             width_agent = self.agent_width,
@@ -125,13 +146,14 @@ impl TableFormatter {
             width_port = self.port_width,
             width_process = self.process_width,
             width_command = self.command_width,
+            width_pr = self.pr_width,
             width_note = self.note_width,
         );
     }
 
     fn top_border(&self) -> String {
         format!(
-            "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
+            "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -140,13 +162,14 @@ impl TableFormatter {
             "─".repeat(self.port_width + 2),
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
+            "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
         )
     }
 
     fn header_row(&self) -> String {
         format!(
-            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_activity$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │ {:<width_note$} │",
+            "│ {:<width_branch$} │ {:<width_agent$} │ {:<width_status$} │ {:<width_activity$} │ {:<width_created$} │ {:<width_port$} │ {:<width_process$} │ {:<width_command$} │ {:<width_pr$} │ {:<width_note$} │",
             "Branch",
             "Agent",
             "Status",
@@ -155,6 +178,7 @@ impl TableFormatter {
             "Port Range",
             "Process",
             "Command",
+            "PR",
             "Note",
             width_branch = self.branch_width,
             width_agent = self.agent_width,
@@ -164,13 +188,14 @@ impl TableFormatter {
             width_port = self.port_width,
             width_process = self.process_width,
             width_command = self.command_width,
+            width_pr = self.pr_width,
             width_note = self.note_width,
         )
     }
 
     fn separator(&self) -> String {
         format!(
-            "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
+            "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -179,13 +204,14 @@ impl TableFormatter {
             "─".repeat(self.port_width + 2),
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
+            "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
         )
     }
 
     fn bottom_border(&self) -> String {
         format!(
-            "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
+            "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -194,6 +220,7 @@ impl TableFormatter {
             "─".repeat(self.port_width + 2),
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
+            "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
         )
     }
