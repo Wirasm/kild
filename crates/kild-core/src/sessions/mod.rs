@@ -1,3 +1,6 @@
+pub mod agent_status;
+pub mod complete;
+pub mod destroy;
 pub mod errors;
 pub mod handler;
 pub mod info;

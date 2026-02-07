@@ -3,11 +3,16 @@ use tracing::{debug, error, info, warn};
 use crate::agents;
 use crate::config::{Config, KildConfig};
 use crate::git;
-use crate::git::operations::get_worktree_status;
-use crate::process::{delete_pid_file, get_pid_file_path};
 use crate::sessions::{errors::SessionError, persistence, ports, types::*, validation};
 use crate::terminal;
 use crate::terminal::types::SpawnResult;
+
+// Re-export from submodules to preserve public API (session_ops::*)
+pub use super::agent_status::{
+    find_session_by_worktree_path, read_agent_status, update_agent_status,
+};
+pub use super::complete::{complete_session, fetch_pr_info, read_pr_info};
+pub use super::destroy::{destroy_session, get_destroy_safety_info, has_remote_configured};
 
 /// Compute a unique spawn ID for a given session and spawn index.
 ///
@@ -46,69 +51,6 @@ fn capture_process_metadata(
                 spawn_result.process_name.clone(),
                 spawn_result.process_start_time,
             )
-        }
-    }
-}
-
-/// Clean up PID files for a session (best-effort).
-///
-/// Handles both multi-agent sessions (per-agent spawn ID PID files) and
-/// legacy sessions (session-level PID file). Failures are logged at debug
-/// level since PID file cleanup is best-effort.
-fn cleanup_session_pid_files(session: &Session, kild_dir: &std::path::Path, operation: &str) {
-    if !session.has_agents() {
-        // Legacy session (pre-multi-agent) — attempt session-level PID file cleanup
-        warn!(
-            event = "core.session.pid_cleanup_no_agents",
-            session_id = session.id,
-            operation = operation,
-            "Session has no tracked agents, attempting session-level PID file cleanup"
-        );
-        let pid_file = get_pid_file_path(kild_dir, &session.id);
-        match delete_pid_file(&pid_file) {
-            Ok(()) => {
-                debug!(
-                    event = %format!("core.session.{}_pid_file_cleaned", operation),
-                    session_id = session.id,
-                    pid_file = %pid_file.display()
-                );
-            }
-            Err(e) => {
-                debug!(
-                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
-                    session_id = session.id,
-                    pid_file = %pid_file.display(),
-                    error = %e
-                );
-            }
-        }
-        return;
-    }
-
-    for agent_proc in session.agents() {
-        // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
-        let pid_key = if agent_proc.spawn_id().is_empty() {
-            session.id.clone() // Backward compat: old sessions without spawn_id
-        } else {
-            agent_proc.spawn_id().to_string()
-        };
-        let pid_file = get_pid_file_path(kild_dir, &pid_key);
-        match delete_pid_file(&pid_file) {
-            Ok(()) => {
-                debug!(
-                    event = %format!("core.session.{}_pid_file_cleaned", operation),
-                    session_id = session.id,
-                    pid_file = %pid_file.display()
-                );
-            }
-            Err(e) => {
-                debug!(
-                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
-                    session_id = session.id,
-                    pid_file = %pid_file.display(),
-                    error = %e
-                );
-            }
         }
     }
 }
@@ -320,813 +262,6 @@ pub fn get_session(name: &str) -> Result<Session, SessionError> {
     );
 
     Ok(session)
-}
-
-/// Destroys a kild by removing its worktree, killing the process, and deleting the session file.
-///
-/// # Arguments
-/// * `name` - Branch name or kild identifier
-/// * `force` - If true, bypass git safety checks and force removal
-///
-/// # Force Mode Behavior
-/// When `force` is false:
-/// - Process kill failures block destruction
-/// - Git refuses to remove worktree with uncommitted changes
-///
-/// When `force` is true:
-/// - Process kill failures are logged but don't block destruction
-/// - Worktree is force-deleted even with uncommitted changes (work will be lost)
-pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
-    info!(
-        event = "core.session.destroy_started",
-        name = name,
-        force = force
-    );
-
-    let config = Config::new();
-
-    // 1. Find session by name (branch name)
-    let session =
-        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
-            SessionError::NotFound {
-                name: name.to_string(),
-            }
-        })?;
-
-    info!(
-        event = "core.session.destroy_found",
-        session_id = session.id,
-        worktree_path = %session.worktree_path.display(),
-        port_range_start = session.port_range_start,
-        port_range_end = session.port_range_end,
-        agent_count = session.agent_count()
-    );
-
-    // 2. Close all terminal windows and kill all processes
-    {
-        if !session.has_agents() {
-            warn!(
-                event = "core.session.destroy_no_agents",
-                session_id = session.id,
-                branch = name,
-                "Session has no tracked agents — skipping process/terminal cleanup"
-            );
-        }
-
-        // Close all terminal windows (fire-and-forget)
-        for agent_proc in session.agents() {
-            if let (Some(terminal_type), Some(window_id)) =
-                (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-            {
-                info!(
-                    event = "core.session.destroy_close_terminal",
-                    terminal_type = ?terminal_type,
-                    agent = agent_proc.agent(),
-                );
-                terminal::handler::close_terminal(terminal_type, Some(window_id));
-            }
-        }
-
-        // Kill all tracked processes
-        let mut kill_errors: Vec<(u32, String)> = Vec::new();
-        for agent_proc in session.agents() {
-            let Some(pid) = agent_proc.process_id() else {
-                continue;
-            };
-
-            info!(
-                event = "core.session.destroy_kill_started",
-                pid = pid,
-                agent = agent_proc.agent()
-            );
-
-            let result = crate::process::kill_process(
-                pid,
-                agent_proc.process_name(),
-                agent_proc.process_start_time(),
-            );
-
-            match result {
-                Ok(()) => {
-                    info!(event = "core.session.destroy_kill_completed", pid = pid);
-                }
-                Err(crate::process::ProcessError::NotFound { .. }) => {
-                    info!(event = "core.session.destroy_kill_already_dead", pid = pid);
-                }
-                Err(e) if force => {
-                    warn!(
-                        event = "core.session.destroy_kill_failed_force_continue",
-                        pid = pid,
-                        error = %e
-                    );
-                }
-                Err(e) => {
-                    kill_errors.push((pid, e.to_string()));
-                }
-            }
-        }
-
-        if !kill_errors.is_empty() && !force {
-            for (pid, err) in &kill_errors {
-                error!(
-                    event = "core.session.destroy_kill_failed",
-                    pid = pid,
-                    error = %err
-                );
-            }
-
-            let pids: Vec<String> = kill_errors.iter().map(|(p, _)| p.to_string()).collect();
-            let (first_pid, first_msg) = kill_errors.into_iter().next().unwrap();
-
-            let message = if pids.len() == 1 {
-                format!(
-                    "Process still running. Kill it manually or use --force flag: {}",
-                    first_msg
-                )
-            } else {
-                format!(
-                    "{} processes still running (PIDs: {}). Kill them manually or use --force flag.",
-                    pids.len(),
-                    pids.join(", ")
-                )
-            };
-
-            return Err(SessionError::ProcessKillFailed {
-                pid: first_pid,
-                message,
-            });
-        }
-    }
-
-    // 4. Remove git worktree
-    if force {
-        info!(
-            event = "core.session.destroy_worktree_force",
-            worktree = %session.worktree_path.display()
-        );
-        git::removal::remove_worktree_force(&session.worktree_path)
-            .map_err(|e| SessionError::GitError { source: e })?;
-    } else {
-        git::removal::remove_worktree_by_path(&session.worktree_path)
-            .map_err(|e| SessionError::GitError { source: e })?;
-    }
-
-    info!(
-        event = "core.session.destroy_worktree_removed",
-        session_id = session.id,
-        worktree_path = %session.worktree_path.display()
-    );
-
-    // 5. Clean up PID files (best-effort, don't fail if missing)
-    cleanup_session_pid_files(&session, &config.kild_dir, "destroy");
-
-    // 6. Remove sidecar files (best-effort)
-    persistence::remove_agent_status_file(&config.sessions_dir(), &session.id);
-    persistence::remove_pr_info_file(&config.sessions_dir(), &session.id);
-
-    // 7. Remove session file (automatically frees port range)
-    persistence::remove_session_file(&config.sessions_dir(), &session.id)?;
-
-    info!(
-        event = "core.session.port_deallocated",
-        session_id = session.id,
-        port_range_start = session.port_range_start,
-        port_range_end = session.port_range_end
-    );
-
-    info!(
-        event = "core.session.destroy_completed",
-        session_id = session.id,
-        name = name
-    );
-
-    Ok(())
-}
-
-/// Completes a kild by checking PR status, optionally deleting remote branch, and destroying the session.
-///
-/// # Arguments
-/// * `name` - Branch name or kild identifier
-///
-/// # Returns
-/// * `Ok(CompleteResult::RemoteDeleted)` - PR was merged and remote branch was deleted
-/// * `Ok(CompleteResult::RemoteDeleteFailed)` - PR was merged but remote deletion failed (non-fatal)
-/// * `Ok(CompleteResult::PrNotMerged)` - PR not merged, remote preserved for future merge
-///
-/// # Errors
-/// Returns `SessionError::NotFound` if the session doesn't exist.
-/// Returns `SessionError::UncommittedChanges` if the worktree has uncommitted changes.
-/// Propagates errors from `destroy_session`.
-/// Remote branch deletion errors are logged but do not fail the operation.
-///
-/// # Workflow Detection
-/// - If PR is merged: attempts to delete remote branch (since gh merge --delete-branch would have failed due to worktree)
-/// - If PR not merged: just destroys the local session, allowing user's subsequent merge to handle remote cleanup
-pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
-    info!(event = "core.session.complete_started", name = name);
-
-    let config = Config::new();
-
-    // 1. Find session by name to get branch info
-    let session =
-        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
-            SessionError::NotFound {
-                name: name.to_string(),
-            }
-        })?;
-
-    let kild_branch = git::operations::kild_branch_name(name);
-
-    // 2. Check if PR was merged (determines if we need to delete remote)
-    // Skip PR check entirely for repos without a remote configured
-    let pr_merged = if has_remote_configured(&session.worktree_path) {
-        check_pr_merged(&session.worktree_path, &kild_branch)
-    } else {
-        debug!(
-            event = "core.session.complete_no_remote",
-            branch = name,
-            "No remote configured — skipping PR check"
-        );
-        false
-    };
-
-    info!(
-        event = "core.session.complete_pr_status",
-        branch = name,
-        pr_merged = pr_merged
-    );
-
-    // 3. Determine the result based on PR status and remote deletion outcome
-    let result = if !pr_merged {
-        CompleteResult::PrNotMerged
-    } else if let Err(e) = delete_remote_branch(&session.worktree_path, &kild_branch) {
-        // Non-fatal: remote might already be deleted, not exist, or deletion failed
-        warn!(
-            event = "core.session.complete_remote_delete_failed",
-            branch = kild_branch,
-            worktree_path = %session.worktree_path.display(),
-            error = %e
-        );
-        CompleteResult::RemoteDeleteFailed
-    } else {
-        info!(
-            event = "core.session.complete_remote_deleted",
-            branch = kild_branch
-        );
-        CompleteResult::RemoteDeleted
-    };
-
-    // 4. Safety check: always block on uncommitted changes (no --force bypass for complete)
-    let safety_info = get_destroy_safety_info(name)?;
-    if safety_info.should_block() {
-        error!(
-            event = "core.session.complete_blocked",
-            name = name,
-            reason = "uncommitted_changes"
-        );
-        return Err(SessionError::UncommittedChanges {
-            name: name.to_string(),
-        });
-    }
-
-    // 5. Destroy the session (reuse existing logic, always non-force since we already
-    //    verified the worktree is clean above)
-    destroy_session(name, false)?;
-
-    info!(
-        event = "core.session.complete_completed",
-        name = name,
-        result = ?result
-    );
-
-    Ok(result)
-}
-
-/// Check if the git repository at the given path has any remote configured.
-///
-/// Uses git2 to enumerate remotes. Returns false on any error (graceful degradation).
-pub fn has_remote_configured(worktree_path: &std::path::Path) -> bool {
-    match git2::Repository::open(worktree_path) {
-        Ok(repo) => match repo.remotes() {
-            Ok(remotes) => !remotes.is_empty(),
-            Err(e) => {
-                debug!(
-                    event = "core.session.remote_check_failed",
-                    path = %worktree_path.display(),
-                    error = %e
-                );
-                false
-            }
-        },
-        Err(e) => {
-            debug!(
-                event = "core.session.remote_check_repo_open_failed",
-                path = %worktree_path.display(),
-                error = %e
-            );
-            false
-        }
-    }
-}
-
-/// Fetch rich PR info from GitHub via `gh pr view`.
-///
-/// Queries `gh pr view <branch> --json number,url,state,statusCheckRollup,reviews,isDraft`
-/// and parses the JSON output into a `PrInfo` struct.
-///
-/// Returns `None` on any error (gh unavailable, no PR, parse error).
-pub fn fetch_pr_info(
-    worktree_path: &std::path::Path,
-    branch: &str,
-) -> Option<super::types::PrInfo> {
-    debug!(
-        event = "core.session.pr_info_fetch_started",
-        branch = branch,
-        worktree_path = %worktree_path.display()
-    );
-
-    let output = std::process::Command::new("gh")
-        .current_dir(worktree_path)
-        .args([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "number,url,state,statusCheckRollup,reviews,isDraft",
-        ])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let json_str = String::from_utf8_lossy(&output.stdout);
-            parse_gh_pr_json(&json_str, branch)
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            debug!(
-                event = "core.session.pr_info_fetch_no_pr",
-                branch = branch,
-                stderr = %stderr.trim()
-            );
-            None
-        }
-        Err(e) => {
-            warn!(
-                event = "core.session.pr_info_fetch_failed",
-                branch = branch,
-                error = %e,
-                hint = "gh CLI may not be installed or accessible"
-            );
-            None
-        }
-    }
-}
-
-/// Parse the JSON output from `gh pr view` into a `PrInfo`.
-fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<super::types::PrInfo> {
-    let value: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!(
-                event = "core.session.pr_info_parse_failed",
-                branch = branch,
-                error = %e
-            );
-            return None;
-        }
-    };
-
-    let number = value.get("number")?.as_u64()? as u32;
-    let url = value.get("url")?.as_str()?.to_string();
-    let is_draft = value
-        .get("isDraft")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let gh_state = value.get("state")?.as_str()?.to_uppercase();
-
-    let state = match gh_state.as_str() {
-        "MERGED" => super::types::PrState::Merged,
-        "CLOSED" => super::types::PrState::Closed,
-        "OPEN" if is_draft => super::types::PrState::Draft,
-        _ => super::types::PrState::Open,
-    };
-
-    // Parse statusCheckRollup for CI status
-    let (ci_status, ci_summary) = parse_ci_status(&value);
-    // Parse reviews for review status
-    let (review_status, review_summary) = parse_review_status(&value);
-
-    let now = chrono::Utc::now().to_rfc3339();
-
-    info!(
-        event = "core.session.pr_info_fetch_completed",
-        branch = branch,
-        pr_number = number,
-        pr_state = %state,
-        ci_status = %ci_status,
-        review_status = %review_status
-    );
-
-    Some(super::types::PrInfo {
-        number,
-        url,
-        state,
-        ci_status,
-        ci_summary,
-        review_status,
-        review_summary,
-        updated_at: now,
-    })
-}
-
-/// Parse `statusCheckRollup` array from gh output into CI status.
-fn parse_ci_status(value: &serde_json::Value) -> (super::types::CiStatus, Option<String>) {
-    let checks = match value.get("statusCheckRollup").and_then(|v| v.as_array()) {
-        Some(arr) => arr,
-        None => return (super::types::CiStatus::Unknown, None),
-    };
-
-    if checks.is_empty() {
-        return (super::types::CiStatus::Unknown, None);
-    }
-
-    let mut passing = 0u32;
-    let mut failing = 0u32;
-    let mut pending = 0u32;
-
-    for check in checks {
-        // gh returns either "conclusion" (for completed checks) or "status" (for in-progress)
-        let conclusion = check
-            .get("conclusion")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let status = check.get("status").and_then(|v| v.as_str()).unwrap_or("");
-
-        match conclusion.to_uppercase().as_str() {
-            "SUCCESS" | "NEUTRAL" | "SKIPPED" => passing += 1,
-            "FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE" => {
-                failing += 1
-            }
-            _ => {
-                // No conclusion yet - check status
-                match status.to_uppercase().as_str() {
-                    "COMPLETED" => passing += 1,
-                    "IN_PROGRESS" | "QUEUED" | "REQUESTED" | "WAITING" | "PENDING" => pending += 1,
-                    _ => pending += 1,
-                }
-            }
-        }
-    }
-
-    let total = passing + failing + pending;
-    let summary = format!("{}/{} passing", passing, total);
-
-    let ci_status = if failing > 0 {
-        super::types::CiStatus::Failing
-    } else if pending > 0 {
-        super::types::CiStatus::Pending
-    } else {
-        super::types::CiStatus::Passing
-    };
-
-    (ci_status, Some(summary))
-}
-
-/// Parse `reviews` array from gh output into review status.
-fn parse_review_status(value: &serde_json::Value) -> (super::types::ReviewStatus, Option<String>) {
-    let reviews = match value.get("reviews").and_then(|v| v.as_array()) {
-        Some(arr) => arr,
-        None => return (super::types::ReviewStatus::Unknown, None),
-    };
-
-    if reviews.is_empty() {
-        return (super::types::ReviewStatus::Pending, None);
-    }
-
-    // Deduplicate reviews by author - only keep the latest review per author
-    let mut latest_by_author: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    for review in reviews {
-        let author = review
-            .get("author")
-            .and_then(|a| a.get("login"))
-            .and_then(|l| l.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let state = review
-            .get("state")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_uppercase();
-        // Skip COMMENTED and DISMISSED - they don't represent a review decision
-        if state == "APPROVED" || state == "CHANGES_REQUESTED" || state == "PENDING" {
-            latest_by_author.insert(author, state);
-        }
-    }
-
-    let mut approved = 0u32;
-    let mut changes_requested = 0u32;
-    let mut pending_reviews = 0u32;
-
-    for state in latest_by_author.values() {
-        match state.as_str() {
-            "APPROVED" => approved += 1,
-            "CHANGES_REQUESTED" => changes_requested += 1,
-            _ => pending_reviews += 1,
-        }
-    }
-
-    let mut parts = Vec::new();
-    if approved > 0 {
-        parts.push(format!("{} approved", approved));
-    }
-    if changes_requested > 0 {
-        parts.push(format!("{} changes requested", changes_requested));
-    }
-    if pending_reviews > 0 {
-        parts.push(format!("{} pending", pending_reviews));
-    }
-
-    let summary = if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(", "))
-    };
-
-    let review_status = if changes_requested > 0 {
-        super::types::ReviewStatus::ChangesRequested
-    } else if approved > 0 {
-        super::types::ReviewStatus::Approved
-    } else {
-        super::types::ReviewStatus::Pending
-    };
-
-    (review_status, summary)
-}
-
-/// Read PR info for a session from the sidecar file.
-///
-/// Returns `None` if no PR info has been cached yet.
-pub fn read_pr_info(session_id: &str) -> Option<super::types::PrInfo> {
-    let config = Config::new();
-    persistence::read_pr_info(&config.sessions_dir(), session_id)
-}
-
-/// Check if there's a merged PR for the given branch using gh CLI.
-///
-/// # Arguments
-/// * `worktree_path` - Path to the git worktree (sets working directory for gh command)
-/// * `branch` - Branch name to check (passed to gh pr view)
-///
-/// # Returns
-/// * `true` - PR exists and is in MERGED state
-/// * `false` - gh not available, PR doesn't exist, PR not merged, or any error occurred
-///
-/// # Note
-/// This function treats all error cases as "not merged" for safety. Errors are logged
-/// at debug/warn level for debugging purposes.
-fn check_pr_merged(worktree_path: &std::path::Path, branch: &str) -> bool {
-    debug!(
-        event = "core.session.pr_check_started",
-        branch = branch,
-        worktree_path = %worktree_path.display()
-    );
-
-    let output = std::process::Command::new("gh")
-        .current_dir(worktree_path)
-        .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let state = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_uppercase();
-            let merged = state == "MERGED";
-            debug!(
-                event = "core.session.pr_check_completed",
-                branch = branch,
-                state = %state,
-                merged = merged
-            );
-            merged
-        }
-        Ok(output) => {
-            // gh CLI executed but returned error (PR not found, auth error, etc.)
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            debug!(
-                event = "core.session.pr_check_gh_error",
-                branch = branch,
-                exit_code = output.status.code(),
-                stderr = %stderr.trim()
-            );
-            false
-        }
-        Err(e) => {
-            // gh not found, permission denied, or other I/O error
-            warn!(
-                event = "core.session.pr_check_failed",
-                branch = branch,
-                worktree_path = %worktree_path.display(),
-                error = %e,
-                hint = "gh CLI may not be installed or accessible"
-            );
-            false
-        }
-    }
-}
-
-/// Delete a branch from the "origin" remote.
-///
-/// Delegates to [`crate::git::cli::delete_remote_branch`] for centralized CLI handling.
-/// Treats "branch already deleted" as success (idempotent).
-fn delete_remote_branch(worktree_path: &std::path::Path, branch: &str) -> Result<(), SessionError> {
-    crate::git::cli::delete_remote_branch(worktree_path, "origin", branch)?;
-    Ok(())
-}
-
-/// Get safety information before destroying a kild.
-///
-/// Gathers information about:
-/// - Uncommitted changes in the worktree
-/// - Unpushed commits
-/// - Whether a remote branch exists
-/// - Whether a PR exists (optional, requires gh CLI)
-///
-/// # Conservative Fallback
-///
-/// If git status checks fail, the fallback is conservative (assumes dirty) to
-/// prevent accidental data loss. Check `git_status.status_check_failed` to
-/// detect this condition and show appropriate warnings.
-///
-/// PR checks uses the `kild/<branch>` naming convention since KILD creates
-/// branches with this prefix.
-///
-/// # Arguments
-/// * `name` - Branch name or kild identifier (without the `kild/` prefix)
-///
-/// # Returns
-/// * `Ok(DestroySafetyInfo)` - Safety information (always succeeds if session found)
-/// * `Err(SessionError::NotFound)` - Session doesn't exist
-pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionError> {
-    info!(event = "core.session.safety_check_started", name = name);
-
-    let config = Config::new();
-
-    // 1. Find session by name (branch name)
-    let session =
-        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
-            SessionError::NotFound {
-                name: name.to_string(),
-            }
-        })?;
-
-    let kild_branch = git::operations::kild_branch_name(name);
-
-    // 2. Get git worktree status (conservative fallback on failure)
-    let git_status = if session.worktree_path.exists() {
-        match get_worktree_status(&session.worktree_path) {
-            Ok(status) => {
-                debug!(
-                    event = "core.session.safety_check_git_status",
-                    has_uncommitted = status.has_uncommitted_changes,
-                    unpushed_count = status.unpushed_commit_count,
-                    has_remote = status.has_remote_branch,
-                    status_check_failed = status.status_check_failed
-                );
-                status
-            }
-            Err(e) => {
-                warn!(
-                    event = "core.session.safety_check_git_failed",
-                    name = name,
-                    error = %e,
-                    "Failed to open repository - assuming dirty to be safe"
-                );
-                // Conservative fallback: assume dirty
-                crate::git::types::WorktreeStatus {
-                    has_uncommitted_changes: true,
-                    status_check_failed: true,
-                    ..Default::default()
-                }
-            }
-        }
-    } else {
-        warn!(
-            event = "core.session.safety_check_worktree_missing",
-            name = name,
-            path = %session.worktree_path.display(),
-            "Worktree missing - assuming dirty to be safe"
-        );
-        // Conservative fallback: assume dirty
-        crate::git::types::WorktreeStatus {
-            has_uncommitted_changes: true,
-            status_check_failed: true,
-            ..Default::default()
-        }
-    };
-
-    // 3. Check if PR exists (best-effort, requires gh CLI)
-    // Skip PR check for repos without a remote to avoid false "No PR found" warnings
-    let pr_status = if has_remote_configured(&session.worktree_path) {
-        check_pr_exists(&session.worktree_path, &kild_branch)
-    } else {
-        debug!(
-            event = "core.session.safety_check_no_remote",
-            branch = kild_branch,
-            "No remote configured — skipping PR check"
-        );
-        PrCheckResult::Unavailable
-    };
-    debug!(
-        event = "core.session.safety_check_pr",
-        branch = kild_branch,
-        pr_status = ?pr_status
-    );
-
-    let safety_info = DestroySafetyInfo {
-        git_status,
-        pr_status,
-    };
-
-    info!(
-        event = "core.session.safety_check_completed",
-        name = name,
-        should_block = safety_info.should_block(),
-        has_warnings = safety_info.has_warnings(),
-        status_check_failed = safety_info.git_status.status_check_failed
-    );
-
-    Ok(safety_info)
-}
-
-/// Check if a PR exists for the given branch.
-///
-/// Uses the `gh` CLI to query GitHub for PRs associated with the branch.
-/// The `gh pr view <branch>` command finds PRs in any state (open, merged, closed).
-///
-/// # Arguments
-/// * `worktree_path` - Path to the git worktree (for gh CLI working directory)
-/// * `branch` - Branch name to check (typically `kild/<name>`)
-///
-/// # Returns
-/// * `PrCheckResult::Exists` - A PR exists for this branch
-/// * `PrCheckResult::NotFound` - No PR found for this branch
-/// * `PrCheckResult::Unavailable` - Could not check (gh unavailable, auth error, network error)
-fn check_pr_exists(worktree_path: &std::path::Path, branch: &str) -> PrCheckResult {
-    debug!(
-        event = "core.session.pr_exists_check_started",
-        branch = branch
-    );
-
-    // Check if worktree exists first
-    if !worktree_path.exists() {
-        debug!(
-            event = "core.session.pr_exists_check_skipped",
-            reason = "worktree_missing"
-        );
-        return PrCheckResult::Unavailable;
-    }
-
-    let output = std::process::Command::new("gh")
-        .current_dir(worktree_path)
-        .args(["pr", "view", branch, "--json", "state"])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            // PR exists (regardless of state - open, merged, or closed)
-            PrCheckResult::Exists
-        }
-        Ok(output) => {
-            // Check if it's "no PR found" vs other error
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("no pull requests found")
-                || stderr.contains("Could not resolve")
-                || stderr.contains("no open pull requests")
-            {
-                PrCheckResult::NotFound
-            } else {
-                // Some other error (auth, network, etc.)
-                warn!(
-                    event = "core.session.pr_exists_check_error",
-                    branch = branch,
-                    stderr = %stderr.trim(),
-                    "gh CLI error - PR status unavailable"
-                );
-                PrCheckResult::Unavailable
-            }
-        }
-        Err(e) => {
-            // gh CLI not available or other I/O error
-            debug!(
-                event = "core.session.pr_exists_check_unavailable",
-                error = %e,
-                "gh CLI not available"
-            );
-            PrCheckResult::Unavailable
-        }
-    }
 }
 
 pub fn restart_session(
@@ -1477,70 +612,6 @@ pub fn open_session(
 /// Stops the agent process in a kild without destroying the kild.
 ///
 /// The worktree and session file are preserved. The kild can be reopened with `open_session()`.
-/// Update agent status for a session via sidecar file.
-///
-/// Also updates `last_activity` on the session JSON to feed the health monitoring system.
-pub fn update_agent_status(
-    name: &str,
-    status: super::types::AgentStatus,
-) -> Result<(), SessionError> {
-    info!(
-        event = "core.session.agent_status_update_started",
-        name = name,
-        status = %status,
-    );
-    let config = Config::new();
-    let session =
-        persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
-            SessionError::NotFound {
-                name: name.to_string(),
-            }
-        })?;
-
-    let now = chrono::Utc::now().to_rfc3339();
-
-    // Write sidecar file
-    let status_info = super::types::AgentStatusInfo {
-        status,
-        updated_at: now.clone(),
-    };
-    persistence::write_agent_status(&config.sessions_dir(), &session.id, &status_info)?;
-
-    // Update last_activity on the session (heartbeat)
-    let mut session = session;
-    session.last_activity = Some(now);
-    persistence::save_session_to_file(&session, &config.sessions_dir())?;
-
-    info!(
-        event = "core.session.agent_status_update_completed",
-        session_id = session.id,
-        status = %status,
-    );
-    Ok(())
-}
-
-/// Read agent status for a session from the sidecar file.
-///
-/// Returns `None` if no status has been reported yet.
-pub fn read_agent_status(session_id: &str) -> Option<super::types::AgentStatusInfo> {
-    let config = Config::new();
-    persistence::read_agent_status(&config.sessions_dir(), session_id)
-}
-
-/// Resolve session from a worktree path (for --self flag).
-///
-/// Matches if the given path equals or is a subdirectory of a session's worktree path.
-pub fn find_session_by_worktree_path(
-    worktree_path: &std::path::Path,
-) -> Result<Option<Session>, SessionError> {
-    let config = Config::new();
-    let (sessions, _) = persistence::load_sessions_from_files(&config.sessions_dir())?;
-
-    Ok(sessions
-        .into_iter()
-        .find(|session| worktree_path.starts_with(&session.worktree_path)))
-}
-
 pub fn stop_session(name: &str) -> Result<(), SessionError> {
     info!(event = "core.session.stop_started", name = name);
 
@@ -1647,7 +718,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     }
 
     // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
-    cleanup_session_pid_files(&session, &config.kild_dir, "stop");
+    super::destroy::cleanup_session_pid_files(&session, &config.kild_dir, "stop");
 
     // 4. Clear process info and set status to Stopped
     session.clear_agents();
@@ -1683,56 +754,6 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_destroy_session_not_found() {
-        let result = destroy_session("non-existent", false);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
-    }
-
-    #[test]
-    fn test_complete_session_not_found() {
-        let result = complete_session("non-existent");
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
-    }
-
-    #[test]
-    fn test_uncommitted_changes_error_is_user_error() {
-        use crate::errors::KildError;
-        let error = SessionError::UncommittedChanges {
-            name: "test-branch".to_string(),
-        };
-        assert!(error.is_user_error());
-        assert_eq!(error.error_code(), "SESSION_UNCOMMITTED_CHANGES");
-        assert!(error.to_string().contains("kild destroy --force"));
-    }
-
-    #[test]
-    fn test_complete_blocks_on_uncommitted_via_safety_info() {
-        // Verify that DestroySafetyInfo with uncommitted changes would block complete.
-        use crate::git::types::WorktreeStatus;
-        use crate::sessions::types::DestroySafetyInfo;
-
-        let dirty = DestroySafetyInfo {
-            git_status: WorktreeStatus {
-                has_uncommitted_changes: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(dirty.should_block());
-
-        let clean = DestroySafetyInfo {
-            git_status: WorktreeStatus {
-                has_uncommitted_changes: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(!clean.should_block());
     }
 
     // Note: create_session test would require git repository setup
@@ -1908,16 +929,6 @@ mod tests {
         use crate::terminal::types::TerminalType;
         use std::fs;
 
-        // This test verifies that destroy_session correctly handles sessions
-        // with terminal_type set. The actual close_terminal call happens in
-        // destroy_session lines 184-189. We can't easily mock the terminal
-        // close, but we can verify:
-        // 1. Session with terminal_type can be destroyed without error
-        // 2. The session file is properly removed after destruction
-        //
-        // Note: The close_terminal function is designed to always return Ok(),
-        // so even if the terminal window doesn't exist, destroy_session continues.
-
         let unique_id = format!(
             "{}_{}",
             std::process::id(),
@@ -1995,11 +1006,6 @@ mod tests {
         use crate::sessions::types::{Session, SessionStatus};
         use std::fs;
 
-        // This test verifies backward compatibility: sessions created before
-        // terminal_type was added (terminal_type = None) can still be destroyed.
-        // The destroy_session function handles this case at lines 184-189:
-        // if let Some(ref terminal_type) = session.terminal_type { ... }
-
         let unique_id = format!(
             "{}_{}",
             std::process::id(),
@@ -2059,10 +1065,6 @@ mod tests {
         use crate::sessions::types::{Session, SessionStatus};
         use crate::terminal::types::TerminalType;
         use std::fs;
-
-        // This test verifies that when a session is saved after restart_session,
-        // the terminal_type field is properly updated and persisted.
-        // restart_session updates terminal_type at line 346.
 
         let unique_id = format!(
             "{}_{}",
@@ -2177,11 +1179,6 @@ mod tests {
         use crate::terminal::types::TerminalType;
         use std::fs;
 
-        // This test verifies stop_session correctly:
-        // - Transitions status from Active to Stopped
-        // - Clears process_id, process_name, process_start_time to None
-        // - Preserves the session file (worktree preserved)
-
         let unique_id = format!(
             "{}_{}",
             std::process::id(),
@@ -2262,21 +1259,6 @@ mod tests {
 
     #[test]
     fn test_destroy_session_force_vs_non_force_behavior() {
-        // This test documents the expected behavioral difference between
-        // force=true and force=false in destroy_session:
-        //
-        // force=false (default):
-        //   - Process kill failures return SessionError::ProcessKillFailed
-        //   - Git uncommitted changes block worktree removal
-        //
-        // force=true:
-        //   - Process kill failures log warning but continue
-        //   - Worktree is force-deleted even with uncommitted changes
-        //
-        // We can't easily test the full flow without git setup,
-        // but we verify the error types exist and the function signatures are correct.
-
-        // Test that non-force destroy returns NotFound for non-existent session
         let result_non_force = destroy_session("test-force-behavior", false);
         assert!(result_non_force.is_err());
         assert!(matches!(
@@ -2284,8 +1266,6 @@ mod tests {
             SessionError::NotFound { .. }
         ));
 
-        // Test that force destroy also returns NotFound for non-existent session
-        // (force doesn't skip session lookup)
         let result_force = destroy_session("test-force-behavior", true);
         assert!(result_force.is_err());
         assert!(matches!(
@@ -2298,15 +1278,6 @@ mod tests {
     fn test_create_session_request_project_path_affects_project_detection() {
         use git2::Repository;
         use std::fs;
-
-        // This test verifies that CreateSessionRequest with project_path
-        // causes detect_project_at to be called with that path, resulting
-        // in a different project than cwd detection would produce.
-        //
-        // We test this by:
-        // 1. Creating a temp git repo at a known path
-        // 2. Calling detect_project_at directly (simulating what create_session does)
-        // 3. Verifying the project_id is derived from the temp repo path
 
         let temp_dir = std::env::temp_dir().join(format!(
             "kild_test_session_project_path_{}",
@@ -2342,11 +1313,6 @@ mod tests {
         );
         assert_eq!(request.project_path.as_ref().unwrap(), &temp_dir);
 
-        // Now simulate the branching logic from create_session:
-        // match &request.project_path {
-        //     Some(path) => git::handler::detect_project_at(path)
-        //     None => git::handler::detect_project()
-        // }
         let project = match &request.project_path {
             Some(path) => git::handler::detect_project_at(path),
             None => git::handler::detect_project(),
@@ -2364,7 +1330,6 @@ mod tests {
         );
 
         // Also verify that without project_path, we'd get a different result
-        // (This confirms the branching logic matters)
         let request_without_path =
             CreateSessionRequest::new("test-branch".to_string(), Some("claude".to_string()), None);
         assert!(
@@ -2378,12 +1343,6 @@ mod tests {
 
     #[test]
     fn test_create_session_request_none_project_path_uses_cwd_detection() {
-        // This test documents that when project_path is None,
-        // create_session falls back to detect_project() which uses cwd.
-        //
-        // We verify this by checking that CreateSessionRequest::new()
-        // correctly leaves project_path as None.
-
         let request = CreateSessionRequest::new(
             "test-branch".to_string(),
             Some("claude".to_string()),
@@ -2394,21 +1353,8 @@ mod tests {
             request.project_path.is_none(),
             "CreateSessionRequest::new should leave project_path as None"
         );
-
-        // This means create_session will call detect_project() instead of detect_project_at()
-        // (verified by code inspection of the match statement in create_session)
     }
 
-    /// Test that sessions with missing worktrees can be loaded but would fail operation validation.
-    ///
-    /// This is the critical safety net for issue #102. After removing worktree existence checks
-    /// from structural validation, operations like `open_session` (line 577-581) and
-    /// `restart_session` (line 437-445) must reject sessions with missing worktrees.
-    ///
-    /// This test verifies the contract:
-    /// 1. Sessions with missing worktrees CAN be loaded (visible in `kild list`)
-    /// 2. The `is_worktree_valid()` helper correctly identifies invalid worktrees
-    /// 3. Operation-level validation would return `WorktreeNotFound`
     #[test]
     fn test_session_with_missing_worktree_fails_operation_validation() {
         use crate::sessions::persistence;
@@ -2473,11 +1419,8 @@ mod tests {
         );
 
         // 4. Verify operation-level validation would reject this session
-        // This is what open_session (line 577-581) and restart_session (line 437-445) check:
-        // if !session.worktree_path.exists() { return Err(SessionError::WorktreeNotFound {...}) }
         let loaded_session = &sessions[0];
         if !loaded_session.worktree_path.exists() {
-            // This is the expected path - operation would return WorktreeNotFound
             let expected_error = SessionError::WorktreeNotFound {
                 path: loaded_session.worktree_path.clone(),
             };
