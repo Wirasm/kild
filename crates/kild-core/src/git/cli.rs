@@ -180,22 +180,22 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
             .args(["rebase", "--abort"])
             .output();
 
-        // Handle abort result: log failure but continue to return RebaseConflict
-        if let Err(e) = abort_result {
-            error!(
-                event = "core.git.rebase_abort_failed",
-                base = base_branch,
-                path = %dir.display(),
-                error = %e
-            );
-            return Err(GitError::RebaseAbortFailed {
-                base_branch: base_branch.to_string(),
-                worktree_path: dir.to_path_buf(),
-                message: e.to_string(),
-            });
-        }
-
-        let abort_output = abort_result.unwrap();
+        let abort_output = match abort_result {
+            Ok(output) => output,
+            Err(e) => {
+                error!(
+                    event = "core.git.rebase_abort_failed",
+                    base = base_branch,
+                    path = %dir.display(),
+                    error = %e
+                );
+                return Err(GitError::RebaseAbortFailed {
+                    base_branch: base_branch.to_string(),
+                    worktree_path: dir.to_path_buf(),
+                    message: e.to_string(),
+                });
+            }
+        };
         if !abort_output.status.success() {
             let abort_stderr = String::from_utf8_lossy(&abort_output.stderr);
             error!(
@@ -239,6 +239,95 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
     Err(GitError::OperationFailed {
         message: format!("git rebase failed (exit {}): {}", code, stderr.trim()),
     })
+}
+
+/// Execute `git diff` in a worktree, inheriting stdio for terminal output.
+///
+/// Uses `.status()` (not `.output()`) so diff output appears directly in the
+/// user's terminal with proper paging.
+///
+/// # Exit Code Semantics
+/// - 0: no differences
+/// - 1: differences found (NOT an error)
+/// - 128+: git error
+pub fn show_diff(worktree_path: &Path, staged: bool) -> Result<(), GitError> {
+    info!(
+        event = "core.git.diff_started",
+        path = %worktree_path.display(),
+        staged = staged
+    );
+
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(worktree_path);
+    cmd.arg("diff");
+    if staged {
+        cmd.arg("--staged");
+    }
+
+    let status = cmd.status().map_err(|e| GitError::DiffFailed {
+        message: format!("Failed to execute git: {}", e),
+    })?;
+
+    // git diff: 0 = no diff, 1 = diff found (both OK), 128+ = error
+    if let Some(code) = status.code()
+        && code >= 128
+    {
+        warn!(
+            event = "core.git.diff_failed",
+            exit_code = code,
+            path = %worktree_path.display()
+        );
+        return Err(GitError::DiffFailed {
+            message: format!("git diff failed with exit code {}", code),
+        });
+    }
+
+    info!(
+        event = "core.git.diff_completed",
+        path = %worktree_path.display(),
+        staged = staged,
+        exit_code = status.code()
+    );
+    Ok(())
+}
+
+/// Get recent commits from a worktree as a formatted string.
+///
+/// Executes `git log --oneline -n <count>` and returns the output.
+pub fn get_commits(worktree_path: &Path, count: usize) -> Result<String, GitError> {
+    info!(
+        event = "core.git.commits_started",
+        path = %worktree_path.display(),
+        count = count
+    );
+
+    let output = std::process::Command::new("git")
+        .current_dir(worktree_path)
+        .args(["log", "--oneline", "-n", &count.to_string()])
+        .output()
+        .map_err(|e| GitError::LogFailed {
+            message: format!("Failed to execute git: {}", e),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!(
+            event = "core.git.commits_failed",
+            path = %worktree_path.display(),
+            stderr = %stderr.trim()
+        );
+        return Err(GitError::LogFailed {
+            message: format!("git log failed: {}", stderr.trim()),
+        });
+    }
+
+    let commits = String::from_utf8_lossy(&output.stdout).to_string();
+    info!(
+        event = "core.git.commits_completed",
+        path = %worktree_path.display(),
+        count = count
+    );
+    Ok(commits)
 }
 
 #[cfg(test)]
@@ -298,5 +387,113 @@ mod tests {
             "fatal: Could not read from remote repository"
         ));
         assert!(!is_already_deleted_error(""));
+    }
+
+    // --- show_diff tests ---
+
+    use std::fs;
+    use std::process::Command as ProcessCommand;
+    use tempfile::TempDir;
+
+    fn init_git_repo(dir: &Path) {
+        ProcessCommand::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .expect("Failed to init git repo");
+        ProcessCommand::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .expect("Failed to configure git email");
+        ProcessCommand::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(dir)
+            .output()
+            .expect("Failed to configure git name");
+    }
+
+    #[test]
+    fn test_show_diff_clean_repo() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        ProcessCommand::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        ProcessCommand::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(show_diff(dir.path(), false).is_ok());
+    }
+
+    #[test]
+    fn test_show_diff_staged() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        ProcessCommand::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        ProcessCommand::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("file.txt"), "changed").unwrap();
+        ProcessCommand::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(show_diff(dir.path(), true).is_ok());
+    }
+
+    #[test]
+    fn test_show_diff_invalid_path() {
+        let result = show_diff(Path::new("/nonexistent/path"), false);
+        assert!(result.is_err());
+    }
+
+    // --- get_commits tests ---
+
+    #[test]
+    fn test_get_commits_with_history() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        ProcessCommand::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        ProcessCommand::new("git")
+            .args(["commit", "-m", "first commit"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let result = get_commits(dir.path(), 10).unwrap();
+        assert!(result.contains("first commit"));
+    }
+
+    #[test]
+    fn test_get_commits_empty_repo() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        // No commits yet — git log should fail
+        let result = get_commits(dir.path(), 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_commits_invalid_path() {
+        let result = get_commits(Path::new("/nonexistent/path"), 10);
+        assert!(result.is_err());
     }
 }

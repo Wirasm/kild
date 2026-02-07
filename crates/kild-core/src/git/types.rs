@@ -146,6 +146,29 @@ impl UncommittedDetails {
     }
 }
 
+/// Aggregated git statistics for a worktree.
+///
+/// Combines diff stats and worktree status into a single response.
+/// Both fields are optional to support graceful degradation when
+/// individual git operations fail.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct GitStats {
+    pub diff_stats: Option<DiffStats>,
+    pub worktree_status: Option<WorktreeStatus>,
+}
+
+impl GitStats {
+    /// Returns true if any git data was successfully collected.
+    pub fn has_data(&self) -> bool {
+        self.diff_stats.is_some() || self.worktree_status.is_some()
+    }
+
+    /// Returns true if all git operations failed.
+    pub fn is_empty(&self) -> bool {
+        self.diff_stats.is_none() && self.worktree_status.is_none()
+    }
+}
+
 impl ProjectInfo {
     pub fn new(id: String, name: String, path: PathBuf, remote_url: Option<String>) -> Self {
         Self {

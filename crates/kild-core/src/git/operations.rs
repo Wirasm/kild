@@ -1,5 +1,5 @@
 use crate::git::errors::GitError;
-use crate::git::types::{CommitCounts, DiffStats, UncommittedDetails, WorktreeStatus};
+use crate::git::types::{CommitCounts, DiffStats, GitStats, UncommittedDetails, WorktreeStatus};
 use git2::{Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
@@ -480,6 +480,46 @@ fn count_unpushed_commits(repo: &Repository) -> CommitCounts {
         has_remote: true,
         behind_count_failed: false,
     }
+}
+
+/// Collect aggregated git stats for a worktree.
+///
+/// Returns `None` if the worktree path doesn't exist.
+/// Individual stat failures are logged as warnings and degraded to `None`
+/// fields rather than failing the entire operation.
+pub fn collect_git_stats(worktree_path: &Path, branch: &str) -> Option<GitStats> {
+    if !worktree_path.exists() {
+        return None;
+    }
+
+    let diff = match get_diff_stats(worktree_path) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            warn!(
+                event = "core.git.stats.diff_failed",
+                branch = branch,
+                error = %e
+            );
+            None
+        }
+    };
+
+    let status = match get_worktree_status(worktree_path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            warn!(
+                event = "core.git.stats.worktree_status_failed",
+                branch = branch,
+                error = %e
+            );
+            None
+        }
+    };
+
+    Some(GitStats {
+        diff_stats: diff,
+        worktree_status: status,
+    })
 }
 
 #[cfg(test)]
@@ -1153,5 +1193,66 @@ mod tests {
         assert_eq!(status.unpushed_commit_count, 0);
         assert!(status.has_remote_branch);
         assert!(!status.behind_count_failed);
+    }
+
+    // --- collect_git_stats tests ---
+
+    #[test]
+    fn test_collect_git_stats_nonexistent_path() {
+        let result = collect_git_stats(Path::new("/nonexistent/path"), "test-branch");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_collect_git_stats_clean_repo() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let stats = collect_git_stats(dir.path(), "test-branch");
+        assert!(stats.is_some());
+        let stats = stats.unwrap();
+        assert!(stats.diff_stats.is_some());
+        assert!(stats.worktree_status.is_some());
+        assert!(stats.has_data());
+        assert!(!stats.is_empty());
+    }
+
+    #[test]
+    fn test_collect_git_stats_with_modifications() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Modify tracked file to create diff stats
+        fs::write(dir.path().join("file.txt"), "modified").unwrap();
+
+        let stats = collect_git_stats(dir.path(), "test-branch");
+        assert!(stats.is_some());
+        let stats = stats.unwrap();
+        assert!(stats.has_data());
+        assert!(stats.diff_stats.is_some());
+        let diff = stats.diff_stats.unwrap();
+        assert!(diff.insertions > 0 || diff.deletions > 0);
     }
 }

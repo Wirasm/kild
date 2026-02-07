@@ -54,6 +54,12 @@ pub enum GitError {
     #[error("Failed to delete remote branch '{branch}': {message}")]
     RemoteBranchDeleteFailed { branch: String, message: String },
 
+    #[error("Git diff failed: {message}")]
+    DiffFailed { message: String },
+
+    #[error("Git log failed: {message}")]
+    LogFailed { message: String },
+
     #[error("IO error during git operation: {source}")]
     IoError {
         #[from]
@@ -77,6 +83,8 @@ impl KildError for GitError {
             GitError::RebaseConflict { .. } => "GIT_REBASE_CONFLICT",
             GitError::RebaseAbortFailed { .. } => "GIT_REBASE_ABORT_FAILED",
             GitError::RemoteBranchDeleteFailed { .. } => "GIT_REMOTE_BRANCH_DELETE_FAILED",
+            GitError::DiffFailed { .. } => "GIT_DIFF_FAILED",
+            GitError::LogFailed { .. } => "GIT_LOG_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",
         }
@@ -170,6 +178,29 @@ mod tests {
         };
         assert_eq!(error.error_code(), "GIT_REMOTE_BRANCH_DELETE_FAILED");
         assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_diff_failed_error() {
+        let error = GitError::DiffFailed {
+            message: "Failed to execute git".to_string(),
+        };
+        assert_eq!(error.to_string(), "Git diff failed: Failed to execute git");
+        assert_eq!(error.error_code(), "GIT_DIFF_FAILED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_log_failed_error() {
+        let error = GitError::LogFailed {
+            message: "git log failed: no commits".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Git log failed: git log failed: no commits"
+        );
+        assert_eq!(error.error_code(), "GIT_LOG_FAILED");
+        assert!(!error.is_user_error());
     }
 
     #[test]

@@ -7,58 +7,15 @@ use kild_core::SessionStatus;
 use kild_core::cleanup;
 use kild_core::config::KildConfig;
 use kild_core::events;
-use kild_core::git::operations::{get_diff_stats, get_worktree_status};
+use kild_core::git::operations::get_diff_stats;
 use kild_core::health;
 use kild_core::process;
 use kild_core::session_ops as session_handler;
 
 use crate::table::truncate;
 
-#[derive(serde::Serialize)]
-struct GitStatsResponse {
-    diff_stats: Option<kild_core::DiffStats>,
-    worktree_status: Option<kild_core::WorktreeStatus>,
-}
-
 /// Branch name and agent name for a successfully opened kild
 type OpenedKild = (String, String);
-
-/// Collect git stats for a session's worktree.
-/// Returns None if worktree doesn't exist or on errors (logged as warnings).
-fn collect_git_stats(worktree_path: &std::path::Path, branch: &str) -> Option<GitStatsResponse> {
-    if !worktree_path.exists() {
-        return None;
-    }
-
-    let diff = match get_diff_stats(worktree_path) {
-        Ok(d) => Some(d),
-        Err(e) => {
-            warn!(
-                event = "cli.git_stats.diff_failed",
-                branch = branch,
-                error = %e
-            );
-            None
-        }
-    };
-
-    let status = match get_worktree_status(worktree_path) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            warn!(
-                event = "cli.git_stats.worktree_status_failed",
-                branch = branch,
-                error = %e
-            );
-            None
-        }
-    };
-
-    Some(GitStatsResponse {
-        diff_stats: diff,
-        worktree_status: status,
-    })
-}
 
 /// Branch name and error message for a failed operation
 type FailedOperation = (String, String);
@@ -250,7 +207,7 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 struct EnrichedSession {
                     #[serde(flatten)]
                     session: kild_core::Session,
-                    git_stats: Option<GitStatsResponse>,
+                    git_stats: Option<kild_core::GitStats>,
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
                     terminal_window_title: Option<String>,
@@ -260,7 +217,10 @@ fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 let enriched: Vec<EnrichedSession> = sessions
                     .into_iter()
                     .map(|session| {
-                        let git_stats = collect_git_stats(&session.worktree_path, &session.branch);
+                        let git_stats = kild_core::git::operations::collect_git_stats(
+                            &session.worktree_path,
+                            &session.branch,
+                        );
                         let status_info = session_handler::read_agent_status(&session.id);
                         let terminal_window_title = session
                             .latest_agent()
@@ -903,49 +863,6 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Determine which editor to use based on precedence:
-/// CLI arg > config.editor.default > $EDITOR env var > "zed" (hardcoded)
-fn select_editor(cli_override: Option<String>, config: &KildConfig) -> String {
-    cli_override
-        .or_else(|| config.editor.default().map(String::from))
-        .or_else(|| std::env::var("EDITOR").ok())
-        .unwrap_or_else(|| "zed".to_string())
-}
-
-/// Build a shell command string for terminal-mode editors.
-/// Escapes the worktree path for safe shell interpretation.
-fn build_terminal_editor_command(
-    editor: &str,
-    flags: Option<&str>,
-    worktree_path: &std::path::Path,
-) -> String {
-    let escaped_path =
-        kild_core::terminal::common::escape::shell_escape(&worktree_path.display().to_string());
-
-    if let Some(flags) = flags {
-        format!("{} {} {}", editor, flags, escaped_path)
-    } else {
-        format!("{} {}", editor, escaped_path)
-    }
-}
-
-/// Build a `Command` for GUI-mode editors.
-/// Splits flags by whitespace into separate arguments.
-fn build_gui_editor_command(
-    editor: &str,
-    flags: Option<&str>,
-    worktree_path: &std::path::Path,
-) -> std::process::Command {
-    let mut cmd = std::process::Command::new(editor);
-    if let Some(flags) = flags {
-        for flag in flags.split_whitespace() {
-            cmd.arg(flag);
-        }
-    }
-    cmd.arg(worktree_path);
-    cmd
-}
-
 fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
@@ -973,7 +890,7 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     };
 
     // 3. Determine editor
-    let editor = select_editor(editor_override, &config);
+    let editor = config.editor.resolve_editor(editor_override.as_deref());
 
     info!(
         event = "cli.code_editor_selected",
@@ -985,8 +902,9 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
     // 4. Spawn editor
     if config.editor.terminal() {
-        let editor_command =
-            build_terminal_editor_command(&editor, config.editor.flags(), &session.worktree_path);
+        let editor_command = config
+            .editor
+            .build_terminal_command(&editor, &session.worktree_path);
 
         match kild_core::terminal_ops::spawn_terminal(
             &session.worktree_path,
@@ -1020,8 +938,9 @@ fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             }
         }
     } else {
-        let mut cmd =
-            build_gui_editor_command(&editor, config.editor.flags(), &session.worktree_path);
+        let mut cmd = config
+            .editor
+            .build_gui_command(&editor, &session.worktree_path);
 
         match cmd.spawn() {
             Ok(_) => {
@@ -1278,61 +1197,22 @@ fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         return Ok(());
     }
 
-    // 2. Build git diff command (with optional --staged flag)
-    let mut cmd = std::process::Command::new("git");
-    cmd.current_dir(&session.worktree_path);
-    cmd.arg("diff");
-
-    if staged {
-        cmd.arg("--staged");
-    }
-
-    // 3. Execute git diff and wait for completion
-    // Note: Output automatically appears in terminal via stdout inheritance
-    let status = match cmd.status() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("❌ Failed to execute git diff: {}", e);
-            eprintln!("   Hint: Make sure 'git' is installed and in your PATH");
-            error!(
-                event = "cli.diff_execution_failed",
-                branch = branch,
-                staged = staged,
-                error = %e
-            );
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
-
-    // git diff exit codes:
-    // 0 = no differences
-    // 1 = differences found (NOT an error!)
-    // 128+ = git error
-    if let Some(code) = status.code()
-        && code >= 128
-    {
-        let error_msg = format!("git diff failed with exit code {}", code);
-        eprintln!("❌ {}", error_msg);
+    // 2. Execute git diff via kild-core (output appears directly in terminal)
+    if let Err(e) = kild_core::git::cli::show_diff(&session.worktree_path, staged) {
+        eprintln!("❌ Failed to show diff: {}", e);
         eprintln!(
             "   Hint: Check that the worktree at {} is a valid git repository",
             session.worktree_path.display()
         );
-        error!(
-            event = "cli.diff_git_error",
-            branch = branch,
-            staged = staged,
-            exit_code = code,
-            worktree_path = %session.worktree_path.display()
-        );
-        return Err(error_msg.into());
+        error!(event = "cli.diff_failed", branch = branch, error = %e);
+        events::log_app_error(&e);
+        return Err(e.into());
     }
 
     info!(
         event = "cli.diff_completed",
         branch = branch,
-        staged = staged,
-        exit_code = status.code()
+        staged = staged
     );
 
     Ok(())
@@ -1345,13 +1225,6 @@ fn handle_commits_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
     let count = *matches.get_one::<usize>("count").unwrap_or(&10);
-
-    // Validate branch name
-    if !is_valid_branch_name(branch) {
-        eprintln!("Invalid branch name: {}", branch);
-        error!(event = "cli.commits_invalid_branch", branch = branch);
-        return Err("Invalid branch name".into());
-    }
 
     info!(
         event = "cli.commits_started",
@@ -1373,50 +1246,28 @@ fn handle_commits_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error
         }
     };
 
-    // Run git log in worktree directory
-    let output = std::process::Command::new("git")
-        .current_dir(&session.worktree_path)
-        .args(["log", "--oneline", "-n", &count.to_string()])
-        .output()
-        .map_err(|e| {
-            eprintln!(
-                "Failed to execute git in '{}': {}",
-                session.worktree_path.display(),
-                e
-            );
-            eprintln!("Hint: Make sure git is installed and the worktree path is accessible.");
-            error!(
-                event = "cli.commits_git_spawn_failed",
-                branch = branch,
-                worktree_path = %session.worktree_path.display(),
-                error = %e
-            );
-            format!("Failed to execute git: {}", e)
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("Git error: {}", stderr);
-        error!(
-            event = "cli.commits_git_failed",
-            branch = branch,
-            error = %stderr
-        );
-        return Err(format!("git log failed: {}", stderr).into());
-    }
+    // Run git log in worktree directory via kild-core
+    let commits = match kild_core::git::cli::get_commits(&session.worktree_path, count) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Failed to get commits: {}", e);
+            error!(event = "cli.commits_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            return Err(e.into());
+        }
+    };
 
     // Output commits to stdout, handling broken pipe gracefully
-    if let Err(e) = std::io::stdout().write_all(&output.stdout) {
-        // Broken pipe is expected when piped to tools like `head`
-        if e.kind() != std::io::ErrorKind::BrokenPipe {
-            eprintln!("Failed to write output: {}", e);
-            error!(
-                event = "cli.commits_write_failed",
-                branch = branch,
-                error = %e
-            );
-            return Err(format!("Failed to write commits output: {}", e).into());
-        }
+    if let Err(e) = std::io::stdout().write_all(commits.as_bytes())
+        && e.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        eprintln!("Failed to write output: {}", e);
+        error!(
+            event = "cli.commits_write_failed",
+            branch = branch,
+            error = %e
+        );
+        return Err(format!("Failed to write commits output: {}", e).into());
     }
 
     info!(
@@ -1588,7 +1439,8 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
 
     match session_handler::get_session(branch) {
         Ok(session) => {
-            let git_stats = collect_git_stats(&session.worktree_path, branch);
+            let git_stats =
+                kild_core::git::operations::collect_git_stats(&session.worktree_path, branch);
             let status_info = session_handler::read_agent_status(&session.id);
             let pr_info = session_handler::read_pr_info(&session.id);
 
@@ -1597,7 +1449,7 @@ fn handle_status_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
                 struct EnrichedStatus<'a> {
                     #[serde(flatten)]
                     session: &'a kild_core::Session,
-                    git_stats: Option<&'a GitStatsResponse>,
+                    git_stats: Option<&'a kild_core::GitStats>,
                     agent_status: Option<String>,
                     agent_status_updated_at: Option<String>,
                     terminal_window_title: Option<String>,
@@ -2357,10 +2209,6 @@ fn print_single_kild_health(kild: &health::KildHealth) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // Mutex to ensure env var tests don't run in parallel and interfere with each other
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_truncate() {
@@ -2428,195 +2276,8 @@ mod tests {
         assert!(!config.agent.default.is_empty());
     }
 
-    #[test]
-    fn test_select_editor_cli_override_takes_precedence() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let config = KildConfig::default();
-
-        // Even if $EDITOR is set, CLI override should win
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::set_var("EDITOR", "vim");
-        }
-        let editor = select_editor(Some("code".to_string()), &config);
-        assert_eq!(editor, "code");
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-    }
-
-    #[test]
-    fn test_select_editor_uses_env_when_no_override() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let config = KildConfig::default();
-
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::set_var("EDITOR", "nvim");
-        }
-        let editor = select_editor(None, &config);
-        assert_eq!(editor, "nvim");
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-    }
-
-    #[test]
-    fn test_select_editor_defaults_to_zed() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let config = KildConfig::default();
-
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-        let editor = select_editor(None, &config);
-        assert_eq!(editor, "zed");
-    }
-
-    #[test]
-    fn test_select_editor_cli_override_ignores_env() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let config = KildConfig::default();
-
-        // Verify CLI override completely ignores $EDITOR
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::set_var("EDITOR", "emacs");
-        }
-        let editor = select_editor(Some("sublime".to_string()), &config);
-        assert_eq!(editor, "sublime");
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-    }
-
-    #[test]
-    fn test_select_editor_config_overrides_env() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let mut config = KildConfig::default();
-        config.editor.set_default("code".to_string());
-
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::set_var("EDITOR", "vim");
-        }
-        let editor = select_editor(None, &config);
-        assert_eq!(editor, "code");
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-    }
-
-    #[test]
-    fn test_select_editor_cli_overrides_config() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let mut config = KildConfig::default();
-        config.editor.set_default("code".to_string());
-
-        // SAFETY: We hold ENV_MUTEX to ensure no concurrent access
-        unsafe {
-            std::env::remove_var("EDITOR");
-        }
-        let editor = select_editor(Some("nvim".to_string()), &config);
-        assert_eq!(editor, "nvim");
-    }
-
-    // Tests for build_terminal_editor_command
-
-    #[test]
-    fn test_terminal_command_no_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_terminal_editor_command("nvim", None, &path);
-        assert_eq!(cmd, "nvim '/tmp/worktree'");
-    }
-
-    #[test]
-    fn test_terminal_command_with_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_terminal_editor_command("nvim", Some("--nofork"), &path);
-        assert_eq!(cmd, "nvim --nofork '/tmp/worktree'");
-    }
-
-    #[test]
-    fn test_terminal_command_with_multiple_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_terminal_editor_command("code", Some("--new-window --wait"), &path);
-        assert_eq!(cmd, "code --new-window --wait '/tmp/worktree'");
-    }
-
-    #[test]
-    fn test_terminal_command_path_with_spaces() {
-        let path = std::path::PathBuf::from("/tmp/my worktree/project");
-        let cmd = build_terminal_editor_command("nvim", None, &path);
-        assert_eq!(cmd, "nvim '/tmp/my worktree/project'");
-    }
-
-    #[test]
-    fn test_terminal_command_path_with_special_chars() {
-        let path = std::path::PathBuf::from("/tmp/it's a path");
-        let cmd = build_terminal_editor_command("vim", None, &path);
-        // Single quotes inside are escaped with the shell pattern '\"'\"'
-        assert!(cmd.starts_with("vim "));
-        assert!(cmd.contains("it"));
-    }
-
-    // Tests for build_gui_editor_command
-
-    #[test]
-    fn test_gui_command_no_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_gui_editor_command("code", None, &path);
-        let args: Vec<_> = cmd.get_args().collect();
-        assert_eq!(args, vec![std::ffi::OsStr::new("/tmp/worktree")]);
-    }
-
-    #[test]
-    fn test_gui_command_with_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_gui_editor_command("code", Some("--new-window"), &path);
-        let args: Vec<_> = cmd.get_args().collect();
-        assert_eq!(
-            args,
-            vec![
-                std::ffi::OsStr::new("--new-window"),
-                std::ffi::OsStr::new("/tmp/worktree"),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_gui_command_with_multiple_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_gui_editor_command("code", Some("--new-window --wait"), &path);
-        let args: Vec<_> = cmd.get_args().collect();
-        assert_eq!(
-            args,
-            vec![
-                std::ffi::OsStr::new("--new-window"),
-                std::ffi::OsStr::new("--wait"),
-                std::ffi::OsStr::new("/tmp/worktree"),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_gui_command_empty_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_gui_editor_command("code", Some(""), &path);
-        let args: Vec<_> = cmd.get_args().collect();
-        // Empty flags string produces no extra args
-        assert_eq!(args, vec![std::ffi::OsStr::new("/tmp/worktree")]);
-    }
-
-    #[test]
-    fn test_gui_command_whitespace_only_flags() {
-        let path = std::path::PathBuf::from("/tmp/worktree");
-        let cmd = build_gui_editor_command("code", Some("   "), &path);
-        let args: Vec<_> = cmd.get_args().collect();
-        // Whitespace-only flags produce no extra args
-        assert_eq!(args, vec![std::ffi::OsStr::new("/tmp/worktree")]);
-    }
+    // Editor selection and command building tests have been moved to
+    // kild-core/src/config/types.rs (EditorConfig methods).
 
     #[test]
     fn test_is_valid_branch_name_accepts_valid_names() {

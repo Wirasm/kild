@@ -31,7 +31,7 @@ pub mod terminal;
 pub use config::KildConfig;
 pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
-pub use git::types::{DiffStats, UncommittedDetails, WorktreeStatus};
+pub use git::types::{DiffStats, GitStats, UncommittedDetails, WorktreeStatus};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{
