@@ -127,7 +127,7 @@ pub struct ProjectsData {
 ///
 /// # Errors
 ///
-/// Returns `ProjectError::GitCheckFailed` if the git2 library encounters an
+/// Returns `ProjectError::Git2CheckFailed` if the git2 library encounters an
 /// unexpected error (e.g., permission denied). This is distinct from returning
 /// `Ok(false)` which means "path is not a git repository".
 pub fn is_git_repo(path: &Path) -> Result<bool, ProjectError> {
@@ -136,14 +136,12 @@ pub fn is_git_repo(path: &Path) -> Result<bool, ProjectError> {
         Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
         Err(e) => {
             tracing::error!(
-                event = "core.projects.git_check_failed",
+                event = "core.projects.git2_check_failed",
                 path = %path.display(),
                 error = %e,
                 "Failed to check if path is a git repository"
             );
-            Err(ProjectError::GitCheckFailed {
-                message: e.to_string(),
-            })
+            Err(ProjectError::Git2CheckFailed { source: e })
         }
     }
 }

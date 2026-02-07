@@ -113,9 +113,9 @@ mod tests {
 
     #[test]
     fn test_dispatch_error_project_delegates_is_user_error() {
-        // GitCheckFailed is NOT a user error in ProjectError
-        let err = DispatchError::Project(ProjectError::GitCheckFailed {
-            message: "permission denied".to_string(),
+        // Git2CheckFailed is NOT a user error in ProjectError
+        let err = DispatchError::Project(ProjectError::Git2CheckFailed {
+            source: git2::Error::from_str("permission denied"),
         });
         assert!(!err.is_user_error());
     }

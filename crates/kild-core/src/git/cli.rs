@@ -1,11 +1,10 @@
-//! Centralized git CLI wrappers.
+//! Centralized git CLI wrappers for auth-requiring operations.
 //!
-//! All production `std::process::Command::new("git")` calls in kild-core live here.
+//! Operations like `fetch`, `rebase`, and `push --delete` require authentication.
+//! The git CLI inherits the user's SSH agent and credential helpers automatically,
+//! while git2 requires explicit credential callback setup.
+//!
 //! Each function validates arguments, logs structured events, and maps errors consistently.
-//!
-//! **Why CLI instead of git2?** Operations like `fetch`, `rebase`, and `push --delete`
-//! require authentication. The git CLI inherits the user's SSH agent and credential
-//! helpers automatically, while git2 requires explicit credential callback setup.
 
 use std::path::Path;
 
@@ -45,7 +44,7 @@ pub fn fetch(dir: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
     validate_git_arg(branch, "branch name")?;
 
     info!(
-        event = "core.git.cli.fetch_started",
+        event = "core.git.fetch_started",
         remote = remote,
         branch = branch,
         path = %dir.display()
@@ -62,7 +61,7 @@ pub fn fetch(dir: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
 
     if output.status.success() {
         info!(
-            event = "core.git.cli.fetch_completed",
+            event = "core.git.fetch_completed",
             remote = remote,
             branch = branch
         );
@@ -70,7 +69,7 @@ pub fn fetch(dir: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         warn!(
-            event = "core.git.cli.fetch_failed",
+            event = "core.git.fetch_failed",
             remote = remote,
             branch = branch,
             stderr = %stderr.trim()
@@ -93,7 +92,7 @@ pub fn delete_remote_branch(dir: &Path, remote: &str, branch: &str) -> Result<()
     validate_git_arg(branch, "branch name")?;
 
     info!(
-        event = "core.git.cli.delete_remote_branch_started",
+        event = "core.git.delete_remote_branch_started",
         remote = remote,
         branch = branch,
         path = %dir.display()
@@ -110,7 +109,7 @@ pub fn delete_remote_branch(dir: &Path, remote: &str, branch: &str) -> Result<()
 
     if output.status.success() {
         info!(
-            event = "core.git.cli.delete_remote_branch_completed",
+            event = "core.git.delete_remote_branch_completed",
             remote = remote,
             branch = branch
         );
@@ -119,28 +118,16 @@ pub fn delete_remote_branch(dir: &Path, remote: &str, branch: &str) -> Result<()
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Common patterns for "branch doesn't exist" across git versions.
-    // These indicate the branch is already gone — treat as success.
-    let benign_patterns = [
-        "remote ref does not exist",
-        "unable to delete",
-        "does not exist",
-    ];
-
-    let is_already_deleted = benign_patterns
-        .iter()
-        .any(|pattern| stderr.to_lowercase().contains(pattern));
-
-    if is_already_deleted {
+    if is_already_deleted_error(&stderr) {
         info!(
-            event = "core.git.cli.delete_remote_branch_already_deleted",
+            event = "core.git.delete_remote_branch_already_deleted",
             remote = remote,
             branch = branch
         );
         Ok(())
     } else {
         debug!(
-            event = "core.git.cli.delete_remote_branch_failed",
+            event = "core.git.delete_remote_branch_failed",
             remote = remote,
             branch = branch,
             stderr = %stderr.trim()
@@ -150,6 +137,20 @@ pub fn delete_remote_branch(dir: &Path, remote: &str, branch: &str) -> Result<()
             message: stderr.trim().to_string(),
         })
     }
+}
+
+/// Check if a `git push --delete` stderr indicates the branch was already deleted.
+///
+/// Matches common "branch doesn't exist" patterns across git versions.
+fn is_already_deleted_error(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    [
+        "remote ref does not exist",
+        "unable to delete",
+        "does not exist",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
 }
 
 /// Rebase the current branch onto a base branch.
@@ -163,7 +164,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
     validate_git_arg(base_branch, "base branch")?;
 
     info!(
-        event = "core.git.cli.rebase_started",
+        event = "core.git.rebase_started",
         base = base_branch,
         path = %dir.display()
     );
@@ -178,7 +179,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
 
     if output.status.success() {
         info!(
-            event = "core.git.cli.rebase_completed",
+            event = "core.git.rebase_completed",
             base = base_branch,
             path = %dir.display()
         );
@@ -204,7 +205,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
         match abort_result {
             Ok(abort_output) if abort_output.status.success() => {
                 info!(
-                    event = "core.git.cli.rebase_abort_completed",
+                    event = "core.git.rebase_abort_completed",
                     base = base_branch,
                     path = %dir.display()
                 );
@@ -212,7 +213,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
             Ok(abort_output) => {
                 let abort_stderr = String::from_utf8_lossy(&abort_output.stderr);
                 error!(
-                    event = "core.git.cli.rebase_abort_failed",
+                    event = "core.git.rebase_abort_failed",
                     base = base_branch,
                     path = %dir.display(),
                     stderr = %abort_stderr.trim()
@@ -225,7 +226,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
             }
             Err(e) => {
                 error!(
-                    event = "core.git.cli.rebase_abort_failed",
+                    event = "core.git.rebase_abort_failed",
                     base = base_branch,
                     path = %dir.display(),
                     error = %e
@@ -239,7 +240,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
         }
 
         warn!(
-            event = "core.git.cli.rebase_conflicts",
+            event = "core.git.rebase_conflicts",
             base = base_branch,
             path = %dir.display()
         );
@@ -251,7 +252,7 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
 
     // Non-conflict failure
     error!(
-        event = "core.git.cli.rebase_failed",
+        event = "core.git.rebase_failed",
         base = base_branch,
         path = %dir.display(),
         code = code,
@@ -296,5 +297,28 @@ mod tests {
         assert!(validate_git_arg("main", "branch").is_ok());
         assert!(validate_git_arg("kild/feature-auth", "branch").is_ok());
         assert!(validate_git_arg("refs/heads/main", "refspec").is_ok());
+    }
+
+    #[test]
+    fn test_is_already_deleted_error_matches_benign_patterns() {
+        // Standard "remote ref does not exist" message
+        assert!(is_already_deleted_error(
+            "error: unable to delete 'origin/kild/test': remote ref does not exist"
+        ));
+        // Lowercase variant
+        assert!(is_already_deleted_error(
+            "fatal: branch 'kild/test' does not exist"
+        ));
+        // "unable to delete" variant
+        assert!(is_already_deleted_error("error: unable to delete 'foo'"));
+    }
+
+    #[test]
+    fn test_is_already_deleted_error_rejects_real_failures() {
+        assert!(!is_already_deleted_error("fatal: Authentication failed"));
+        assert!(!is_already_deleted_error(
+            "fatal: Could not read from remote repository"
+        ));
+        assert!(!is_already_deleted_error(""));
     }
 }

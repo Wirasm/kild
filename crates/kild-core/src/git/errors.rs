@@ -92,6 +92,8 @@ impl KildError for GitError {
                 // RebaseConflict is a user error: user must resolve conflicts manually.
                 // RebaseAbortFailed is NOT — it's an internal failure to clean up after conflict.
                 | GitError::RebaseConflict { .. }
+                // RemoteBranchDeleteFailed is user-actionable (network, auth, invalid remote).
+                | GitError::RemoteBranchDeleteFailed { .. }
         )
     }
 }
@@ -158,6 +160,16 @@ mod tests {
         );
         assert_eq!(error.error_code(), "GIT_REBASE_ABORT_FAILED");
         assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_remote_branch_delete_failed_is_user_error() {
+        let error = GitError::RemoteBranchDeleteFailed {
+            branch: "kild/test".to_string(),
+            message: "authentication failed".to_string(),
+        };
+        assert_eq!(error.error_code(), "GIT_REMOTE_BRANCH_DELETE_FAILED");
+        assert!(error.is_user_error());
     }
 
     #[test]
