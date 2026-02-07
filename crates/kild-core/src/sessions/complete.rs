@@ -60,21 +60,27 @@ pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
     // 3. Determine the result based on PR status and remote deletion outcome
     let result = if !pr_merged {
         CompleteResult::PrNotMerged
-    } else if let Err(e) = delete_remote_branch(&session.worktree_path, &kild_branch) {
-        // Non-fatal: remote might already be deleted, not exist, or deletion failed
-        warn!(
-            event = "core.session.complete_remote_delete_failed",
-            branch = kild_branch,
-            worktree_path = %session.worktree_path.display(),
-            error = %e
-        );
-        CompleteResult::RemoteDeleteFailed
     } else {
-        info!(
-            event = "core.session.complete_remote_deleted",
-            branch = kild_branch
-        );
-        CompleteResult::RemoteDeleted
+        match crate::git::cli::delete_remote_branch(&session.worktree_path, "origin", &kild_branch)
+        {
+            Ok(()) => {
+                info!(
+                    event = "core.session.complete_remote_deleted",
+                    branch = kild_branch
+                );
+                CompleteResult::RemoteDeleted
+            }
+            Err(e) => {
+                // Non-fatal: remote might already be deleted, not exist, or deletion failed
+                warn!(
+                    event = "core.session.complete_remote_delete_failed",
+                    branch = kild_branch,
+                    worktree_path = %session.worktree_path.display(),
+                    error = %e
+                );
+                CompleteResult::RemoteDeleteFailed
+            }
+        }
     };
 
     // 4. Safety check: always block on uncommitted changes (no --force bypass for complete)
@@ -408,15 +414,6 @@ fn check_pr_merged(worktree_path: &std::path::Path, branch: &str) -> bool {
             false
         }
     }
-}
-
-/// Delete a branch from the "origin" remote.
-///
-/// Delegates to [`crate::git::cli::delete_remote_branch`] for centralized CLI handling.
-/// Treats "branch already deleted" as success (idempotent).
-fn delete_remote_branch(worktree_path: &std::path::Path, branch: &str) -> Result<(), SessionError> {
-    crate::git::cli::delete_remote_branch(worktree_path, "origin", branch)?;
-    Ok(())
 }
 
 #[cfg(test)]

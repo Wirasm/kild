@@ -16,16 +16,15 @@ pub fn update_agent_status(
         status = %status,
     );
     let config = Config::new();
-    let session =
+    let mut session =
         persistence::find_session_by_name(&config.sessions_dir(), name)?.ok_or_else(|| {
             SessionError::NotFound {
                 name: name.to_string(),
             }
         })?;
 
+    // Write sidecar file with current timestamp
     let now = chrono::Utc::now().to_rfc3339();
-
-    // Write sidecar file
     let status_info = super::types::AgentStatusInfo {
         status,
         updated_at: now.clone(),
@@ -33,7 +32,6 @@ pub fn update_agent_status(
     persistence::write_agent_status(&config.sessions_dir(), &session.id, &status_info)?;
 
     // Update last_activity on the session (heartbeat)
-    let mut session = session;
     session.last_activity = Some(now);
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 

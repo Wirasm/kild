@@ -29,15 +29,17 @@ pub(crate) fn cleanup_session_pid_files(
         match delete_pid_file(&pid_file) {
             Ok(()) => {
                 debug!(
-                    event = %format!("core.session.{}_pid_file_cleaned", operation),
+                    event = "core.session.pid_file_cleaned",
                     session_id = session.id,
+                    operation = operation,
                     pid_file = %pid_file.display()
                 );
             }
             Err(e) => {
                 debug!(
-                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                    event = "core.session.pid_file_cleanup_failed",
                     session_id = session.id,
+                    operation = operation,
                     pid_file = %pid_file.display(),
                     error = %e
                 );
@@ -57,15 +59,17 @@ pub(crate) fn cleanup_session_pid_files(
         match delete_pid_file(&pid_file) {
             Ok(()) => {
                 debug!(
-                    event = %format!("core.session.{}_pid_file_cleaned", operation),
+                    event = "core.session.pid_file_cleaned",
                     session_id = session.id,
+                    operation = operation,
                     pid_file = %pid_file.display()
                 );
             }
             Err(e) => {
                 debug!(
-                    event = %format!("core.session.{}_pid_file_cleanup_failed", operation),
+                    event = "core.session.pid_file_cleanup_failed",
                     session_id = session.id,
+                    operation = operation,
                     pid_file = %pid_file.display(),
                     error = %e
                 );
