@@ -106,23 +106,25 @@ pub fn get_forge_backend(
     worktree_path: &Path,
     forge_override: Option<ForgeType>,
 ) -> Option<&'static dyn ForgeBackend> {
-    let forge_type = if let Some(ft) = forge_override {
-        debug!(event = "core.forge.config_override", forge = ft.as_str(),);
-        ft
-    } else {
-        detect_forge(worktree_path)?
+    let forge_type = match forge_override {
+        Some(ft) => {
+            debug!(event = "core.forge.config_override", forge = ft.as_str());
+            ft
+        }
+        None => detect_forge(worktree_path)?,
     };
 
     let backend = get_backend(&forge_type)?;
-    if backend.is_available() {
-        Some(backend)
-    } else {
+
+    if !backend.is_available() {
         debug!(
             event = "core.forge.cli_not_available",
             forge = backend.name()
         );
-        None
+        return None;
     }
+
+    Some(backend)
 }
 
 #[cfg(test)]

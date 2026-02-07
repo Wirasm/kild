@@ -286,28 +286,32 @@ fn parse_ci_status(value: &serde_json::Value) -> (CiStatus, Option<String>) {
             .unwrap_or("");
         let status = check.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
-        match conclusion.to_uppercase().as_str() {
+        let conclusion_upper = conclusion.to_uppercase();
+        match conclusion_upper.as_str() {
             "SUCCESS" | "NEUTRAL" | "SKIPPED" => passing += 1,
             "FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE" => {
                 failing += 1
             }
-            _ => match status.to_uppercase().as_str() {
-                "COMPLETED" => passing += 1,
-                "IN_PROGRESS" | "QUEUED" | "REQUESTED" | "WAITING" | "PENDING" => pending += 1,
-                _ => pending += 1,
-            },
+            "" => {
+                // No conclusion yet - check status field
+                let status_upper = status.to_uppercase();
+                match status_upper.as_str() {
+                    "COMPLETED" => passing += 1,
+                    "IN_PROGRESS" | "QUEUED" | "REQUESTED" | "WAITING" | "PENDING" => pending += 1,
+                    _ => pending += 1,
+                }
+            }
+            _ => pending += 1,
         }
     }
 
     let total = passing + failing + pending;
     let summary = format!("{}/{} passing", passing, total);
 
-    let ci_status = if failing > 0 {
-        CiStatus::Failing
-    } else if pending > 0 {
-        CiStatus::Pending
-    } else {
-        CiStatus::Passing
+    let ci_status = match (failing > 0, pending > 0) {
+        (true, _) => CiStatus::Failing,
+        (false, true) => CiStatus::Pending,
+        (false, false) => CiStatus::Passing,
     };
 
     (ci_status, Some(summary))
@@ -330,6 +334,7 @@ fn parse_review_status(value: &serde_json::Value) -> (ReviewStatus, Option<Strin
     // Deduplicate reviews by author — last entry per author wins (GitHub API array order)
     let mut latest_by_author: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+
     for review in reviews {
         let author = review
             .get("author")
@@ -337,13 +342,15 @@ fn parse_review_status(value: &serde_json::Value) -> (ReviewStatus, Option<Strin
             .and_then(|l| l.as_str())
             .unwrap_or("unknown")
             .to_string();
+
         let state = review
             .get("state")
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_uppercase();
+
         // Skip COMMENTED and DISMISSED — they don't represent a review decision
-        if state == "APPROVED" || state == "CHANGES_REQUESTED" || state == "PENDING" {
+        if matches!(state.as_str(), "APPROVED" | "CHANGES_REQUESTED" | "PENDING") {
             latest_by_author.insert(author, state);
         }
     }
@@ -377,12 +384,10 @@ fn parse_review_status(value: &serde_json::Value) -> (ReviewStatus, Option<Strin
         Some(parts.join(", "))
     };
 
-    let review_status = if changes_requested > 0 {
-        ReviewStatus::ChangesRequested
-    } else if approved > 0 {
-        ReviewStatus::Approved
-    } else {
-        ReviewStatus::Pending
+    let review_status = match (changes_requested > 0, approved > 0) {
+        (true, _) => ReviewStatus::ChangesRequested,
+        (false, true) => ReviewStatus::Approved,
+        (false, false) => ReviewStatus::Pending,
     };
 
     (review_status, summary)

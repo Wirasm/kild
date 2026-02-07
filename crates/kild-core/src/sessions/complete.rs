@@ -80,33 +80,31 @@ pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
     );
 
     // 3. Determine the result based on PR status and remote deletion outcome
-    let result = match pr_merged {
-        Some(true) => {
-            match crate::git::cli::delete_remote_branch(
-                &session.worktree_path,
-                "origin",
-                &kild_branch,
-            ) {
-                Ok(()) => {
-                    info!(
-                        event = "core.session.complete_remote_deleted",
-                        branch = kild_branch
-                    );
-                    CompleteResult::RemoteDeleted
-                }
-                Err(e) => {
-                    warn!(
-                        event = "core.session.complete_remote_delete_failed",
-                        branch = kild_branch,
-                        worktree_path = %session.worktree_path.display(),
-                        error = %e
-                    );
-                    CompleteResult::RemoteDeleteFailed
-                }
+    let result = if pr_merged == Some(true) {
+        // PR was merged - attempt to delete remote branch
+        match crate::git::cli::delete_remote_branch(&session.worktree_path, "origin", &kild_branch)
+        {
+            Ok(()) => {
+                info!(
+                    event = "core.session.complete_remote_deleted",
+                    branch = kild_branch
+                );
+                CompleteResult::RemoteDeleted
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.complete_remote_delete_failed",
+                    branch = kild_branch,
+                    worktree_path = %session.worktree_path.display(),
+                    error = %e
+                );
+                CompleteResult::RemoteDeleteFailed
             }
         }
-        Some(false) => CompleteResult::PrNotMerged,
-        None => CompleteResult::PrCheckUnavailable,
+    } else if pr_merged == Some(false) {
+        CompleteResult::PrNotMerged
+    } else {
+        CompleteResult::PrCheckUnavailable
     };
 
     // 4. Safety check: always block on uncommitted changes (no --force bypass for complete)
@@ -146,9 +144,9 @@ pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge:
         .ok()
         .and_then(|c| c.git.forge());
 
-    crate::forge::get_forge_backend(worktree_path, forge_override).and_then(|backend| match backend
-        .fetch_pr_info(worktree_path, branch)
-    {
+    let backend = crate::forge::get_forge_backend(worktree_path, forge_override)?;
+
+    match backend.fetch_pr_info(worktree_path, branch) {
         Ok(pr_info) => pr_info,
         Err(e) => {
             warn!(
@@ -158,7 +156,7 @@ pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge:
             );
             None
         }
-    })
+    }
 }
 
 /// Read PR info for a session from the sidecar file.
