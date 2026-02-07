@@ -57,18 +57,18 @@ pub fn focus_window_by_title(title: &str) -> Result<(), TerminalError> {
             event = "core.terminal.hyprland_focus_completed",
             title = %title
         );
-        Ok(())
-    } else {
-        let stderr = super::helpers::stderr_lossy(&output);
-        warn!(
-            event = "core.terminal.hyprland_focus_failed",
-            title = %title,
-            stderr = %stderr
-        );
-        Err(TerminalError::FocusFailed {
-            message: format!("Hyprland focus failed for '{}': {}", title, stderr),
-        })
+        return Ok(());
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.hyprland_focus_failed",
+        title = %title,
+        stderr = %stderr
+    );
+    Err(TerminalError::FocusFailed {
+        message: format!("Hyprland focus failed for '{}': {}", title, stderr),
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -103,18 +103,18 @@ pub fn hide_window_by_title(title: &str) -> Result<(), TerminalError> {
             event = "core.terminal.hyprland_hide_completed",
             title = %title
         );
-        Ok(())
-    } else {
-        let stderr = super::helpers::stderr_lossy(&output);
-        warn!(
-            event = "core.terminal.hyprland_hide_failed",
-            title = %title,
-            stderr = %stderr
-        );
-        Err(TerminalError::HideFailed {
-            message: format!("Hyprland hide failed for '{}': {}", title, stderr),
-        })
+        return Ok(());
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.hyprland_hide_failed",
+        title = %title,
+        stderr = %stderr
+    );
+    Err(TerminalError::HideFailed {
+        message: format!("Hyprland hide failed for '{}': {}", title, stderr),
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -135,27 +135,13 @@ pub fn close_window_by_title(title: &str) {
         title = %title
     );
 
-    match std::process::Command::new("hyprctl")
+    let output = match std::process::Command::new("hyprctl")
         .arg("dispatch")
         .arg("closewindow")
         .arg(format!("title:{}", title))
         .output()
     {
-        Ok(output) if output.status.success() => {
-            debug!(
-                event = "core.terminal.hyprland_close_completed",
-                title = %title
-            );
-        }
-        Ok(output) => {
-            let stderr = super::helpers::stderr_lossy(&output);
-            warn!(
-                event = "core.terminal.hyprland_close_failed",
-                title = %title,
-                stderr = %stderr,
-                message = "hyprctl closewindow failed - window may remain open"
-            );
-        }
+        Ok(output) => output,
         Err(e) => {
             warn!(
                 event = "core.terminal.hyprland_close_exec_failed",
@@ -163,8 +149,25 @@ pub fn close_window_by_title(title: &str) {
                 error = %e,
                 message = "Failed to execute hyprctl - window may remain open"
             );
+            return;
         }
+    };
+
+    if output.status.success() {
+        debug!(
+            event = "core.terminal.hyprland_close_completed",
+            title = %title
+        );
+        return;
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.hyprland_close_failed",
+        title = %title,
+        stderr = %stderr,
+        message = "hyprctl closewindow failed - window may remain open"
+    );
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -219,25 +222,8 @@ pub fn window_exists_by_title(title: &str) -> Result<Option<bool>, TerminalError
 
     // Parse JSON output to find windows with matching title
     // The JSON is an array of client objects, each with a "title" field
-    match serde_json::from_str::<Vec<HyprlandClient>>(&stdout) {
-        Ok(clients) => {
-            let match_count = clients.iter().filter(|c| c.title.contains(title)).count();
-            if match_count > 1 {
-                warn!(
-                    event = "core.terminal.hyprland_window_multiple_matches",
-                    title = %title,
-                    match_count = match_count,
-                );
-            }
-            let found = match_count > 0;
-            debug!(
-                event = "core.terminal.hyprland_window_check_completed",
-                title = %title,
-                found = found,
-                client_count = clients.len()
-            );
-            Ok(Some(found))
-        }
+    let clients = match serde_json::from_str::<Vec<HyprlandClient>>(&stdout) {
+        Ok(clients) => clients,
         Err(e) => {
             warn!(
                 event = "core.terminal.hyprland_window_check_parse_failed",
@@ -245,9 +231,27 @@ pub fn window_exists_by_title(title: &str) -> Result<Option<bool>, TerminalError
                 error = %e,
                 message = "Failed to parse hyprctl clients JSON"
             );
-            Ok(None)
+            return Ok(None);
         }
+    };
+
+    let match_count = clients.iter().filter(|c| c.title.contains(title)).count();
+    if match_count > 1 {
+        warn!(
+            event = "core.terminal.hyprland_window_multiple_matches",
+            title = %title,
+            match_count = match_count,
+        );
     }
+
+    let found = match_count > 0;
+    debug!(
+        event = "core.terminal.hyprland_window_check_completed",
+        title = %title,
+        found = found,
+        client_count = clients.len()
+    );
+    Ok(Some(found))
 }
 
 #[cfg(not(target_os = "linux"))]

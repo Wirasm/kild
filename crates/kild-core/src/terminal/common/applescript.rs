@@ -38,11 +38,12 @@ pub fn execute_spawn_script(
         window_id = %window_id
     );
 
-    if window_id.is_empty() {
-        Ok(None)
+    let result = if window_id.is_empty() {
+        None
     } else {
-        Ok(Some(window_id))
-    }
+        Some(window_id)
+    };
+    Ok(result)
 }
 
 /// Close a window via AppleScript (fire-and-forget, errors logged).
@@ -54,28 +55,12 @@ pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &s
         window_id = %window_id
     );
 
-    match std::process::Command::new("osascript")
+    let output = match std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
         .output()
     {
-        Ok(output) if output.status.success() => {
-            debug!(
-                event = "core.terminal.close_completed",
-                terminal = terminal_name,
-                window_id = %window_id
-            );
-        }
-        Ok(output) => {
-            let stderr = super::helpers::stderr_lossy(&output);
-            warn!(
-                event = "core.terminal.close_failed",
-                terminal = terminal_name,
-                window_id = %window_id,
-                stderr = %stderr,
-                message = "AppleScript close failed - window may remain open"
-            );
-        }
+        Ok(output) => output,
         Err(e) => {
             warn!(
                 event = "core.terminal.close_failed",
@@ -84,8 +69,27 @@ pub fn close_applescript_window(script: &str, terminal_name: &str, window_id: &s
                 error = %e,
                 message = "Failed to execute osascript"
             );
+            return;
         }
+    };
+
+    if output.status.success() {
+        debug!(
+            event = "core.terminal.close_completed",
+            terminal = terminal_name,
+            window_id = %window_id
+        );
+        return;
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.close_failed",
+        terminal = terminal_name,
+        window_id = %window_id,
+        stderr = %stderr,
+        message = "AppleScript close failed - window may remain open"
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -117,34 +121,12 @@ pub fn focus_applescript_window(
         window_id = %window_id
     );
 
-    match std::process::Command::new("osascript")
+    let output = match std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
         .output()
     {
-        Ok(output) if output.status.success() => {
-            info!(
-                event = "core.terminal.focus_completed",
-                terminal = terminal_name,
-                window_id = %window_id
-            );
-            Ok(())
-        }
-        Ok(output) => {
-            let stderr = super::helpers::stderr_lossy(&output);
-            warn!(
-                event = "core.terminal.focus_failed",
-                terminal = terminal_name,
-                window_id = %window_id,
-                stderr = %stderr
-            );
-            Err(TerminalError::FocusFailed {
-                message: format!(
-                    "{} focus failed for window {}: {}",
-                    terminal_name, window_id, stderr
-                ),
-            })
-        }
+        Ok(output) => output,
         Err(e) => {
             error!(
                 event = "core.terminal.focus_failed",
@@ -152,14 +134,37 @@ pub fn focus_applescript_window(
                 window_id = %window_id,
                 error = %e
             );
-            Err(TerminalError::FocusFailed {
+            return Err(TerminalError::FocusFailed {
                 message: format!(
                     "Failed to execute osascript for {} focus: {}",
                     terminal_name, e
                 ),
-            })
+            });
         }
+    };
+
+    if output.status.success() {
+        info!(
+            event = "core.terminal.focus_completed",
+            terminal = terminal_name,
+            window_id = %window_id
+        );
+        return Ok(());
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.focus_failed",
+        terminal = terminal_name,
+        window_id = %window_id,
+        stderr = %stderr
+    );
+    Err(TerminalError::FocusFailed {
+        message: format!(
+            "{} focus failed for window {}: {}",
+            terminal_name, window_id, stderr
+        ),
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -191,34 +196,12 @@ pub fn hide_applescript_window(
         window_id = %window_id
     );
 
-    match std::process::Command::new("osascript")
+    let output = match std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
         .output()
     {
-        Ok(output) if output.status.success() => {
-            info!(
-                event = "core.terminal.hide_completed",
-                terminal = terminal_name,
-                window_id = %window_id
-            );
-            Ok(())
-        }
-        Ok(output) => {
-            let stderr = super::helpers::stderr_lossy(&output);
-            warn!(
-                event = "core.terminal.hide_failed",
-                terminal = terminal_name,
-                window_id = %window_id,
-                stderr = %stderr
-            );
-            Err(TerminalError::HideFailed {
-                message: format!(
-                    "{} hide failed for window {}: {}",
-                    terminal_name, window_id, stderr
-                ),
-            })
-        }
+        Ok(output) => output,
         Err(e) => {
             error!(
                 event = "core.terminal.hide_failed",
@@ -226,14 +209,37 @@ pub fn hide_applescript_window(
                 window_id = %window_id,
                 error = %e
             );
-            Err(TerminalError::HideFailed {
+            return Err(TerminalError::HideFailed {
                 message: format!(
                     "Failed to execute osascript for {} hide: {}",
                     terminal_name, e
                 ),
-            })
+            });
         }
+    };
+
+    if output.status.success() {
+        info!(
+            event = "core.terminal.hide_completed",
+            terminal = terminal_name,
+            window_id = %window_id
+        );
+        return Ok(());
     }
+
+    let stderr = super::helpers::stderr_lossy(&output);
+    warn!(
+        event = "core.terminal.hide_failed",
+        terminal = terminal_name,
+        window_id = %window_id,
+        stderr = %stderr
+    );
+    Err(TerminalError::HideFailed {
+        message: format!(
+            "{} hide failed for window {}: {}",
+            terminal_name, window_id, stderr
+        ),
+    })
 }
 
 #[cfg(not(target_os = "macos"))]

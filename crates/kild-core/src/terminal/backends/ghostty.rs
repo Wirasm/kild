@@ -467,48 +467,46 @@ fn check_window_by_pid(pid: u32) -> Result<Option<bool>, TerminalError> {
         pid
     );
 
-    match std::process::Command::new("osascript")
+    let output = match std::process::Command::new("osascript")
         .arg("-e")
         .arg(&check_script)
         .output()
     {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            match result.as_str() {
-                "found" => {
-                    debug!(
-                        event = "core.terminal.check_ghostty_by_pid_found",
-                        pid = pid
-                    );
-                    Ok(Some(true))
-                }
-                _ => {
-                    debug!(
-                        event = "core.terminal.check_ghostty_by_pid_no_windows",
-                        pid = pid,
-                        result = %result
-                    );
-                    Ok(Some(false))
-                }
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            debug!(
-                event = "core.terminal.check_ghostty_by_pid_failed",
-                pid = pid,
-                stderr = %stderr
-            );
-            Ok(None)
-        }
+        Ok(output) => output,
         Err(e) => {
             debug!(
                 event = "core.terminal.check_ghostty_by_pid_error",
                 pid = pid,
                 error = %e
             );
-            Ok(None)
+            return Ok(None);
         }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        debug!(
+            event = "core.terminal.check_ghostty_by_pid_failed",
+            pid = pid,
+            stderr = %stderr
+        );
+        return Ok(None);
+    }
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if result == "found" {
+        debug!(
+            event = "core.terminal.check_ghostty_by_pid_found",
+            pid = pid
+        );
+        Ok(Some(true))
+    } else {
+        debug!(
+            event = "core.terminal.check_ghostty_by_pid_no_windows",
+            pid = pid,
+            result = %result
+        );
+        Ok(Some(false))
     }
 }
 
@@ -533,55 +531,56 @@ fn check_window_by_title(window_id: &str) -> Result<Option<bool>, TerminalError>
         escaped_id
     );
 
-    match std::process::Command::new("osascript")
+    let output = match std::process::Command::new("osascript")
         .arg("-e")
         .arg(&check_script)
         .output()
     {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout);
-            let trimmed = result.trim();
-
-            match trimmed {
-                "found" => {
-                    debug!(
-                        event = "core.terminal.ghostty_window_check_found",
-                        window_title = %window_id
-                    );
-                    Ok(Some(true))
-                }
-                "not_found" | "app_not_running" => {
-                    debug!(
-                        event = "core.terminal.ghostty_window_check_not_found",
-                        window_title = %window_id,
-                        reason = %trimmed
-                    );
-                    Ok(Some(false))
-                }
-                _ => {
-                    debug!(
-                        event = "core.terminal.ghostty_window_check_unknown_result",
-                        window_title = %window_id,
-                        result = %trimmed
-                    );
-                    Ok(None)
-                }
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            debug!(
-                event = "core.terminal.ghostty_window_check_script_failed",
-                window_title = %window_id,
-                stderr = %stderr.trim()
-            );
-            Ok(None)
-        }
+        Ok(output) => output,
         Err(e) => {
             debug!(
                 event = "core.terminal.ghostty_window_check_error",
                 window_title = %window_id,
                 error = %e
+            );
+            return Ok(None);
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        debug!(
+            event = "core.terminal.ghostty_window_check_script_failed",
+            window_title = %window_id,
+            stderr = %stderr.trim()
+        );
+        return Ok(None);
+    }
+
+    let result = String::from_utf8_lossy(&output.stdout);
+    let trimmed = result.trim();
+
+    match trimmed {
+        "found" => {
+            debug!(
+                event = "core.terminal.ghostty_window_check_found",
+                window_title = %window_id
+            );
+            Ok(Some(true))
+        }
+        "not_found" | "app_not_running" => {
+            debug!(
+                event = "core.terminal.ghostty_window_check_not_found",
+                window_title = %window_id,
+                reason = %trimmed
+            );
+            Ok(Some(false))
+        }
+        _ => {
+            debug!(
+                event = "core.terminal.ghostty_window_check_unknown_result",
+                window_title = %window_id,
+                result = %trimmed
             );
             Ok(None)
         }
@@ -611,20 +610,18 @@ fn with_ghostty_window<T>(
 
     // Step 1: Activate Ghostty app to bring it to the foreground
     let activate_script = r#"tell application "Ghostty" to activate"#;
-    let activation_result = std::process::Command::new("osascript")
+    if let Ok(output) = std::process::Command::new("osascript")
         .arg("-e")
         .arg(activate_script)
-        .output();
-
-    match activation_result {
-        Ok(output) if output.status.success() => {
+        .output()
+    {
+        if output.status.success() {
             debug!(
                 event = "core.terminal.ghostty_activated",
                 window_id = %window_id,
                 operation = %operation
             );
-        }
-        Ok(output) => {
+        } else {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             warn!(
                 event = "core.terminal.ghostty_activate_failed",
@@ -634,15 +631,13 @@ fn with_ghostty_window<T>(
                 message = "Ghostty activation failed - continuing with window lookup"
             );
         }
-        Err(e) => {
-            warn!(
-                event = "core.terminal.ghostty_activate_failed",
-                window_id = %window_id,
-                operation = %operation,
-                error = %e,
-                message = "Failed to execute osascript for activation - continuing with window lookup"
-            );
-        }
+    } else {
+        warn!(
+            event = "core.terminal.ghostty_activate_failed",
+            window_id = %window_id,
+            operation = %operation,
+            message = "Failed to execute osascript for activation - continuing with window lookup"
+        );
     }
 
     // Step 2: Try PID-based action (handles dynamic title changes)

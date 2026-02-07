@@ -12,17 +12,16 @@ pub fn stderr_lossy(output: &std::process::Output) -> String {
 /// Returns `Some(id)` if a window ID is provided, or `None` after logging
 /// a debug event indicating the close was skipped.
 pub fn require_window_id<'a>(window_id: Option<&'a str>, terminal_name: &str) -> Option<&'a str> {
-    match window_id {
-        Some(id) => Some(id),
-        None => {
-            debug!(
-                event = "core.terminal.close_skipped_no_id",
-                terminal = terminal_name,
-                message = "No window ID available, skipping close to avoid closing wrong window"
-            );
-            None
-        }
+    if let Some(id) = window_id {
+        return Some(id);
     }
+
+    debug!(
+        event = "core.terminal.close_skipped_no_id",
+        terminal = terminal_name,
+        message = "No window ID available, skipping close to avoid closing wrong window"
+    );
+    None
 }
 
 /// Generate platform-not-supported stub methods for a terminal backend.
