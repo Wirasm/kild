@@ -157,6 +157,18 @@ pub struct GitStats {
     pub worktree_status: Option<WorktreeStatus>,
 }
 
+impl GitStats {
+    /// Returns true if any git data was successfully collected.
+    pub fn has_data(&self) -> bool {
+        self.diff_stats.is_some() || self.worktree_status.is_some()
+    }
+
+    /// Returns true if all git operations failed.
+    pub fn is_empty(&self) -> bool {
+        self.diff_stats.is_none() && self.worktree_status.is_none()
+    }
+}
+
 impl ProjectInfo {
     pub fn new(id: String, name: String, path: PathBuf, remote_url: Option<String>) -> Self {
         Self {

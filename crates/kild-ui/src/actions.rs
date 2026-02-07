@@ -572,7 +572,7 @@ mod tests {
             std::env::remove_var("EDITOR");
         }
         let editor = super::select_editor();
-        assert_eq!(editor, "zed");
+        assert_eq!(editor, "code");
 
         restore_env_var("EDITOR", original);
     }
@@ -593,7 +593,7 @@ mod tests {
 ///
 /// Editor selection priority (GUI context - no CLI flag available):
 /// 1. $EDITOR environment variable
-/// 2. Default: "zed"
+/// 2. Default: "code" (VS Code)
 ///
 /// Note: The CLI `code` command also supports an `--editor` flag that takes
 /// highest precedence, but this is unavailable in the GUI context.
@@ -629,7 +629,7 @@ pub fn open_in_editor(worktree_path: &std::path::Path) -> Result<(), String> {
                 error = %e
             );
             Err(format!(
-                "Failed to open editor '{}': {}. Check that $EDITOR is set correctly or 'zed' is installed.",
+                "Failed to open editor '{}': {}. Check that $EDITOR is set correctly or 'code' (VS Code) is installed.",
                 editor, e
             ))
         }
@@ -640,7 +640,7 @@ pub fn open_in_editor(worktree_path: &std::path::Path) -> Result<(), String> {
 ///
 /// Priority:
 /// 1. $EDITOR environment variable
-/// 2. Default: "zed"
+/// 2. Default: "code" (VS Code)
 fn select_editor() -> String {
-    std::env::var("EDITOR").unwrap_or_else(|_| "zed".to_string())
+    std::env::var("EDITOR").unwrap_or_else(|_| "code".to_string())
 }

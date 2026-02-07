@@ -1224,5 +1224,35 @@ mod tests {
         let stats = stats.unwrap();
         assert!(stats.diff_stats.is_some());
         assert!(stats.worktree_status.is_some());
+        assert!(stats.has_data());
+        assert!(!stats.is_empty());
+    }
+
+    #[test]
+    fn test_collect_git_stats_with_modifications() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Modify tracked file to create diff stats
+        fs::write(dir.path().join("file.txt"), "modified").unwrap();
+
+        let stats = collect_git_stats(dir.path(), "test-branch");
+        assert!(stats.is_some());
+        let stats = stats.unwrap();
+        assert!(stats.has_data());
+        assert!(stats.diff_stats.is_some());
+        let diff = stats.diff_stats.unwrap();
+        assert!(diff.insertions > 0 || diff.deletions > 0);
     }
 }

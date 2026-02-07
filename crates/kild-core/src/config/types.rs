@@ -33,6 +33,7 @@ use crate::forge::ForgeType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tracing::debug;
 
 /// Runtime configuration for the KILD CLI.
 ///
@@ -163,7 +164,7 @@ impl GitConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EditorConfig {
     /// Editor command configured in TOML.
-    /// When None, runtime fallback applies ($EDITOR, then "zed").
+    /// When None, runtime fallback applies ($EDITOR, then "code").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default: Option<String>,
 
@@ -204,13 +205,24 @@ impl EditorConfig {
     }
 
     /// Resolve which editor to use based on priority chain:
-    /// CLI override > config default > $EDITOR env var > "zed" fallback.
+    /// CLI override > config default > $EDITOR env var > "code" (VS Code) fallback.
     pub fn resolve_editor(&self, cli_override: Option<&str>) -> String {
-        cli_override
-            .map(String::from)
-            .or_else(|| self.default().map(String::from))
-            .or_else(|| std::env::var("EDITOR").ok())
-            .unwrap_or_else(|| "zed".to_string())
+        if let Some(editor) = cli_override {
+            return editor.to_string();
+        }
+        if let Some(editor) = self.default() {
+            return editor.to_string();
+        }
+        if let Ok(editor) = std::env::var("EDITOR") {
+            return editor;
+        }
+
+        debug!(
+            event = "core.config.editor_fallback",
+            fallback = "code",
+            "No editor configured via CLI, config, or $EDITOR — using VS Code"
+        );
+        "code".to_string()
     }
 
     /// Build a shell command string for terminal-mode editors.
@@ -516,7 +528,7 @@ default = "code"
     fn test_resolve_editor_fallback() {
         let config = <EditorConfig as Default>::default();
         let result = config.resolve_editor(None);
-        // Result is either $EDITOR value or "zed" fallback
+        // Result is either $EDITOR value or "code" fallback
         assert!(!result.is_empty());
     }
 
@@ -542,6 +554,23 @@ default = "code"
         let config = <EditorConfig as Default>::default();
         let cmd = config.build_gui_command("code", std::path::Path::new("/tmp/worktree"));
         assert_eq!(cmd.get_program(), "code");
+    }
+
+    #[test]
+    fn test_build_terminal_command_prevents_shell_injection() {
+        let config = <EditorConfig as Default>::default();
+
+        // Backtick command substitution
+        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/`whoami`"));
+        assert!(cmd.contains("'"), "backticks should be quoted");
+
+        // $() command substitution
+        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/$(rm -rf /)"));
+        assert!(cmd.contains("'"), "$() should be quoted");
+
+        // Semicolon injection
+        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/; rm -rf /"));
+        assert!(cmd.contains("'"), "semicolons should be quoted");
     }
 
     #[test]

@@ -180,22 +180,22 @@ pub fn rebase(dir: &Path, base_branch: &str) -> Result<(), GitError> {
             .args(["rebase", "--abort"])
             .output();
 
-        // Handle abort result: log failure but continue to return RebaseConflict
-        if let Err(e) = abort_result {
-            error!(
-                event = "core.git.rebase_abort_failed",
-                base = base_branch,
-                path = %dir.display(),
-                error = %e
-            );
-            return Err(GitError::RebaseAbortFailed {
-                base_branch: base_branch.to_string(),
-                worktree_path: dir.to_path_buf(),
-                message: e.to_string(),
-            });
-        }
-
-        let abort_output = abort_result.unwrap();
+        let abort_output = match abort_result {
+            Ok(output) => output,
+            Err(e) => {
+                error!(
+                    event = "core.git.rebase_abort_failed",
+                    base = base_branch,
+                    path = %dir.display(),
+                    error = %e
+                );
+                return Err(GitError::RebaseAbortFailed {
+                    base_branch: base_branch.to_string(),
+                    worktree_path: dir.to_path_buf(),
+                    message: e.to_string(),
+                });
+            }
+        };
         if !abort_output.status.success() {
             let abort_stderr = String::from_utf8_lossy(&abort_output.stderr);
             error!(
