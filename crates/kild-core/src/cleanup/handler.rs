@@ -441,7 +441,7 @@ fn cleanup_orphaned_worktrees(
             worktree_path = %worktree_path.display()
         );
 
-        match git::handler::remove_worktree_by_path(worktree_path) {
+        match git::removal::remove_worktree_by_path(worktree_path) {
             Ok(()) => {
                 info!(
                     event = "core.cleanup.worktree_delete_completed",

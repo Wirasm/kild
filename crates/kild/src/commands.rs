@@ -1794,7 +1794,7 @@ fn handle_rebase_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error:
         }
     };
 
-    match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
+    match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {
             println!("✅ {}: rebased onto {}", branch, base_branch);
             info!(
@@ -1838,7 +1838,7 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
-        match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
+        match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
                 println!("✅ {}: rebased onto {}", session.branch, base_branch);
                 info!(
@@ -1918,7 +1918,7 @@ fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
 
     // Fetch from remote — use the project repo path (worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;
-    if let Err(e) = kild_core::git::handler::fetch_remote(&project.path, remote, base_branch) {
+    if let Err(e) = kild_core::git::remote::fetch_remote(&project.path, remote, base_branch) {
         error!(
             event = "cli.sync_fetch_failed",
             branch = branch,
@@ -1934,7 +1934,7 @@ fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         return Err(e.into());
     }
 
-    match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
+    match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {
             println!(
                 "✅ {}: synced (fetched + rebased onto {})",
@@ -1972,7 +1972,7 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
 
     // Fetch once at repo level (all worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;
-    if let Err(e) = kild_core::git::handler::fetch_remote(&project.path, remote, base_branch) {
+    if let Err(e) = kild_core::git::remote::fetch_remote(&project.path, remote, base_branch) {
         error!(
             event = "cli.sync_all_fetch_failed",
             remote = remote,
@@ -2004,7 +2004,7 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
-        match kild_core::git::handler::rebase_worktree(&session.worktree_path, base_branch) {
+        match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
                 println!("✅ {}: rebased onto {}", session.branch, base_branch);
                 info!(

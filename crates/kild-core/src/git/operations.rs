@@ -107,6 +107,29 @@ pub fn validate_branch_name(branch: &str) -> Result<String, GitError> {
     Ok(trimmed.to_string())
 }
 
+/// Validate a git argument to prevent injection.
+///
+/// Rejects values that start with `-` (option injection), contain control characters,
+/// or contain `::` sequences (refspec injection).
+pub fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
+    if value.starts_with('-') {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: '{value}' (must not start with '-')"),
+        });
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: contains control characters"),
+        });
+    }
+    if value.contains("::") {
+        return Err(GitError::OperationFailed {
+            message: format!("Invalid {label}: '::' sequences are not allowed"),
+        });
+    }
+    Ok(())
+}
+
 /// Gets the current branch name from the repository.
 ///
 /// Returns `None` if the repository is in a detached HEAD state.

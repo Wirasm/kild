@@ -464,10 +464,10 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
             event = "core.session.destroy_worktree_force",
             worktree = %session.worktree_path.display()
         );
-        git::handler::remove_worktree_force(&session.worktree_path)
+        git::removal::remove_worktree_force(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
     } else {
-        git::handler::remove_worktree_by_path(&session.worktree_path)
+        git::removal::remove_worktree_by_path(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
     }
 

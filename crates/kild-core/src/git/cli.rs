@@ -11,29 +11,7 @@ use std::path::Path;
 use tracing::{debug, error, info, warn};
 
 use super::errors::GitError;
-
-/// Validate a git argument to prevent injection.
-///
-/// Rejects values that start with `-` (option injection), contain control characters,
-/// or contain `::` sequences (refspec injection).
-pub fn validate_git_arg(value: &str, label: &str) -> Result<(), GitError> {
-    if value.starts_with('-') {
-        return Err(GitError::OperationFailed {
-            message: format!("Invalid {label}: '{value}' (must not start with '-')"),
-        });
-    }
-    if value.chars().any(|c| c.is_control()) {
-        return Err(GitError::OperationFailed {
-            message: format!("Invalid {label}: contains control characters"),
-        });
-    }
-    if value.contains("::") {
-        return Err(GitError::OperationFailed {
-            message: format!("Invalid {label}: '::' sequences are not allowed"),
-        });
-    }
-    Ok(())
-}
+use super::operations::validate_git_arg;
 
 /// Fetch a specific branch from a remote.
 ///
