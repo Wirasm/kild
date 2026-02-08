@@ -1,0 +1,127 @@
+use clap::ArgMatches;
+use tracing::{error, info};
+
+use kild_core::SessionStatus;
+use kild_core::events;
+use kild_core::session_ops as session_handler;
+
+use super::helpers::{FailedOperation, OpenedKild, resolve_open_mode};
+
+pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let mode = resolve_open_mode(matches);
+
+    // Check for --all flag first
+    if matches.get_flag("all") {
+        return handle_open_all(mode);
+    }
+
+    // Single branch operation
+    let branch = matches
+        .get_one::<String>("branch")
+        .ok_or("Branch argument is required (or use --all)")?;
+
+    info!(event = "cli.open_started", branch = branch, mode = ?mode);
+
+    match session_handler::open_session(branch, mode.clone()) {
+        Ok(session) => {
+            match mode {
+                kild_core::OpenMode::BareShell => {
+                    println!("✅ Opened bare terminal in kild '{}'", branch);
+                    println!("   Agent: (none - bare shell)");
+                }
+                _ => {
+                    println!("✅ Opened new agent in kild '{}'", branch);
+                    println!("   Agent: {}", session.agent);
+                }
+            }
+            if let Some(pid) = session.latest_agent().and_then(|a| a.process_id()) {
+                println!("   PID: {}", pid);
+            }
+            info!(
+                event = "cli.open_completed",
+                branch = branch,
+                session_id = session.id
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to open kild '{}': {}", branch, e);
+            error!(event = "cli.open_failed", branch = branch, error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Handle `kild open --all` - open agents in all stopped kilds
+fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::Error>> {
+    info!(event = "cli.open_all_started", mode = ?mode);
+
+    let sessions = session_handler::list_sessions()?;
+    let stopped: Vec<_> = sessions
+        .into_iter()
+        .filter(|s| s.status == SessionStatus::Stopped)
+        .collect();
+
+    if stopped.is_empty() {
+        println!("No stopped kilds to open.");
+        info!(event = "cli.open_all_completed", opened = 0, failed = 0);
+        return Ok(());
+    }
+
+    let mut opened: Vec<OpenedKild> = Vec::new();
+    let mut errors: Vec<FailedOperation> = Vec::new();
+
+    for session in stopped {
+        match session_handler::open_session(&session.branch, mode.clone()) {
+            Ok(s) => {
+                info!(
+                    event = "cli.open_completed",
+                    branch = s.branch,
+                    session_id = s.id
+                );
+                opened.push((s.branch, s.agent));
+            }
+            Err(e) => {
+                error!(
+                    event = "cli.open_failed",
+                    branch = session.branch,
+                    error = %e
+                );
+                events::log_app_error(&e);
+                errors.push((session.branch, e.to_string()));
+            }
+        }
+    }
+
+    // Report successes
+    if !opened.is_empty() {
+        println!("Opened {} kild(s):", opened.len());
+        for (branch, agent) in &opened {
+            println!("   {} ({})", branch, agent);
+        }
+    }
+
+    // Report failures
+    if !errors.is_empty() {
+        eprintln!("Failed to open {} kild(s):", errors.len());
+        for (branch, err) in &errors {
+            eprintln!("   {}: {}", branch, err);
+        }
+    }
+
+    info!(
+        event = "cli.open_all_completed",
+        opened = opened.len(),
+        failed = errors.len()
+    );
+
+    // Return error if any failures (for exit code)
+    if !errors.is_empty() {
+        let total_count = opened.len() + errors.len();
+        use super::helpers::format_partial_failure_error;
+        return Err(format_partial_failure_error("open", errors.len(), total_count).into());
+    }
+
+    Ok(())
+}
