@@ -3,7 +3,7 @@ use tracing::{error, info, warn};
 
 use kild_core::SessionStatus;
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::{FailedOperation, format_partial_failure_error, get_terminal_info};
 
@@ -18,7 +18,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.hide_started", branch = branch);
 
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);
@@ -56,7 +56,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.hide_all_started");
 
-    let sessions = session_handler::list_sessions()?;
+    let sessions = session_ops::list_sessions()?;
     let active: Vec<_> = sessions
         .into_iter()
         .filter(|s| s.status == SessionStatus::Active)

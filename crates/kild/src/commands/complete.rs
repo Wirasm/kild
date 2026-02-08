@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info, warn};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::is_valid_branch_name;
 
@@ -22,7 +22,7 @@ pub(crate) fn handle_complete_command(
     info!(event = "cli.complete_started", branch = branch);
 
     // Pre-complete safety check (always — complete never bypasses uncommitted check)
-    let safety_info = match session_handler::get_destroy_safety_info(branch) {
+    let safety_info = match session_ops::get_destroy_safety_info(branch) {
         Ok(info) => Some(info),
         Err(e) => {
             warn!(
@@ -63,7 +63,7 @@ pub(crate) fn handle_complete_command(
         }
     }
 
-    match session_handler::complete_session(branch) {
+    match session_ops::complete_session(branch) {
         Ok(result) => {
             use kild_core::CompleteResult;
 

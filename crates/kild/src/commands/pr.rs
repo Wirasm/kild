@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info, warn};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::is_valid_branch_name;
 
@@ -27,7 +27,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     );
 
     // 1. Look up session
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);
@@ -38,7 +38,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     };
 
     // 2. Check for remote
-    if !session_handler::has_remote_configured(&session.worktree_path) {
+    if !session_ops::has_remote_configured(&session.worktree_path) {
         println!("No remote configured — PR tracking unavailable.");
         info!(
             event = "cli.pr_completed",
@@ -51,9 +51,9 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     let kild_branch = kild_core::git::operations::kild_branch_name(branch);
 
     // 3. Get PR info: refresh or read from cache
-    let pr_info = if refresh || session_handler::read_pr_info(&session.id).is_none() {
+    let pr_info = if refresh || session_ops::read_pr_info(&session.id).is_none() {
         // Fetch from GitHub and write sidecar
-        let fetched = session_handler::fetch_pr_info(&session.worktree_path, &kild_branch);
+        let fetched = session_ops::fetch_pr_info(&session.worktree_path, &kild_branch);
         if let Some(ref info) = fetched {
             let config = kild_core::config::Config::new();
             if let Err(e) = kild_core::sessions::persistence::write_pr_info(
@@ -70,7 +70,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
         }
         fetched
     } else {
-        session_handler::read_pr_info(&session.id)
+        session_ops::read_pr_info(&session.id)
     };
 
     // 4. Output

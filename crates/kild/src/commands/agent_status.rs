@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::AgentStatus;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 pub(crate) fn handle_agent_status_command(
     matches: &ArgMatches,
@@ -14,13 +14,12 @@ pub(crate) fn handle_agent_status_command(
     let (branch, status_str) = match (use_self, targets.as_slice()) {
         (true, [status]) => {
             let cwd = std::env::current_dir()?;
-            let session =
-                session_handler::find_session_by_worktree_path(&cwd)?.ok_or_else(|| {
-                    format!(
-                        "No kild session found for current directory: {}",
-                        cwd.display()
-                    )
-                })?;
+            let session = session_ops::find_session_by_worktree_path(&cwd)?.ok_or_else(|| {
+                format!(
+                    "No kild session found for current directory: {}",
+                    cwd.display()
+                )
+            })?;
             (session.branch, status.as_str())
         }
         (false, [branch, status]) => ((*branch).clone(), status.as_str()),
@@ -36,7 +35,7 @@ pub(crate) fn handle_agent_status_command(
 
     info!(event = "cli.agent_status_started", branch = %branch, status = %status);
 
-    session_handler::update_agent_status(&branch, status).map_err(|e| {
+    session_ops::update_agent_status(&branch, status).map_err(|e| {
         error!(event = "cli.agent_status_failed", error = %e);
         e
     })?;

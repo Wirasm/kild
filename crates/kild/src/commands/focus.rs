@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -12,7 +12,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     info!(event = "cli.focus_started", branch = branch);
 
     // 1. Look up the session
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);

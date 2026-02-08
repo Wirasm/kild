@@ -1,4 +1,4 @@
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, Command};
 
 pub fn build_cli() -> Command {
     Command::new("kild-peek")
@@ -630,11 +630,6 @@ pub fn build_cli() -> Command {
                         .default_value("30000"),
                 ),
         )
-}
-
-#[allow(dead_code)]
-pub fn get_matches() -> ArgMatches {
-    build_cli().get_matches()
 }
 
 #[cfg(test)]

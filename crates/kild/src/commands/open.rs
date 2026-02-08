@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use kild_core::SessionStatus;
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::{FailedOperation, OpenedKild, resolve_open_mode};
 
@@ -22,7 +22,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    match session_handler::open_session(branch, mode.clone()) {
+    match session_ops::open_session(branch, mode.clone()) {
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
@@ -57,7 +57,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", mode = ?mode);
 
-    let sessions = session_handler::list_sessions()?;
+    let sessions = session_ops::list_sessions()?;
     let stopped: Vec<_> = sessions
         .into_iter()
         .filter(|s| s.status == SessionStatus::Stopped)
@@ -73,7 +73,7 @@ fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in stopped {
-        match session_handler::open_session(&session.branch, mode.clone()) {
+        match session_ops::open_session(&session.branch, mode.clone()) {
             Ok(s) => {
                 info!(
                     event = "cli.open_completed",

@@ -15,8 +15,6 @@ mod theme;
 mod views;
 mod watcher;
 
-pub use components::{Button, ButtonVariant};
-
 use views::MainView;
 
 fn main() {

@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info, warn};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 pub(crate) fn handle_restart_command(
     matches: &ArgMatches,
@@ -20,7 +20,7 @@ pub(crate) fn handle_restart_command(
     warn!(event = "cli.restart_deprecated", branch = branch);
     info!(event = "cli.restart_started", branch = branch, agent_override = ?agent_override);
 
-    match session_handler::restart_session(branch, agent_override) {
+    match session_ops::restart_session(branch, agent_override) {
         Ok(session) => {
             println!("✅ KILD '{}' restarted successfully!", branch);
             println!("   Agent: {}", session.agent);

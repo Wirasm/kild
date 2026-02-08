@@ -322,7 +322,7 @@ impl AppState {
     }
 
     /// Get the error for a specific branch, if any.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_error(&self, branch: &str) -> Option<&OperationError> {
         self.errors.get(branch)
     }

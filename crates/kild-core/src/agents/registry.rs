@@ -15,7 +15,7 @@ static REGISTRY: LazyLock<AgentRegistry> = LazyLock::new(AgentRegistry::new);
 /// Registry that manages all agent backend implementations.
 ///
 /// Uses `AgentType` as the internal key for type safety, while providing
-/// string-based lookup functions for backward compatibility.
+/// string-based lookup functions for ergonomic access.
 struct AgentRegistry {
     backends: HashMap<AgentType, Box<dyn AgentBackend>>,
 }

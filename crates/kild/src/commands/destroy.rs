@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::{FailedOperation, format_partial_failure_error, is_confirmation_accepted};
 
@@ -28,7 +28,7 @@ pub(crate) fn handle_destroy_command(
 
     // Pre-destroy safety check (unless --force is specified)
     if !force
-        && let Ok(safety_info) = session_handler::get_destroy_safety_info(branch)
+        && let Ok(safety_info) = session_ops::get_destroy_safety_info(branch)
         && safety_info.has_warnings()
     {
         let warnings = safety_info.warning_messages();
@@ -56,7 +56,7 @@ pub(crate) fn handle_destroy_command(
         }
     }
 
-    match session_handler::destroy_session(branch, force) {
+    match session_ops::destroy_session(branch, force) {
         Ok(()) => {
             println!("✅ KILD '{}' destroyed successfully!", branch);
 
@@ -83,7 +83,7 @@ pub(crate) fn handle_destroy_command(
 fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.destroy_all_started", force = force);
 
-    let sessions = session_handler::list_sessions()?;
+    let sessions = session_ops::list_sessions()?;
 
     if sessions.is_empty() {
         println!("No kilds to destroy.");
@@ -119,7 +119,7 @@ fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in sessions {
-        match session_handler::destroy_session(&session.branch, force) {
+        match session_ops::destroy_session(&session.branch, force) {
             Ok(()) => {
                 info!(event = "cli.destroy_completed", branch = session.branch);
                 destroyed.push(session.branch);

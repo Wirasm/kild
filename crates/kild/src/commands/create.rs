@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use kild_core::CreateSessionRequest;
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::load_config_with_warning;
 
@@ -46,7 +46,7 @@ pub(crate) fn handle_create_command(
         .with_base_branch(base_branch)
         .with_no_fetch(no_fetch);
 
-    match session_handler::create_session(request, &config) {
+    match session_ops::create_session(request, &config) {
         Ok(session) => {
             println!("✅ KILD created successfully!");
             println!("   Branch: {}", session.branch);

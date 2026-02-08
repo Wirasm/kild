@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 pub(crate) fn handle_commits_command(
     matches: &ArgMatches,
@@ -20,7 +20,7 @@ pub(crate) fn handle_commits_command(
         count = count
     );
 
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(session) => session,
         Err(e) => {
             eprintln!("Failed to find kild '{}': {}", branch, e);

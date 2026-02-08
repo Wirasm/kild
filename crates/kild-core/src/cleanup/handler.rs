@@ -246,7 +246,7 @@ pub fn scan_for_orphans_with_strategy(
 
     match strategy {
         CleanupStrategy::All => {
-            // All strategy delegates to legacy scan_for_orphans()
+            // All strategy delegates to scan_for_orphans()
             info!(event = "core.cleanup.strategy_all_delegating");
             return scan_for_orphans().map_err(|e| {
                 error!(event = "core.cleanup.strategy_all_failed", error = %e);

@@ -3,7 +3,7 @@ use tracing::{error, info, warn};
 
 use kild_core::events;
 use kild_core::process;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use crate::table::truncate;
 
@@ -23,12 +23,12 @@ pub(crate) fn handle_status_command(
         json_output = json_output
     );
 
-    match session_handler::get_session(branch) {
+    match session_ops::get_session(branch) {
         Ok(session) => {
             let git_stats =
                 kild_core::git::operations::collect_git_stats(&session.worktree_path, branch);
-            let status_info = session_handler::read_agent_status(&session.id);
-            let pr_info = session_handler::read_pr_info(&session.id);
+            let status_info = session_ops::read_agent_status(&session.id);
+            let pr_info = session_ops::read_pr_info(&session.id);
 
             if json_output {
                 let terminal_window_title = session

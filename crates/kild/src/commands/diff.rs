@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use kild_core::events;
 use kild_core::git::operations::get_diff_stats;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -20,7 +20,7 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     );
 
     // 1. Look up the session
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);

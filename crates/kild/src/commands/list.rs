@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::json_types::EnrichedSession;
 
@@ -11,7 +11,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.list_started", json_output = json_output);
 
-    match session_handler::list_sessions() {
+    match session_ops::list_sessions() {
         Ok(sessions) => {
             let session_count = sessions.len();
 
@@ -23,11 +23,11 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                             &session.worktree_path,
                             &session.branch,
                         );
-                        let status_info = session_handler::read_agent_status(&session.id);
+                        let status_info = session_ops::read_agent_status(&session.id);
                         let terminal_window_title = session
                             .latest_agent()
                             .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
-                        let pr_info = session_handler::read_pr_info(&session.id);
+                        let pr_info = session_ops::read_pr_info(&session.id);
                         EnrichedSession {
                             session,
                             git_stats,
@@ -46,11 +46,11 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 // Read sidecar statuses for table display
                 let statuses: Vec<Option<kild_core::sessions::types::AgentStatusInfo>> = sessions
                     .iter()
-                    .map(|s| session_handler::read_agent_status(&s.id))
+                    .map(|s| session_ops::read_agent_status(&s.id))
                     .collect();
                 let pr_infos: Vec<Option<kild_core::PrInfo>> = sessions
                     .iter()
-                    .map(|s| session_handler::read_pr_info(&s.id))
+                    .map(|s| session_ops::read_pr_info(&s.id))
                     .collect();
                 let formatter = crate::table::TableFormatter::new(&sessions);
                 formatter.print_table(&sessions, &statuses, &pr_infos);

@@ -65,12 +65,6 @@ impl Project {
         &self.name
     }
 
-    /// Set the project name.
-    #[allow(dead_code)]
-    pub fn set_name(&mut self, name: String) {
-        self.name = name;
-    }
-
     /// Update the path to its canonical form (used during migration).
     ///
     /// # Errors

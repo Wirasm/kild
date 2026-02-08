@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::{
     FailedOperation, format_partial_failure_error, is_valid_branch_name, load_config_with_warning,
@@ -38,7 +38,7 @@ pub(crate) fn handle_rebase_command(
         base = base_branch
     );
 
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);
@@ -81,7 +81,7 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
         None => config.git.base_branch(),
     };
 
-    let sessions = session_handler::list_sessions()?;
+    let sessions = session_ops::list_sessions()?;
 
     if sessions.is_empty() {
         println!("No kilds to rebase.");

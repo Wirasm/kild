@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::is_valid_branch_name;
 
@@ -20,7 +20,7 @@ pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
 
     info!(event = "cli.cd_started", branch = branch);
 
-    match session_handler::get_session(branch) {
+    match session_ops::get_session(branch) {
         Ok(session) => {
             // Print only the path - no formatting, no leading text
             // This enables shell integration: cd "$(kild cd branch)"

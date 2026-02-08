@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use kild_core::SessionStatus;
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::{FailedOperation, format_partial_failure_error};
 
@@ -20,7 +20,7 @@ pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.stop_started", branch = branch);
 
-    match session_handler::stop_session(branch) {
+    match session_ops::stop_session(branch) {
         Ok(()) => {
             println!("✅ Stopped kild '{}'", branch);
             println!("   KILD preserved. Use 'kild open {}' to restart.", branch);
@@ -40,7 +40,7 @@ pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.stop_all_started");
 
-    let sessions = session_handler::list_sessions()?;
+    let sessions = session_ops::list_sessions()?;
     let active: Vec<_> = sessions
         .into_iter()
         .filter(|s| s.status == SessionStatus::Active)
@@ -56,7 +56,7 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in active {
-        match session_handler::stop_session(&session.branch) {
+        match session_ops::stop_session(&session.branch) {
             Ok(()) => {
                 info!(event = "cli.stop_completed", branch = session.branch);
                 stopped.push(session.branch);

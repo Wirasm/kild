@@ -52,7 +52,7 @@ pub use types::{
 };
 pub use validation::{VALID_TERMINALS, validate_config};
 
-// Backward-compatible delegation for KildConfig methods
+// Convenience methods delegating to submodule functions
 impl KildConfig {
     /// Load configuration from the hierarchy of config files.
     ///

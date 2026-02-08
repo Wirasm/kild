@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops as session_handler;
+use kild_core::session_ops;
 
 use super::helpers::load_config_with_warning;
 
@@ -22,7 +22,7 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let config = load_config_with_warning();
 
     // 2. Look up the session to get worktree path
-    let session = match session_handler::get_session(branch) {
+    let session = match session_ops::get_session(branch) {
         Ok(session) => session,
         Err(e) => {
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);
