@@ -225,40 +225,6 @@ impl EditorConfig {
         "code".to_string()
     }
 
-    /// Build a shell command string for terminal-mode editors.
-    ///
-    /// The worktree path is shell-escaped for safe interpretation.
-    /// Flags are inserted between the editor command and the path.
-    pub fn build_terminal_command(&self, editor: &str, worktree_path: &std::path::Path) -> String {
-        use crate::terminal::common::escape::shell_escape;
-        let escaped_path = shell_escape(&worktree_path.display().to_string());
-
-        if let Some(flags) = self.flags() {
-            format!("{} {} {}", editor, flags, escaped_path)
-        } else {
-            format!("{} {}", editor, escaped_path)
-        }
-    }
-
-    /// Build a `Command` for GUI-mode editors.
-    ///
-    /// Flags are split by whitespace into separate arguments.
-    /// The worktree path is added as the final argument.
-    pub fn build_gui_command(
-        &self,
-        editor: &str,
-        worktree_path: &std::path::Path,
-    ) -> std::process::Command {
-        let mut cmd = std::process::Command::new(editor);
-        if let Some(flags) = self.flags() {
-            for flag in flags.split_whitespace() {
-                cmd.arg(flag);
-            }
-        }
-        cmd.arg(worktree_path);
-        cmd
-    }
-
     /// Merge two editor configs. `other` takes precedence for set fields.
     pub fn merge(self, other: EditorConfig) -> EditorConfig {
         EditorConfig {
@@ -530,57 +496,5 @@ default = "code"
         let result = config.resolve_editor(None);
         // Result is either $EDITOR value or "code" fallback
         assert!(!result.is_empty());
-    }
-
-    #[test]
-    fn test_build_terminal_command_no_flags() {
-        let config = <EditorConfig as Default>::default();
-        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/worktree"));
-        assert!(cmd.contains("vim"));
-        assert!(cmd.contains("/tmp/worktree"));
-    }
-
-    #[test]
-    fn test_build_terminal_command_with_flags() {
-        let config: EditorConfig = toml::from_str(r#"flags = "--new-window""#).unwrap();
-        let cmd = config.build_terminal_command("code", std::path::Path::new("/tmp/worktree"));
-        assert!(cmd.contains("code"));
-        assert!(cmd.contains("--new-window"));
-        assert!(cmd.contains("/tmp/worktree"));
-    }
-
-    #[test]
-    fn test_build_gui_command_no_flags() {
-        let config = <EditorConfig as Default>::default();
-        let cmd = config.build_gui_command("code", std::path::Path::new("/tmp/worktree"));
-        assert_eq!(cmd.get_program(), "code");
-    }
-
-    #[test]
-    fn test_build_terminal_command_prevents_shell_injection() {
-        let config = <EditorConfig as Default>::default();
-
-        // Backtick command substitution
-        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/`whoami`"));
-        assert!(cmd.contains("'"), "backticks should be quoted");
-
-        // $() command substitution
-        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/$(rm -rf /)"));
-        assert!(cmd.contains("'"), "$() should be quoted");
-
-        // Semicolon injection
-        let cmd = config.build_terminal_command("vim", std::path::Path::new("/tmp/; rm -rf /"));
-        assert!(cmd.contains("'"), "semicolons should be quoted");
-    }
-
-    #[test]
-    fn test_build_gui_command_with_flags() {
-        let config: EditorConfig = toml::from_str(r#"flags = "--new-window --wait""#).unwrap();
-        let cmd = config.build_gui_command("code", std::path::Path::new("/tmp/worktree"));
-        assert_eq!(cmd.get_program(), "code");
-        // Flags are split by whitespace, so "--new-window" and "--wait" become separate args
-        let args: Vec<_> = cmd.get_args().collect();
-        assert!(args.contains(&std::ffi::OsStr::new("--new-window")));
-        assert!(args.contains(&std::ffi::OsStr::new("--wait")));
     }
 }

@@ -32,85 +32,31 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         }
     };
 
-    // 3. Determine editor
-    let editor = config.editor.resolve_editor(editor_override.as_deref());
-
-    info!(
-        event = "cli.code_editor_selected",
-        branch = branch,
-        editor = editor,
-        terminal = config.editor.terminal(),
-        flags = ?config.editor.flags()
-    );
-
-    // 4. Spawn editor
-    if config.editor.terminal() {
-        let editor_command = config
-            .editor
-            .build_terminal_command(&editor, &session.worktree_path);
-
-        match kild_core::terminal_ops::spawn_terminal(
-            &session.worktree_path,
-            &editor_command,
-            &config,
-            None,
-            None,
-        ) {
-            Ok(_) => {
-                println!("✅ Opening '{}' in {} (terminal)", branch, editor);
-                println!("   Path: {}", session.worktree_path.display());
-                info!(
-                    event = "cli.code_completed",
-                    branch = branch,
-                    editor = editor,
-                    terminal = true,
-                    worktree_path = %session.worktree_path.display()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("❌ Failed to open editor '{}' in terminal: {}", editor, e);
-                error!(
-                    event = "cli.code_failed",
-                    branch = branch,
-                    editor = editor,
-                    terminal = true,
-                    error = %e
-                );
-                Err(e.into())
-            }
+    // 3. Open editor via kild-core editor backend
+    match kild_core::editor::open_editor(
+        &session.worktree_path,
+        editor_override.as_deref(),
+        &config,
+    ) {
+        Ok(()) => {
+            println!("✅ Opening '{}' in editor", branch);
+            println!("   Path: {}", session.worktree_path.display());
+            info!(
+                event = "cli.code_completed",
+                branch = branch,
+                worktree_path = %session.worktree_path.display()
+            );
+            Ok(())
         }
-    } else {
-        let mut cmd = config
-            .editor
-            .build_gui_command(&editor, &session.worktree_path);
-
-        match cmd.spawn() {
-            Ok(_) => {
-                println!("✅ Opening '{}' in {}", branch, editor);
-                println!("   Path: {}", session.worktree_path.display());
-                info!(
-                    event = "cli.code_completed",
-                    branch = branch,
-                    editor = editor,
-                    worktree_path = %session.worktree_path.display()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("❌ Failed to open editor '{}': {}", editor, e);
-                eprintln!(
-                    "   Hint: Make sure '{}' is installed and in your PATH",
-                    editor
-                );
-                error!(
-                    event = "cli.code_failed",
-                    branch = branch,
-                    editor = editor,
-                    error = %e
-                );
-                Err(e.into())
-            }
+        Err(e) => {
+            eprintln!("❌ Failed to open editor: {}", e);
+            eprintln!("   Hint: Make sure the editor is installed and in your PATH");
+            error!(
+                event = "cli.code_failed",
+                branch = branch,
+                error = %e
+            );
+            Err(e.into())
         }
     }
 }
