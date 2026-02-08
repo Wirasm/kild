@@ -14,6 +14,7 @@
 pub mod agents;
 pub mod cleanup;
 pub mod config;
+pub mod editor;
 pub mod errors;
 pub mod events;
 pub mod files;
@@ -29,6 +30,7 @@ pub mod terminal;
 
 // Re-export commonly used types at crate root for convenience
 pub use config::KildConfig;
+pub use editor::{EditorBackend, EditorError, EditorType};
 pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
 pub use git::types::{DiffStats, GitStats, UncommittedDetails, WorktreeStatus};
