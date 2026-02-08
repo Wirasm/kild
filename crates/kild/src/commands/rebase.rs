@@ -27,10 +27,10 @@ pub(crate) fn handle_rebase_command(
     }
 
     let config = load_config_with_warning();
-    let base_branch = matches
-        .get_one::<String>("base")
-        .map(|s| s.as_str())
-        .unwrap_or_else(|| config.git.base_branch());
+    let base_branch = match matches.get_one::<String>("base") {
+        Some(s) => s.as_str(),
+        None => config.git.base_branch(),
+    };
 
     info!(
         event = "cli.rebase_started",
@@ -76,9 +76,10 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
     info!(event = "cli.rebase_all_started", base_override = ?base_override);
 
     let config = load_config_with_warning();
-    let base_branch = base_override
-        .as_deref()
-        .unwrap_or_else(|| config.git.base_branch());
+    let base_branch = match base_override.as_deref() {
+        Some(base) => base,
+        None => config.git.base_branch(),
+    };
 
     let sessions = session_handler::list_sessions()?;
 

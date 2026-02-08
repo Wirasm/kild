@@ -119,12 +119,8 @@ fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::
     // Return error if any failures (for exit code)
     if !errors.is_empty() {
         let total_count = opened.len() + errors.len();
-        return Err(format!(
-            "Partial failure: {} of {} kild(s) failed to open",
-            errors.len(),
-            total_count
-        )
-        .into());
+        use super::helpers::format_partial_failure_error;
+        return Err(format_partial_failure_error("open", errors.len(), total_count).into());
     }
 
     Ok(())

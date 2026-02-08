@@ -5,7 +5,7 @@ use kild_core::SessionStatus;
 use kild_core::events;
 use kild_core::session_ops as session_handler;
 
-use super::helpers::FailedOperation;
+use super::helpers::{FailedOperation, format_partial_failure_error};
 
 pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     // Check for --all flag first
@@ -98,12 +98,7 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     // Return error if any failures (for exit code)
     if !errors.is_empty() {
         let total_count = stopped.len() + errors.len();
-        return Err(format!(
-            "Partial failure: {} of {} kild(s) failed to stop",
-            errors.len(),
-            total_count
-        )
-        .into());
+        return Err(format_partial_failure_error("stop", errors.len(), total_count).into());
     }
 
     Ok(())

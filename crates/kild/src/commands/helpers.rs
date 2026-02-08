@@ -87,13 +87,14 @@ pub fn format_partial_failure_error(operation: &str, failed: usize, total: usize
 /// Convert CLI args into an OpenMode.
 pub fn resolve_open_mode(matches: &clap::ArgMatches) -> kild_core::OpenMode {
     if matches.get_flag("no-agent") {
-        kild_core::OpenMode::BareShell
-    } else {
-        match matches.get_one::<String>("agent").cloned() {
-            Some(agent) => kild_core::OpenMode::Agent(agent),
-            None => kild_core::OpenMode::DefaultAgent,
-        }
+        return kild_core::OpenMode::BareShell;
     }
+
+    if let Some(agent) = matches.get_one::<String>("agent").cloned() {
+        return kild_core::OpenMode::Agent(agent);
+    }
+
+    kild_core::OpenMode::DefaultAgent
 }
 
 #[cfg(test)]

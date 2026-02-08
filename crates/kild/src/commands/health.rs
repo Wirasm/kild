@@ -150,24 +150,20 @@ fn print_health_table(output: &health::HealthOutput) {
             health::HealthStatus::Unknown => "❓",
         };
 
-        let cpu_str = kild
-            .metrics
-            .cpu_usage_percent
-            .map(|c| format!("{:.1}%", c))
-            .unwrap_or_else(|| "N/A".to_string());
+        let cpu_str = match kild.metrics.cpu_usage_percent {
+            Some(c) => format!("{:.1}%", c),
+            None => "N/A".to_string(),
+        };
 
-        let mem_str = kild
-            .metrics
-            .memory_usage_mb
-            .map(|m| format!("{}MB", m))
-            .unwrap_or_else(|| "N/A".to_string());
+        let mem_str = match kild.metrics.memory_usage_mb {
+            Some(m) => format!("{}MB", m),
+            None => "N/A".to_string(),
+        };
 
-        let activity_str = kild
-            .metrics
-            .last_activity
-            .as_ref()
-            .map(|a| truncate(a, 19))
-            .unwrap_or_else(|| "Never".to_string());
+        let activity_str = match &kild.metrics.last_activity {
+            Some(a) => truncate(a, 19),
+            None => "Never".to_string(),
+        };
 
         println!(
             "│ {} │ {:<16} │ {:<7} │ {:<8} │ {:<8} │ {:<8} │ {:<19} │",

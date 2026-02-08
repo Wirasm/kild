@@ -25,10 +25,10 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     }
 
     let config = load_config_with_warning();
-    let base_branch = matches
-        .get_one::<String>("base")
-        .map(|s| s.as_str())
-        .unwrap_or_else(|| config.git.base_branch());
+    let base_branch = match matches.get_one::<String>("base") {
+        Some(s) => s.as_str(),
+        None => config.git.base_branch(),
+    };
     let remote = config.git.remote();
 
     info!(
@@ -97,9 +97,10 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
     info!(event = "cli.sync_all_started", base_override = ?base_override);
 
     let config = load_config_with_warning();
-    let base_branch = base_override
-        .as_deref()
-        .unwrap_or_else(|| config.git.base_branch());
+    let base_branch = match base_override.as_deref() {
+        Some(base) => base,
+        None => config.git.base_branch(),
+    };
     let remote = config.git.remote();
 
     // Fetch once at repo level (all worktrees share the same .git)

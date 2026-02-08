@@ -107,15 +107,19 @@ pub(crate) fn handle_status_command(
                         )
                     };
                     println!("│ Commits:     {:<47} │", commits_line);
-                    let remote_status = if ws.has_remote_branch {
-                        match (ws.unpushed_commit_count, ws.behind_commit_count) {
-                            (0, 0) if !ws.behind_count_failed => "Up to date",
-                            (0, _) => "Behind remote",
-                            (_, 0) if !ws.behind_count_failed => "Unpushed changes",
-                            _ => "Diverged",
-                        }
-                    } else {
+                    let remote_status = if !ws.has_remote_branch {
                         "Never pushed"
+                    } else if ws.unpushed_commit_count == 0
+                        && ws.behind_commit_count == 0
+                        && !ws.behind_count_failed
+                    {
+                        "Up to date"
+                    } else if ws.unpushed_commit_count == 0 {
+                        "Behind remote"
+                    } else if ws.behind_commit_count == 0 && !ws.behind_count_failed {
+                        "Unpushed changes"
+                    } else {
+                        "Diverged"
                     };
                     println!("│ Remote:      {:<47} │", remote_status);
                 }
