@@ -14,6 +14,9 @@ use crate::terminal::handler as terminal_ops;
 /// Unlike the known backends (Zed, VSCode, Vim), GenericBackend holds state
 /// (the command name and terminal flag) and is constructed dynamically by the
 /// registry when no known backend matches.
+///
+/// The `terminal` flag takes precedence over `config.editor.terminal()` since
+/// GenericBackend is constructed with the resolved terminal mode by the registry.
 pub struct GenericBackend {
     command: String,
     terminal: bool,
@@ -45,19 +48,18 @@ impl EditorBackend for GenericBackend {
     }
 
     fn open(&self, path: &Path, flags: &[String], config: &KildConfig) -> Result<(), EditorError> {
-        info!(
-            event = "core.editor.open_started",
-            editor = %self.command,
-            path = %path.display(),
-            terminal = self.terminal
-        );
-
         if self.terminal {
             let escaped_path = shell_escape(&path.display().to_string());
-            let command = if flags.is_empty() {
+            let escaped_flags: Vec<String> = flags.iter().map(|f| shell_escape(f)).collect();
+            let command = if escaped_flags.is_empty() {
                 format!("{} {}", self.command, escaped_path)
             } else {
-                format!("{} {} {}", self.command, flags.join(" "), escaped_path)
+                format!(
+                    "{} {} {}",
+                    self.command,
+                    escaped_flags.join(" "),
+                    escaped_path
+                )
             };
 
             match terminal_ops::spawn_terminal(path, &command, config, None, None) {
@@ -128,5 +130,30 @@ mod tests {
         let backend = GenericBackend::new("my-term-editor".to_string(), true);
         assert!(backend.is_terminal_editor());
         assert!(!backend.is_available());
+    }
+
+    #[test]
+    fn test_generic_backend_open_gui_unavailable() {
+        let backend = GenericBackend::new("fake-editor-xyz".to_string(), false);
+        let config = KildConfig::default();
+        let path = std::env::temp_dir();
+        let result = backend.open(&path, &[], &config);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            EditorError::SpawnFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn test_generic_backend_shell_escapes_flags() {
+        use crate::terminal::common::escape::shell_escape;
+        // Verify that flags with metacharacters get escaped
+        let flag = "--flag; rm -rf /";
+        let escaped = shell_escape(flag);
+        assert!(
+            escaped.contains("'"),
+            "flags with shell metacharacters should be quoted"
+        );
     }
 }

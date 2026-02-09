@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::KildConfig;
 
@@ -52,6 +52,10 @@ pub fn detect_editor() -> Result<EditorType, EditorError> {
         }
     }
 
+    warn!(
+        event = "core.editor.detection_failed",
+        "No supported editor found in system PATH"
+    );
     Err(EditorError::NoEditorFound)
 }
 
@@ -69,8 +73,35 @@ fn resolve_editor(
         cli_override = ?cli_override
     );
 
-    let editor_name = config.editor.resolve_editor(cli_override);
-    let editor_type = editor_name.parse::<EditorType>().ok();
+    let editor_name = if let Some(editor) = cli_override {
+        editor.to_string()
+    } else if let Some(editor) = config.editor.default() {
+        editor.to_string()
+    } else if let Ok(editor) = std::env::var("EDITOR") {
+        editor
+    } else {
+        // No explicit config — auto-detect from available editors
+        let detected = detect_editor()?;
+        info!(
+            event = "core.editor.auto_detected",
+            editor = detected.as_str(),
+            "No editor configured — auto-detected"
+        );
+        detected.as_str().to_string()
+    };
+
+    let editor_type = match editor_name.parse::<EditorType>() {
+        Ok(et) => Some(et),
+        Err(e) => {
+            debug!(
+                event = "core.editor.type_unrecognized",
+                editor = %editor_name,
+                reason = %e,
+                "Will use GenericBackend"
+            );
+            None
+        }
+    };
 
     debug!(
         event = "core.editor.resolve_completed",
@@ -93,11 +124,14 @@ pub fn open_editor(
     let (editor_name, editor_type) = resolve_editor(cli_override, config)?;
 
     // Parse flags from config
-    let flags: Vec<String> = config
-        .editor
-        .flags()
-        .map(|f| f.split_whitespace().map(String::from).collect())
-        .unwrap_or_default();
+    let flags: Vec<String> = match config.editor.flags() {
+        Some(f) => {
+            let parsed: Vec<String> = f.split_whitespace().map(String::from).collect();
+            debug!(event = "core.editor.flags_loaded", flags = ?parsed);
+            parsed
+        }
+        None => Vec::new(),
+    };
 
     info!(
         event = "core.editor.open_started",
@@ -107,21 +141,14 @@ pub fn open_editor(
     );
 
     match editor_type {
-        Some(EditorType::Vim) => {
-            // Terminal editors resolve to Vim type but the actual command
-            // may be "nvim", "helix", etc. Use VimBackend::open_with_command
-            // to pass the resolved command name.
-            let backend = VimBackend;
-            backend.open_with_command(&editor_name, path, &flags, config)
-        }
         Some(et) => {
             let backend = get_backend(&et).ok_or_else(|| EditorError::EditorNotFound {
                 editor: editor_name.clone(),
             })?;
-            backend.open(path, &flags, config)
+            backend.open_with_command(&editor_name, path, &flags, config)
         }
         None => {
-            // Unknown editor - use GenericBackend
+            // Unknown editor — use GenericBackend
             let terminal = config.editor.terminal();
             let backend = GenericBackend::new(editor_name.clone(), terminal);
 
@@ -139,6 +166,7 @@ pub fn open_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::KildError;
 
     #[test]
     fn test_get_backend_zed() {
@@ -163,7 +191,19 @@ mod tests {
 
     #[test]
     fn test_detect_editor_does_not_panic() {
-        let _result = detect_editor();
+        // Result depends on which editors are installed
+        let result = detect_editor();
+        match result {
+            Ok(editor_type) => {
+                let backend = get_backend(&editor_type);
+                assert!(backend.is_some());
+                assert!(backend.unwrap().is_available());
+            }
+            Err(e) => {
+                assert!(matches!(e, EditorError::NoEditorFound));
+                assert!(e.is_user_error());
+            }
+        }
     }
 
     #[test]
@@ -211,5 +251,41 @@ mod tests {
         let (name, editor_type) = resolve_editor(Some("my-custom-editor"), &config).unwrap();
         assert_eq!(name, "my-custom-editor");
         assert!(editor_type.is_none());
+    }
+
+    #[test]
+    fn test_open_editor_unknown_unavailable_returns_not_found() {
+        let config = KildConfig::default();
+        let path = std::env::temp_dir();
+        let result = open_editor(&path, Some("totally-fake-editor-xyz"), &config);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, EditorError::EditorNotFound { ref editor } if editor == "totally-fake-editor-xyz")
+        );
+        assert!(err.is_user_error());
+    }
+
+    #[test]
+    fn test_open_editor_known_type_resolves_correctly() {
+        let config = KildConfig::default();
+        // Verify "code" resolves to VSCode type without spawning
+        let (name, editor_type) = resolve_editor(Some("code"), &config).unwrap();
+        assert_eq!(name, "code");
+        assert_eq!(editor_type, Some(EditorType::VSCode));
+    }
+
+    #[test]
+    fn test_open_editor_vim_type_resolves_correctly() {
+        let config = KildConfig::default();
+        // "nvim" should resolve to Vim type with "nvim" as the command name
+        let (name, editor_type) = resolve_editor(Some("nvim"), &config).unwrap();
+        assert_eq!(name, "nvim");
+        assert_eq!(editor_type, Some(EditorType::Vim));
+
+        // "helix" should also resolve to Vim type
+        let (name, editor_type) = resolve_editor(Some("helix"), &config).unwrap();
+        assert_eq!(name, "helix");
+        assert_eq!(editor_type, Some(EditorType::Vim));
     }
 }

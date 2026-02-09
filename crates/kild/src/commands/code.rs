@@ -1,6 +1,7 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
+use kild_core::editor::EditorError;
 use kild_core::events;
 use kild_core::session_ops;
 
@@ -49,8 +50,26 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to open editor: {}", e);
-            eprintln!("   Hint: Make sure the editor is installed and in your PATH");
+            match &e {
+                EditorError::EditorNotFound { editor } => {
+                    eprintln!("❌ Editor '{}' not found", editor);
+                    eprintln!(
+                        "   Hint: Install '{}' or configure a different editor:",
+                        editor
+                    );
+                    eprintln!("         --editor <name>            (CLI override)");
+                    eprintln!("         [editor] default = \"...\"   (config file)");
+                    eprintln!("         export EDITOR=...          (environment)");
+                }
+                EditorError::NoEditorFound => {
+                    eprintln!("❌ No supported editor found");
+                    eprintln!("   Hint: Install one of: zed, code (VS Code), vim/nvim");
+                    eprintln!("   Or configure a custom editor in ~/.kild/config.toml");
+                }
+                _ => {
+                    eprintln!("❌ Failed to open editor: {}", e);
+                }
+            }
             error!(
                 event = "cli.code_failed",
                 branch = branch,

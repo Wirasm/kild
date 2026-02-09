@@ -27,12 +27,6 @@ impl EditorBackend for VSCodeBackend {
     }
 
     fn open(&self, path: &Path, flags: &[String], _config: &KildConfig) -> Result<(), EditorError> {
-        info!(
-            event = "core.editor.open_started",
-            editor = "code",
-            path = %path.display()
-        );
-
         let mut cmd = Command::new("code");
         for flag in flags {
             cmd.arg(flag);
@@ -68,5 +62,12 @@ mod tests {
         assert_eq!(backend.name(), "code");
         assert_eq!(backend.display_name(), "VS Code");
         assert!(!backend.is_terminal_editor());
+    }
+
+    #[test]
+    fn test_vscode_backend_is_not_terminal_editor() {
+        let backend = VSCodeBackend;
+        assert!(!backend.is_terminal_editor());
+        // VS Code is a GUI editor — open() should spawn directly, not via terminal
     }
 }

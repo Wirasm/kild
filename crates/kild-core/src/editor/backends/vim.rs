@@ -30,32 +30,25 @@ impl EditorBackend for VimBackend {
     fn open(&self, path: &Path, flags: &[String], config: &KildConfig) -> Result<(), EditorError> {
         self.open_with_command("vim", path, flags, config)
     }
-}
 
-impl VimBackend {
-    /// Open with a specific editor command (vim, nvim, helix, etc.).
-    ///
-    /// This is called by the registry with the resolved editor command name,
-    /// allowing the same backend to handle vim, nvim, and helix.
-    pub fn open_with_command(
+    fn open_with_command(
         &self,
         editor_cmd: &str,
         path: &Path,
         flags: &[String],
         config: &KildConfig,
     ) -> Result<(), EditorError> {
-        info!(
-            event = "core.editor.open_started",
-            editor = editor_cmd,
-            path = %path.display(),
-            terminal = true
-        );
-
         let escaped_path = shell_escape(&path.display().to_string());
-        let command = if flags.is_empty() {
+        let escaped_flags: Vec<String> = flags.iter().map(|f| shell_escape(f)).collect();
+        let command = if escaped_flags.is_empty() {
             format!("{} {}", editor_cmd, escaped_path)
         } else {
-            format!("{} {} {}", editor_cmd, flags.join(" "), escaped_path)
+            format!(
+                "{} {} {}",
+                editor_cmd,
+                escaped_flags.join(" "),
+                escaped_path
+            )
         };
 
         match terminal_ops::spawn_terminal(path, &command, config, None, None) {
@@ -90,5 +83,30 @@ mod tests {
         assert_eq!(backend.name(), "vim");
         assert_eq!(backend.display_name(), "Vim");
         assert!(backend.is_terminal_editor());
+    }
+
+    #[test]
+    fn test_vim_backend_shell_escapes_path() {
+        // Verify shell_escape is applied to paths with metacharacters
+        use crate::terminal::common::escape::shell_escape;
+        let escaped = shell_escape("/tmp/`whoami`");
+        assert!(escaped.contains("'"), "backticks should be quoted");
+
+        let escaped = shell_escape("/tmp/$(rm -rf /)");
+        assert!(escaped.contains("'"), "$() should be quoted");
+
+        let escaped = shell_escape("/tmp/; rm -rf /");
+        assert!(escaped.contains("'"), "semicolons should be quoted");
+    }
+
+    #[test]
+    fn test_vim_backend_shell_escapes_flags() {
+        use crate::terminal::common::escape::shell_escape;
+        let flag = "--flag; rm -rf /";
+        let escaped = shell_escape(flag);
+        assert!(
+            escaped.contains("'"),
+            "flags with semicolons should be quoted"
+        );
     }
 }

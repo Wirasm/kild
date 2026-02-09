@@ -27,12 +27,6 @@ impl EditorBackend for ZedBackend {
     }
 
     fn open(&self, path: &Path, flags: &[String], _config: &KildConfig) -> Result<(), EditorError> {
-        info!(
-            event = "core.editor.open_started",
-            editor = "zed",
-            path = %path.display()
-        );
-
         let mut cmd = Command::new("zed");
         for flag in flags {
             cmd.arg(flag);
@@ -68,5 +62,12 @@ mod tests {
         assert_eq!(backend.name(), "zed");
         assert_eq!(backend.display_name(), "Zed");
         assert!(!backend.is_terminal_editor());
+    }
+
+    #[test]
+    fn test_zed_backend_is_not_terminal_editor() {
+        let backend = ZedBackend;
+        assert!(!backend.is_terminal_editor());
+        // Zed is a GUI editor — open() should spawn directly, not via terminal
     }
 }

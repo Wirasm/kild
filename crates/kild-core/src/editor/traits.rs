@@ -19,6 +19,10 @@ pub trait EditorBackend: Send + Sync {
     fn is_available(&self) -> bool;
 
     /// Whether this editor runs inside a terminal (e.g., vim, nvim, helix).
+    ///
+    /// INVARIANT: If this returns `true`, `open()` MUST delegate to
+    /// `terminal_ops::spawn_terminal()`. If `false`, `open()` MUST spawn
+    /// the editor process directly via `Command::new()`.
     fn is_terminal_editor(&self) -> bool;
 
     /// Open a path in this editor.
@@ -26,6 +30,21 @@ pub trait EditorBackend: Send + Sync {
     /// For GUI editors, spawns a new process directly.
     /// For terminal editors, delegates to the terminal backend via `config`.
     fn open(&self, path: &Path, flags: &[String], config: &KildConfig) -> Result<(), EditorError>;
+
+    /// Open with an override command name.
+    ///
+    /// Used for editors where multiple command names map to the same backend
+    /// (e.g., vim/nvim/helix all use VimBackend). The default implementation
+    /// ignores the override and calls `open()`.
+    fn open_with_command(
+        &self,
+        _command_override: &str,
+        path: &Path,
+        flags: &[String],
+        config: &KildConfig,
+    ) -> Result<(), EditorError> {
+        self.open(path, flags, config)
+    }
 }
 
 #[cfg(test)]
