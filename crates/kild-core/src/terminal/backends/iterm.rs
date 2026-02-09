@@ -13,31 +13,25 @@ use crate::terminal::common::{
 
 /// AppleScript template for iTerm window launching (with window ID capture).
 ///
-/// Handles cold start vs warm start to avoid duplicate windows:
-/// - **Cold start** (iTerm not running): `tell application "iTerm"` launches iTerm,
-///   which automatically creates a default window. We reuse that window instead of
-///   creating a second one. A retry loop polls for the window because `activate` is
-///   asynchronous and the default window may not be ready immediately. If the window
-///   doesn't appear within ~1s, `current window` will error (surfaced to the user).
-/// - **Warm start** (iTerm already running): Creates a new window as normal.
+/// Avoids duplicate windows on cold start:
+/// - **Cold start**: Reuses iTerm's auto-created default window (polls up to 1s for it to appear)
+/// - **Warm start**: Creates a new window as normal
 ///
-/// The running-state check (`set iTermWasRunning`) must happen *before* the `tell`
-/// block because `tell application "iTerm"` itself launches iTerm, making it always
-/// appear as running inside the block.
+/// The running-state check must occur before the `tell` block since `tell application "iTerm"`
+/// launches iTerm, making it always appear running inside the block.
 #[cfg(target_os = "macos")]
 const ITERM_SCRIPT: &str = r#"set iTermWasRunning to application "iTerm" is running
     tell application "iTerm"
         activate
-        if not iTermWasRunning then
-            -- iTerm just launched. Poll for the default window to appear
-            -- (activate is asynchronous, window may not exist yet).
+        if iTermWasRunning then
+            set newWindow to (create window with default profile)
+        else
+            -- Cold start: poll for default window (activate is async)
             repeat 10 times
                 if (count of windows) > 0 then exit repeat
                 delay 0.1
             end repeat
             set newWindow to current window
-        else
-            set newWindow to (create window with default profile)
         end if
         set windowId to id of newWindow
         tell current session of newWindow
@@ -194,13 +188,13 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_iterm_script_reuses_window_on_cold_start() {
+    fn test_iterm_script_handles_cold_start() {
         assert!(ITERM_SCRIPT.contains("current window"));
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_iterm_script_creates_window_when_running() {
+    fn test_iterm_script_handles_warm_start() {
         assert!(ITERM_SCRIPT.contains("create window with default profile"));
     }
 }
