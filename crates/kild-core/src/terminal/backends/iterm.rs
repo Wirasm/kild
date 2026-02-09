@@ -21,8 +21,9 @@ const ITERM_SCRIPT: &str = r#"set iTermWasRunning to application "iTerm" is runn
     tell application "iTerm"
         activate
         if not iTermWasRunning then
-            -- iTerm just launched and created a default window.
-            -- Reuse it instead of creating a second window.
+            -- iTerm just launched. Wait for the default window to initialize
+            -- before reusing it (activate is asynchronous).
+            delay 0.5
             set newWindow to current window
         else
             set newWindow to (create window with default profile)
