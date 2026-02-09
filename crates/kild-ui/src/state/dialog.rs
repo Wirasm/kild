@@ -83,30 +83,29 @@ pub enum CreateDialogField {
 /// in MainView. This struct only tracks agent selection and focus state.
 #[derive(Clone, Debug)]
 pub struct CreateFormState {
-    pub selected_agent_index: usize,
+    selected_agent_index: usize,
     pub focused_field: CreateDialogField,
 }
 
 impl CreateFormState {
+    /// Get the current selected agent index.
+    pub fn selected_agent_index(&self) -> usize {
+        self.selected_agent_index
+    }
+
+    /// Set selected agent by index, clamping to valid range.
+    pub fn set_selected_agent_index(&mut self, index: usize) {
+        let agents = kild_core::agents::valid_agent_names();
+        self.selected_agent_index = index.min(agents.len().saturating_sub(1));
+    }
+
     /// Get the currently selected agent name.
     ///
-    /// Derives the agent name from the index, falling back to the default
-    /// agent if the index is out of bounds (with warning logged).
+    /// Derives the agent name from the index. The index is always valid
+    /// because `set_selected_agent_index` clamps to bounds.
     pub fn selected_agent(&self) -> String {
         let agents = kild_core::agents::valid_agent_names();
-        agents
-            .get(self.selected_agent_index)
-            .copied()
-            .unwrap_or_else(|| {
-                tracing::warn!(
-                    event = "ui.create_form.agent_index_out_of_bounds",
-                    index = self.selected_agent_index,
-                    agent_count = agents.len(),
-                    "Selected agent index out of bounds, using default"
-                );
-                kild_core::agents::default_agent_name()
-            })
-            .to_string()
+        agents[self.selected_agent_index].to_string()
     }
 }
 
@@ -194,21 +193,20 @@ mod tests {
 
         if agents.len() > 1 {
             // Change index and verify selected_agent() returns the correct agent
-            form.selected_agent_index = 1;
+            form.set_selected_agent_index(1);
             assert_eq!(form.selected_agent(), agents[1]);
         }
     }
 
     #[test]
-    fn test_create_form_state_selected_agent_fallback_on_invalid_index() {
-        let form = CreateFormState {
-            selected_agent_index: 999,
-            ..Default::default()
-        };
+    fn test_create_form_state_set_index_clamps_out_of_bounds() {
+        let mut form = CreateFormState::default();
+        let agents = kild_core::agents::valid_agent_names();
 
-        // Should fall back to default agent
-        let expected = kild_core::agents::default_agent_name();
-        assert_eq!(form.selected_agent(), expected);
+        // Setting an out-of-bounds index should clamp to last valid index
+        form.set_selected_agent_index(999);
+        assert_eq!(form.selected_agent_index(), agents.len() - 1);
+        assert_eq!(form.selected_agent(), agents[agents.len() - 1]);
     }
 
     #[test]

@@ -22,16 +22,12 @@ pub fn render_add_project_dialog(
     name_input: Option<&gpui::Entity<InputState>>,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let add_project_error = match dialog {
-        DialogState::AddProject { error, .. } => error.clone(),
-        _ => {
-            tracing::error!(
-                event = "ui.add_project_dialog.invalid_state",
-                "render_add_project_dialog called with non-AddProject dialog state"
-            );
-            Some("Internal error: invalid dialog state".to_string())
-        }
+    let DialogState::AddProject { error, .. } = dialog else {
+        unreachable!(
+            "render_add_project_dialog called with non-AddProject dialog state — this is a bug in MainView render logic"
+        );
     };
+    let add_project_error = error.clone();
 
     // Overlay: covers entire screen with semi-transparent background
     div()

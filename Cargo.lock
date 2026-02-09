@@ -3395,6 +3395,7 @@ dependencies = [
  "gpui-component",
  "kild-core",
  "notify 8.2.0",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

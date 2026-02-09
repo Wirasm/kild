@@ -274,12 +274,20 @@ impl MainView {
         tracing::info!(event = "ui.create_dialog.opened");
         self.state.open_create_dialog();
 
-        let branch_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Type branch name..."));
+        let branch_pattern =
+            regex::Regex::new(r"^[a-zA-Z0-9\-_/]*$").expect("branch name regex is valid");
+        let branch_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Type branch name...")
+                .pattern(branch_pattern)
+        });
         self.branch_input = Some(branch_input);
 
-        let note_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("What is this kild for?"));
+        let note_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("What is this kild for?")
+                .validate(|text, _| !text.chars().any(|c| c.is_control()))
+        });
         self.note_input = Some(note_input);
 
         cx.notify();
@@ -349,12 +357,8 @@ impl MainView {
                 .spawn(async move { actions::create_kild(branch, agent, note, project_path) })
                 .await;
 
-            // Always clear loading state, even if view was dropped
-            let _ = this.update(cx, |view, _cx| {
-                view.state.clear_dialog_loading();
-            });
-
             if let Err(e) = this.update(cx, |view, cx| {
+                view.state.clear_dialog_loading();
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -364,9 +368,9 @@ impl MainView {
                 }
                 cx.notify();
             }) {
-                tracing::warn!(
-                    event = "ui.dialog_submit.view_update_failed",
-                    error = ?e
+                tracing::debug!(
+                    event = "ui.dialog_submit.view_dropped",
+                    error = ?e,
                 );
             }
         })
@@ -387,8 +391,8 @@ impl MainView {
 
         // Update selected agent index in dialog state
         if let crate::state::DialogState::Create { form, .. } = self.state.dialog_mut() {
-            let next_index = (form.selected_agent_index + 1) % agents.len();
-            form.selected_agent_index = next_index;
+            let next_index = (form.selected_agent_index() + 1) % agents.len();
+            form.set_selected_agent_index(next_index);
             tracing::info!(
                 event = "ui.create_dialog.agent_changed",
                 agent = %form.selected_agent()
@@ -446,12 +450,8 @@ impl MainView {
                 .spawn(async move { actions::destroy_kild(branch, force) })
                 .await;
 
-            // Always clear loading state, even if view was dropped
-            let _ = this.update(cx, |view, _cx| {
-                view.state.clear_dialog_loading();
-            });
-
             if let Err(e) = this.update(cx, |view, cx| {
+                view.state.clear_dialog_loading();
                 match result {
                     Ok(events) => view.state.apply_events(&events),
                     Err(e) => {
@@ -461,9 +461,9 @@ impl MainView {
                 }
                 cx.notify();
             }) {
-                tracing::warn!(
-                    event = "ui.confirm_destroy.view_update_failed",
-                    error = ?e
+                tracing::debug!(
+                    event = "ui.confirm_destroy.view_dropped",
+                    error = ?e,
                 );
             }
         })
@@ -473,7 +473,6 @@ impl MainView {
     /// Handle cancel button click in destroy dialog.
     pub fn on_confirm_cancel(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.confirm_dialog.cancelled");
-        self.clear_input_entities();
         self.mutate_state(cx, |s| s.close_dialog());
     }
 
@@ -504,12 +503,8 @@ impl MainView {
                 .spawn(async move { actions::open_kild(branch_for_action, None) })
                 .await;
 
-            // Always clear loading state, even if view was dropped
-            let _ = this.update(cx, |view, _cx| {
-                view.state.clear_loading(&branch);
-            });
-
             if let Err(e) = this.update(cx, |view, cx| {
+                view.state.clear_loading(&branch);
                 match result {
                     Ok(events) => {
                         view.state.apply_events(&events);
@@ -527,9 +522,9 @@ impl MainView {
                 }
                 cx.notify();
             }) {
-                tracing::warn!(
-                    event = "ui.open_click.view_update_failed",
-                    error = ?e
+                tracing::debug!(
+                    event = "ui.open_click.view_dropped",
+                    error = ?e,
                 );
             }
         })
@@ -556,12 +551,8 @@ impl MainView {
                 .spawn(async move { actions::stop_kild(branch_for_action) })
                 .await;
 
-            // Always clear loading state, even if view was dropped
-            let _ = this.update(cx, |view, _cx| {
-                view.state.clear_loading(&branch);
-            });
-
             if let Err(e) = this.update(cx, |view, cx| {
+                view.state.clear_loading(&branch);
                 match result {
                     Ok(events) => {
                         view.state.apply_events(&events);
@@ -579,9 +570,9 @@ impl MainView {
                 }
                 cx.notify();
             }) {
-                tracing::warn!(
-                    event = "ui.stop_click.view_update_failed",
-                    error = ?e
+                tracing::debug!(
+                    event = "ui.stop_click.view_dropped",
+                    error = ?e,
                 );
             }
         })
@@ -616,12 +607,8 @@ impl MainView {
                 .spawn(async move { operation(&displays) })
                 .await;
 
-            // Always clear loading state, even if view was dropped
-            let _ = this.update(cx, |view, _cx| {
-                view.state.clear_bulk_loading();
-            });
-
             if let Err(e) = this.update(cx, |view, cx| {
+                view.state.clear_bulk_loading();
                 let (count, errors) = result;
                 for error in &errors {
                     tracing::warn!(
@@ -636,9 +623,9 @@ impl MainView {
                 }
                 cx.notify();
             }) {
-                tracing::warn!(
-                    event = "ui.bulk_operation.view_update_failed",
-                    error = ?e
+                tracing::debug!(
+                    event = "ui.bulk_operation.view_dropped",
+                    error = ?e,
                 );
             }
         })
@@ -919,7 +906,7 @@ impl MainView {
     /// Handle keyboard shortcuts for dialogs.
     ///
     /// Text input is handled by gpui-component's Input widget internally.
-    /// This handler only manages Escape (close) and Tab (agent cycling in create dialog).
+    /// This handler manages Escape (close), Enter (submit), and Tab (agent cycling).
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         use crate::state::DialogState;
 
@@ -939,6 +926,7 @@ impl MainView {
             }
             DialogState::Create { .. } => match key_str.as_str() {
                 "escape" => self.on_dialog_cancel(cx),
+                "enter" => self.on_dialog_submit(cx),
                 "tab" => self.on_agent_cycle(cx),
                 _ => {}
             },

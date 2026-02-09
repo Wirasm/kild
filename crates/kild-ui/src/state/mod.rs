@@ -13,5 +13,5 @@ pub mod sessions;
 
 // Re-export all public types at module level so consumers use `crate::state::*`
 pub use app_state::AppState;
-pub use dialog::{CreateDialogField, CreateFormState, DialogState};
+pub use dialog::{CreateDialogField, DialogState};
 pub use errors::OperationError;

@@ -27,32 +27,24 @@ use crate::views::MainView;
 /// - Red warning box: Uncommitted changes (blocking - button says "Force Destroy")
 /// - Amber warning box: Unpushed commits, no PR, never pushed (non-blocking)
 ///
-/// # Invalid State Handling
-/// If called with a non-`DialogState::Confirm` state, logs an error and
-/// displays "Internal error: invalid dialog state" to the user.
+/// # Panics
+/// Panics if called with a non-`DialogState::Confirm` state (programming error).
 pub fn render_confirm_dialog(
     dialog: &DialogState,
     loading: bool,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let (branch, safety_info, confirm_error) = match dialog {
-        DialogState::Confirm {
-            branch,
-            safety_info,
-            error,
-        } => (branch.clone(), safety_info.clone(), error.clone()),
-        _ => {
-            tracing::error!(
-                event = "ui.confirm_dialog.invalid_state",
-                "render_confirm_dialog called with non-Confirm dialog state"
-            );
-            (
-                "unknown".to_string(),
-                None,
-                Some("Internal error: invalid dialog state".to_string()),
-            )
-        }
+    let DialogState::Confirm {
+        branch,
+        safety_info,
+        error,
+    } = dialog
+    else {
+        unreachable!(
+            "render_confirm_dialog called with non-Confirm dialog state — this is a bug in MainView render logic"
+        );
     };
+    let (branch, safety_info, confirm_error) = (branch.clone(), safety_info.clone(), error.clone());
 
     // Determine if we should block (uncommitted changes)
     let should_block = safety_info

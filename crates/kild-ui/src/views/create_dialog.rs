@@ -10,7 +10,7 @@ use gpui_component::Disableable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 
-use crate::state::{CreateDialogField, CreateFormState, DialogState};
+use crate::state::{CreateDialogField, DialogState};
 use crate::theme;
 use crate::views::MainView;
 
@@ -30,24 +30,17 @@ pub fn render_create_dialog(
     note_input: Option<&gpui::Entity<InputState>>,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let (form, create_error) = match dialog {
-        DialogState::Create { form, error } => (form, error.clone()),
-        _ => {
-            tracing::error!(
-                event = "ui.create_dialog.invalid_state",
-                "render_create_dialog called with non-Create dialog state"
-            );
-            (
-                &CreateFormState::default(),
-                Some("Internal error: invalid dialog state".to_string()),
-            )
-        }
+    let DialogState::Create { form, error } = dialog else {
+        unreachable!(
+            "render_create_dialog called with non-Create dialog state — this is a bug in MainView render logic"
+        );
     };
+    let create_error = error.clone();
 
     let agents = agent_options();
     let current_agent = form.selected_agent();
     let focused_field = form.focused_field.clone();
-    let selected_agent_index = form.selected_agent_index;
+    let selected_agent_index = form.selected_agent_index();
 
     // Overlay: covers entire screen with semi-transparent background
     div()

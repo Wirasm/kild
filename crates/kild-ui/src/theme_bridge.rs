@@ -31,6 +31,11 @@ pub fn apply_tallinn_night_theme(cx: &mut App) {
 fn tallinn_night_colors() -> ThemeConfigColors {
     // ThemeConfigColors has private base color fields, so we deserialize from JSON
     // to construct it rather than using struct literal syntax.
+    //
+    // Hover colors (success.hover, danger.hover, warning.hover) are lightened
+    // variants for gpui-component button states, not part of KILD's base palette.
+    //
+    // Compatible with gpui-component 0.5.1. Verify theme keys if upgrading.
     let json = r##"{
         "background": "#0E1012",
         "foreground": "#B8C0CC",
@@ -110,5 +115,16 @@ fn tallinn_night_colors() -> ThemeConfigColors {
         "drag.border": "#7CB4C8",
         "drop_target.background": "#7CB4C822"
     }"##;
-    serde_json::from_str(json).expect("Tallinn Night theme colors are valid")
+    match serde_json::from_str(json) {
+        Ok(colors) => colors,
+        Err(e) => {
+            tracing::error!(
+                event = "ui.theme.deserialization_failed",
+                error = %e,
+                "Tallinn Night theme JSON is invalid — falling back to library defaults. \
+                 This is a bug: the JSON schema may be incompatible with this gpui-component version."
+            );
+            ThemeConfigColors::default()
+        }
+    }
 }
