@@ -89,6 +89,9 @@ cargo run -p kild -- stats my-branch --json      # JSON output for branch health
 cargo run -p kild -- stats my-branch -b dev      # Override base branch
 cargo run -p kild -- stats --all                 # Fleet summary table (all kilds)
 cargo run -p kild -- stats --all --json          # JSON array of all kild health
+cargo run -p kild -- overlaps                    # Detect file overlaps across kilds
+cargo run -p kild -- overlaps --json             # JSON output for overlap detection
+cargo run -p kild -- overlaps -b dev             # Override base branch
 cargo run -p kild -- pr my-branch                # Show PR status for kild
 cargo run -p kild -- pr my-branch --json         # JSON output for PR status
 cargo run -p kild -- pr my-branch --refresh      # Force refresh PR data from GitHub

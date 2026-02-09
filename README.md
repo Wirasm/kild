@@ -188,6 +188,19 @@ kild stats --all
 kild stats --all --json
 ```
 
+### Detect file overlaps
+```bash
+# Detect when multiple kilds modify the same files
+kild overlaps
+
+# JSON output
+kild overlaps --json
+
+# Override base branch
+kild overlaps --base dev
+kild overlaps -b dev
+```
+
 ### Show PR status
 ```bash
 # Show cached PR status
