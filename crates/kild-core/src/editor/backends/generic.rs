@@ -51,16 +51,11 @@ impl EditorBackend for GenericBackend {
         if self.terminal {
             let escaped_path = shell_escape(&path.display().to_string());
             let escaped_flags: Vec<String> = flags.iter().map(|f| shell_escape(f)).collect();
-            let command = if escaped_flags.is_empty() {
-                format!("{} {}", self.command, escaped_path)
-            } else {
-                format!(
-                    "{} {} {}",
-                    self.command,
-                    escaped_flags.join(" "),
-                    escaped_path
-                )
-            };
+
+            let mut parts = vec![self.command.clone()];
+            parts.extend(escaped_flags);
+            parts.push(escaped_path);
+            let command = parts.join(" ");
 
             match terminal_ops::spawn_terminal(path, &command, config, None, None) {
                 Ok(_) => {

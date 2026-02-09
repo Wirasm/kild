@@ -63,11 +63,4 @@ mod tests {
         assert_eq!(backend.display_name(), "VS Code");
         assert!(!backend.is_terminal_editor());
     }
-
-    #[test]
-    fn test_vscode_backend_is_not_terminal_editor() {
-        let backend = VSCodeBackend;
-        assert!(!backend.is_terminal_editor());
-        // VS Code is a GUI editor — open() should spawn directly, not via terminal
-    }
 }

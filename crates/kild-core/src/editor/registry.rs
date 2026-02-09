@@ -90,18 +90,15 @@ fn resolve_editor(
         detected.as_str().to_string()
     };
 
-    let editor_type = match editor_name.parse::<EditorType>() {
-        Ok(et) => Some(et),
-        Err(e) => {
-            debug!(
-                event = "core.editor.type_unrecognized",
-                editor = %editor_name,
-                reason = %e,
-                "Will use GenericBackend"
-            );
-            None
-        }
-    };
+    let editor_type = editor_name.parse::<EditorType>().ok();
+
+    if editor_type.is_none() {
+        debug!(
+            event = "core.editor.type_unrecognized",
+            editor = %editor_name,
+            "Will use GenericBackend"
+        );
+    }
 
     debug!(
         event = "core.editor.resolve_completed",
@@ -124,14 +121,15 @@ pub fn open_editor(
     let (editor_name, editor_type) = resolve_editor(cli_override, config)?;
 
     // Parse flags from config
-    let flags: Vec<String> = match config.editor.flags() {
-        Some(f) => {
-            let parsed: Vec<String> = f.split_whitespace().map(String::from).collect();
-            debug!(event = "core.editor.flags_loaded", flags = ?parsed);
-            parsed
-        }
-        None => Vec::new(),
-    };
+    let flags: Vec<String> = config
+        .editor
+        .flags()
+        .map(|f| f.split_whitespace().map(String::from).collect())
+        .unwrap_or_default();
+
+    if !flags.is_empty() {
+        debug!(event = "core.editor.flags_loaded", flags = ?flags);
+    }
 
     info!(
         event = "core.editor.open_started",

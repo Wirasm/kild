@@ -40,16 +40,11 @@ impl EditorBackend for VimBackend {
     ) -> Result<(), EditorError> {
         let escaped_path = shell_escape(&path.display().to_string());
         let escaped_flags: Vec<String> = flags.iter().map(|f| shell_escape(f)).collect();
-        let command = if escaped_flags.is_empty() {
-            format!("{} {}", editor_cmd, escaped_path)
-        } else {
-            format!(
-                "{} {} {}",
-                editor_cmd,
-                escaped_flags.join(" "),
-                escaped_path
-            )
-        };
+
+        let mut parts = vec![editor_cmd.to_string()];
+        parts.extend(escaped_flags);
+        parts.push(escaped_path);
+        let command = parts.join(" ");
 
         match terminal_ops::spawn_terminal(path, &command, config, None, None) {
             Ok(_) => {
