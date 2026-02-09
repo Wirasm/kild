@@ -10,10 +10,10 @@ pub(crate) fn handle_overlaps_command(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let json_output = matches.get_flag("json");
     let config = load_config_with_warning();
-    let base_branch = match matches.get_one::<String>("base") {
-        Some(s) => s.as_str(),
-        None => config.git.base_branch(),
-    };
+    let base_branch = matches
+        .get_one::<String>("base")
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| config.git.base_branch());
 
     info!(
         event = "cli.overlaps_started",
@@ -48,12 +48,23 @@ pub(crate) fn handle_overlaps_command(
 
     // Surface errors before the report so users see warnings first
     if !errors.is_empty() {
-        // Total failure — don't show the empty report, it's misleading
-        if errors.len() == total {
+        let all_failed = errors.len() == total;
+
+        if all_failed {
             eprintln!("Error: All {} kild(s) failed to compute overlaps:", total);
-            for (branch, msg) in &errors {
-                eprintln!("  {} — {}", branch, msg);
-            }
+        } else {
+            eprintln!(
+                "Warning: {} of {} kild(s) failed (showing partial results):",
+                errors.len(),
+                total
+            );
+        }
+
+        for (branch, msg) in &errors {
+            eprintln!("  {} — {}", branch, msg);
+        }
+
+        if all_failed {
             error!(
                 event = "cli.overlaps_failed",
                 failed = errors.len(),
@@ -62,15 +73,6 @@ pub(crate) fn handle_overlaps_command(
             return Err(format!("All {} kild(s) failed overlap detection", total).into());
         }
 
-        // Partial failure — show warnings, then continue with partial results
-        eprintln!(
-            "Warning: {} of {} kild(s) failed (showing partial results):",
-            errors.len(),
-            total
-        );
-        for (branch, msg) in &errors {
-            eprintln!("  {} — {}", branch, msg);
-        }
         eprintln!();
     }
 
