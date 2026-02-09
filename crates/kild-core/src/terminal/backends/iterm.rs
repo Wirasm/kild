@@ -141,6 +141,18 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn test_iterm_focus_script_uses_valid_applescript() {
+        assert!(ITERM_FOCUS_SCRIPT.contains("{window_id}"));
+        assert!(ITERM_FOCUS_SCRIPT.contains("set miniaturized"));
+        assert!(ITERM_FOCUS_SCRIPT.contains("select window id"));
+        assert!(
+            !ITERM_FOCUS_SCRIPT.contains("set frontmost"),
+            "set frontmost is not a valid iTerm window property"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn test_iterm_script_command_substitution() {
         use std::path::PathBuf;
         let cd_command = build_cd_command(&PathBuf::from("/tmp"), "echo hello");
