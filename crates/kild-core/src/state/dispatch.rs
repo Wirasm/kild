@@ -33,15 +33,15 @@ impl Store for CoreStore {
         let result = match cmd {
             Command::CreateKild {
                 branch,
-                agent,
+                agent_mode,
                 note,
                 project_path,
             } => {
                 let request = match project_path {
                     Some(path) => {
-                        CreateSessionRequest::with_project_path(branch, agent, note, path)
+                        CreateSessionRequest::with_project_path(branch, agent_mode, note, path)
                     }
-                    None => CreateSessionRequest::new(branch, agent, note),
+                    None => CreateSessionRequest::new(branch, agent_mode, note),
                 };
                 let session = session_ops::create_session(request, &self.config)?;
                 Ok(vec![Event::KildCreated {
@@ -235,24 +235,29 @@ mod tests {
 
     #[test]
     fn test_create_request_with_project_path() {
+        use crate::state::types::AgentMode;
         let request = CreateSessionRequest::with_project_path(
             "test-branch".to_string(),
-            Some("claude".to_string()),
+            AgentMode::Agent("claude".to_string()),
             Some("a note".to_string()),
             PathBuf::from("/tmp/project"),
         );
         assert_eq!(request.branch, "test-branch");
-        assert_eq!(request.agent, Some("claude".to_string()));
+        assert_eq!(request.agent_mode, AgentMode::Agent("claude".to_string()));
         assert_eq!(request.note, Some("a note".to_string()));
         assert_eq!(request.project_path, Some(PathBuf::from("/tmp/project")));
     }
 
     #[test]
     fn test_create_request_without_project_path() {
-        let request =
-            CreateSessionRequest::new("test-branch".to_string(), Some("claude".to_string()), None);
+        use crate::state::types::AgentMode;
+        let request = CreateSessionRequest::new(
+            "test-branch".to_string(),
+            AgentMode::Agent("claude".to_string()),
+            None,
+        );
         assert_eq!(request.branch, "test-branch");
-        assert_eq!(request.agent, Some("claude".to_string()));
+        assert_eq!(request.agent_mode, AgentMode::Agent("claude".to_string()));
         assert_eq!(request.note, None);
         assert_eq!(request.project_path, None);
     }

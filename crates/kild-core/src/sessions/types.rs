@@ -495,7 +495,8 @@ pub struct ValidatedRequest {
 #[derive(Debug, Clone)]
 pub struct CreateSessionRequest {
     pub branch: String,
-    pub agent: Option<String>,
+    /// What agent to launch (default from config, specific override, or bare shell).
+    pub agent_mode: crate::state::types::AgentMode,
     pub note: Option<String>,
     /// Optional project path for UI context. When provided, this path is used
     /// instead of current working directory for project detection.
@@ -509,10 +510,14 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
-    pub fn new(branch: String, agent: Option<String>, note: Option<String>) -> Self {
+    pub fn new(
+        branch: String,
+        agent_mode: crate::state::types::AgentMode,
+        note: Option<String>,
+    ) -> Self {
         Self {
             branch,
-            agent,
+            agent_mode,
             note,
             project_path: None,
             base_branch: None,
@@ -523,13 +528,13 @@ impl CreateSessionRequest {
     /// Create a request with explicit project path (for UI usage)
     pub fn with_project_path(
         branch: String,
-        agent: Option<String>,
+        agent_mode: crate::state::types::AgentMode,
         note: Option<String>,
         project_path: PathBuf,
     ) -> Self {
         Self {
             branch,
-            agent,
+            agent_mode,
             note,
             project_path: Some(project_path),
             base_branch: None,
@@ -545,14 +550,6 @@ impl CreateSessionRequest {
     pub fn with_no_fetch(mut self, no_fetch: bool) -> Self {
         self.no_fetch = no_fetch;
         self
-    }
-
-    pub fn agent(&self) -> String {
-        self.agent.clone().unwrap_or_else(|| "claude".to_string())
-    }
-
-    pub fn agent_or_default(&self, default: &str) -> String {
-        self.agent.clone().unwrap_or_else(|| default.to_string())
     }
 }
 
@@ -686,7 +683,7 @@ mod tests {
         // Test CreateSessionRequest properly includes note
         let request_with_note = CreateSessionRequest::new(
             "feature-auth".to_string(),
-            Some("claude".to_string()),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
             Some("OAuth2 implementation".to_string()),
         );
         assert_eq!(
@@ -695,20 +692,36 @@ mod tests {
         );
 
         // Test request without note
-        let request_without_note =
-            CreateSessionRequest::new("feature-auth".to_string(), Some("claude".to_string()), None);
+        let request_without_note = CreateSessionRequest::new(
+            "feature-auth".to_string(),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
+            None,
+        );
         assert_eq!(request_without_note.note, None);
     }
 
     #[test]
-    fn test_create_session_request() {
-        let request = CreateSessionRequest::new("test-branch".to_string(), None, None);
-        assert_eq!(request.branch, "test-branch");
-        assert_eq!(request.agent(), "claude");
+    fn test_create_session_request_agent_mode() {
+        use crate::state::types::AgentMode;
 
-        let request_with_agent =
-            CreateSessionRequest::new("test-branch".to_string(), Some("kiro".to_string()), None);
-        assert_eq!(request_with_agent.agent(), "kiro");
+        let request =
+            CreateSessionRequest::new("test-branch".to_string(), AgentMode::DefaultAgent, None);
+        assert_eq!(request.branch, "test-branch");
+        assert_eq!(request.agent_mode, AgentMode::DefaultAgent);
+
+        let request_with_agent = CreateSessionRequest::new(
+            "test-branch".to_string(),
+            AgentMode::Agent("kiro".to_string()),
+            None,
+        );
+        assert_eq!(
+            request_with_agent.agent_mode,
+            AgentMode::Agent("kiro".to_string())
+        );
+
+        let request_bare_shell =
+            CreateSessionRequest::new("test-branch".to_string(), AgentMode::BareShell, None);
+        assert_eq!(request_bare_shell.agent_mode, AgentMode::BareShell);
     }
 
     #[test]
@@ -808,7 +821,7 @@ mod tests {
     fn test_create_session_request_with_project_path() {
         let request = CreateSessionRequest::with_project_path(
             "test-branch".to_string(),
-            Some("claude".to_string()),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
             None,
             PathBuf::from("/path/to/project"),
         );
@@ -821,7 +834,11 @@ mod tests {
 
     #[test]
     fn test_create_session_request_new_has_no_project_path() {
-        let request = CreateSessionRequest::new("test-branch".to_string(), None, None);
+        let request = CreateSessionRequest::new(
+            "test-branch".to_string(),
+            crate::state::types::AgentMode::DefaultAgent,
+            None,
+        );
         assert!(request.project_path.is_none());
     }
 

@@ -40,7 +40,7 @@ pub use sessions::types::{
     AgentProcess, AgentStatus, AgentStatusInfo, CompleteResult, CreateSessionRequest,
     DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
 };
-pub use state::{Command, CoreStore, DispatchError, Event, OpenMode, Store};
+pub use state::{AgentMode, Command, CoreStore, DispatchError, Event, OpenMode, Store};
 
 // Re-export handler modules as the primary API
 pub use cleanup::handler as cleanup_ops;

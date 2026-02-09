@@ -59,23 +59,61 @@ pub fn create_session(
     request: CreateSessionRequest,
     kild_config: &KildConfig,
 ) -> Result<Session, SessionError> {
-    let agent = request.agent_or_default(&kild_config.agent.default);
-    let agent_command =
-        kild_config
-            .get_agent_command(&agent)
-            .map_err(|e| SessionError::ConfigError {
-                message: e.to_string(),
-            })?;
+    // Determine agent name and command based on AgentMode
+    let (agent, agent_command) = match &request.agent_mode {
+        crate::state::types::AgentMode::BareShell => {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                let fallback = "/bin/sh".to_string();
+                warn!(
+                    event = "core.session.shell_env_missing",
+                    fallback = %fallback,
+                    "$SHELL not set, falling back to /bin/sh"
+                );
+                fallback
+            });
+            info!(event = "core.session.create_shell_selected", shell = %shell);
+            ("shell".to_string(), shell)
+        }
+        crate::state::types::AgentMode::Agent(name) => {
+            let command =
+                kild_config
+                    .get_agent_command(name)
+                    .map_err(|e| SessionError::ConfigError {
+                        message: e.to_string(),
+                    })?;
 
-    // Warn if agent CLI is not available in PATH
-    if let Some(false) = agents::is_agent_available(&agent) {
-        warn!(
-            event = "core.session.agent_not_available",
-            agent = %agent,
-            "Agent CLI '{}' not found in PATH - session may fail to start",
-            agent
-        );
-    }
+            if let Some(false) = agents::is_agent_available(name) {
+                warn!(
+                    event = "core.session.agent_not_available",
+                    agent = %name,
+                    "Agent CLI '{}' not found in PATH - session may fail to start",
+                    name
+                );
+            }
+
+            (name.clone(), command)
+        }
+        crate::state::types::AgentMode::DefaultAgent => {
+            let name = kild_config.agent.default.clone();
+            let command =
+                kild_config
+                    .get_agent_command(&name)
+                    .map_err(|e| SessionError::ConfigError {
+                        message: e.to_string(),
+                    })?;
+
+            if let Some(false) = agents::is_agent_available(&name) {
+                warn!(
+                    event = "core.session.agent_not_available",
+                    agent = %name,
+                    "Agent CLI '{}' not found in PATH - session may fail to start",
+                    name
+                );
+            }
+
+            (name, command)
+        }
+    };
 
     info!(
         event = "core.session.create_started",
@@ -498,7 +536,6 @@ pub fn open_session(
                         fallback = %fallback,
                         "$SHELL not set, falling back to /bin/sh"
                     );
-                    eprintln!("Warning: $SHELL not set. Using /bin/sh as fallback.");
                     fallback
                 });
                 info!(event = "core.session.open_shell_selected", shell = %shell);
@@ -1301,7 +1338,7 @@ mod tests {
         // Create the request with explicit project_path
         let request = CreateSessionRequest::with_project_path(
             "test-branch".to_string(),
-            Some("claude".to_string()),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
             None,
             temp_dir.clone(),
         );
@@ -1330,8 +1367,11 @@ mod tests {
         );
 
         // Also verify that without project_path, we'd get a different result
-        let request_without_path =
-            CreateSessionRequest::new("test-branch".to_string(), Some("claude".to_string()), None);
+        let request_without_path = CreateSessionRequest::new(
+            "test-branch".to_string(),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
+            None,
+        );
         assert!(
             request_without_path.project_path.is_none(),
             "Request without project_path should have None"
@@ -1345,7 +1385,7 @@ mod tests {
     fn test_create_session_request_none_project_path_uses_cwd_detection() {
         let request = CreateSessionRequest::new(
             "test-branch".to_string(),
-            Some("claude".to_string()),
+            crate::state::types::AgentMode::Agent("claude".to_string()),
             Some("test note".to_string()),
         );
 

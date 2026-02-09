@@ -67,6 +67,15 @@ pub fn build_cli() -> Command {
                         .help("Skip fetching from remote before creating worktree")
                         .action(ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("no-agent")
+                        .long("no-agent")
+                        .help("Create with a bare terminal shell instead of launching an agent")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("agent")
+                        .conflicts_with("startup-command")
+                        .conflicts_with("flags")
+                )
         )
         .subcommand(
             Command::new("list")
@@ -1453,5 +1462,121 @@ mod tests {
         let app = build_cli();
         let matches = app.try_get_matches_from(vec!["kild", "sync", "--all", "some-branch"]);
         assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "create", "my-branch", "--no-agent"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("no-agent"));
+        assert_eq!(
+            create_matches.get_one::<String>("branch").unwrap(),
+            "my-branch"
+        );
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_conflicts_with_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--agent",
+            "claude",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_conflicts_with_startup_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--startup-command",
+            "some-cmd",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_conflicts_with_flags() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--flags",
+            "--trust-all-tools",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_with_note() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--note",
+            "manual work",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("no-agent"));
+        assert_eq!(
+            create_matches.get_one::<String>("note").unwrap(),
+            "manual work"
+        );
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_with_base() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--base",
+            "develop",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("no-agent"));
+        assert_eq!(create_matches.get_one::<String>("base").unwrap(), "develop");
+    }
+
+    #[test]
+    fn test_cli_create_no_agent_with_no_fetch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-agent",
+            "--no-fetch",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("no-agent"));
+        assert!(create_matches.get_flag("no-fetch"));
     }
 }

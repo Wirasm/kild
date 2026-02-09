@@ -62,6 +62,7 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 # Run
 cargo run -p kild -- create my-branch --agent claude
 cargo run -p kild -- create my-branch --agent claude --note "Working on auth feature"
+cargo run -p kild -- create my-branch --no-agent       # Open bare terminal with $SHELL
 cargo run -p kild -- list
 cargo run -p kild -- list --json                 # JSON output for scripting
 cargo run -p kild -- status my-branch --json     # JSON output for single kild

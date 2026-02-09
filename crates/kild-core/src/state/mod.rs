@@ -8,4 +8,4 @@ pub use dispatch::CoreStore;
 pub use errors::DispatchError;
 pub use events::Event;
 pub use store::Store;
-pub use types::{Command, OpenMode};
+pub use types::{AgentMode, Command, OpenMode};

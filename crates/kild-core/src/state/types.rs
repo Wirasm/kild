@@ -15,6 +15,20 @@ pub enum OpenMode {
     BareShell,
 }
 
+/// What agent to launch when creating a kild.
+///
+/// Mirrors [`OpenMode`] for the create path. Determines whether the new kild
+/// gets an AI agent or a bare terminal shell.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AgentMode {
+    /// Use default agent from config.
+    DefaultAgent,
+    /// Use a specific agent (overrides config default).
+    Agent(String),
+    /// Open a bare terminal with `$SHELL` instead of an agent.
+    BareShell,
+}
+
 /// All business operations that can be dispatched through the store.
 ///
 /// Each variant captures the parameters needed to execute the operation.
@@ -26,8 +40,8 @@ pub enum Command {
     CreateKild {
         /// Branch name for the new kild (will be prefixed with `kild/`).
         branch: String,
-        /// Agent to launch. Uses default from config if `None`.
-        agent: Option<String>,
+        /// What agent to launch (default, specific, or bare shell).
+        agent_mode: AgentMode,
         /// Optional note describing what this kild is for.
         note: Option<String>,
         /// Project path for session tracking. Uses current directory if `None`.
@@ -69,10 +83,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_agent_mode_serde_roundtrip() {
+        let modes = vec![
+            AgentMode::DefaultAgent,
+            AgentMode::Agent("claude".to_string()),
+            AgentMode::BareShell,
+        ];
+        for mode in modes {
+            let json = serde_json::to_string(&mode).unwrap();
+            let roundtripped: AgentMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(mode, roundtripped);
+        }
+    }
+
+    #[test]
+    fn test_create_kild_with_bare_shell_serde() {
+        let cmd = Command::CreateKild {
+            branch: "debug-session".to_string(),
+            agent_mode: AgentMode::BareShell,
+            note: None,
+            project_path: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let deserialized: Command = serde_json::from_str(&json).unwrap();
+        assert_eq!(cmd, deserialized);
+    }
+
+    #[test]
     fn test_command_serde_roundtrip() {
         let cmd = Command::CreateKild {
             branch: "my-feature".to_string(),
-            agent: Some("claude".to_string()),
+            agent_mode: AgentMode::Agent("claude".to_string()),
             note: Some("Working on auth".to_string()),
             project_path: Some(PathBuf::from("/home/user/project")),
         };
@@ -86,7 +127,7 @@ mod tests {
         let commands = vec![
             Command::CreateKild {
                 branch: "feature".to_string(),
-                agent: Some("claude".to_string()),
+                agent_mode: AgentMode::Agent("claude".to_string()),
                 note: None,
                 project_path: None,
             },
@@ -138,7 +179,7 @@ mod tests {
         let commands = vec![
             Command::CreateKild {
                 branch: "test".to_string(),
-                agent: Some("kiro".to_string()),
+                agent_mode: AgentMode::Agent("kiro".to_string()),
                 note: Some("test note".to_string()),
                 project_path: Some(PathBuf::from("/tmp/project")),
             },

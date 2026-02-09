@@ -71,6 +71,9 @@ kild create bugfix/login-error --agent kiro
 
 # Add a description with --note
 kild create feature-auth --agent claude --note "Implementing JWT authentication"
+
+# Create without launching an agent (opens bare terminal with $SHELL)
+kild create debug-session --no-agent
 ```
 
 ### List active kilds

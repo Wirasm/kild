@@ -75,13 +75,13 @@ kild create feature-auth --agent claude
 
 ### Create a Kild
 ```bash
-kild create <branch> [--agent <agent>] [--terminal <terminal>] [--flags <flags>] [--note <note>]
+kild create <branch> [--agent <agent>] [--terminal <terminal>] [--flags <flags>] [--note <note>] [--no-agent]
 ```
 
 Creates an isolated workspace with:
 - New Git worktree in `~/.kild/worktrees/<project>/<branch>/`
 - Unique port range (10 ports, starting from 3000)
-- Native terminal with AI agent launched
+- Native terminal with AI agent launched (or bare terminal with `--no-agent`)
 - Process tracking (PID, name, start time)
 - Session metadata saved to `~/.kild/sessions/`
 
@@ -105,6 +105,10 @@ kild create feature-auth --agent kiro
 # Override terminal (only when user requests)
 kild create feature-auth --terminal iterm
 # Result: Opens in iTerm instead of default terminal
+
+# Create without agent (opens bare terminal with $SHELL)
+kild create debug-session --no-agent
+# Result: Creates kild but opens bare terminal instead of launching an agent
 ```
 
 ### List All Kilds
