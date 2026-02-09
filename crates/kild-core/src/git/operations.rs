@@ -1,7 +1,7 @@
 use crate::git::errors::GitError;
 use crate::git::types::{
-    BaseBranchDrift, BranchHealth, CommitActivity, CommitCounts, ConflictStatus, DiffStats,
-    FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
+    BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, CommitCounts, ConflictStatus,
+    DiffStats, FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
 };
 use git2::{Oid, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
@@ -656,48 +656,39 @@ fn diff_against_base(repo: &Repository, branch_oid: Oid, merge_base_oid: Oid) ->
 /// Get list of changed file paths between merge base and branch tip.
 ///
 /// Returns the set of files modified, added, or deleted on the branch
-/// relative to the merge base. Returns `None` if commits cannot be
-/// resolved or diff computation fails (logged as warnings).
+/// relative to the merge base.
+///
+/// # Errors
+///
+/// Returns a descriptive error string if commits cannot be resolved,
+/// trees cannot be retrieved, or diff computation fails.
 fn get_changed_files(
     repo: &Repository,
     branch_oid: Oid,
     merge_base_oid: Oid,
-) -> Option<Vec<PathBuf>> {
-    let base_commit = match repo.find_commit(merge_base_oid) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(event = "core.git.overlaps.base_commit_not_found", error = %e);
-            return None;
-        }
-    };
-    let branch_commit = match repo.find_commit(branch_oid) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(event = "core.git.overlaps.branch_commit_not_found", error = %e);
-            return None;
-        }
-    };
-    let base_tree = match base_commit.tree() {
-        Ok(t) => t,
-        Err(e) => {
-            warn!(event = "core.git.overlaps.base_tree_failed", error = %e);
-            return None;
-        }
-    };
-    let branch_tree = match branch_commit.tree() {
-        Ok(t) => t,
-        Err(e) => {
-            warn!(event = "core.git.overlaps.branch_tree_failed", error = %e);
-            return None;
-        }
-    };
-    let diff = match repo.diff_tree_to_tree(Some(&base_tree), Some(&branch_tree), None) {
-        Ok(d) => d,
-        Err(e) => {
+) -> Result<Vec<PathBuf>, String> {
+    let base_commit = repo.find_commit(merge_base_oid).map_err(|e| {
+        warn!(event = "core.git.overlaps.base_commit_not_found", error = %e);
+        format!("Base commit not found: {}", e)
+    })?;
+    let branch_commit = repo.find_commit(branch_oid).map_err(|e| {
+        warn!(event = "core.git.overlaps.branch_commit_not_found", error = %e);
+        format!("Branch commit not found: {}", e)
+    })?;
+    let base_tree = base_commit.tree().map_err(|e| {
+        warn!(event = "core.git.overlaps.base_tree_failed", error = %e);
+        format!("Failed to read base tree: {}", e)
+    })?;
+    let branch_tree = branch_commit.tree().map_err(|e| {
+        warn!(event = "core.git.overlaps.branch_tree_failed", error = %e);
+        format!("Failed to read branch tree: {}", e)
+    })?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&base_tree), Some(&branch_tree), None)
+        .map_err(|e| {
             warn!(event = "core.git.overlaps.diff_computation_failed", error = %e);
-            return None;
-        }
-    };
+            format!("Diff computation failed: {}", e)
+        })?;
 
     let files: Vec<PathBuf> = diff
         .deltas()
@@ -710,7 +701,7 @@ fn get_changed_files(
         })
         .collect();
 
-    Some(files)
+    Ok(files)
 }
 
 /// Check for merge conflicts between branch tip and base tip (in-memory).
@@ -909,7 +900,7 @@ pub fn collect_file_overlaps(
     sessions: &[crate::Session],
     base_branch: &str,
 ) -> (OverlapReport, Vec<(String, String)>) {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     info!(
         event = "core.git.overlaps.collect_started",
@@ -928,7 +919,11 @@ pub fn collect_file_overlaps(
                 warn!(event = "core.git.overlaps.repo_open_failed", branch = &*session.branch, error = %e);
                 errors.push((
                     session.branch.clone(),
-                    format!("Failed to open repository: {}", e),
+                    format!(
+                        "Failed to open repository at {}: {}",
+                        session.worktree_path.display(),
+                        e
+                    ),
                 ));
                 continue;
             }
@@ -944,7 +939,10 @@ pub fn collect_file_overlaps(
                 );
                 errors.push((
                     session.branch.clone(),
-                    format!("Branch '{}' not found", kild_branch),
+                    format!(
+                        "Branch '{}' not found (checked local and origin remote)",
+                        kild_branch
+                    ),
                 ));
                 continue;
             }
@@ -959,7 +957,10 @@ pub fn collect_file_overlaps(
                 );
                 errors.push((
                     session.branch.clone(),
-                    format!("Base branch '{}' not found", base_branch),
+                    format!(
+                        "Base branch '{}' not found (checked local and origin remote)",
+                        base_branch
+                    ),
                 ));
                 continue;
             }
@@ -974,21 +975,21 @@ pub fn collect_file_overlaps(
                 );
                 errors.push((
                     session.branch.clone(),
-                    "No common ancestor with base branch".to_string(),
+                    format!(
+                        "No common ancestor with base branch '{}' (branch may be orphaned)",
+                        base_branch
+                    ),
                 ));
                 continue;
             }
         };
 
         match get_changed_files(&repo, branch_oid, merge_base) {
-            Some(files) => {
+            Ok(files) => {
                 files_by_branch.insert(session.branch.clone(), files);
             }
-            None => {
-                errors.push((
-                    session.branch.clone(),
-                    "Failed to compute changed files".to_string(),
-                ));
+            Err(detail) => {
+                errors.push((session.branch.clone(), detail));
             }
         }
     }
@@ -1021,17 +1022,20 @@ pub fn collect_file_overlaps(
     });
 
     // Determine which kilds have zero overlaps
-    let overlapping_branches: std::collections::HashSet<&str> = overlapping_files
+    let overlapping_branches: HashSet<&str> = overlapping_files
         .iter()
         .flat_map(|o| o.branches.iter().map(|s| s.as_str()))
         .collect();
 
-    let mut clean_kilds: Vec<(String, usize)> = files_by_branch
+    let mut clean_kilds: Vec<CleanKild> = files_by_branch
         .iter()
         .filter(|(branch, _)| !overlapping_branches.contains(branch.as_str()))
-        .map(|(branch, files)| (branch.clone(), files.len()))
+        .map(|(branch, files)| CleanKild {
+            branch: branch.clone(),
+            changed_files: files.len(),
+        })
         .collect();
-    clean_kilds.sort_by(|a, b| a.0.cmp(&b.0));
+    clean_kilds.sort_by(|a, b| a.branch.cmp(&b.branch));
 
     let report = OverlapReport {
         overlapping_files,
@@ -2006,7 +2010,7 @@ mod tests {
         let merge_base = find_merge_base(&repo, branch_oid, base_oid).unwrap();
 
         let files = get_changed_files(&repo, branch_oid, merge_base);
-        assert!(files.is_some());
+        assert!(files.is_ok());
         let files = files.unwrap();
         assert_eq!(files.len(), 2);
         assert!(files.contains(&PathBuf::from("new_file.rs")));
@@ -2040,7 +2044,7 @@ mod tests {
         let merge_base = find_merge_base(&repo, branch_oid, base_oid).unwrap();
 
         let files = get_changed_files(&repo, branch_oid, merge_base);
-        assert!(files.is_some());
+        assert!(files.is_ok());
         assert!(files.unwrap().is_empty());
     }
 
@@ -2073,7 +2077,7 @@ mod tests {
         let merge_base = find_merge_base(&repo, branch_oid, base_oid).unwrap();
 
         let files = get_changed_files(&repo, branch_oid, merge_base);
-        assert!(files.is_some());
+        assert!(files.is_ok());
         let files = files.unwrap();
         assert_eq!(files.len(), 1);
         assert!(files.contains(&PathBuf::from("to_delete.txt")));
@@ -2177,8 +2181,8 @@ mod tests {
         assert!(errors.is_empty());
         assert!(report.overlapping_files.is_empty());
         assert_eq!(report.clean_kilds.len(), 1);
-        assert_eq!(report.clean_kilds[0].0, "solo");
-        assert_eq!(report.clean_kilds[0].1, 1);
+        assert_eq!(report.clean_kilds[0].branch, "solo");
+        assert_eq!(report.clean_kilds[0].changed_files, 1);
     }
 
     #[test]
@@ -2225,6 +2229,51 @@ mod tests {
         assert_eq!(errors[0].0, "bad");
         assert!(report.overlapping_files.is_empty());
         assert_eq!(report.clean_kilds.len(), 1);
-        assert_eq!(report.clean_kilds[0].0, "good");
+        assert_eq!(report.clean_kilds[0].branch, "good");
+    }
+
+    #[test]
+    fn test_collect_file_overlaps_three_way_overlap() {
+        let dir1 = TempDir::new().unwrap();
+        let dir2 = TempDir::new().unwrap();
+        let dir3 = TempDir::new().unwrap();
+
+        let all_files = &["core.rs", "utils.rs", "only_c.rs"];
+        // All three modify core.rs, A and B modify utils.rs
+        setup_kild_repo(dir1.path(), "branch-a", all_files, &["core.rs", "utils.rs"]);
+        setup_kild_repo(dir2.path(), "branch-b", all_files, &["core.rs", "utils.rs"]);
+        setup_kild_repo(
+            dir3.path(),
+            "branch-c",
+            all_files,
+            &["core.rs", "only_c.rs"],
+        );
+
+        let sessions = vec![
+            make_test_session("branch-a", dir1.path().to_path_buf()),
+            make_test_session("branch-b", dir2.path().to_path_buf()),
+            make_test_session("branch-c", dir3.path().to_path_buf()),
+        ];
+
+        let (report, errors) = collect_file_overlaps(&sessions, "main");
+        assert!(errors.is_empty(), "Unexpected errors: {:?}", errors);
+
+        // core.rs is modified by 3 branches, utils.rs by 2 — sorted by count desc
+        assert_eq!(report.overlapping_files.len(), 2);
+        assert_eq!(
+            report.overlapping_files[0].file,
+            PathBuf::from("core.rs"),
+            "3-way overlap should sort first"
+        );
+        assert_eq!(report.overlapping_files[0].branches.len(), 3);
+        assert_eq!(report.overlapping_files[1].file, PathBuf::from("utils.rs"));
+        assert_eq!(report.overlapping_files[1].branches.len(), 2);
+
+        // No clean kilds — all three are involved in at least one overlap
+        assert!(
+            report.clean_kilds.is_empty(),
+            "All kilds have overlaps: {:?}",
+            report.clean_kilds
+        );
     }
 }

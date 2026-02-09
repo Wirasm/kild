@@ -236,21 +236,43 @@ pub struct BranchHealth {
 }
 
 /// A single file that is modified by multiple kilds.
+///
+/// Invariants (enforced at construction in `collect_file_overlaps`):
+/// - `branches.len() >= 2` (overlap requires multiple branches)
+/// - `branches` is sorted alphabetically and deduplicated
+/// - Branch names are user-facing (not `kild/` prefixed)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileOverlap {
     /// The file path relative to the repository root.
     pub file: PathBuf,
     /// Branch names (user names, not kild/ prefixed) that modify this file.
+    /// Guaranteed to contain at least 2 entries, sorted and deduplicated.
     pub branches: Vec<String>,
 }
 
+/// A kild with no file overlaps with other kilds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CleanKild {
+    /// Branch name (user-facing, not kild/ prefixed).
+    pub branch: String,
+    /// Number of files changed in this kild relative to the base branch.
+    pub changed_files: usize,
+}
+
 /// Report of file overlaps across kilds in a project.
+///
+/// Invariants (enforced at construction in `collect_file_overlaps`):
+/// - `overlapping_files` sorted by branch count (desc), then file path (asc)
+/// - `clean_kilds` sorted alphabetically by branch name
+/// - Branches in `clean_kilds` do not appear in any `overlapping_files`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OverlapReport {
     /// Files modified by more than one kild.
+    /// Sorted by number of overlapping branches (descending), then by file path.
     pub overlapping_files: Vec<FileOverlap>,
-    /// Kilds with no file overlaps (branch name, changed file count).
-    pub clean_kilds: Vec<(String, usize)>,
+    /// Kilds with no file overlaps with other kilds.
+    /// Sorted alphabetically by branch name.
+    pub clean_kilds: Vec<CleanKild>,
 }
 
 impl ProjectInfo {
@@ -543,13 +565,16 @@ mod tests {
                 file: PathBuf::from("src/lib.rs"),
                 branches: vec!["branch-a".to_string(), "branch-b".to_string()],
             }],
-            clean_kilds: vec![("branch-c".to_string(), 5)],
+            clean_kilds: vec![CleanKild {
+                branch: "branch-c".to_string(),
+                changed_files: 5,
+            }],
         };
         let value = serde_json::to_value(&report).expect("OverlapReport should serialize");
         assert_eq!(value["overlapping_files"].as_array().unwrap().len(), 1);
         assert_eq!(value["overlapping_files"][0]["file"], "src/lib.rs");
-        assert_eq!(value["clean_kilds"][0][0], "branch-c");
-        assert_eq!(value["clean_kilds"][0][1], 5);
+        assert_eq!(value["clean_kilds"][0]["branch"], "branch-c");
+        assert_eq!(value["clean_kilds"][0]["changed_files"], 5);
     }
 
     #[test]
@@ -561,5 +586,16 @@ mod tests {
         let value = serde_json::to_value(&report).expect("Empty OverlapReport should serialize");
         assert!(value["overlapping_files"].as_array().unwrap().is_empty());
         assert!(value["clean_kilds"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_clean_kild_serializes_to_json() {
+        let clean = CleanKild {
+            branch: "feature-auth".to_string(),
+            changed_files: 3,
+        };
+        let value = serde_json::to_value(&clean).expect("CleanKild should serialize");
+        assert_eq!(value["branch"], "feature-auth");
+        assert_eq!(value["changed_files"], 3);
     }
 }

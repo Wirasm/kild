@@ -35,6 +35,7 @@ pub(crate) fn handle_overlaps_command(
         return Ok(());
     }
 
+    let total = sessions.len();
     let (report, errors) =
         kild_core::git::operations::collect_file_overlaps(&sessions, base_branch);
 
@@ -45,6 +46,34 @@ pub(crate) fn handle_overlaps_command(
         errors = errors.len()
     );
 
+    // Surface errors before the report so users see warnings first
+    if !errors.is_empty() {
+        // Total failure — don't show the empty report, it's misleading
+        if errors.len() == total {
+            eprintln!("Error: All {} kild(s) failed to compute overlaps:", total);
+            for (branch, msg) in &errors {
+                eprintln!("  {} — {}", branch, msg);
+            }
+            error!(
+                event = "cli.overlaps_failed",
+                failed = errors.len(),
+                total = total
+            );
+            return Err(format!("All {} kild(s) failed overlap detection", total).into());
+        }
+
+        // Partial failure — show warnings, then continue with partial results
+        eprintln!(
+            "Warning: {} of {} kild(s) failed (showing partial results):",
+            errors.len(),
+            total
+        );
+        for (branch, msg) in &errors {
+            eprintln!("  {} — {}", branch, msg);
+        }
+        eprintln!();
+    }
+
     if json_output {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -52,13 +81,8 @@ pub(crate) fn handle_overlaps_command(
     }
 
     if !errors.is_empty() {
-        let total = sessions.len();
-        eprintln!();
-        for (branch, msg) in &errors {
-            eprintln!("  Warning: {} — {}", branch, msg);
-        }
         error!(
-            event = "cli.overlaps_failed",
+            event = "cli.overlaps_partial_failure",
             failed = errors.len(),
             total = total
         );
@@ -73,8 +97,8 @@ fn print_overlap_report(report: &kild_core::OverlapReport) {
         println!("No file overlaps detected across kilds.");
         if !report.clean_kilds.is_empty() {
             println!();
-            for (branch, file_count) in &report.clean_kilds {
-                println!("  {} ({} files changed)", branch, file_count);
+            for clean in &report.clean_kilds {
+                println!("  {} ({} files changed)", clean.branch, clean.changed_files);
             }
         }
         return;
@@ -90,10 +114,10 @@ fn print_overlap_report(report: &kild_core::OverlapReport) {
     if !report.clean_kilds.is_empty() {
         println!();
         println!("No overlaps:");
-        for (branch, file_count) in &report.clean_kilds {
+        for clean in &report.clean_kilds {
             println!(
                 "  {} ({} files changed, no shared files with other kilds)",
-                branch, file_count
+                clean.branch, clean.changed_files
             );
         }
     }

@@ -431,7 +431,7 @@ impl Session {
             project_id: "test-project".to_string(),
             branch,
             worktree_path,
-            agent: "claude".to_string(),
+            agent: "test".to_string(),
             status: SessionStatus::Active,
             created_at: "2026-02-09T10:00:00Z".to_string(),
             port_range_start: 0,
