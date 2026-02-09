@@ -103,27 +103,25 @@ async fn dispatch_message(
     match msg {
         ClientMessage::CreateSession {
             id,
-            branch,
-            agent,
-            note,
-            project_path,
-            base_branch: _,
-            no_fetch: _,
+            session_id,
+            working_directory,
+            command,
+            args,
+            env_vars,
+            rows,
+            cols,
         } => {
             let mut mgr = session_manager.lock().await;
-            let worktree_path = project_path.as_deref().unwrap_or(".");
-            let agent_name = agent.as_deref().unwrap_or("shell");
+            let env_pairs: Vec<(String, String)> = env_vars.into_iter().collect();
 
             match mgr.create_session(
-                &branch, // session_id (simplified for Phase 1b)
-                "default",
-                &branch,
-                worktree_path,
-                agent_name,
-                note,
-                agent_name, // command (simplified)
-                &[],
-                &[],
+                &session_id,
+                &working_directory,
+                &command,
+                &args,
+                &env_pairs,
+                rows,
+                cols,
             ) {
                 Ok(session_info) => Some(DaemonMessage::SessionCreated {
                     id,
@@ -301,9 +299,9 @@ async fn dispatch_message(
             }
         }
 
-        ClientMessage::ListSessions { id, project_id } => {
+        ClientMessage::ListSessions { id, project_id: _ } => {
             let mgr = session_manager.lock().await;
-            let sessions = mgr.list_sessions(project_id.as_deref());
+            let sessions = mgr.list_sessions();
             Some(DaemonMessage::SessionList { id, sessions })
         }
 

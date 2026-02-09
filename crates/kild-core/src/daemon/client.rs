@@ -108,33 +108,67 @@ fn send_request(
     Ok(response)
 }
 
+/// Parameters for creating a daemon-managed PTY session.
+///
+/// The daemon is a pure PTY manager. It does NOT know about git worktrees,
+/// agents, or kild sessions. The caller (kild-core session handler) is
+/// responsible for worktree creation and session file persistence.
+#[derive(Debug, Clone)]
+pub struct DaemonCreateRequest<'a> {
+    /// Unique request ID for response correlation.
+    pub request_id: &'a str,
+    /// Session identifier (e.g. "myapp_feature-auth").
+    pub session_id: &'a str,
+    /// Working directory for the PTY process.
+    pub working_directory: &'a Path,
+    /// Command to execute in the PTY.
+    pub command: &'a str,
+    /// Arguments for the command.
+    pub args: &'a [String],
+    /// Environment variables to set for the PTY process.
+    pub env_vars: &'a [(String, String)],
+    /// Initial PTY rows.
+    pub rows: u16,
+    /// Initial PTY columns.
+    pub cols: u16,
+}
+
 /// Create a new PTY session in the daemon.
 ///
 /// Sends a `create_session` JSONL message to the daemon via unix socket.
 /// Blocks until the daemon responds with session ID or error.
 pub fn create_pty_session(
-    spawn_id: &str,
-    working_directory: &Path,
-    command: &str,
+    request: &DaemonCreateRequest<'_>,
 ) -> Result<DaemonCreateResult, DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
 
     info!(
         event = "core.daemon.create_pty_session_started",
-        spawn_id = spawn_id,
-        working_directory = %working_directory.display()
+        request_id = request.request_id,
+        session_id = request.session_id,
+        command = request.command,
     );
 
-    let request = serde_json::json!({
-        "id": spawn_id,
+    let env_map: serde_json::Map<String, serde_json::Value> = request
+        .env_vars
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+
+    let msg = serde_json::json!({
+        "id": request.request_id,
         "type": "create_session",
-        "spawn_id": spawn_id,
-        "working_directory": working_directory.to_string_lossy(),
-        "command": command,
+        "session_id": request.session_id,
+        "working_directory": request.working_directory.to_string_lossy(),
+        "command": request.command,
+        "args": request.args,
+        "env_vars": env_map,
+        "rows": request.rows,
+        "cols": request.cols,
     });
 
     let mut stream = connect(&socket_path)?;
-    let response = send_request(&mut stream, request)?;
+    let response = send_request(&mut stream, msg)?;
 
     let session_id = response
         .get("session")

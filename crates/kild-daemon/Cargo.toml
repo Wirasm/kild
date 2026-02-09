@@ -33,6 +33,9 @@ base64.workspace = true
 # Home directory for socket path
 dirs.workspace = true
 
+# TOML config parsing
+toml.workspace = true
+
 # Timestamps
 chrono.workspace = true
 

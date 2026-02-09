@@ -240,15 +240,24 @@ pub fn create_session(
             )?
         }
         crate::state::types::RuntimeMode::Daemon => {
-            // New path: request daemon to create PTY session
-            let daemon_result = crate::daemon::client::create_pty_session(
-                &spawn_id,
-                &worktree.path,
-                &validated.command,
-            )
-            .map_err(|e| SessionError::DaemonError {
-                message: e.to_string(),
-            })?;
+            // New path: request daemon to create PTY session.
+            // The daemon is a pure PTY manager — it spawns a command in a
+            // working directory. Worktree creation and session persistence
+            // are handled here in kild-core.
+            let daemon_request = crate::daemon::client::DaemonCreateRequest {
+                request_id: &spawn_id,
+                session_id: &session_id,
+                working_directory: &worktree.path,
+                command: &validated.command,
+                args: &[],
+                env_vars: &[],
+                rows: 24,
+                cols: 80,
+            };
+            let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
+                .map_err(|e| SessionError::DaemonError {
+                    message: e.to_string(),
+                })?;
 
             AgentProcess::new(
                 validated.agent.clone(),

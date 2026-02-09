@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::SessionInfo;
@@ -9,20 +11,31 @@ use crate::types::SessionInfo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
+    /// Create a new daemon session with a PTY.
+    ///
+    /// The daemon does NOT create git worktrees — that is the caller's
+    /// responsibility. The daemon just spawns a process in a PTY.
     #[serde(rename = "create_session")]
     CreateSession {
         id: String,
-        branch: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        agent: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        note: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        project_path: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        base_branch: Option<String>,
+        /// Unique session identifier (e.g. "myapp_feature-auth").
+        session_id: String,
+        /// Working directory for the PTY process.
+        working_directory: String,
+        /// Command to execute in the PTY.
+        command: String,
+        /// Arguments for the command.
         #[serde(default)]
-        no_fetch: bool,
+        args: Vec<String>,
+        /// Environment variables to set for the PTY process.
+        #[serde(default)]
+        env_vars: HashMap<String, String>,
+        /// Initial PTY rows.
+        #[serde(default = "default_rows")]
+        rows: u16,
+        /// Initial PTY columns.
+        #[serde(default = "default_cols")]
+        cols: u16,
     },
 
     #[serde(rename = "attach")]
@@ -134,6 +147,14 @@ pub enum DaemonMessage {
     Ack { id: String },
 }
 
+fn default_rows() -> u16 {
+    24
+}
+
+fn default_cols() -> u16 {
+    80
+}
+
 impl ClientMessage {
     /// Extract the request ID from any client message.
     pub fn id(&self) -> &str {
@@ -161,12 +182,16 @@ mod tests {
     fn test_client_message_create_session_roundtrip() {
         let msg = ClientMessage::CreateSession {
             id: "req-001".to_string(),
-            branch: "feature-auth".to_string(),
-            agent: Some("claude".to_string()),
-            note: Some("OAuth2 implementation".to_string()),
-            project_path: Some("/Users/me/projects/myapp".to_string()),
-            base_branch: None,
-            no_fetch: false,
+            session_id: "myapp_feature-auth".to_string(),
+            working_directory: "/tmp/worktrees/feature-auth".to_string(),
+            command: "claude".to_string(),
+            args: vec!["--dangerously-skip-permissions".to_string()],
+            env_vars: HashMap::from([(
+                "KILD_SESSION".to_string(),
+                "myapp_feature-auth".to_string(),
+            )]),
+            rows: 24,
+            cols: 80,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"create_session"#));
@@ -215,12 +240,13 @@ mod tests {
         let messages: Vec<ClientMessage> = vec![
             ClientMessage::CreateSession {
                 id: "1".to_string(),
-                branch: "b".to_string(),
-                agent: None,
-                note: None,
-                project_path: None,
-                base_branch: None,
-                no_fetch: false,
+                session_id: "s".to_string(),
+                working_directory: "/tmp".to_string(),
+                command: "bash".to_string(),
+                args: vec![],
+                env_vars: HashMap::new(),
+                rows: 24,
+                cols: 80,
             },
             ClientMessage::Attach {
                 id: "2".to_string(),
@@ -281,13 +307,10 @@ mod tests {
             id: "req-001".to_string(),
             session: SessionInfo {
                 id: "myapp_feature-auth".to_string(),
-                project_id: "myapp".to_string(),
-                branch: "feature-auth".to_string(),
-                worktree_path: "/tmp/worktrees/feature-auth".to_string(),
-                agent: "claude".to_string(),
+                working_directory: "/tmp/worktrees/feature-auth".to_string(),
+                command: "claude".to_string(),
                 status: "running".to_string(),
                 created_at: "2026-02-09T14:30:00Z".to_string(),
-                note: Some("OAuth2".to_string()),
                 client_count: None,
                 pty_pid: None,
             },
@@ -297,7 +320,7 @@ mod tests {
         let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
         if let DaemonMessage::SessionCreated { id, session } = parsed {
             assert_eq!(id, "req-001");
-            assert_eq!(session.branch, "feature-auth");
+            assert_eq!(session.command, "claude");
         } else {
             panic!("wrong variant");
         }
@@ -397,22 +420,25 @@ mod tests {
     }
 
     #[test]
-    fn test_client_message_optional_fields_omitted() {
-        let msg = ClientMessage::CreateSession {
-            id: "1".to_string(),
-            branch: "feature".to_string(),
-            agent: None,
-            note: None,
-            project_path: None,
-            base_branch: None,
-            no_fetch: false,
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        // Optional None fields should not appear in output
-        assert!(!json.contains("agent"));
-        assert!(!json.contains("note"));
-        assert!(!json.contains("project_path"));
-        assert!(!json.contains("base_branch"));
+    fn test_client_message_create_session_defaults() {
+        // Empty args and env_vars default to empty, rows/cols default to 24/80
+        let json = r#"{"id":"1","type":"create_session","session_id":"s","working_directory":"/tmp","command":"bash"}"#;
+        let parsed: ClientMessage = serde_json::from_str(json).unwrap();
+        if let ClientMessage::CreateSession {
+            args,
+            env_vars,
+            rows,
+            cols,
+            ..
+        } = parsed
+        {
+            assert!(args.is_empty());
+            assert!(env_vars.is_empty());
+            assert_eq!(rows, 24);
+            assert_eq!(cols, 80);
+        } else {
+            panic!("wrong variant");
+        }
     }
 
     #[test]
@@ -426,14 +452,19 @@ mod tests {
 
     #[test]
     fn test_wire_format_example() {
-        // Test the wire format example from the design doc
-        let create =
-            r#"{"id":"1","type":"create_session","branch":"feature-auth","agent":"claude"}"#;
+        let create = r#"{"id":"1","type":"create_session","session_id":"myapp_feature-auth","working_directory":"/tmp/wt","command":"claude","args":["--dangerously-skip-permissions"]}"#;
         let parsed: ClientMessage = serde_json::from_str(create).unwrap();
         assert_eq!(parsed.id(), "1");
-        if let ClientMessage::CreateSession { branch, agent, .. } = parsed {
-            assert_eq!(branch, "feature-auth");
-            assert_eq!(agent, Some("claude".to_string()));
+        if let ClientMessage::CreateSession {
+            session_id,
+            command,
+            args,
+            ..
+        } = parsed
+        {
+            assert_eq!(session_id, "myapp_feature-auth");
+            assert_eq!(command, "claude");
+            assert_eq!(args, vec!["--dangerously-skip-permissions"]);
         } else {
             panic!("wrong variant");
         }

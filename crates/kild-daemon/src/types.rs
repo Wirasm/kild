@@ -81,6 +81,50 @@ fn default_shutdown_timeout_secs() -> u64 {
     5
 }
 
+/// Wrapper for deserializing the `[daemon]` section from a KILD config file.
+///
+/// The daemon reads `~/.kild/config.toml` itself to extract its own configuration.
+/// This struct mirrors just enough of the file structure to extract the `[daemon]` section.
+#[derive(Debug, Deserialize)]
+struct ConfigFile {
+    #[serde(default)]
+    daemon: DaemonConfig,
+}
+
+/// Load daemon configuration from `~/.kild/config.toml`.
+///
+/// Reads the `[daemon]` section from the user's config file. Falls back to
+/// defaults if the file doesn't exist or the section is missing.
+pub fn load_daemon_config() -> DaemonConfig {
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join(".kild")
+        .join("config.toml");
+
+    match std::fs::read_to_string(&config_path) {
+        Ok(contents) => match toml::from_str::<ConfigFile>(&contents) {
+            Ok(file) => file.daemon,
+            Err(e) => {
+                tracing::warn!(
+                    event = "daemon.config.parse_failed",
+                    path = %config_path.display(),
+                    error = %e,
+                );
+                DaemonConfig::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DaemonConfig::default(),
+        Err(e) => {
+            tracing::warn!(
+                event = "daemon.config.read_failed",
+                path = %config_path.display(),
+                error = %e,
+            );
+            DaemonConfig::default()
+        }
+    }
+}
+
 /// Runtime status of the daemon process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonStatus {
@@ -94,20 +138,18 @@ pub struct DaemonStatus {
     pub active_connections: usize,
 }
 
-/// Summary of a session as returned via IPC.
+/// Summary of a daemon session as returned via IPC.
 ///
-/// This is a wire type for the protocol, not the internal `DaemonSession`.
+/// This is a PTY-centric wire type for the protocol, not the internal
+/// `DaemonSession`. The daemon knows about PTYs and processes, not about
+/// git worktrees or agents — those concepts live in kild-core.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: String,
-    pub project_id: String,
-    pub branch: String,
-    pub worktree_path: String,
-    pub agent: String,
+    pub working_directory: String,
+    pub command: String,
     pub status: String,
     pub created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,39 +201,58 @@ mod tests {
     fn test_session_info_serde() {
         let info = SessionInfo {
             id: "myapp_feature-auth".to_string(),
-            project_id: "myapp".to_string(),
-            branch: "feature-auth".to_string(),
-            worktree_path: "/tmp/worktrees/feature-auth".to_string(),
-            agent: "claude".to_string(),
+            working_directory: "/tmp/worktrees/feature-auth".to_string(),
+            command: "claude".to_string(),
             status: "running".to_string(),
             created_at: "2026-02-09T14:30:00Z".to_string(),
-            note: Some("OAuth2 implementation".to_string()),
             client_count: Some(2),
             pty_pid: Some(12345),
         };
         let json = serde_json::to_string(&info).unwrap();
         let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, info.id);
-        assert_eq!(parsed.note, info.note);
+        assert_eq!(parsed.command, "claude");
         assert_eq!(parsed.client_count, Some(2));
+    }
+
+    #[test]
+    fn test_load_daemon_config_from_toml() {
+        let toml = r#"
+[daemon]
+scrollback_buffer_size = 1024
+shutdown_timeout_secs = 10
+"#;
+        let file: ConfigFile = toml::from_str(toml).unwrap();
+        assert_eq!(file.daemon.scrollback_buffer_size, 1024);
+        assert_eq!(file.daemon.shutdown_timeout_secs, 10);
+        // Defaults for unset fields
+        assert_eq!(file.daemon.pty_output_batch_ms, 4);
+    }
+
+    #[test]
+    fn test_load_daemon_config_missing_section() {
+        let toml = r#"
+[agent]
+default = "claude"
+"#;
+        let file: ConfigFile = toml::from_str(toml).unwrap();
+        // Should get all defaults when [daemon] section is missing
+        assert_eq!(file.daemon.scrollback_buffer_size, 65536);
+        assert_eq!(file.daemon.shutdown_timeout_secs, 5);
     }
 
     #[test]
     fn test_session_info_optional_fields_omitted() {
         let info = SessionInfo {
             id: "test".to_string(),
-            project_id: "proj".to_string(),
-            branch: "branch".to_string(),
-            worktree_path: "/tmp".to_string(),
-            agent: "claude".to_string(),
+            working_directory: "/tmp".to_string(),
+            command: "bash".to_string(),
             status: "stopped".to_string(),
             created_at: "2026-02-09T14:30:00Z".to_string(),
-            note: None,
             client_count: None,
             pty_pid: None,
         };
         let json = serde_json::to_string(&info).unwrap();
-        assert!(!json.contains("note"));
         assert!(!json.contains("client_count"));
         assert!(!json.contains("pty_pid"));
     }

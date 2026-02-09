@@ -91,7 +91,7 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::err
         return Ok(());
     }
 
-    if !config.daemon.auto_start {
+    if !config.daemon_auto_start() {
         return Err("Daemon is not running. Start it with 'kild daemon start'.".into());
     }
 
@@ -134,7 +134,7 @@ pub fn resolve_runtime_mode(
         kild_core::RuntimeMode::Daemon
     } else if no_daemon_flag {
         kild_core::RuntimeMode::Terminal
-    } else if config.daemon.enabled {
+    } else if config.is_daemon_enabled() {
         kild_core::RuntimeMode::Daemon
     } else {
         kild_core::RuntimeMode::Terminal

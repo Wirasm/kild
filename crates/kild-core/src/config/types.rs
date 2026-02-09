@@ -88,9 +88,9 @@ pub struct KildConfig {
     #[serde(default)]
     pub editor: EditorConfig,
 
-    /// Daemon runtime configuration
+    /// Daemon runtime configuration (whether to use daemon mode by default).
     #[serde(default)]
-    pub daemon: DaemonRuntimeConfig,
+    pub(crate) daemon: DaemonRuntimeConfig,
 }
 
 impl Default for KildConfig {
@@ -111,19 +111,21 @@ impl Default for KildConfig {
 /// Daemon runtime configuration.
 ///
 /// Controls whether the daemon is the default runtime for new sessions
-/// and auto-start behavior.
+/// and auto-start behavior. This struct is crate-internal; the CLI accesses
+/// these values via `KildConfig::is_daemon_enabled()` and
+/// `KildConfig::daemon_auto_start()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonRuntimeConfig {
+pub(crate) struct DaemonRuntimeConfig {
     /// Whether daemon mode is the default for new sessions.
     /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
     /// Default: false
     #[serde(default)]
-    pub enabled: bool,
+    pub(crate) enabled: bool,
 
     /// Auto-start the daemon if not running when daemon mode is requested.
     /// Default: true
     #[serde(default = "default_daemon_auto_start")]
-    pub auto_start: bool,
+    pub(crate) auto_start: bool,
 }
 
 fn default_daemon_auto_start() -> bool {
@@ -135,6 +137,20 @@ impl Default for DaemonRuntimeConfig {
         Self {
             enabled: false,
             auto_start: default_daemon_auto_start(),
+        }
+    }
+}
+
+impl DaemonRuntimeConfig {
+    /// Merge two daemon runtime configs. Override takes precedence.
+    pub(crate) fn merge(base: &Self, override_config: &Self) -> Self {
+        Self {
+            enabled: override_config.enabled || base.enabled,
+            auto_start: if override_config.auto_start {
+                true
+            } else {
+                base.auto_start
+            },
         }
     }
 }

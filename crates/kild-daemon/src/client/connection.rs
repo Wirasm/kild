@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use tokio::io::BufReader;
@@ -84,23 +85,31 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// Create a new session.
+    /// Create a new session with a PTY.
+    ///
+    /// The daemon creates the PTY and spawns the command. The caller (kild-core)
+    /// is responsible for git worktree creation and session file persistence.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session(
         &mut self,
-        branch: &str,
-        agent: Option<&str>,
-        note: Option<String>,
-        project_path: Option<String>,
+        session_id: &str,
+        working_directory: &str,
+        command: &str,
+        args: &[String],
+        env_vars: &HashMap<String, String>,
+        rows: u16,
+        cols: u16,
     ) -> Result<SessionInfo, DaemonError> {
         let id = self.next_id();
         let msg = ClientMessage::CreateSession {
             id,
-            branch: branch.to_string(),
-            agent: agent.map(String::from),
-            note,
-            project_path,
-            base_branch: None,
-            no_fetch: false,
+            session_id: session_id.to_string(),
+            working_directory: working_directory.to_string(),
+            command: command.to_string(),
+            args: args.to_vec(),
+            env_vars: env_vars.clone(),
+            rows,
+            cols,
         };
 
         let response = self.request(&msg).await?;

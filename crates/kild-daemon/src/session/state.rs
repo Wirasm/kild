@@ -29,13 +29,13 @@ impl std::fmt::Display for SessionState {
 }
 
 /// A session managed by the daemon, combining metadata with PTY runtime state.
+///
+/// The daemon is PTY-centric: it knows about commands and working directories,
+/// not about git branches or agents. Those concepts live in kild-core.
 pub struct DaemonSession {
     id: String,
-    project_id: String,
-    branch: String,
-    worktree_path: String,
-    agent: String,
-    note: Option<String>,
+    working_directory: String,
+    command: String,
     created_at: String,
     state: SessionState,
     /// Broadcast sender for PTY output distribution to attached clients.
@@ -52,24 +52,17 @@ pub struct DaemonSession {
 
 impl DaemonSession {
     /// Create a new session in Creating state.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        project_id: String,
-        branch: String,
-        worktree_path: String,
-        agent: String,
-        note: Option<String>,
+        working_directory: String,
+        command: String,
         created_at: String,
         scrollback_capacity: usize,
     ) -> Self {
         Self {
             id,
-            project_id,
-            branch,
-            worktree_path,
-            agent,
-            note,
+            working_directory,
+            command,
             created_at,
             state: SessionState::Creating,
             output_tx: None,
@@ -85,10 +78,6 @@ impl DaemonSession {
         &self.id
     }
 
-    pub fn project_id(&self) -> &str {
-        &self.project_id
-    }
-
     pub fn state(&self) -> SessionState {
         self.state
     }
@@ -101,13 +90,12 @@ impl DaemonSession {
         &self.created_at
     }
 
-    pub fn command(&self) -> Option<&str> {
-        // DaemonSession doesn't store command; return None
-        None
+    pub fn command(&self) -> &str {
+        &self.command
     }
 
-    pub fn cwd(&self) -> Option<&str> {
-        Some(&self.worktree_path)
+    pub fn working_directory(&self) -> &str {
+        &self.working_directory
     }
 
     pub fn has_output(&self) -> bool {
@@ -178,13 +166,10 @@ impl DaemonSession {
     pub fn to_session_info(&self) -> SessionInfo {
         SessionInfo {
             id: self.id.clone(),
-            project_id: self.project_id.clone(),
-            branch: self.branch.clone(),
-            worktree_path: self.worktree_path.clone(),
-            agent: self.agent.clone(),
+            working_directory: self.working_directory.clone(),
+            command: self.command.clone(),
             status: self.state.to_string(),
             created_at: self.created_at.clone(),
-            note: self.note.clone(),
             client_count: Some(self.client_count()),
             pty_pid: self.pty_pid,
         }
@@ -198,11 +183,8 @@ mod tests {
     fn test_session() -> DaemonSession {
         DaemonSession::new(
             "myapp_feature".to_string(),
-            "myapp".to_string(),
-            "feature".to_string(),
             "/tmp/wt".to_string(),
             "claude".to_string(),
-            Some("test note".to_string()),
             "2026-02-09T14:30:00Z".to_string(),
             1024,
         )
@@ -284,10 +266,10 @@ mod tests {
 
         let info = session.to_session_info();
         assert_eq!(info.id, "myapp_feature");
-        assert_eq!(info.branch, "feature");
+        assert_eq!(info.working_directory, "/tmp/wt");
+        assert_eq!(info.command, "claude");
         assert_eq!(info.status, "creating");
         assert_eq!(info.client_count, Some(2));
-        assert_eq!(info.note, Some("test note".to_string()));
     }
 
     #[test]

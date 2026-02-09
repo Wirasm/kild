@@ -3,6 +3,7 @@
 //! These tests start a real server on a temp socket, connect via `DaemonClient`,
 //! and exercise the full IPC protocol.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use kild_daemon::client::DaemonClient;
@@ -59,26 +60,35 @@ async fn test_create_session_and_list() {
 
     let mut client = DaemonClient::connect(&socket_path).await.unwrap();
 
-    // Create a session running /bin/sh -c "echo hello"
+    // Create a session running /bin/sh
     let session = client
-        .create_session("test-branch", Some("/bin/sh"), None, None)
+        .create_session(
+            "test-session",
+            "/tmp",
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+        )
         .await
         .unwrap();
 
-    assert_eq!(session.branch, "test-branch");
+    assert_eq!(session.id, "test-session");
+    assert_eq!(session.command, "/bin/sh");
     assert_eq!(session.status, "running");
 
     // List sessions
     let sessions = client.list_sessions(None).await.unwrap();
     assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].branch, "test-branch");
+    assert_eq!(sessions[0].id, "test-session");
 
     // Get specific session
-    let info = client.get_session("test-branch").await.unwrap();
-    assert_eq!(info.branch, "test-branch");
+    let info = client.get_session("test-session").await.unwrap();
+    assert_eq!(info.command, "/bin/sh");
 
     // Stop the session
-    client.stop_session("test-branch").await.unwrap();
+    client.stop_session("test-session").await.unwrap();
 
     // Shutdown
     client.shutdown().await.unwrap();
@@ -99,10 +109,18 @@ async fn test_attach_and_read_output() {
 
     let mut client = DaemonClient::connect(&socket_path).await.unwrap();
 
-    // Create a session running echo
+    // Create a session running /bin/sh
     let working_dir = dir.path().to_string_lossy().to_string();
     let _session = client
-        .create_session("echo-test", Some("/bin/sh"), None, Some(working_dir))
+        .create_session(
+            "echo-test",
+            &working_dir,
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+        )
         .await
         .unwrap();
 

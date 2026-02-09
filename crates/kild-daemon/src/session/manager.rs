@@ -46,19 +46,18 @@ impl SessionManager {
     /// Create a new session with a PTY.
     ///
     /// Creates the PTY, spawns the command, and sets up output broadcasting.
-    /// Does NOT create the git worktree — that is the integrator's responsibility.
+    /// Does NOT create git worktrees — that is kild-core's responsibility.
+    /// The daemon is a pure PTY manager.
     #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &mut self,
         session_id: &str,
-        project_id: &str,
-        branch: &str,
-        worktree_path: &str,
-        agent: &str,
-        note: Option<String>,
+        working_directory: &str,
         command: &str,
-        args: &[&str],
+        args: &[String],
         env_vars: &[(String, String)],
+        rows: u16,
+        cols: u16,
     ) -> Result<SessionInfo, DaemonError> {
         if self.sessions.contains_key(session_id) {
             return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
@@ -67,28 +66,32 @@ impl SessionManager {
         info!(
             event = "daemon.session.create_started",
             session_id = session_id,
-            branch = branch,
             command = command,
+            working_directory = working_directory,
         );
 
         let created_at = chrono::Utc::now().to_rfc3339();
 
         let mut session = DaemonSession::new(
             session_id.to_string(),
-            project_id.to_string(),
-            branch.to_string(),
-            worktree_path.to_string(),
-            agent.to_string(),
-            note,
+            working_directory.to_string(),
+            command.to_string(),
             created_at,
             self.config.scrollback_buffer_size,
         );
 
         // Create the PTY and spawn the command
-        let working_dir = std::path::Path::new(worktree_path);
-        let managed_pty =
-            self.pty_manager
-                .create(session_id, command, args, working_dir, 24, 80, env_vars)?;
+        let working_dir = std::path::Path::new(working_directory);
+        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let managed_pty = self.pty_manager.create(
+            session_id,
+            command,
+            &args_refs,
+            working_dir,
+            rows,
+            cols,
+            env_vars,
+        )?;
 
         let pty_pid = managed_pty.child_process_id();
 
@@ -259,11 +262,10 @@ impl SessionManager {
         self.sessions.get(session_id).map(|s| s.to_session_info())
     }
 
-    /// List all sessions, optionally filtered by project.
-    pub fn list_sessions(&self, project_id: Option<&str>) -> Vec<SessionInfo> {
+    /// List all sessions.
+    pub fn list_sessions(&self) -> Vec<SessionInfo> {
         self.sessions
             .values()
-            .filter(|s| project_id.is_none_or(|pid| s.project_id() == pid))
             .map(|s| s.to_session_info())
             .collect()
     }

@@ -12,4 +12,4 @@ pub use client::DaemonClient;
 pub use errors::DaemonError;
 pub use protocol::messages::{ClientMessage, DaemonMessage};
 pub use server::run_server;
-pub use types::{DaemonConfig, DaemonStatus, SessionInfo};
+pub use types::{DaemonConfig, DaemonStatus, SessionInfo, load_daemon_config};
