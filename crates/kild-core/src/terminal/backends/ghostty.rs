@@ -58,7 +58,7 @@ fn find_ghostty_pid_by_session(session_id: &str) -> Option<u32> {
 
     // The window_id is embedded in the sh -c command line via the ANSI title escape.
     // pgrep -f may match either the Ghostty process itself or the sh child process.
-    // For sh matches, traverse to the Ghostty parent PID for focus_by_pid.
+    // For sh matches, traverse to the Ghostty parent PID for window lookup.
     let found_pid = pids.into_iter().find_map(|pid| {
         // First check if the candidate is itself a Ghostty process
         if is_ghostty_process(pid) {
@@ -105,12 +105,15 @@ fn get_parent_pid(pid: u32) -> Option<u32> {
     match trimmed.parse() {
         Ok(ppid) => Some(ppid),
         Err(e) => {
-            debug!(
-                event = "core.terminal.get_parent_pid_parse_failed",
-                pid = pid,
-                output = %trimmed,
-                error = %e
-            );
+            // Non-empty output that fails to parse indicates a system issue
+            if !trimmed.is_empty() {
+                warn!(
+                    event = "core.terminal.get_parent_pid_parse_failed",
+                    pid = pid,
+                    output = %trimmed,
+                    error = %e,
+                );
+            }
             None
         }
     }
@@ -376,6 +379,8 @@ impl TerminalBackend for GhosttyBackend {
 
         match find_ghostty_native_window(window_id)? {
             Some(window) => {
+                // Define "open" as visible (not minimized). Minimized windows are
+                // considered "not open" for session status (agent is not actively visible).
                 let is_open = !window.is_minimized;
                 debug!(
                     event = "core.terminal.check_ghostty_completed",

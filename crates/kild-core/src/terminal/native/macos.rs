@@ -32,12 +32,22 @@ pub fn find_window(
         title_contains = title_contains
     );
 
+    // Empty title would match all windows (contains is always true for empty string).
+    // Guard against this to prevent incorrect matches if session ID is missing.
     if title_contains.is_empty() {
+        warn!(
+            event = "core.terminal.native.find_window_empty_title",
+            app_name = app_name,
+            message = "Empty title provided, cannot search for window"
+        );
         return Ok(None);
     }
 
     let windows = xcap::Window::all().map_err(|e| TerminalError::NativeWindowError {
-        message: format!("Failed to enumerate windows via Core Graphics: {}", e),
+        message: format!(
+            "Failed to enumerate windows via Core Graphics while searching for '{}': {}",
+            app_name, e
+        ),
     })?;
 
     let app_lower = app_name.to_lowercase();
@@ -46,7 +56,14 @@ pub fn find_window(
     for w in windows {
         let w_app = match w.app_name() {
             Ok(name) => name,
-            Err(_) => continue,
+            Err(e) => {
+                debug!(
+                    event = "core.terminal.native.window_skipped",
+                    reason = "app_name_unavailable",
+                    error = %e
+                );
+                continue;
+            }
         };
 
         if !w_app.to_lowercase().contains(&app_lower) {
@@ -60,11 +77,32 @@ pub fn find_window(
 
         let id = match w.id() {
             Ok(id) => id,
-            Err(_) => continue,
+            Err(e) => {
+                debug!(
+                    event = "core.terminal.native.window_skipped",
+                    reason = "id_unavailable",
+                    app_name = %w_app,
+                    error = %e
+                );
+                continue;
+            }
         };
 
         let is_minimized = w.is_minimized().unwrap_or(false);
-        let pid = w.pid().ok().and_then(|p| i32::try_from(p).ok());
+        // xcap returns u32 PIDs, but macOS Accessibility API uses i32.
+        // Use try_from to handle the (unlikely) case of PID > i32::MAX.
+        let pid = w.pid().ok().and_then(|p| {
+            i32::try_from(p)
+                .inspect_err(|e| {
+                    warn!(
+                        event = "core.terminal.native.pid_conversion_failed",
+                        window_id = id,
+                        pid_u32 = p,
+                        error = %e,
+                    );
+                })
+                .ok()
+        });
 
         debug!(
             event = "core.terminal.native.find_window_found",
@@ -108,7 +146,10 @@ pub fn find_window_by_pid(
     );
 
     let windows = xcap::Window::all().map_err(|e| TerminalError::NativeWindowError {
-        message: format!("Failed to enumerate windows via Core Graphics: {}", e),
+        message: format!(
+            "Failed to enumerate windows via Core Graphics while searching for '{}' (PID {}): {}",
+            app_name, pid, e
+        ),
     })?;
 
     let app_lower = app_name.to_lowercase();
@@ -116,7 +157,14 @@ pub fn find_window_by_pid(
     for w in windows {
         let w_app = match w.app_name() {
             Ok(name) => name,
-            Err(_) => continue,
+            Err(e) => {
+                debug!(
+                    event = "core.terminal.native.window_skipped",
+                    reason = "app_name_unavailable",
+                    error = %e
+                );
+                continue;
+            }
         };
 
         if !w_app.to_lowercase().contains(&app_lower) {
@@ -125,7 +173,15 @@ pub fn find_window_by_pid(
 
         let w_pid = match w.pid() {
             Ok(p) => p,
-            Err(_) => continue,
+            Err(e) => {
+                debug!(
+                    event = "core.terminal.native.window_skipped",
+                    reason = "pid_unavailable",
+                    app_name = %w_app,
+                    error = %e
+                );
+                continue;
+            }
         };
 
         if w_pid != pid {
@@ -134,11 +190,30 @@ pub fn find_window_by_pid(
 
         let id = match w.id() {
             Ok(id) => id,
-            Err(_) => continue,
+            Err(e) => {
+                debug!(
+                    event = "core.terminal.native.window_skipped",
+                    reason = "id_unavailable",
+                    app_name = %w_app,
+                    error = %e
+                );
+                continue;
+            }
         };
 
         let title = w.title().unwrap_or_default();
         let is_minimized = w.is_minimized().unwrap_or(false);
+        // xcap returns u32 PIDs, but macOS Accessibility API uses i32.
+        let converted_pid = i32::try_from(w_pid)
+            .inspect_err(|e| {
+                warn!(
+                    event = "core.terminal.native.pid_conversion_failed",
+                    window_id = id,
+                    pid_u32 = w_pid,
+                    error = %e,
+                );
+            })
+            .ok();
 
         debug!(
             event = "core.terminal.native.find_window_by_pid_found",
@@ -151,7 +226,7 @@ pub fn find_window_by_pid(
             id,
             title,
             app_name: w_app,
-            pid: i32::try_from(w_pid).ok(),
+            pid: converted_pid,
             is_minimized,
         }));
     }
@@ -195,14 +270,14 @@ pub fn focus_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
             );
         }
         Err(e) => {
-            // AX failed — fall back to AppleScript activation (brings app to front,
-            // just can't target specific window)
+            // AX failed — fall back to AppleScript activation (activates entire app,
+            // can't target specific window — may focus wrong window if multiple exist)
             warn!(
                 event = "core.terminal.native.focus_ax_failed_fallback",
                 window_id = window.id,
                 pid = pid,
                 error = %e,
-                message = "Accessibility API failed, falling back to app activation"
+                message = "Accessibility API failed, falling back to app activation (less precise — activates entire app, may focus wrong window if multiple exist)"
             );
         }
     }
@@ -242,12 +317,13 @@ pub fn minimize_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
             return Ok(());
         }
         Err(e) => {
+            // AX failed — fallback hides ALL app windows, not just the target
             warn!(
                 event = "core.terminal.native.minimize_ax_failed_fallback",
                 window_id = window.id,
                 pid = pid,
                 error = %e,
-                message = "Accessibility API failed, falling back to System Events hide"
+                message = "Accessibility API failed, falling back to System Events hide (will hide ALL app windows, not just the target)"
             );
         }
     }
@@ -339,8 +415,9 @@ fn ax_find_and_act_on_window(
     };
 
     let title_lower = title.to_lowercase();
+    let window_count = cf_array.len();
 
-    for i in 0..cf_array.len() {
+    for i in 0..window_count {
         // SAFETY: Accessing array elements — these are unretained borrows into the CFArray.
         let Some(item) = cf_array.get(i) else {
             continue;
@@ -357,7 +434,10 @@ fn ax_find_and_act_on_window(
         }
     }
 
-    Err(format!("No AX window found matching title '{}'", title))
+    Err(format!(
+        "No AX window found matching title '{}' (checked {} AX windows — title may have changed)",
+        title, window_count
+    ))
 }
 
 /// Perform AXRaise action on a window element.
@@ -376,6 +456,10 @@ fn ax_perform_raise(window_element: AXUIElementRef) -> Result<(), String> {
     };
 
     if result != kAXErrorSuccess {
+        debug!(
+            event = "core.terminal.native.ax_raise_trying_main",
+            ax_raised_error = result,
+        );
         // Try AXMain as fallback (some apps respond to this instead)
         let cf_main = CFString::new("AXMain");
         let result2 = unsafe {
@@ -463,13 +547,21 @@ fn activate_app(app_name: &str) -> Result<(), TerminalError> {
         Ok(output) if output.status.success() => Ok(()),
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let hint = if stderr.contains("not running") || stderr.contains("Can't get application")
+            {
+                " (is the app running?)"
+            } else if stderr.contains("not allowed") || stderr.contains("permission") {
+                " (check System Settings > Privacy & Security > Automation)"
+            } else {
+                ""
+            };
             warn!(
                 event = "core.terminal.native.activate_app_failed",
                 app_name = app_name,
                 stderr = %stderr
             );
             Err(TerminalError::FocusFailed {
-                message: format!("Failed to activate {}: {}", app_name, stderr),
+                message: format!("Failed to activate {}: {}{}", app_name, stderr, hint),
             })
         }
         Err(e) => {
@@ -500,12 +592,62 @@ fn hide_app_via_system_events(app_name: &str) -> Result<(), TerminalError> {
         Ok(output) if output.status.success() => Ok(()),
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let hint = if stderr.contains("not running") || stderr.contains("Can't get process") {
+                " (is the app running?)"
+            } else if stderr.contains("not allowed") || stderr.contains("permission") {
+                " (check System Settings > Privacy & Security > Automation)"
+            } else {
+                ""
+            };
             Err(TerminalError::HideFailed {
-                message: format!("Failed to hide {} via System Events: {}", app_name, stderr),
+                message: format!(
+                    "Failed to hide {} via System Events: {}{}",
+                    app_name, stderr, hint
+                ),
             })
         }
         Err(e) => Err(TerminalError::HideFailed {
             message: format!("Failed to run osascript for {}: {}", app_name, e),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_window_empty_title_returns_none() {
+        let result = find_window("Ghostty", "");
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().is_none(),
+            "Empty title should not match any window"
+        );
+    }
+
+    #[test]
+    fn test_find_window_nonexistent_app_returns_none() {
+        let result = find_window("NonExistentApp12345XYZ", "some-title");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_window_by_pid_nonexistent_returns_none() {
+        let result = find_window_by_pid("NonExistentApp12345XYZ", 99999);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_pid_i32_conversion_overflow() {
+        // Validates that PID > i32::MAX fails conversion gracefully.
+        // Our code logs a warning and sets pid to None in this case.
+        let large_pid: u32 = i32::MAX as u32 + 1;
+        assert!(i32::try_from(large_pid).is_err());
+
+        let max_valid: u32 = i32::MAX as u32;
+        assert_eq!(i32::try_from(max_valid).unwrap(), i32::MAX);
     }
 }
