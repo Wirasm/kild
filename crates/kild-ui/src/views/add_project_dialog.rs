@@ -4,128 +4,152 @@
 
 use gpui::{Context, IntoElement, div, prelude::*, px};
 
-use crate::components::{Button, ButtonVariant, Modal, TextInput};
-use crate::state::{AddProjectDialogField, AddProjectFormState, DialogState};
+use gpui_component::ActiveTheme;
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::{Input, InputState};
+
+use crate::state::DialogState;
 use crate::theme;
 use crate::views::MainView;
 
 /// Render the add project dialog.
 ///
-/// This is a modal dialog with:
-/// - Semi-transparent overlay background
-/// - Dialog box with form fields
-/// - Path input (keyboard capture)
-/// - Name input (optional)
-/// - Cancel/Add buttons
-/// - Error message display
-///
-/// # Invalid State Handling
-/// If called with a non-`DialogState::AddProject` state, logs an error and
-/// displays "Internal error: invalid dialog state" to the user.
+/// Text input is managed by gpui-component's Input widget via InputState entities
+/// passed from MainView.
 pub fn render_add_project_dialog(
     dialog: &DialogState,
+    path_input: Option<&gpui::Entity<InputState>>,
+    name_input: Option<&gpui::Entity<InputState>>,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let (form, add_project_error) = match dialog {
-        DialogState::AddProject { form, error } => (form, error.clone()),
-        _ => {
-            tracing::error!(
-                event = "ui.add_project_dialog.invalid_state",
-                "render_add_project_dialog called with non-AddProject dialog state"
-            );
-            (
-                &AddProjectFormState::default(),
-                Some("Internal error: invalid dialog state".to_string()),
-            )
-        }
+    let DialogState::AddProject { error, .. } = dialog else {
+        unreachable!(
+            "render_add_project_dialog called with non-AddProject dialog state — this is a bug in MainView render logic"
+        );
     };
+    let add_project_error = error.clone();
 
-    let path = form.path.clone();
-    let name = form.name.clone();
-    let focused_field = form.focused_field.clone();
-
-    Modal::new("add-project-dialog", "Add Project")
-        .width(px(450.0))
-        .body(
+    // Overlay: covers entire screen with semi-transparent background
+    div()
+        .id("add-project-dialog")
+        .absolute()
+        .inset_0()
+        .bg(cx.theme().overlay)
+        .flex()
+        .justify_center()
+        .items_center()
+        // Dialog box: centered, themed container
+        .child(
             div()
+                .id("add-project-dialog-box")
+                .w(px(450.))
+                .bg(cx.theme().background)
+                .rounded(cx.theme().radius_lg)
+                .border_1()
+                .border_color(cx.theme().border)
                 .flex()
                 .flex_col()
-                .gap(px(theme::SPACE_4))
-                // Path field
+                // Header: title with bottom border
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_b_1()
+                        .border_color(theme::border_subtle())
                         .child(
                             div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text_subtle())
-                                .child("Path"),
-                        )
-                        .child(
-                            TextInput::new("path-input")
-                                .value(&path)
-                                .placeholder("/path/to/repository")
-                                .focused(focused_field == AddProjectDialogField::Path),
+                                .text_size(px(theme::TEXT_LG))
+                                .text_color(theme::text_bright())
+                                .child("Add Project"),
                         ),
                 )
-                // Name field (optional)
+                // Body
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
-                        .child(
-                            div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text_subtle())
-                                .child("Name (optional)"),
-                        )
-                        .child(
-                            TextInput::new("name-input")
-                                .value(&name)
-                                .placeholder("Defaults to directory name")
-                                .focused(focused_field == AddProjectDialogField::Name),
-                        ),
-                )
-                // Error message (if any)
-                .when_some(add_project_error, |this, error| {
-                    this.child(
+                    div().px(px(theme::SPACE_4)).py(px(theme::SPACE_4)).child(
                         div()
-                            .px(px(theme::SPACE_3))
-                            .py(px(theme::SPACE_2))
-                            .bg(theme::with_alpha(theme::ember(), 0.2))
-                            .rounded(px(theme::RADIUS_MD))
-                            .border_1()
-                            .border_color(theme::ember())
+                            .flex()
+                            .flex_col()
+                            .gap(px(theme::SPACE_4))
+                            // Path field
                             .child(
                                 div()
-                                    .text_size(px(theme::TEXT_SM))
-                                    .text_color(theme::ember())
-                                    .child(error),
-                            ),
-                    )
-                }),
-        )
-        .footer(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(theme::SPACE_2))
-                .child(
-                    Button::new("add-project-cancel-btn", "Cancel")
-                        .variant(ButtonVariant::Secondary)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_add_project_cancel(cx);
-                        })),
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(theme::SPACE_1))
+                                    .child(
+                                        div()
+                                            .text_size(px(theme::TEXT_SM))
+                                            .text_color(theme::text_subtle())
+                                            .child("Path"),
+                                    )
+                                    .when_some(path_input, |this, input| {
+                                        this.child(Input::new(input))
+                                    }),
+                            )
+                            // Name field (optional)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(theme::SPACE_1))
+                                    .child(
+                                        div()
+                                            .text_size(px(theme::TEXT_SM))
+                                            .text_color(theme::text_subtle())
+                                            .child("Name (optional)"),
+                                    )
+                                    .when_some(name_input, |this, input| {
+                                        this.child(Input::new(input))
+                                    }),
+                            )
+                            // Error message (if any)
+                            .when_some(add_project_error, |this, error| {
+                                this.child(
+                                    div()
+                                        .px(px(theme::SPACE_3))
+                                        .py(px(theme::SPACE_2))
+                                        .bg(theme::with_alpha(theme::ember(), 0.2))
+                                        .rounded(px(theme::RADIUS_MD))
+                                        .border_1()
+                                        .border_color(theme::ember())
+                                        .child(
+                                            div()
+                                                .text_size(px(theme::TEXT_SM))
+                                                .text_color(theme::ember())
+                                                .child(error),
+                                        ),
+                                )
+                            }),
+                    ),
                 )
+                // Footer: buttons
                 .child(
-                    Button::new("add-project-submit-btn", "Add")
-                        .variant(ButtonVariant::Primary)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_add_project_submit(cx);
-                        })),
+                    div()
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_t_1()
+                        .border_color(theme::border_subtle())
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap(px(theme::SPACE_2))
+                                .child(
+                                    Button::new("add-project-cancel-btn")
+                                        .label("Cancel")
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_add_project_cancel(cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("add-project-submit-btn")
+                                        .label("Add")
+                                        .primary()
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_add_project_submit(cx);
+                                        })),
+                                ),
+                        ),
                 ),
         )
 }

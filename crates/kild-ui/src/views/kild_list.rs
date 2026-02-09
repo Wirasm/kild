@@ -5,7 +5,10 @@
 use chrono::{DateTime, Utc};
 use gpui::{Context, IntoElement, div, prelude::*, px, uniform_list};
 
-use crate::components::{Button, ButtonVariant, Status, StatusIndicator};
+use gpui_component::Disableable;
+use gpui_component::button::{Button, ButtonVariants};
+
+use crate::components::{Status, StatusIndicator};
 use crate::state::AppState;
 use crate::theme;
 use crate::views::MainView;
@@ -97,10 +100,11 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                     .child("Add a project to start creating kilds."),
             )
             .child(
-                Button::new("empty-state-add-project", "+ Add Project")
-                    .variant(ButtonVariant::Primary)
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.on_add_project_click(cx);
+                Button::new("empty-state-add-project")
+                    .label("+ Add Project")
+                    .primary()
+                    .on_click(cx.listener(|view, _, window, cx| {
+                        view.on_add_project_click(window, cx);
                     })),
             )
     } else {
@@ -316,8 +320,9 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                             })
                                             // Copy Path button [Copy] - Ghost variant
                                             .child(
-                                                Button::new(("copy-btn", ix), "Copy")
-                                                    .variant(ButtonVariant::Ghost)
+                                                Button::new(("copy-btn", ix))
+                                                    .label("Copy")
+                                                    .ghost()
                                                     .on_click(cx.listener(
                                                         move |view, _, _, cx| {
                                                             view.on_copy_path_click(
@@ -331,8 +336,9 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                             .child({
                                                 let wt = worktree_path_for_edit.clone();
                                                 let br = branch_for_edit.clone();
-                                                Button::new(("edit-btn", ix), "Edit")
-                                                    .variant(ButtonVariant::Ghost)
+                                                Button::new(("edit-btn", ix))
+                                                    .label("Edit")
+                                                    .ghost()
                                                     .on_click(cx.listener(move |view, _, _, cx| {
                                                         view.on_open_editor_click(&wt, &br, cx);
                                                     }))
@@ -343,8 +349,8 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                                 let wid = window_id_for_focus.clone();
                                                 let br = branch_for_focus.clone();
                                                 row.child(
-                                                    Button::new(("focus-btn", ix), "Focus")
-                                                        .variant(ButtonVariant::Secondary)
+                                                    Button::new(("focus-btn", ix))
+                                                        .label("Focus")
                                                         .on_click(cx.listener(
                                                             move |view, _, _, cx| {
                                                                 view.on_focus_terminal_click(
@@ -362,8 +368,9 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                                 let br = branch_for_open.clone();
                                                 let label = if is_loading { "..." } else { "▶" };
                                                 row.child(
-                                                    Button::new(("open-btn", ix), label)
-                                                        .variant(ButtonVariant::Success)
+                                                    Button::new(("open-btn", ix))
+                                                        .label(label)
+                                                        .success()
                                                         .disabled(is_loading)
                                                         .on_click(cx.listener(
                                                             move |view, _, _, cx| {
@@ -377,8 +384,9 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                                 let br = branch_for_stop.clone();
                                                 let label = if is_loading { "..." } else { "⏹" };
                                                 row.child(
-                                                    Button::new(("stop-btn", ix), label)
-                                                        .variant(ButtonVariant::Warning)
+                                                    Button::new(("stop-btn", ix))
+                                                        .label(label)
+                                                        .warning()
                                                         .disabled(is_loading)
                                                         .on_click(cx.listener(
                                                             move |view, _, _, cx| {
@@ -390,8 +398,9 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                             // Destroy button [×] - Danger variant
                                             .child({
                                                 let br = branch_for_destroy.clone();
-                                                Button::new(("destroy-btn", ix), "×")
-                                                    .variant(ButtonVariant::Danger)
+                                                Button::new(("destroy-btn", ix))
+                                                    .label("×")
+                                                    .danger()
                                                     .disabled(is_loading)
                                                     .on_click(cx.listener(move |view, _, _, cx| {
                                                         view.on_destroy_click(&br, cx);

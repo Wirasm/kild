@@ -5,7 +5,9 @@
 
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
-use crate::components::{Button, ButtonVariant, Status, StatusIndicator};
+use gpui_component::button::{Button, ButtonVariants};
+
+use crate::components::{Status, StatusIndicator};
 use crate::state::AppState;
 use crate::theme;
 use crate::views::main_view::MainView;
@@ -177,18 +179,16 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
                     div()
                         .flex()
                         .gap(px(theme::SPACE_2))
-                        .child(
-                            Button::new("detail-copy-path", "Copy Path")
-                                .variant(ButtonVariant::Secondary)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.on_copy_path_click(&worktree_path_for_copy, cx);
-                                })),
-                        )
+                        .child(Button::new("detail-copy-path").label("Copy Path").on_click(
+                            cx.listener(move |view, _, _, cx| {
+                                view.on_copy_path_click(&worktree_path_for_copy, cx);
+                            }),
+                        ))
                         .child({
                             let wt = worktree_path_for_editor.clone();
                             let br = branch_for_editor.clone();
-                            Button::new("detail-open-editor", "Open Editor")
-                                .variant(ButtonVariant::Secondary)
+                            Button::new("detail-open-editor")
+                                .label("Open Editor")
                                 .on_click(cx.listener(move |view, _, _, cx| {
                                     view.on_open_editor_click(&wt, &br, cx);
                                 }))
@@ -204,8 +204,8 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
                             let wid = window_id_for_focus.clone();
                             let br = branch_for_focus.clone();
                             row.child(
-                                Button::new("detail-focus-terminal", "Focus")
-                                    .variant(ButtonVariant::Secondary)
+                                Button::new("detail-focus-terminal")
+                                    .label("Focus")
                                     .on_click(cx.listener(move |view, _, _, cx| {
                                         view.on_focus_terminal_click(
                                             tt.as_ref(),
@@ -218,29 +218,26 @@ pub fn render_detail_panel(state: &AppState, cx: &mut Context<MainView>) -> AnyE
                         })
                         .when(is_running, |row| {
                             let br = branch_for_action.clone();
-                            row.child(
-                                Button::new("detail-stop", "Stop")
-                                    .variant(ButtonVariant::Warning)
-                                    .on_click(cx.listener(move |view, _, _, cx| {
-                                        view.on_stop_click(&br, cx);
-                                    })),
-                            )
+                            row.child(Button::new("detail-stop").label("Stop").warning().on_click(
+                                cx.listener(move |view, _, _, cx| {
+                                    view.on_stop_click(&br, cx);
+                                }),
+                            ))
                         })
                         .when(!is_running, |row| {
                             let br = branch_for_action.clone();
-                            row.child(
-                                Button::new("detail-open", "Open")
-                                    .variant(ButtonVariant::Success)
-                                    .on_click(cx.listener(move |view, _, _, cx| {
-                                        view.on_open_click(&br, cx);
-                                    })),
-                            )
+                            row.child(Button::new("detail-open").label("Open").success().on_click(
+                                cx.listener(move |view, _, _, cx| {
+                                    view.on_open_click(&br, cx);
+                                }),
+                            ))
                         }),
                 )
                 // Row 3: Destroy
                 .child(
-                    Button::new("detail-destroy", "Destroy Kild")
-                        .variant(ButtonVariant::Danger)
+                    Button::new("detail-destroy")
+                        .label("Destroy Kild")
+                        .danger()
                         .on_click(cx.listener(move |view, _, _, cx| {
                             view.on_destroy_click(&branch_for_destroy, cx);
                         })),

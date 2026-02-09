@@ -6,12 +6,14 @@ use gpui::{
     App, AppContext, Application, Bounds, SharedString, TitlebarOptions, WindowBounds,
     WindowOptions, px, size,
 };
+use gpui_component::Root;
 
 mod actions;
 mod components;
 mod refresh;
 mod state;
 mod theme;
+mod theme_bridge;
 mod views;
 mod watcher;
 
@@ -24,6 +26,12 @@ fn main() {
         .init();
 
     Application::new().run(|cx: &mut App| {
+        // Initialize gpui-component (must be first)
+        gpui_component::init(cx);
+
+        // Apply Tallinn Night theme
+        theme_bridge::apply_tallinn_night_theme(cx);
+
         let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
         cx.open_window(
             WindowOptions {
@@ -34,7 +42,10 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_, cx| cx.new(MainView::new),
+            |window, cx| {
+                let view = cx.new(MainView::new);
+                cx.new(|cx| Root::new(view, window, cx))
+            },
         )
         .expect("Failed to open window");
     });

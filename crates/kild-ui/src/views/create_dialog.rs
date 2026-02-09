@@ -5,8 +5,12 @@
 
 use gpui::{Context, IntoElement, div, prelude::*, px};
 
-use crate::components::{Button, ButtonVariant, Modal, TextInput};
-use crate::state::{CreateDialogField, CreateFormState, DialogState};
+use gpui_component::ActiveTheme;
+use gpui_component::Disableable;
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::{Input, InputState};
+
+use crate::state::{CreateDialogField, DialogState};
 use crate::theme;
 use crate::views::MainView;
 
@@ -17,184 +21,206 @@ pub fn agent_options() -> Vec<&'static str> {
 
 /// Render the create kild dialog.
 ///
-/// This is a modal dialog with:
-/// - Semi-transparent overlay background
-/// - Dialog box with form fields
-/// - Branch name input (keyboard capture)
-/// - Agent selection (click to cycle)
-/// - Cancel/Create buttons
-/// - Error message display
-///
-/// # Invalid State Handling
-/// If called with a non-`DialogState::Create` state, logs an error and
-/// displays "Internal error: invalid dialog state" to the user.
+/// Text input is managed by gpui-component's Input widget via InputState entities
+/// passed from MainView. The dialog reads agent selection from DialogState form state.
 pub fn render_create_dialog(
     dialog: &DialogState,
     loading: bool,
+    branch_input: Option<&gpui::Entity<InputState>>,
+    note_input: Option<&gpui::Entity<InputState>>,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let (form, create_error) = match dialog {
-        DialogState::Create { form, error } => (form, error.clone()),
-        _ => {
-            tracing::error!(
-                event = "ui.create_dialog.invalid_state",
-                "render_create_dialog called with non-Create dialog state"
-            );
-            // Return a default form to avoid panic - the dialog shouldn't be visible anyway
-            (
-                &CreateFormState::default(),
-                Some("Internal error: invalid dialog state".to_string()),
-            )
-        }
+    let DialogState::Create { form, error } = dialog else {
+        unreachable!(
+            "render_create_dialog called with non-Create dialog state — this is a bug in MainView render logic"
+        );
     };
+    let create_error = error.clone();
 
     let agents = agent_options();
     let current_agent = form.selected_agent();
-    let branch_name = form.branch_name.clone();
-    let note = form.note.clone();
     let focused_field = form.focused_field.clone();
-    let selected_agent_index = form.selected_agent_index;
+    let selected_agent_index = form.selected_agent_index();
 
-    Modal::new("create-dialog", "Create New KILD")
-        .body(
+    // Overlay: covers entire screen with semi-transparent background
+    div()
+        .id("create-dialog")
+        .absolute()
+        .inset_0()
+        .bg(cx.theme().overlay)
+        .flex()
+        .justify_center()
+        .items_center()
+        // Dialog box: centered, themed container
+        .child(
             div()
+                .id("create-dialog-box")
+                .w(px(400.))
+                .bg(cx.theme().background)
+                .rounded(cx.theme().radius_lg)
+                .border_1()
+                .border_color(cx.theme().border)
                 .flex()
                 .flex_col()
-                .gap(px(theme::SPACE_4))
-                // Branch name field
+                // Header: title with bottom border
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_b_1()
+                        .border_color(theme::border_subtle())
                         .child(
                             div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text_subtle())
-                                .child("Branch Name"),
-                        )
-                        .child(
-                            TextInput::new("branch-input")
-                                .value(&branch_name)
-                                .placeholder("Type branch name...")
-                                .focused(focused_field == CreateDialogField::BranchName),
+                                .text_size(px(theme::TEXT_LG))
+                                .text_color(theme::text_bright())
+                                .child("Create New KILD"),
                         ),
                 )
-                // Agent selection field (custom - click to cycle)
-                .child({
-                    let is_focused = focused_field == CreateDialogField::Agent;
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
-                        .child(
-                            div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text_subtle())
-                                .child("Agent"),
-                        )
-                        .child(
-                            div()
-                                .id("agent-selector")
-                                .px(px(theme::SPACE_3))
-                                .py(px(theme::SPACE_2))
-                                .bg(theme::surface())
-                                .hover(|style| style.bg(theme::elevated()))
-                                .rounded(px(theme::RADIUS_MD))
-                                .border_1()
-                                .border_color(if is_focused {
-                                    theme::ice()
-                                } else {
-                                    theme::border()
-                                })
-                                .cursor_pointer()
-                                .on_mouse_up(
-                                    gpui::MouseButton::Left,
-                                    cx.listener(|view, _, _, cx| {
-                                        view.on_agent_cycle(cx);
-                                    }),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .justify_between()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .text_color(theme::text_bright())
-                                                .child(current_agent),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(theme::text_subtle())
-                                                .text_size(px(theme::TEXT_SM))
-                                                .child(format!(
-                                                    "({}/{})",
-                                                    selected_agent_index + 1,
-                                                    agents.len()
-                                                )),
-                                        ),
-                                ),
-                        )
-                })
-                // Note field (optional)
+                // Body
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
-                        .child(
-                            div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text_subtle())
-                                .child("Note (optional)"),
-                        )
-                        .child(
-                            TextInput::new("note-input")
-                                .value(&note)
-                                .placeholder("What is this kild for?")
-                                .focused(focused_field == CreateDialogField::Note),
-                        ),
-                )
-                // Error message (if any)
-                .when_some(create_error, |this, error| {
-                    this.child(
+                    div().px(px(theme::SPACE_4)).py(px(theme::SPACE_4)).child(
                         div()
-                            .px(px(theme::SPACE_3))
-                            .py(px(theme::SPACE_2))
-                            .bg(theme::with_alpha(theme::ember(), 0.2))
-                            .rounded(px(theme::RADIUS_MD))
-                            .border_1()
-                            .border_color(theme::ember())
+                            .flex()
+                            .flex_col()
+                            .gap(px(theme::SPACE_4))
+                            // Branch name field
                             .child(
                                 div()
-                                    .text_size(px(theme::TEXT_SM))
-                                    .text_color(theme::ember())
-                                    .child(error),
-                            ),
-                    )
-                }),
-        )
-        .footer(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(theme::SPACE_2))
-                .child(
-                    Button::new("cancel-btn", "Cancel")
-                        .variant(ButtonVariant::Secondary)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_dialog_cancel(cx);
-                        })),
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(theme::SPACE_1))
+                                    .child(
+                                        div()
+                                            .text_size(px(theme::TEXT_SM))
+                                            .text_color(theme::text_subtle())
+                                            .child("Branch Name"),
+                                    )
+                                    .when_some(branch_input, |this, input| {
+                                        this.child(Input::new(input))
+                                    }),
+                            )
+                            // Agent selection field (custom - click to cycle)
+                            .child({
+                                let is_focused = focused_field == CreateDialogField::Agent;
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(theme::SPACE_1))
+                                    .child(
+                                        div()
+                                            .text_size(px(theme::TEXT_SM))
+                                            .text_color(theme::text_subtle())
+                                            .child("Agent"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("agent-selector")
+                                            .px(px(theme::SPACE_3))
+                                            .py(px(theme::SPACE_2))
+                                            .bg(theme::surface())
+                                            .hover(|style| style.bg(theme::elevated()))
+                                            .rounded(px(theme::RADIUS_MD))
+                                            .border_1()
+                                            .border_color(if is_focused {
+                                                theme::ice()
+                                            } else {
+                                                theme::border()
+                                            })
+                                            .cursor_pointer()
+                                            .on_mouse_up(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|view, _, _, cx| {
+                                                    view.on_agent_cycle(cx);
+                                                }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .justify_between()
+                                                    .items_center()
+                                                    .child(
+                                                        div()
+                                                            .text_color(theme::text_bright())
+                                                            .child(current_agent),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_color(theme::text_subtle())
+                                                            .text_size(px(theme::TEXT_SM))
+                                                            .child(format!(
+                                                                "({}/{})",
+                                                                selected_agent_index + 1,
+                                                                agents.len()
+                                                            )),
+                                                    ),
+                                            ),
+                                    )
+                            })
+                            // Note field (optional)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(theme::SPACE_1))
+                                    .child(
+                                        div()
+                                            .text_size(px(theme::TEXT_SM))
+                                            .text_color(theme::text_subtle())
+                                            .child("Note (optional)"),
+                                    )
+                                    .when_some(note_input, |this, input| {
+                                        this.child(Input::new(input))
+                                    }),
+                            )
+                            // Error message (if any)
+                            .when_some(create_error, |this, error| {
+                                this.child(
+                                    div()
+                                        .px(px(theme::SPACE_3))
+                                        .py(px(theme::SPACE_2))
+                                        .bg(theme::with_alpha(theme::ember(), 0.2))
+                                        .rounded(px(theme::RADIUS_MD))
+                                        .border_1()
+                                        .border_color(theme::ember())
+                                        .child(
+                                            div()
+                                                .text_size(px(theme::TEXT_SM))
+                                                .text_color(theme::ember())
+                                                .child(error),
+                                        ),
+                                )
+                            }),
+                    ),
                 )
-                .child({
-                    let button_text = if loading { "Creating..." } else { "Create" };
-                    Button::new("create-btn", button_text)
-                        .variant(ButtonVariant::Primary)
-                        .disabled(loading)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_dialog_submit(cx);
-                        }))
-                }),
+                // Footer: buttons
+                .child(
+                    div()
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_t_1()
+                        .border_color(theme::border_subtle())
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap(px(theme::SPACE_2))
+                                .child(Button::new("cancel-btn").label("Cancel").on_click(
+                                    cx.listener(|view, _, _, cx| {
+                                        view.on_dialog_cancel(cx);
+                                    }),
+                                ))
+                                .child({
+                                    let button_text =
+                                        if loading { "Creating..." } else { "Create" };
+                                    Button::new("create-btn")
+                                        .label(button_text)
+                                        .primary()
+                                        .disabled(loading)
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_dialog_submit(cx);
+                                        }))
+                                }),
+                        ),
+                ),
         )
 }

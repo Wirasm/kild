@@ -71,41 +71,47 @@ pub fn text_white() -> Rgba {
     gpui::rgb(0xF8FAFC)
 }
 
-// Primary accent - Ice (for primary actions, focus states)
+// Primary accent - Ice (frosted steel-blue, for primary actions, focus states)
 pub fn ice() -> Rgba {
-    gpui::rgb(0x38BDF8)
+    gpui::rgb(0x7CB4C8)
 }
 pub fn ice_dim() -> Rgba {
-    gpui::rgb(0x0EA5E9)
+    gpui::rgb(0x5E9AB2)
 }
 pub fn ice_bright() -> Rgba {
-    gpui::rgb(0x7DD3FC)
+    gpui::rgb(0x98CCE0)
 }
 
-// Status - Aurora (active/running/success)
+// Status - Aurora (olive green, active/running/success)
 pub fn aurora() -> Rgba {
-    gpui::rgb(0x34D399)
+    gpui::rgb(0x6B8F5E)
 }
 pub fn aurora_dim() -> Rgba {
-    gpui::rgb(0x10B981)
+    gpui::rgb(0x556F4A)
 }
 
-// Status - Copper (stopped/warning/idle)
+// Status - Copper (warm ochre, stopped/warning/idle)
 pub fn copper() -> Rgba {
-    gpui::rgb(0xFBBF24)
+    gpui::rgb(0xC49A5C)
 }
 pub fn copper_dim() -> Rgba {
-    gpui::rgb(0xD97706)
+    gpui::rgb(0xA07D45)
 }
 
-// Status - Ember (error/crashed/danger)
+// Status - Ember (terracotta, error/crashed/danger)
 pub fn ember() -> Rgba {
-    gpui::rgb(0xF87171)
+    gpui::rgb(0xB87060)
+}
+pub fn ember_dim() -> Rgba {
+    gpui::rgb(0x9A584A)
 }
 
-// Agent indicator - Kiri (purple, for AI activity)
+// Agent indicator - Kiri (twilight mauve, for AI activity)
 pub fn kiri() -> Rgba {
-    gpui::rgb(0xA78BFA)
+    gpui::rgb(0xA088B0)
+}
+pub fn kiri_dim() -> Rgba {
+    gpui::rgb(0x866B92)
 }
 
 // Secondary accent - Blade (for secondary actions)

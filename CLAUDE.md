@@ -195,7 +195,8 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 
 **Key modules in kild-ui:**
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
-- `components/` - Reusable UI components (Button, StatusIndicator, Modal, TextInput with themed variants)
+- `theme_bridge.rs` - Maps Tallinn Night colors to gpui-component theme tokens
+- `components/` - Custom UI components (StatusIndicator only; Button, TextInput, Modal from gpui-component library)
 - `state/` - Type-safe state modules with encapsulated AppState facade (app_state.rs, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
 - `views/` - GPUI components (main view with 3-column layout: sidebar, kild list, detail panel)

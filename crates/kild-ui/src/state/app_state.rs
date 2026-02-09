@@ -546,9 +546,6 @@ mod tests {
     use kild_core::{Event, GitStatus, ProcessStatus, Session};
     use std::path::PathBuf;
 
-    use super::super::dialog::AddProjectDialogField;
-    use super::super::dialog::AddProjectFormState;
-
     #[test]
     fn test_close_dialog_clears_confirm_state() {
         let mut state = AppState::test_new();
@@ -611,11 +608,6 @@ mod tests {
     fn test_close_dialog_clears_add_project_state() {
         let mut state = AppState::test_new();
         state.dialog = DialogState::AddProject {
-            form: AddProjectFormState {
-                path: "/some/path".to_string(),
-                name: "test".to_string(),
-                focused_field: AddProjectDialogField::Path,
-            },
             error: Some("Error".to_string()),
         };
 

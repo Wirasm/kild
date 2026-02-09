@@ -5,10 +5,10 @@
 use gpui::{Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
 use std::path::PathBuf;
 
-use crate::components::{Button, ButtonVariant};
 use crate::state::AppState;
 use crate::theme;
 use crate::views::main_view::MainView;
+use gpui_component::button::{Button, ButtonVariants};
 
 /// Width of the sidebar in pixels.
 pub const SIDEBAR_WIDTH: f32 = 200.0;
@@ -205,10 +205,11 @@ pub fn render_sidebar(state: &AppState, cx: &mut Context<MainView>) -> impl Into
                 .gap(px(theme::SPACE_2))
                 // Add Project button
                 .child(
-                    Button::new("sidebar-add-project", "+ Add Project")
-                        .variant(ButtonVariant::Ghost)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_add_project_click(cx);
+                    Button::new("sidebar-add-project")
+                        .label("+ Add Project")
+                        .ghost()
+                        .on_click(cx.listener(|view, _, window, cx| {
+                            view.on_add_project_click(window, cx);
                         })),
                 )
                 // Remove current (only if project selected)

@@ -47,6 +47,7 @@ kild-peek-core = { path = "crates/kild-peek-core" }
 
 # UI dependencies
 gpui = "0.2"
+gpui-component = "0.5.1"
 # Pin core-text to 21.0.0 to avoid core_graphics version conflict.
 # core-text 21.1.0 pulls in core-graphics 0.25.0, but gpui's font-kit dependency
 # requires core-graphics 0.24.0, causing type mismatches at compile time.

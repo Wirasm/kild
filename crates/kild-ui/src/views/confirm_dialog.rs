@@ -6,7 +6,10 @@
 use gpui::{Context, IntoElement, div, prelude::*, px};
 use kild_core::DestroySafetyInfo;
 
-use crate::components::{Button, ButtonVariant, Modal};
+use gpui_component::ActiveTheme;
+use gpui_component::Disableable;
+use gpui_component::button::{Button, ButtonVariants};
+
 use crate::state::DialogState;
 use crate::theme;
 use crate::views::MainView;
@@ -24,32 +27,24 @@ use crate::views::MainView;
 /// - Red warning box: Uncommitted changes (blocking - button says "Force Destroy")
 /// - Amber warning box: Unpushed commits, no PR, never pushed (non-blocking)
 ///
-/// # Invalid State Handling
-/// If called with a non-`DialogState::Confirm` state, logs an error and
-/// displays "Internal error: invalid dialog state" to the user.
+/// # Panics
+/// Panics if called with a non-`DialogState::Confirm` state (programming error).
 pub fn render_confirm_dialog(
     dialog: &DialogState,
     loading: bool,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let (branch, safety_info, confirm_error) = match dialog {
-        DialogState::Confirm {
-            branch,
-            safety_info,
-            error,
-        } => (branch.clone(), safety_info.clone(), error.clone()),
-        _ => {
-            tracing::error!(
-                event = "ui.confirm_dialog.invalid_state",
-                "render_confirm_dialog called with non-Confirm dialog state"
-            );
-            (
-                "unknown".to_string(),
-                None,
-                Some("Internal error: invalid dialog state".to_string()),
-            )
-        }
+    let DialogState::Confirm {
+        branch,
+        safety_info,
+        error,
+    } = dialog
+    else {
+        unreachable!(
+            "render_confirm_dialog called with non-Confirm dialog state — this is a bug in MainView render logic"
+        );
     };
+    let (branch, safety_info, confirm_error) = (branch.clone(), safety_info.clone(), error.clone());
 
     // Determine if we should block (uncommitted changes)
     let should_block = safety_info
@@ -64,83 +59,132 @@ pub fn render_confirm_dialog(
         "Destroy"
     };
 
-    Modal::new("confirm-dialog", "Destroy KILD?")
-        .body(
+    // Overlay: covers entire screen with semi-transparent background
+    div()
+        .id("confirm-dialog")
+        .absolute()
+        .inset_0()
+        .bg(cx.theme().overlay)
+        .flex()
+        .justify_center()
+        .items_center()
+        // Dialog box: centered, themed container
+        .child(
             div()
+                .id("confirm-dialog-box")
+                .w(px(400.))
+                .bg(cx.theme().background)
+                .rounded(cx.theme().radius_lg)
+                .border_1()
+                .border_color(cx.theme().border)
                 .flex()
                 .flex_col()
-                .gap(px(theme::SPACE_3))
+                // Header: title with bottom border
                 .child(
                     div()
-                        .text_color(theme::text_bright())
-                        .child(format!("Destroy '{branch}'?")),
-                )
-                .child(
-                    div()
-                        .text_color(theme::text_subtle())
-                        .text_size(px(theme::TEXT_SM))
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_b_1()
+                        .border_color(theme::border_subtle())
                         .child(
-                            "This will delete the working directory and stop any running agent.",
+                            div()
+                                .text_size(px(theme::TEXT_LG))
+                                .text_color(theme::text_bright())
+                                .child("Destroy KILD?"),
                         ),
                 )
+                // Body
                 .child(
                     div()
-                        .text_color(theme::ember())
-                        .text_size(px(theme::TEXT_SM))
-                        .child("This cannot be undone."),
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_4))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(theme::SPACE_3))
+                                .child(
+                                    div()
+                                        .text_color(theme::text_bright())
+                                        .child(format!("Destroy '{branch}'?")),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(theme::text_subtle())
+                                        .text_size(px(theme::TEXT_SM))
+                                        .child(
+                                            "This will delete the working directory and stop any running agent.",
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(theme::ember())
+                                        .text_size(px(theme::TEXT_SM))
+                                        .child("This cannot be undone."),
+                                )
+                                // Safety warnings (if any)
+                                .when_some(safety_info, |this, info| {
+                                    if info.has_warnings() {
+                                        this.child(render_safety_warnings(&info))
+                                    } else {
+                                        this
+                                    }
+                                })
+                                // Error message (if any)
+                                .when_some(confirm_error, |this, error| {
+                                    this.child(
+                                        div()
+                                            .px(px(theme::SPACE_3))
+                                            .py(px(theme::SPACE_2))
+                                            .bg(theme::with_alpha(theme::ember(), 0.2))
+                                            .rounded(px(theme::RADIUS_MD))
+                                            .border_1()
+                                            .border_color(theme::ember())
+                                            .child(
+                                                div()
+                                                    .text_size(px(theme::TEXT_SM))
+                                                    .text_color(theme::ember())
+                                                    .child(error),
+                                            ),
+                                    )
+                                }),
+                        ),
                 )
-                // Safety warnings (if any)
-                .when_some(safety_info, |this, info| {
-                    if info.has_warnings() {
-                        this.child(render_safety_warnings(&info))
-                    } else {
-                        this
-                    }
-                })
-                // Error message (if any)
-                .when_some(confirm_error, |this, error| {
-                    this.child(
-                        div()
-                            .px(px(theme::SPACE_3))
-                            .py(px(theme::SPACE_2))
-                            .bg(theme::with_alpha(theme::ember(), 0.2))
-                            .rounded(px(theme::RADIUS_MD))
-                            .border_1()
-                            .border_color(theme::ember())
-                            .child(
-                                div()
-                                    .text_size(px(theme::TEXT_SM))
-                                    .text_color(theme::ember())
-                                    .child(error),
-                            ),
-                    )
-                }),
-        )
-        .footer(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(theme::SPACE_2))
+                // Footer: buttons
                 .child(
-                    Button::new("confirm-cancel-btn", "Cancel")
-                        .variant(ButtonVariant::Secondary)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_confirm_cancel(cx);
-                        })),
-                )
-                .child({
-                    let button_text = if loading {
-                        "Destroying..."
-                    } else {
-                        destroy_button_text
-                    };
-                    Button::new("confirm-destroy-btn", button_text)
-                        .variant(ButtonVariant::Danger)
-                        .disabled(loading)
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.on_confirm_destroy(cx);
-                        }))
-                }),
+                    div()
+                        .px(px(theme::SPACE_4))
+                        .py(px(theme::SPACE_3))
+                        .border_t_1()
+                        .border_color(theme::border_subtle())
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap(px(theme::SPACE_2))
+                                .child(
+                                    Button::new("confirm-cancel-btn")
+                                        .label("Cancel")
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_confirm_cancel(cx);
+                                        })),
+                                )
+                                .child({
+                                    let button_text = if loading {
+                                        "Destroying..."
+                                    } else {
+                                        destroy_button_text
+                                    };
+                                    Button::new("confirm-destroy-btn")
+                                        .label(button_text)
+                                        .danger()
+                                        .disabled(loading)
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.on_confirm_destroy(cx);
+                                        }))
+                                }),
+                        ),
+                ),
         )
 }
 

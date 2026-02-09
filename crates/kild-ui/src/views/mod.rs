@@ -3,6 +3,7 @@
 //! This module contains the view layer of the application:
 //! - `main_view` - Root view that composes header, list, and dialog
 //! - `kild_list` - List of kilds with status indicators
+//! - `detail_panel` - Right panel showing selected kild details
 //! - `create_dialog` - Modal dialog for creating new kilds
 //! - `confirm_dialog` - Modal dialog for confirming destructive actions
 //! - `add_project_dialog` - Modal dialog for adding new projects
