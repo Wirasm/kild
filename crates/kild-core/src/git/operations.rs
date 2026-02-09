@@ -1,6 +1,10 @@
+use crate::forge::types::{CiStatus, PrInfo};
 use crate::git::errors::GitError;
-use crate::git::types::{CommitCounts, DiffStats, GitStats, UncommittedDetails, WorktreeStatus};
-use git2::{Repository, Status, StatusOptions};
+use crate::git::types::{
+    BaseBranchDrift, BranchHealth, CommitActivity, CommitCounts, DiffStats, GitStats,
+    MergeReadiness, UncommittedDetails, WorktreeStatus,
+};
+use git2::{Oid, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
@@ -519,6 +523,261 @@ pub fn collect_git_stats(worktree_path: &Path, branch: &str) -> Option<GitStats>
     Some(GitStats {
         diff_stats: diff,
         worktree_status: status,
+    })
+}
+
+// --- Branch Health Operations ---
+
+/// Find the merge base between two commits.
+fn find_merge_base(repo: &Repository, oid_a: Oid, oid_b: Oid) -> Option<Oid> {
+    repo.merge_base(oid_a, oid_b).ok()
+}
+
+/// Count commits reachable from `branch_oid` but not from `base_oid`.
+fn count_commits_since(repo: &Repository, branch_oid: Oid, base_oid: Oid) -> usize {
+    let mut walk = match repo.revwalk() {
+        Ok(rw) => rw,
+        Err(e) => {
+            warn!(event = "core.git.stats.revwalk_init_failed", error = %e);
+            return 0;
+        }
+    };
+    if walk.push(branch_oid).is_err() || walk.hide(base_oid).is_err() {
+        return 0;
+    }
+    walk.count()
+}
+
+/// Get the last commit time on the current HEAD as RFC3339.
+fn get_last_commit_time(repo: &Repository) -> Option<String> {
+    let head = repo.head().ok()?;
+    let commit = head.peel_to_commit().ok()?;
+    let time = commit.time();
+    let secs = time.seconds();
+    let offset_mins = time.offset_minutes();
+    let offset_secs = (offset_mins as i64) * 60;
+    let utc_secs = secs + offset_secs;
+    // Format as RFC3339 UTC
+    let dt = chrono::DateTime::from_timestamp(utc_secs, 0)?;
+    Some(dt.to_rfc3339())
+}
+
+/// Compute diff stats between merge base tree and branch tip tree.
+fn diff_against_base(repo: &Repository, branch_oid: Oid, merge_base_oid: Oid) -> Option<DiffStats> {
+    let base_commit = repo.find_commit(merge_base_oid).ok()?;
+    let branch_commit = repo.find_commit(branch_oid).ok()?;
+    let base_tree = base_commit.tree().ok()?;
+    let branch_tree = branch_commit.tree().ok()?;
+    let diff = repo
+        .diff_tree_to_tree(Some(&base_tree), Some(&branch_tree), None)
+        .ok()?;
+    let stats = diff.stats().ok()?;
+    Some(DiffStats {
+        insertions: stats.insertions(),
+        deletions: stats.deletions(),
+        files_changed: stats.files_changed(),
+    })
+}
+
+/// Check for merge conflicts between branch tip and base tip.
+///
+/// Returns `(has_conflicts, check_failed)`.
+fn check_conflicts(repo: &Repository, branch_oid: Oid, base_oid: Oid) -> (bool, bool) {
+    let branch_commit = match repo.find_commit(branch_oid) {
+        Ok(c) => c,
+        Err(_) => return (false, true),
+    };
+    let base_commit = match repo.find_commit(base_oid) {
+        Ok(c) => c,
+        Err(_) => return (false, true),
+    };
+    match repo.merge_commits(&branch_commit, &base_commit, None) {
+        Ok(index) => (index.has_conflicts(), false),
+        Err(e) => {
+            warn!(event = "core.git.stats.merge_check_failed", error = %e);
+            (false, true)
+        }
+    }
+}
+
+/// Count commits ahead and behind between branch tip and base branch tip.
+fn count_base_drift(
+    repo: &Repository,
+    branch_oid: Oid,
+    base_oid: Oid,
+    base_branch: &str,
+) -> BaseBranchDrift {
+    let ahead = count_commits_since(repo, branch_oid, base_oid);
+    let behind = count_commits_since(repo, base_oid, branch_oid);
+    BaseBranchDrift {
+        ahead,
+        behind,
+        base_branch: base_branch.to_string(),
+    }
+}
+
+/// Compute merge readiness from branch state and optional PR info.
+pub fn compute_merge_readiness(
+    drift: &BaseBranchDrift,
+    has_conflicts: bool,
+    conflict_check_failed: bool,
+    has_remote: bool,
+    worktree_status: &Option<WorktreeStatus>,
+    pr_info: Option<&PrInfo>,
+) -> MergeReadiness {
+    // Priority: HasConflicts > NeedsRebase > NeedsPush > NeedsPr > CiFailing > Ready/ReadyLocal
+    if has_conflicts {
+        return MergeReadiness::HasConflicts;
+    }
+
+    // If conflict check failed, conservatively report conflicts
+    if conflict_check_failed {
+        return MergeReadiness::HasConflicts;
+    }
+
+    if drift.behind > 0 {
+        return MergeReadiness::NeedsRebase;
+    }
+
+    if !has_remote {
+        return MergeReadiness::ReadyLocal;
+    }
+
+    // Check if there are unpushed commits
+    let has_unpushed = worktree_status
+        .as_ref()
+        .is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
+
+    if has_unpushed {
+        return MergeReadiness::NeedsPush;
+    }
+
+    // Check PR state
+    match pr_info {
+        None => MergeReadiness::NeedsPr,
+        Some(pr) => {
+            if pr.ci_status == CiStatus::Failing {
+                MergeReadiness::CiFailing
+            } else {
+                MergeReadiness::Ready
+            }
+        }
+    }
+}
+
+/// Resolve a branch name to its OID, trying local first then remote.
+fn resolve_branch_oid(repo: &Repository, branch_name: &str) -> Option<Oid> {
+    // Try local branch first
+    if let Ok(branch) = repo.find_branch(branch_name, git2::BranchType::Local)
+        && let Some(oid) = branch.get().target()
+    {
+        return Some(oid);
+    }
+    // Try remote tracking branch
+    let remote_ref = format!("origin/{}", branch_name);
+    if let Ok(branch) = repo.find_branch(&remote_ref, git2::BranchType::Remote)
+        && let Some(oid) = branch.get().target()
+    {
+        return Some(oid);
+    }
+    None
+}
+
+/// Check if repository has any remote configured.
+fn repo_has_remote(repo: &Repository) -> bool {
+    repo.remotes().is_ok_and(|remotes| !remotes.is_empty())
+}
+
+/// Collect comprehensive branch health metrics for a kild.
+///
+/// Takes `pr_info` as parameter to keep git and forge separate.
+/// The CLI is responsible for fetching PR info and passing it in.
+///
+/// Returns `None` if the worktree cannot be opened.
+pub fn collect_branch_health(
+    worktree_path: &Path,
+    branch: &str,
+    base_branch: &str,
+    created_at: &str,
+    pr_info: Option<&PrInfo>,
+) -> Option<BranchHealth> {
+    let repo = match Repository::open(worktree_path) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(event = "core.git.stats.repo_open_failed", branch = branch, error = %e);
+            return None;
+        }
+    };
+
+    let has_remote = repo_has_remote(&repo);
+
+    // Resolve kild branch OID
+    let kild_branch = kild_branch_name(branch);
+    let branch_oid = match resolve_branch_oid(&repo, &kild_branch) {
+        Some(oid) => oid,
+        None => {
+            warn!(
+                event = "core.git.stats.branch_not_found",
+                branch = kild_branch
+            );
+            return None;
+        }
+    };
+
+    // Resolve base branch OID
+    let base_oid = match resolve_branch_oid(&repo, base_branch) {
+        Some(oid) => oid,
+        None => {
+            warn!(
+                event = "core.git.stats.base_branch_not_found",
+                base = base_branch
+            );
+            return None;
+        }
+    };
+
+    // Find merge base
+    let merge_base = find_merge_base(&repo, branch_oid, base_oid);
+
+    // Commit activity
+    let commits_since_base = merge_base.map_or(0, |mb| count_commits_since(&repo, branch_oid, mb));
+    let last_commit_time = get_last_commit_time(&repo);
+
+    // Diff vs base
+    let diff_vs_base = merge_base.and_then(|mb| diff_against_base(&repo, branch_oid, mb));
+
+    // Conflict detection (against base tip, not merge base)
+    let (has_conflicts, conflict_check_failed) = check_conflicts(&repo, branch_oid, base_oid);
+
+    // Base branch drift
+    let drift = count_base_drift(&repo, branch_oid, base_oid, base_branch);
+
+    // Worktree status for unpushed check
+    let worktree_status = get_worktree_status(worktree_path).ok();
+
+    // Compute readiness
+    let merge_readiness = compute_merge_readiness(
+        &drift,
+        has_conflicts,
+        conflict_check_failed,
+        has_remote,
+        &worktree_status,
+        pr_info,
+    );
+
+    Some(BranchHealth {
+        branch: branch.to_string(),
+        created_at: created_at.to_string(),
+        commit_activity: CommitActivity {
+            commits_since_base,
+            last_commit_time,
+        },
+        drift,
+        diff_vs_base,
+        has_conflicts,
+        conflict_check_failed,
+        merge_readiness,
+        has_remote,
     })
 }
 
@@ -1254,5 +1513,267 @@ mod tests {
         assert!(stats.diff_stats.is_some());
         let diff = stats.diff_stats.unwrap();
         assert!(diff.insertions > 0 || diff.deletions > 0);
+    }
+
+    // --- Branch health tests ---
+
+    #[test]
+    fn test_compute_merge_readiness_has_conflicts() {
+        let drift = BaseBranchDrift {
+            ahead: 1,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, true, false, true, &None, None);
+        assert_eq!(result, MergeReadiness::HasConflicts);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_conflict_check_failed() {
+        let drift = BaseBranchDrift {
+            ahead: 1,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, false, true, true, &None, None);
+        assert_eq!(result, MergeReadiness::HasConflicts);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_needs_rebase() {
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 5,
+            base_branch: "main".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &None, None);
+        assert_eq!(result, MergeReadiness::NeedsRebase);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_ready_local() {
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, false, false, false, &None, None);
+        assert_eq!(result, MergeReadiness::ReadyLocal);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_needs_push() {
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 3,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &Some(ws), None);
+        assert_eq!(result, MergeReadiness::NeedsPush);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_needs_push_never_pushed() {
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: false,
+            ..Default::default()
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &Some(ws), None);
+        assert_eq!(result, MergeReadiness::NeedsPush);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_needs_pr() {
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &Some(ws), None);
+        assert_eq!(result, MergeReadiness::NeedsPr);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_ci_failing() {
+        use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let pr = PrInfo {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Failing,
+            ci_summary: None,
+            review_status: ReviewStatus::Unknown,
+            review_summary: None,
+            updated_at: "2026-02-09T12:00:00Z".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &Some(ws), Some(&pr));
+        assert_eq!(result, MergeReadiness::CiFailing);
+    }
+
+    #[test]
+    fn test_compute_merge_readiness_ready() {
+        use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+        let drift = BaseBranchDrift {
+            ahead: 3,
+            behind: 0,
+            base_branch: "main".to_string(),
+        };
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let pr = PrInfo {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Passing,
+            ci_summary: None,
+            review_status: ReviewStatus::Approved,
+            review_summary: None,
+            updated_at: "2026-02-09T12:00:00Z".to_string(),
+        };
+        let result = compute_merge_readiness(&drift, false, false, true, &Some(ws), Some(&pr));
+        assert_eq!(result, MergeReadiness::Ready);
+    }
+
+    #[test]
+    fn test_collect_branch_health_nonexistent_path() {
+        let result = collect_branch_health(
+            Path::new("/nonexistent/path"),
+            "test",
+            "main",
+            "2026-02-09T10:00:00Z",
+            None,
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_collect_branch_health_with_kild_branch() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Create initial commit on main
+        fs::write(dir.path().join("file.txt"), "initial").unwrap();
+        git_add_commit(dir.path(), "initial on main");
+
+        // Rename default branch to main (in case it's 'master')
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create kild branch with a commit
+        Command::new("git")
+            .args(["checkout", "-b", "kild/test-feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("feature.txt"), "feature code").unwrap();
+        git_add_commit(dir.path(), "feature commit");
+
+        let health = collect_branch_health(
+            dir.path(),
+            "test-feature",
+            "main",
+            "2026-02-09T10:00:00Z",
+            None,
+        );
+        assert!(health.is_some());
+        let health = health.unwrap();
+        assert_eq!(health.branch, "test-feature");
+        assert_eq!(health.commit_activity.commits_since_base, 1);
+        assert!(!health.has_remote);
+        assert_eq!(health.drift.ahead, 1);
+        assert_eq!(health.drift.behind, 0);
+        assert_eq!(health.merge_readiness, MergeReadiness::ReadyLocal);
+        assert!(!health.has_conflicts);
+        assert!(!health.conflict_check_failed);
+        assert!(health.diff_vs_base.is_some());
+    }
+
+    #[test]
+    fn test_collect_branch_health_behind_base() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Create initial commit on main
+        fs::write(dir.path().join("file.txt"), "initial").unwrap();
+        git_add_commit(dir.path(), "initial on main");
+
+        // Rename default branch to main
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create kild branch
+        Command::new("git")
+            .args(["checkout", "-b", "kild/test-behind"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("feature.txt"), "feature").unwrap();
+        git_add_commit(dir.path(), "feature commit");
+
+        // Go back to main and add commits
+        Command::new("git")
+            .args(["checkout", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("main-update.txt"), "update 1").unwrap();
+        git_add_commit(dir.path(), "main update 1");
+        fs::write(dir.path().join("main-update2.txt"), "update 2").unwrap();
+        git_add_commit(dir.path(), "main update 2");
+
+        // Go back to kild branch to set HEAD
+        Command::new("git")
+            .args(["checkout", "kild/test-behind"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let health = collect_branch_health(
+            dir.path(),
+            "test-behind",
+            "main",
+            "2026-02-09T10:00:00Z",
+            None,
+        );
+        assert!(health.is_some());
+        let health = health.unwrap();
+        assert_eq!(health.drift.ahead, 1);
+        assert_eq!(health.drift.behind, 2);
+        assert_eq!(health.merge_readiness, MergeReadiness::NeedsRebase);
     }
 }

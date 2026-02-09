@@ -425,6 +425,35 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
+            Command::new("stats")
+                .about("Show branch health and merge readiness for a kild")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild")
+                        .index(1)
+                        .required_unless_present("all")
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help("Show stats for all kilds")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("branch")
+                )
+                .arg(
+                    Arg::new("base")
+                        .long("base")
+                        .short('b')
+                        .help("Base branch to compare against (overrides config, default: main)")
+                )
+        )
+        .subcommand(
             Command::new("health")
                 .about("Show health status and metrics for kild")
                 .arg(
@@ -1578,5 +1607,93 @@ mod tests {
         let create_matches = matches.subcommand_matches("create").unwrap();
         assert!(create_matches.get_flag("no-agent"));
         assert!(create_matches.get_flag("no-fetch"));
+    }
+
+    // --- stats command tests ---
+
+    #[test]
+    fn test_cli_stats_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "test-branch"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
+        assert!(!sub.get_flag("json"));
+        assert!(!sub.get_flag("all"));
+        assert!(sub.get_one::<String>("base").is_none());
+    }
+
+    #[test]
+    fn test_cli_stats_with_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "test-branch", "--json"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert!(sub.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_stats_all_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "--all"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert!(sub.get_flag("all"));
+        assert!(sub.get_one::<String>("branch").is_none());
+    }
+
+    #[test]
+    fn test_cli_stats_all_with_json() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "--all", "--json"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert!(sub.get_flag("all"));
+        assert!(sub.get_flag("json"));
+    }
+
+    #[test]
+    fn test_cli_stats_all_conflicts_with_branch() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "--all", "some-branch"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_stats_with_base() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "stats", "test-branch", "--base", "dev"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert_eq!(sub.get_one::<String>("base").unwrap(), "dev");
+    }
+
+    #[test]
+    fn test_cli_stats_with_base_short() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats", "test-branch", "-b", "dev"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("stats").unwrap();
+        assert_eq!(sub.get_one::<String>("base").unwrap(), "dev");
+    }
+
+    #[test]
+    fn test_cli_stats_requires_branch_or_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "stats"]);
+        assert!(matches.is_err());
     }
 }

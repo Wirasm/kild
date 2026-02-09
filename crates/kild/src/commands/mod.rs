@@ -23,6 +23,7 @@ mod open;
 mod pr;
 mod rebase;
 mod restart;
+mod stats;
 mod status;
 mod stop;
 mod sync;
@@ -45,6 +46,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("diff", sub_matches)) => diff::handle_diff_command(sub_matches),
         Some(("commits", sub_matches)) => commits::handle_commits_command(sub_matches),
         Some(("pr", sub_matches)) => pr::handle_pr_command(sub_matches),
+        Some(("stats", sub_matches)) => stats::handle_stats_command(sub_matches),
         Some(("status", sub_matches)) => status::handle_status_command(sub_matches),
         Some(("agent-status", sub_matches)) => {
             agent_status::handle_agent_status_command(sub_matches)

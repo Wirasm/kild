@@ -33,7 +33,10 @@ pub use config::KildConfig;
 pub use editor::{EditorBackend, EditorError, EditorType};
 pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
-pub use git::types::{DiffStats, GitStats, UncommittedDetails, WorktreeStatus};
+pub use git::types::{
+    BaseBranchDrift, BranchHealth, CommitActivity, DiffStats, GitStats, MergeReadiness,
+    UncommittedDetails, WorktreeStatus,
+};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{

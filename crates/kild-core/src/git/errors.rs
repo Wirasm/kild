@@ -57,6 +57,9 @@ pub enum GitError {
     #[error("Git diff failed: {message}")]
     DiffFailed { message: String },
 
+    #[error("Merge analysis failed: {message}")]
+    MergeAnalysisFailed { message: String },
+
     #[error("Git log failed: {message}")]
     LogFailed { message: String },
 
@@ -84,6 +87,7 @@ impl KildError for GitError {
             GitError::RebaseAbortFailed { .. } => "GIT_REBASE_ABORT_FAILED",
             GitError::RemoteBranchDeleteFailed { .. } => "GIT_REMOTE_BRANCH_DELETE_FAILED",
             GitError::DiffFailed { .. } => "GIT_DIFF_FAILED",
+            GitError::MergeAnalysisFailed { .. } => "GIT_MERGE_ANALYSIS_FAILED",
             GitError::LogFailed { .. } => "GIT_LOG_FAILED",
             GitError::Git2Error { .. } => "GIT2_ERROR",
             GitError::IoError { .. } => "GIT_IO_ERROR",

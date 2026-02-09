@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::fmt;
 use std::path::PathBuf;
 
 /// Git diff statistics for a worktree.
@@ -167,6 +168,79 @@ impl GitStats {
     pub fn is_empty(&self) -> bool {
         self.diff_stats.is_none() && self.worktree_status.is_none()
     }
+}
+
+/// Computed merge readiness status for a branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeReadiness {
+    /// Clean, pushed, PR open, CI passing
+    Ready,
+    /// Has unpushed commits
+    NeedsPush,
+    /// Behind base branch significantly
+    NeedsRebase,
+    /// Cannot merge cleanly into base
+    HasConflicts,
+    /// Pushed but no PR exists
+    NeedsPr,
+    /// PR exists but CI is failing
+    CiFailing,
+    /// Ready to merge locally (no remote configured)
+    ReadyLocal,
+}
+
+impl fmt::Display for MergeReadiness {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MergeReadiness::Ready => write!(f, "Ready"),
+            MergeReadiness::NeedsPush => write!(f, "Needs push"),
+            MergeReadiness::NeedsRebase => write!(f, "Needs rebase"),
+            MergeReadiness::HasConflicts => write!(f, "Has conflicts"),
+            MergeReadiness::NeedsPr => write!(f, "Needs PR"),
+            MergeReadiness::CiFailing => write!(f, "CI failing"),
+            MergeReadiness::ReadyLocal => write!(f, "Ready (local)"),
+        }
+    }
+}
+
+/// Commit activity metrics for a branch.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct CommitActivity {
+    /// Total commits on branch since diverging from base.
+    pub commits_since_base: usize,
+    /// Timestamp of the last commit (RFC3339). None if no commits.
+    pub last_commit_time: Option<String>,
+}
+
+/// Base branch drift metrics.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct BaseBranchDrift {
+    /// Commits ahead of base branch (on kild branch, not on base).
+    pub ahead: usize,
+    /// Commits base branch has gained since kild branched off.
+    pub behind: usize,
+    /// Name of the base branch used for comparison.
+    pub base_branch: String,
+}
+
+/// Comprehensive branch health for a kild.
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchHealth {
+    pub branch: String,
+    pub created_at: String,
+    pub commit_activity: CommitActivity,
+    pub drift: BaseBranchDrift,
+    /// Total diff from merge base to branch tip (how big the PR will be).
+    pub diff_vs_base: Option<DiffStats>,
+    /// Whether the branch can merge cleanly into base.
+    pub has_conflicts: bool,
+    /// Whether conflict detection failed (result unreliable).
+    pub conflict_check_failed: bool,
+    /// Computed readiness status.
+    pub merge_readiness: MergeReadiness,
+    /// Whether a remote is configured for this repository.
+    pub has_remote: bool,
 }
 
 impl ProjectInfo {
@@ -352,6 +426,80 @@ mod tests {
         assert_eq!(details["staged_files"], 3);
         assert_eq!(details["modified_files"], 2);
         assert_eq!(details["untracked_files"], 1);
+    }
+
+    // --- MergeReadiness tests ---
+
+    #[test]
+    fn test_merge_readiness_display() {
+        assert_eq!(MergeReadiness::Ready.to_string(), "Ready");
+        assert_eq!(MergeReadiness::NeedsPush.to_string(), "Needs push");
+        assert_eq!(MergeReadiness::NeedsRebase.to_string(), "Needs rebase");
+        assert_eq!(MergeReadiness::HasConflicts.to_string(), "Has conflicts");
+        assert_eq!(MergeReadiness::NeedsPr.to_string(), "Needs PR");
+        assert_eq!(MergeReadiness::CiFailing.to_string(), "CI failing");
+        assert_eq!(MergeReadiness::ReadyLocal.to_string(), "Ready (local)");
+    }
+
+    #[test]
+    fn test_merge_readiness_serde() {
+        let json = serde_json::to_string(&MergeReadiness::NeedsRebase).unwrap();
+        assert_eq!(json, "\"needs_rebase\"");
+
+        let json = serde_json::to_string(&MergeReadiness::HasConflicts).unwrap();
+        assert_eq!(json, "\"has_conflicts\"");
+
+        let json = serde_json::to_string(&MergeReadiness::ReadyLocal).unwrap();
+        assert_eq!(json, "\"ready_local\"");
+    }
+
+    #[test]
+    fn test_commit_activity_default() {
+        let activity = CommitActivity::default();
+        assert_eq!(activity.commits_since_base, 0);
+        assert!(activity.last_commit_time.is_none());
+    }
+
+    #[test]
+    fn test_base_branch_drift_default() {
+        let drift = BaseBranchDrift::default();
+        assert_eq!(drift.ahead, 0);
+        assert_eq!(drift.behind, 0);
+        assert_eq!(drift.base_branch, "");
+    }
+
+    #[test]
+    fn test_branch_health_serializes_to_json() {
+        let health = BranchHealth {
+            branch: "feature-auth".to_string(),
+            created_at: "2026-02-09T10:00:00Z".to_string(),
+            commit_activity: CommitActivity {
+                commits_since_base: 4,
+                last_commit_time: Some("2026-02-09T11:48:00Z".to_string()),
+            },
+            drift: BaseBranchDrift {
+                ahead: 4,
+                behind: 12,
+                base_branch: "main".to_string(),
+            },
+            diff_vs_base: Some(DiffStats {
+                insertions: 450,
+                deletions: 30,
+                files_changed: 12,
+            }),
+            has_conflicts: false,
+            conflict_check_failed: false,
+            merge_readiness: MergeReadiness::NeedsRebase,
+            has_remote: true,
+        };
+        let value = serde_json::to_value(&health).expect("BranchHealth should serialize");
+        assert_eq!(value["branch"], "feature-auth");
+        assert_eq!(value["commit_activity"]["commits_since_base"], 4);
+        assert_eq!(value["drift"]["behind"], 12);
+        assert_eq!(value["diff_vs_base"]["insertions"], 450);
+        assert_eq!(value["has_conflicts"], false);
+        assert_eq!(value["merge_readiness"], "needs_rebase");
+        assert_eq!(value["has_remote"], true);
     }
 
     #[test]
