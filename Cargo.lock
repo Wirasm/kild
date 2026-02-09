@@ -3194,7 +3194,9 @@ dependencies = [
 name = "kild-core"
 version = "0.1.0"
 dependencies = [
+ "accessibility-sys",
  "chrono",
+ "core-foundation 0.10.0",
  "dirs 5.0.1",
  "git2",
  "glob",
@@ -3210,6 +3212,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "which 7.0.3",
+ "xcap",
 ]
 
 [[package]]

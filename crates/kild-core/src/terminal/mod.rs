@@ -2,6 +2,7 @@ pub mod backends;
 pub mod common;
 pub mod errors;
 pub mod handler;
+pub mod native;
 pub mod operations;
 pub mod registry;
 pub mod traits;

@@ -11,9 +11,7 @@ use crate::terminal::{
 use crate::terminal::types::SpawnConfig;
 
 #[cfg(target_os = "macos")]
-use crate::terminal::common::escape::{
-    applescript_escape, build_cd_command, escape_regex, shell_escape,
-};
+use crate::terminal::common::escape::{build_cd_command, escape_regex, shell_escape};
 
 /// Find the Ghostty process PID that contains the given session identifier in its command line.
 /// Returns the first matching Ghostty process PID, or None if no match is found.
@@ -141,538 +139,55 @@ fn is_ghostty_process(pid: u32) -> bool {
     }
 }
 
-/// Focus a Ghostty window by finding its process via PID and using System Events.
-#[cfg(target_os = "macos")]
-fn focus_by_pid(pid: u32) -> Result<(), TerminalError> {
-    use tracing::{debug, info};
-
-    debug!(
-        event = "core.terminal.focus_ghostty_by_pid_started",
-        pid = pid
-    );
-
-    // Use System Events with unix id to target the specific process
-    let focus_script = format!(
-        r#"tell application "System Events"
-            set targetProc to first process whose unix id is {}
-            set frontmost of targetProc to true
-            tell targetProc
-                if (count of windows) > 0 then
-                    perform action "AXRaise" of window 1
-                    return "focused"
-                else
-                    return "no windows"
-                end if
-            end tell
-        end tell"#,
-        pid
-    );
-
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&focus_script)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if result == "focused" {
-                info!(
-                    event = "core.terminal.focus_completed",
-                    terminal = "Ghostty",
-                    method = "pid",
-                    pid = pid
-                );
-                Ok(())
-            } else {
-                debug!(
-                    event = "core.terminal.focus_ghostty_by_pid_no_windows",
-                    pid = pid,
-                    result = %result
-                );
-                Err(TerminalError::FocusFailed {
-                    message: format!("Ghostty process {} has no windows", pid),
-                })
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            debug!(
-                event = "core.terminal.focus_ghostty_by_pid_failed",
-                pid = pid,
-                stderr = %stderr
-            );
-            Err(TerminalError::FocusFailed {
-                message: format!("Failed to focus Ghostty by PID {}: {}", pid, stderr),
-            })
-        }
-        Err(e) => {
-            debug!(
-                event = "core.terminal.focus_ghostty_by_pid_error",
-                pid = pid,
-                error = %e
-            );
-            Err(TerminalError::FocusFailed {
-                message: format!("osascript error for PID {}: {}", pid, e),
-            })
-        }
-    }
-}
-
-/// Focus a Ghostty window by title using System Events.
-#[cfg(target_os = "macos")]
-fn focus_by_title(window_id: &str) -> Result<(), TerminalError> {
-    use tracing::{error, info, warn};
-
-    let escaped_id = applescript_escape(window_id);
-    let focus_script = format!(
-        r#"tell application "System Events"
-            tell process "Ghostty"
-                set frontmost to true
-                repeat with w in windows
-                    if name of w contains "{}" then
-                        perform action "AXRaise" of w
-                        return "focused"
-                    end if
-                end repeat
-                return "not found"
-            end tell
-        end tell"#,
-        escaped_id
-    );
-
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&focus_script)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout);
-            if result.trim() == "focused" {
-                info!(
-                    event = "core.terminal.focus_completed",
-                    terminal = "Ghostty",
-                    method = "title",
-                    window_id = %window_id
-                );
-                Ok(())
-            } else {
-                warn!(
-                    event = "core.terminal.focus_failed",
-                    terminal = "Ghostty",
-                    window_id = %window_id,
-                    message = "Window not found by PID or title"
-                );
-                Err(TerminalError::FocusFailed {
-                    message: format!(
-                        "Ghostty window '{}' not found (terminal may have been closed)",
-                        window_id
-                    ),
-                })
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            warn!(
-                event = "core.terminal.focus_failed",
-                terminal = "Ghostty",
-                window_id = %window_id,
-                stderr = %stderr
-            );
-            Err(TerminalError::FocusFailed { message: stderr })
-        }
-        Err(e) => {
-            error!(
-                event = "core.terminal.focus_failed",
-                terminal = "Ghostty",
-                window_id = %window_id,
-                error = %e
-            );
-            Err(TerminalError::FocusFailed {
-                message: e.to_string(),
-            })
-        }
-    }
-}
-
-/// Hide a Ghostty window by PID using System Events AXMinimized attribute.
-#[cfg(target_os = "macos")]
-fn hide_by_pid(pid: u32) -> Result<(), TerminalError> {
-    use tracing::{debug, info};
-
-    debug!(
-        event = "core.terminal.hide_ghostty_by_pid_started",
-        pid = pid
-    );
-
-    let hide_script = format!(
-        r#"tell application "System Events"
-            set targetProc to first process whose unix id is {}
-            tell targetProc
-                if (count of windows) > 0 then
-                    set value of attribute "AXMinimized" of window 1 to true
-                    return "hidden"
-                else
-                    return "no windows"
-                end if
-            end tell
-        end tell"#,
-        pid
-    );
-
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&hide_script)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if result == "hidden" {
-                info!(
-                    event = "core.terminal.hide_completed",
-                    terminal = "Ghostty",
-                    method = "pid",
-                    pid = pid
-                );
-                Ok(())
-            } else {
-                debug!(
-                    event = "core.terminal.hide_ghostty_by_pid_no_windows",
-                    pid = pid,
-                    result = %result
-                );
-                Err(TerminalError::HideFailed {
-                    message: format!("Ghostty process {} has no windows", pid),
-                })
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            debug!(
-                event = "core.terminal.hide_ghostty_by_pid_failed",
-                pid = pid,
-                stderr = %stderr
-            );
-            Err(TerminalError::HideFailed {
-                message: format!("Failed to hide Ghostty by PID {}: {}", pid, stderr),
-            })
-        }
-        Err(e) => {
-            debug!(
-                event = "core.terminal.hide_ghostty_by_pid_error",
-                pid = pid,
-                error = %e
-            );
-            Err(TerminalError::HideFailed {
-                message: format!("osascript error for PID {}: {}", pid, e),
-            })
-        }
-    }
-}
-
-/// Hide a Ghostty window by title using System Events AXMinimized attribute.
-#[cfg(target_os = "macos")]
-fn hide_by_title(window_id: &str) -> Result<(), TerminalError> {
-    use tracing::{info, warn};
-
-    let escaped_id = applescript_escape(window_id);
-    let hide_script = format!(
-        r#"tell application "System Events"
-            tell process "Ghostty"
-                repeat with w in windows
-                    if name of w contains "{}" then
-                        set value of attribute "AXMinimized" of w to true
-                        return "hidden"
-                    end if
-                end repeat
-                return "not found"
-            end tell
-        end tell"#,
-        escaped_id
-    );
-
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&hide_script)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if result == "hidden" {
-                info!(
-                    event = "core.terminal.hide_completed",
-                    terminal = "Ghostty",
-                    method = "title",
-                    window_id = %window_id
-                );
-                Ok(())
-            } else {
-                warn!(
-                    event = "core.terminal.hide_failed",
-                    terminal = "Ghostty",
-                    window_id = %window_id,
-                    message = "Window not found by PID or title"
-                );
-                Err(TerminalError::HideFailed {
-                    message: format!(
-                        "Ghostty window '{}' not found (terminal may have been closed)",
-                        window_id
-                    ),
-                })
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            warn!(
-                event = "core.terminal.hide_failed",
-                terminal = "Ghostty",
-                window_id = %window_id,
-                stderr = %stderr
-            );
-            Err(TerminalError::HideFailed { message: stderr })
-        }
-        Err(e) => {
-            warn!(
-                event = "core.terminal.hide_failed",
-                terminal = "Ghostty",
-                window_id = %window_id,
-                error = %e
-            );
-            Err(TerminalError::HideFailed {
-                message: e.to_string(),
-            })
-        }
-    }
-}
-
-/// Check if a Ghostty window exists by PID using System Events.
-#[cfg(target_os = "macos")]
-fn check_window_by_pid(pid: u32) -> Result<Option<bool>, TerminalError> {
-    use tracing::debug;
-
-    debug!(
-        event = "core.terminal.check_ghostty_by_pid_started",
-        pid = pid
-    );
-
-    let check_script = format!(
-        r#"tell application "System Events"
-            set targetProc to first process whose unix id is {}
-            tell targetProc
-                if (count of windows) > 0 then
-                    return "found"
-                else
-                    return "no windows"
-                end if
-            end tell
-        end tell"#,
-        pid
-    );
-
-    let output = match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&check_script)
-        .output()
-    {
-        Ok(output) => output,
-        Err(e) => {
-            debug!(
-                event = "core.terminal.check_ghostty_by_pid_error",
-                pid = pid,
-                error = %e
-            );
-            return Ok(None);
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        debug!(
-            event = "core.terminal.check_ghostty_by_pid_failed",
-            pid = pid,
-            stderr = %stderr
-        );
-        return Ok(None);
-    }
-
-    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if result == "found" {
-        debug!(
-            event = "core.terminal.check_ghostty_by_pid_found",
-            pid = pid
-        );
-        Ok(Some(true))
-    } else {
-        debug!(
-            event = "core.terminal.check_ghostty_by_pid_no_windows",
-            pid = pid,
-            result = %result
-        );
-        Ok(Some(false))
-    }
-}
-
-/// Check if a Ghostty window exists by title using System Events.
-#[cfg(target_os = "macos")]
-fn check_window_by_title(window_id: &str) -> Result<Option<bool>, TerminalError> {
-    let escaped_id = applescript_escape(window_id);
-    let check_script = format!(
-        r#"tell application "System Events"
-            if not (exists process "Ghostty") then
-                return "app_not_running"
-            end if
-            tell process "Ghostty"
-                repeat with w in windows
-                    if name of w contains "{}" then
-                        return "found"
-                    end if
-                end repeat
-                return "not_found"
-            end tell
-        end tell"#,
-        escaped_id
-    );
-
-    let output = match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&check_script)
-        .output()
-    {
-        Ok(output) => output,
-        Err(e) => {
-            debug!(
-                event = "core.terminal.ghostty_window_check_error",
-                window_title = %window_id,
-                error = %e
-            );
-            return Ok(None);
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!(
-            event = "core.terminal.ghostty_window_check_script_failed",
-            window_title = %window_id,
-            stderr = %stderr.trim()
-        );
-        return Ok(None);
-    }
-
-    let result = String::from_utf8_lossy(&output.stdout);
-    let trimmed = result.trim();
-
-    match trimmed {
-        "found" => {
-            debug!(
-                event = "core.terminal.ghostty_window_check_found",
-                window_title = %window_id
-            );
-            Ok(Some(true))
-        }
-        "not_found" | "app_not_running" => {
-            debug!(
-                event = "core.terminal.ghostty_window_check_not_found",
-                window_title = %window_id,
-                reason = %trimmed
-            );
-            Ok(Some(false))
-        }
-        _ => {
-            debug!(
-                event = "core.terminal.ghostty_window_check_unknown_result",
-                window_title = %window_id,
-                result = %trimmed
-            );
-            Ok(None)
-        }
-    }
-}
-
-/// Executes an action on a Ghostty window with reliable lookup.
+/// Look up a Ghostty window using Core Graphics API, with PID fallback.
 ///
-/// Steps:
-/// 1. Activate Ghostty app (tolerates failure)
-/// 2. Try PID-based action via `pid_action`
-/// 3. Fall back to title-based action via `title_action`
+/// Strategy:
+/// 1. Try to find by app name + title match (via xcap)
+/// 2. If title doesn't match (agent changed it), try PID-based lookup
 #[cfg(target_os = "macos")]
-fn with_ghostty_window<T>(
+fn find_ghostty_native_window(
     window_id: &str,
-    operation: &str,
-    pid_action: impl FnOnce(u32) -> Result<T, TerminalError>,
-    title_action: impl FnOnce(&str) -> Result<T, TerminalError>,
-) -> Result<T, TerminalError> {
-    use tracing::warn;
+) -> Result<Option<crate::terminal::native::NativeWindowInfo>, TerminalError> {
+    use crate::terminal::native;
 
     debug!(
-        event = "core.terminal.ghostty_window_lookup_started",
-        window_id = %window_id,
-        operation = %operation
+        event = "core.terminal.ghostty_native_lookup_started",
+        window_id = %window_id
     );
 
-    // Step 1: Activate Ghostty app to bring it to the foreground
-    let activate_script = r#"tell application "Ghostty" to activate"#;
-    if let Ok(output) = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(activate_script)
-        .output()
-    {
-        if output.status.success() {
-            debug!(
-                event = "core.terminal.ghostty_activated",
-                window_id = %window_id,
-                operation = %operation
-            );
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            warn!(
-                event = "core.terminal.ghostty_activate_failed",
-                window_id = %window_id,
-                operation = %operation,
-                stderr = %stderr,
-                message = "Ghostty activation failed - continuing with window lookup"
-            );
-        }
-    } else {
-        warn!(
-            event = "core.terminal.ghostty_activate_failed",
+    // Primary: find by title (most common case — title matches session ID)
+    if let Some(window) = native::find_window("Ghostty", window_id)? {
+        debug!(
+            event = "core.terminal.ghostty_native_found_by_title",
             window_id = %window_id,
-            operation = %operation,
-            message = "Failed to execute osascript for activation - continuing with window lookup"
+            cg_window_id = window.id
         );
+        return Ok(Some(window));
     }
 
-    // Step 2: Try PID-based action (handles dynamic title changes)
+    // Fallback: find by PID (when agent has changed the window title)
     if let Some(pid) = find_ghostty_pid_by_session(window_id) {
         debug!(
-            event = "core.terminal.ghostty_trying_pid",
+            event = "core.terminal.ghostty_native_trying_pid",
             window_id = %window_id,
-            operation = %operation,
             pid = pid
         );
-        match pid_action(pid) {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                debug!(
-                    event = "core.terminal.ghostty_pid_failed_fallback",
-                    window_id = %window_id,
-                    operation = %operation,
-                    pid = pid,
-                    error = %e,
-                    message = "PID-based action failed, falling back to title search"
-                );
-            }
+        if let Some(window) = native::find_window_by_pid("Ghostty", pid)? {
+            debug!(
+                event = "core.terminal.ghostty_native_found_by_pid",
+                window_id = %window_id,
+                pid = pid,
+                cg_window_id = window.id
+            );
+            return Ok(Some(window));
         }
-    } else {
-        debug!(
-            event = "core.terminal.ghostty_no_pid_fallback",
-            window_id = %window_id,
-            operation = %operation,
-            message = "No matching Ghostty process found, falling back to title search"
-        );
     }
 
-    // Step 3: Fall back to title-based action
-    title_action(window_id)
+    debug!(
+        event = "core.terminal.ghostty_native_not_found",
+        window_id = %window_id
+    );
+    Ok(None)
 }
 
 /// Backend implementation for Ghostty terminal.
@@ -819,22 +334,65 @@ impl TerminalBackend for GhosttyBackend {
 
     #[cfg(target_os = "macos")]
     fn focus_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        with_ghostty_window(window_id, "focus", focus_by_pid, focus_by_title)
+        use crate::terminal::native;
+        use tracing::info;
+
+        debug!(event = "core.terminal.focus_ghostty_started", window_id = %window_id);
+
+        match find_ghostty_native_window(window_id)? {
+            Some(window) => {
+                native::focus_window(&window)?;
+                info!(event = "core.terminal.focus_completed", terminal = "Ghostty", window_id = %window_id);
+                Ok(())
+            }
+            None => Err(TerminalError::FocusFailed {
+                message: format!("No Ghostty window found matching '{}'", window_id),
+            }),
+        }
     }
 
     #[cfg(target_os = "macos")]
     fn hide_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        with_ghostty_window(window_id, "hide", hide_by_pid, hide_by_title)
+        use crate::terminal::native;
+        use tracing::info;
+
+        debug!(event = "core.terminal.hide_ghostty_started", window_id = %window_id);
+
+        match find_ghostty_native_window(window_id)? {
+            Some(window) => {
+                native::minimize_window(&window)?;
+                info!(event = "core.terminal.hide_completed", terminal = "Ghostty", window_id = %window_id);
+                Ok(())
+            }
+            None => Err(TerminalError::HideFailed {
+                message: format!("No Ghostty window found matching '{}'", window_id),
+            }),
+        }
     }
 
     #[cfg(target_os = "macos")]
     fn is_window_open(&self, window_id: &str) -> Result<Option<bool>, TerminalError> {
-        with_ghostty_window(
-            window_id,
-            "window_check",
-            check_window_by_pid,
-            check_window_by_title,
-        )
+        debug!(event = "core.terminal.check_ghostty_started", window_id = %window_id);
+
+        match find_ghostty_native_window(window_id)? {
+            Some(window) => {
+                let is_open = !window.is_minimized;
+                debug!(
+                    event = "core.terminal.check_ghostty_completed",
+                    window_id = %window_id,
+                    is_open = is_open,
+                    is_minimized = window.is_minimized
+                );
+                Ok(Some(is_open))
+            }
+            None => {
+                debug!(
+                    event = "core.terminal.check_ghostty_not_found",
+                    window_id = %window_id
+                );
+                Ok(Some(false))
+            }
+        }
     }
 
     crate::terminal::common::helpers::platform_unsupported!(not(target_os = "macos"), "ghostty");
@@ -1009,5 +567,32 @@ mod tests {
         let escaped = escape_regex(window_id);
         assert_eq!(escaped, "kild-project123-my-branch_0");
         assert!(!escaped.contains("Ghostty"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_find_ghostty_native_window_not_found() {
+        // When no Ghostty window matches, should return None
+        let result = find_ghostty_native_window("nonexistent-window-xyz-12345");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_native_window_info_fields() {
+        use crate::terminal::native::NativeWindowInfo;
+        let info = NativeWindowInfo {
+            id: 12345,
+            title: "test-window".to_string(),
+            app_name: "Ghostty".to_string(),
+            pid: Some(9999),
+            is_minimized: false,
+        };
+        assert_eq!(info.id, 12345);
+        assert_eq!(info.title, "test-window");
+        assert_eq!(info.app_name, "Ghostty");
+        assert_eq!(info.pid, Some(9999));
+        assert!(!info.is_minimized);
     }
 }

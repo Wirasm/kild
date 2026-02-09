@@ -32,6 +32,9 @@ pub enum TerminalError {
     #[error("Failed to hide terminal window: {message}")]
     HideFailed { message: String },
 
+    #[error("Native window operation failed: {message}")]
+    NativeWindowError { message: String },
+
     #[error("IO error during terminal operation: {source}")]
     IoError {
         #[from]
@@ -52,6 +55,7 @@ impl KildError for TerminalError {
             TerminalError::HyprlandIpcFailed { .. } => "HYPRLAND_IPC_FAILED",
             TerminalError::FocusFailed { .. } => "TERMINAL_FOCUS_FAILED",
             TerminalError::HideFailed { .. } => "TERMINAL_HIDE_FAILED",
+            TerminalError::NativeWindowError { .. } => "NATIVE_WINDOW_ERROR",
             TerminalError::IoError { .. } => "TERMINAL_IO_ERROR",
         }
     }
@@ -67,6 +71,7 @@ impl KildError for TerminalError {
                 | TerminalError::HyprlandIpcFailed { .. }
                 | TerminalError::FocusFailed { .. }
                 | TerminalError::HideFailed { .. }
+                | TerminalError::NativeWindowError { .. }
         )
     }
 }
