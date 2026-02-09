@@ -31,11 +31,13 @@ const ITERM_CLOSE_SCRIPT: &str = r#"tell application "iTerm"
 
 /// AppleScript template for iTerm window focusing.
 /// - `activate` brings iTerm to the foreground (above other apps)
-/// - `set frontmost` ensures the specific window is in front of other iTerm windows
+/// - `set miniaturized to false` restores minimized windows
+/// - `select` brings the specific window in front of other iTerm windows
 #[cfg(target_os = "macos")]
 const ITERM_FOCUS_SCRIPT: &str = r#"tell application "iTerm"
         activate
-        set frontmost of window id {window_id} to true
+        set miniaturized of window id {window_id} to false
+        select window id {window_id}
     end tell"#;
 
 /// AppleScript template for iTerm window hiding (minimize).
@@ -135,6 +137,18 @@ mod tests {
     #[test]
     fn test_iterm_close_script_has_window_id_placeholder() {
         assert!(ITERM_CLOSE_SCRIPT.contains("{window_id}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_iterm_focus_script_uses_valid_applescript() {
+        assert!(ITERM_FOCUS_SCRIPT.contains("{window_id}"));
+        assert!(ITERM_FOCUS_SCRIPT.contains("set miniaturized"));
+        assert!(ITERM_FOCUS_SCRIPT.contains("select window id"));
+        assert!(
+            !ITERM_FOCUS_SCRIPT.contains("set frontmost"),
+            "set frontmost is not a valid iTerm window property"
+        );
     }
 
     #[cfg(target_os = "macos")]
