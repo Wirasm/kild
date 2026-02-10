@@ -342,6 +342,7 @@ mod tests {
             None,
             String::new(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         )
         .unwrap()
     }

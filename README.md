@@ -13,7 +13,8 @@ KILD eliminates context switching between scattered terminals when working with 
 ## Features
 
 - **Isolated Worktrees**: Each kild gets its own Git worktree with unique `kild/<branch>` branch
-- **Native Terminal Integration**: Launches AI agents in native terminal windows
+- **Dual Runtime Modes**: Choose between external terminal windows or daemon-owned PTYs
+- **Session Persistence**: Daemon-managed sessions survive terminal restarts (experimental)
 - **Session Tracking**: Persistent registry tracks all active kilds
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Agent-Friendly**: Designed for programmatic use by AI assistants
@@ -74,6 +75,12 @@ kild create feature-auth --agent claude --note "Implementing JWT authentication"
 
 # Create without launching an agent (opens bare terminal with $SHELL)
 kild create debug-session --no-agent
+
+# Launch in daemon-owned PTY (experimental)
+kild create my-branch --agent claude --daemon
+
+# Force external terminal window (override config default)
+kild create my-branch --agent claude --no-daemon
 ```
 
 ### List active kilds
@@ -213,6 +220,31 @@ kild pr <branch> --refresh
 kild pr <branch> --json
 ```
 
+### Daemon management (experimental)
+```bash
+# Start daemon in background
+kild daemon start
+
+# Start daemon in foreground (for debugging)
+kild daemon start --foreground
+
+# Stop running daemon
+kild daemon stop
+
+# Show daemon status
+kild daemon status
+kild daemon status --json
+
+# Attach to daemon-managed session
+kild attach <branch>
+# Press Ctrl+C to detach
+```
+
+**Note**: Daemon mode is experimental (Phase 1b). Known limitations:
+- `auto_start` config option not yet implemented
+- Daemon runs in foreground only with `--foreground` flag
+- Scrollback replay on attach not yet implemented
+
 ### Stop a kild
 ```bash
 # Stop agent, preserve worktree
@@ -286,6 +318,13 @@ Configure additional patterns in `[include_patterns]` section. Your patterns ext
 **Terminal Preferences**: Set preferred terminal emulator (Ghostty, iTerm2, Terminal.app on macOS; Alacritty on Linux).
 
 **Editor Settings**: Configure default editor for `kild code` command with optional flags and terminal mode for terminal-based editors.
+
+**Daemon Runtime**: Control whether sessions run in daemon-owned PTYs by default:
+```toml
+[daemon]
+enabled = false      # Use daemon mode by default
+auto_start = true    # Auto-start daemon when needed
+```
 
 ## How It Works
 

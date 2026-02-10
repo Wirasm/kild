@@ -84,6 +84,63 @@ pub fn format_partial_failure_error(operation: &str, failed: usize, total: usize
     )
 }
 
+/// Ensure the daemon is running. If not running and auto_start is enabled,
+/// spawns the daemon in the background and waits for it to become ready.
+pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::error::Error>> {
+    if kild_core::daemon::client::ping_daemon().unwrap_or(false) {
+        return Ok(());
+    }
+
+    if !config.daemon_auto_start() {
+        return Err("Daemon is not running. Start it with 'kild daemon start'.".into());
+    }
+
+    eprintln!("Starting daemon...");
+
+    let daemon_binary = std::env::current_exe()?;
+    std::process::Command::new(&daemon_binary)
+        .args(["daemon", "start", "--foreground"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to start daemon: {}", e))?;
+
+    let socket_path = kild_core::daemon::socket_path();
+    let timeout = std::time::Duration::from_secs(5);
+    let start = std::time::Instant::now();
+
+    loop {
+        if socket_path.exists() && kild_core::daemon::client::ping_daemon().unwrap_or(false) {
+            eprintln!("Daemon started.");
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            return Err("Daemon started but not ready after 5s".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Resolve runtime mode from CLI flags and config.
+///
+/// Priority: --daemon / --no-daemon flags > [daemon] enabled config > Terminal default
+pub fn resolve_runtime_mode(
+    daemon_flag: bool,
+    no_daemon_flag: bool,
+    config: &KildConfig,
+) -> kild_core::RuntimeMode {
+    if daemon_flag {
+        kild_core::RuntimeMode::Daemon
+    } else if no_daemon_flag {
+        kild_core::RuntimeMode::Terminal
+    } else if config.is_daemon_enabled() {
+        kild_core::RuntimeMode::Daemon
+    } else {
+        kild_core::RuntimeMode::Terminal
+    }
+}
+
 /// Convert CLI args into an OpenMode.
 pub fn resolve_open_mode(matches: &clap::ArgMatches) -> kild_core::OpenMode {
     if matches.get_flag("no-agent") {
@@ -296,5 +353,46 @@ mod tests {
 
         let open_error = format_partial_failure_error("open", 2, 4);
         assert_eq!(open_error, "Partial failure: 2 of 4 kild(s) failed to open");
+    }
+
+    fn config_with_daemon_enabled() -> KildConfig {
+        let mut value = serde_json::to_value(KildConfig::default()).unwrap();
+        value["daemon"]["enabled"] = serde_json::Value::Bool(true);
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_daemon_flag_wins() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(true, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_no_daemon_flag_wins() {
+        let config = config_with_daemon_enabled();
+        let mode = resolve_runtime_mode(false, true, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_config_enabled() {
+        let config = config_with_daemon_enabled();
+        let mode = resolve_runtime_mode(false, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_default_terminal() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(false, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_both_flags_daemon_wins() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(true, true, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
     }
 }

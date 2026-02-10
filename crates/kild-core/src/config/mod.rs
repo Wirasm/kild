@@ -77,4 +77,16 @@ impl KildConfig {
     ) -> Result<String, Box<dyn std::error::Error>> {
         loading::get_agent_command(self, agent_name)
     }
+
+    /// Whether daemon mode is the default for new sessions.
+    ///
+    /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
+    pub fn is_daemon_enabled(&self) -> bool {
+        self.daemon.enabled()
+    }
+
+    /// Whether to auto-start the daemon if not running.
+    pub fn daemon_auto_start(&self) -> bool {
+        self.daemon.auto_start()
+    }
 }

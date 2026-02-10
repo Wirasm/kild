@@ -5,7 +5,7 @@ use kild_core::CreateSessionRequest;
 use kild_core::events;
 use kild_core::session_ops;
 
-use super::helpers::load_config_with_warning;
+use super::helpers::{ensure_daemon_running, load_config_with_warning, resolve_runtime_mode};
 
 pub(crate) fn handle_create_command(
     matches: &ArgMatches,
@@ -50,9 +50,19 @@ pub(crate) fn handle_create_command(
     let base_branch = matches.get_one::<String>("base").cloned();
     let no_fetch = matches.get_flag("no-fetch");
 
+    let daemon_flag = matches.get_flag("daemon");
+    let no_daemon_flag = matches.get_flag("no-daemon");
+    let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, &config);
+
+    // Ensure daemon is running if daemon mode is requested
+    if runtime_mode == kild_core::RuntimeMode::Daemon {
+        ensure_daemon_running(&config)?;
+    }
+
     let request = CreateSessionRequest::new(branch.clone(), agent_mode, note)
         .with_base_branch(base_branch)
-        .with_no_fetch(no_fetch);
+        .with_no_fetch(no_fetch)
+        .with_runtime_mode(runtime_mode);
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {

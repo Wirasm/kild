@@ -129,55 +129,74 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
             );
         }
 
-        // Close all terminal windows (fire-and-forget)
-        for agent_proc in session.agents() {
-            if let (Some(terminal_type), Some(window_id)) =
-                (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-            {
-                info!(
-                    event = "core.session.destroy_close_terminal",
-                    terminal_type = ?terminal_type,
-                    agent = agent_proc.agent(),
-                );
-                terminal::handler::close_terminal(terminal_type, Some(window_id));
-            }
-        }
-
-        // Kill all tracked processes
+        // Kill/stop all tracked agents — branch on daemon vs terminal
         let mut kill_errors: Vec<(u32, String)> = Vec::new();
         for agent_proc in session.agents() {
-            let Some(pid) = agent_proc.process_id() else {
-                continue;
-            };
-
-            info!(
-                event = "core.session.destroy_kill_started",
-                pid = pid,
-                agent = agent_proc.agent()
-            );
-
-            let result = crate::process::kill_process(
-                pid,
-                agent_proc.process_name(),
-                agent_proc.process_start_time(),
-            );
-
-            match result {
-                Ok(()) => {
-                    info!(event = "core.session.destroy_kill_completed", pid = pid);
+            if let Some(daemon_sid) = agent_proc.daemon_session_id() {
+                // Daemon-managed: destroy via IPC
+                info!(
+                    event = "core.session.destroy_daemon_session",
+                    daemon_session_id = daemon_sid,
+                    agent = agent_proc.agent()
+                );
+                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, force) {
+                    if force {
+                        warn!(
+                            event = "core.session.destroy_daemon_failed_force_continue",
+                            daemon_session_id = daemon_sid,
+                            error = %e
+                        );
+                    } else {
+                        let pid = agent_proc.process_id().unwrap_or(0);
+                        kill_errors.push((pid, e.to_string()));
+                    }
                 }
-                Err(crate::process::ProcessError::NotFound { .. }) => {
-                    info!(event = "core.session.destroy_kill_already_dead", pid = pid);
-                }
-                Err(e) if force => {
-                    warn!(
-                        event = "core.session.destroy_kill_failed_force_continue",
-                        pid = pid,
-                        error = %e
+            } else {
+                // Terminal-managed: close window + kill process
+                if let (Some(terminal_type), Some(window_id)) =
+                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+                {
+                    info!(
+                        event = "core.session.destroy_close_terminal",
+                        terminal_type = ?terminal_type,
+                        agent = agent_proc.agent(),
                     );
+                    terminal::handler::close_terminal(terminal_type, Some(window_id));
                 }
-                Err(e) => {
-                    kill_errors.push((pid, e.to_string()));
+
+                let Some(pid) = agent_proc.process_id() else {
+                    continue;
+                };
+
+                info!(
+                    event = "core.session.destroy_kill_started",
+                    pid = pid,
+                    agent = agent_proc.agent()
+                );
+
+                let result = crate::process::kill_process(
+                    pid,
+                    agent_proc.process_name(),
+                    agent_proc.process_start_time(),
+                );
+
+                match result {
+                    Ok(()) => {
+                        info!(event = "core.session.destroy_kill_completed", pid = pid);
+                    }
+                    Err(crate::process::ProcessError::NotFound { .. }) => {
+                        info!(event = "core.session.destroy_kill_already_dead", pid = pid);
+                    }
+                    Err(e) if force => {
+                        warn!(
+                            event = "core.session.destroy_kill_failed_force_continue",
+                            pid = pid,
+                            error = %e
+                        );
+                    }
+                    Err(e) => {
+                        kill_errors.push((pid, e.to_string()));
+                    }
                 }
             }
         }

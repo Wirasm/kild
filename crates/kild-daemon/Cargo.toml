@@ -1,0 +1,47 @@
+[package]
+name = "kild-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "KILD daemon - PTY ownership, session persistence, IPC server"
+
+[dependencies]
+kild-core.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Serialization (JSONL protocol)
+serde.workspace = true
+serde_json.workspace = true
+
+# PTY management
+portable-pty.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Signal handling and process management
+nix.workspace = true
+
+# Error types
+thiserror.workspace = true
+
+# Binary encoding for PTY data
+base64.workspace = true
+
+# Home directory for socket path
+dirs.workspace = true
+
+# TOML config parsing
+toml.workspace = true
+
+# Timestamps
+chrono.workspace = true
+
+# Cancellation token for graceful shutdown
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

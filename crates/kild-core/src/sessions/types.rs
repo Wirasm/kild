@@ -202,6 +202,10 @@ pub struct AgentProcess {
     terminal_window_id: Option<String>,
     command: String,
     opened_at: String,
+    /// Daemon session ID when this agent runs in a daemon-owned PTY.
+    /// When `Some`, process_id/process_name/process_start_time are `None`
+    /// and operations route through `daemon::client` instead of PID-based tracking.
+    daemon_session_id: Option<String>,
 }
 
 /// Internal serde representation that routes through [`AgentProcess::new`]
@@ -219,6 +223,8 @@ struct AgentProcessData {
     terminal_window_id: Option<String>,
     command: String,
     opened_at: String,
+    #[serde(default)]
+    daemon_session_id: Option<String>,
 }
 
 impl From<AgentProcess> for AgentProcessData {
@@ -233,6 +239,7 @@ impl From<AgentProcess> for AgentProcessData {
             terminal_window_id: ap.terminal_window_id,
             command: ap.command,
             opened_at: ap.opened_at,
+            daemon_session_id: ap.daemon_session_id,
         }
     }
 }
@@ -251,6 +258,7 @@ impl TryFrom<AgentProcessData> for AgentProcess {
             data.terminal_window_id,
             data.command,
             data.opened_at,
+            data.daemon_session_id,
         )
         .map_err(|e| e.to_string())
     }
@@ -282,6 +290,7 @@ impl AgentProcess {
         terminal_window_id: Option<String>,
         command: String,
         opened_at: String,
+        daemon_session_id: Option<String>,
     ) -> Result<Self, super::errors::SessionError> {
         // Validate: process_id, process_name, process_start_time must all be present or all absent
         let has_pid = process_id.is_some();
@@ -301,6 +310,7 @@ impl AgentProcess {
             terminal_window_id,
             command,
             opened_at,
+            daemon_session_id,
         })
     }
 
@@ -338,6 +348,10 @@ impl AgentProcess {
 
     pub fn opened_at(&self) -> &str {
         &self.opened_at
+    }
+
+    pub fn daemon_session_id(&self) -> Option<&str> {
+        self.daemon_session_id.as_deref()
     }
 }
 
@@ -527,6 +541,8 @@ pub struct CreateSessionRequest {
     pub base_branch: Option<String>,
     /// Skip fetching before create (CLI --no-fetch flag).
     pub no_fetch: bool,
+    /// Whether to launch in an external terminal or daemon-owned PTY.
+    pub runtime_mode: crate::state::types::RuntimeMode,
 }
 
 impl CreateSessionRequest {
@@ -542,6 +558,7 @@ impl CreateSessionRequest {
             project_path: None,
             base_branch: None,
             no_fetch: false,
+            runtime_mode: crate::state::types::RuntimeMode::Terminal,
         }
     }
 
@@ -559,6 +576,7 @@ impl CreateSessionRequest {
             project_path: Some(project_path),
             base_branch: None,
             no_fetch: false,
+            runtime_mode: crate::state::types::RuntimeMode::Terminal,
         }
     }
 
@@ -569,6 +587,11 @@ impl CreateSessionRequest {
 
     pub fn with_no_fetch(mut self, no_fetch: bool) -> Self {
         self.no_fetch = no_fetch;
+        self
+    }
+
+    pub fn with_runtime_mode(mut self, mode: crate::state::types::RuntimeMode) -> Self {
+        self.runtime_mode = mode;
         self
     }
 }
@@ -768,6 +791,7 @@ mod tests {
             Some("1596".to_string()),
             "claude-code".to_string(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         )
         .unwrap();
         let session = Session::new(
@@ -1160,6 +1184,7 @@ mod tests {
             None,
             "cmd".to_string(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         );
         assert!(result.is_err());
 
@@ -1174,6 +1199,7 @@ mod tests {
             None,
             "cmd".to_string(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         );
         assert!(result.is_err());
 
@@ -1188,6 +1214,7 @@ mod tests {
             None,
             "cmd".to_string(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         );
         assert!(result.is_ok());
 
@@ -1202,6 +1229,7 @@ mod tests {
             None,
             "cmd".to_string(),
             "2024-01-01T00:00:00Z".to_string(),
+            None,
         );
         assert!(result.is_ok());
     }
@@ -1218,6 +1246,7 @@ mod tests {
             Some("kild-test".to_string()),
             "claude-code".to_string(),
             "2024-01-15T10:30:00Z".to_string(),
+            None,
         )
         .unwrap();
         let json = serde_json::to_string(&agent).unwrap();
@@ -1270,6 +1299,7 @@ mod tests {
                     Some("kild-test".to_string()),
                     "claude-code".to_string(),
                     "2024-01-01T00:00:00Z".to_string(),
+                    None,
                 )
                 .unwrap(),
                 AgentProcess::new(
@@ -1282,6 +1312,7 @@ mod tests {
                     Some("kild-test-2".to_string()),
                     "kiro-cli chat".to_string(),
                     "2024-01-01T00:01:00Z".to_string(),
+                    None,
                 )
                 .unwrap(),
             ],

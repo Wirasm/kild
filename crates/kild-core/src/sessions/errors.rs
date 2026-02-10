@@ -71,6 +71,9 @@ pub enum SessionError {
         "Cannot complete '{name}' with uncommitted changes. Use 'kild destroy --force' to remove."
     )]
     UncommittedChanges { name: String },
+
+    #[error("Daemon error: {message}")]
+    DaemonError { message: String },
 }
 
 impl KildError for SessionError {
@@ -95,6 +98,7 @@ impl KildError for SessionError {
             SessionError::InvalidAgentStatus { .. } => "INVALID_AGENT_STATUS",
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
+            SessionError::DaemonError { .. } => "DAEMON_ERROR",
         }
     }
 

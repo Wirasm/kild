@@ -63,6 +63,8 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 cargo run -p kild -- create my-branch --agent claude
 cargo run -p kild -- create my-branch --agent claude --note "Working on auth feature"
 cargo run -p kild -- create my-branch --no-agent       # Open bare terminal with $SHELL
+cargo run -p kild -- create my-branch --daemon         # Launch in daemon-owned PTY
+cargo run -p kild -- create my-branch --no-daemon      # Force external terminal (override config)
 cargo run -p kild -- list
 cargo run -p kild -- list --json                 # JSON output for scripting
 cargo run -p kild -- status my-branch --json     # JSON output for single kild
@@ -103,6 +105,12 @@ cargo run -p kild -- sync my-branch --base dev   # Fetch + rebase onto custom ba
 cargo run -p kild -- sync --all                  # Fetch once + rebase all kilds
 cargo run -p kild -- agent-status my-branch working  # Report agent activity (for hooks)
 cargo run -p kild -- agent-status --self idle        # Auto-detect session from $PWD
+cargo run -p kild -- daemon start                # Start daemon in background
+cargo run -p kild -- daemon start --foreground   # Start daemon in foreground (debug)
+cargo run -p kild -- daemon stop                 # Stop running daemon
+cargo run -p kild -- daemon status               # Show daemon status
+cargo run -p kild -- daemon status --json        # JSON output for daemon status
+cargo run -p kild -- attach my-branch            # Attach to daemon-managed kild (Ctrl+C to detach)
 cargo run -p kild -- stop my-branch              # Stop agent, preserve kild
 cargo run -p kild -- stop --all                  # Stop all running kilds
 cargo run -p kild -- destroy my-branch           # Destroy kild
@@ -174,6 +182,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 **Workspace structure:**
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
+- `crates/kild-daemon` - Daemon server for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
 - `crates/kild-peek-core` - Core library for native app inspection and interaction (window listing, screenshots, image comparison, assertions, UI automation)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
@@ -182,6 +191,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode)
+- `daemon/` - Daemon client for IPC communication (sync Unix socket client)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
 - `config/` - Hierarchical TOML config (defaults → user → project → CLI)
@@ -191,7 +201,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `process/` - PID tracking and process info
 - `logging/` - Tracing initialization with JSON output
 - `events/` - App lifecycle event helpers
-- `state/` - Command pattern for business operations (Command enum, Event enum, Store trait returns events)
+- `state/` - Command pattern for business operations (Command enum, Event enum, Store trait returns events, RuntimeMode enum)
 
 **Key modules in kild-ui:**
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
@@ -203,6 +213,13 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback
 
+**Key modules in kild-daemon:**
+- `protocol/` - JSONL IPC protocol (ClientMessage, DaemonMessage, codec)
+- `pty/` - PTY lifecycle management (PtyManager, ManagedPty via portable-pty, output broadcasting)
+- `session/` - Daemon session state machine (SessionManager, DaemonSession, SessionState enum)
+- `server/` - Unix socket server (async connection handling, message dispatch, signal-based shutdown)
+- `client/` - Daemon client for typed IPC operations (DaemonClient with connection pooling)
+
 **Key modules in kild-peek-core:**
 - `window/` - Window and monitor enumeration via macOS APIs
 - `screenshot/` - Screenshot capture with multiple targets (window, monitor, base64 output)
@@ -213,7 +230,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
-**Module pattern:** Each domain starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects).
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files.
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
@@ -250,13 +267,18 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 |-------|-------|-------------|
 | `cli` | `crates/kild/` | User-facing CLI commands |
 | `core` | `crates/kild-core/` | Core library logic |
+| `daemon` | `crates/kild-daemon/` | Daemon server and PTY management |
 | `ui` | `crates/kild-ui/` | GPUI native GUI |
 | `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
 | `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`
+**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`
 
 Note: `projects` domain events are `core.projects.*` (in kild-core), while UI-specific events use `ui.*` prefix.
+
+Note: `core.daemon.*` = daemon client IPC (in kild-core), `daemon.*` = daemon server/PTY operations (in kild-daemon).
+
+Daemon server sub-domains: `session`, `pty`, `server`, `connection`, `client`, `pid`, `config`
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
@@ -291,6 +313,10 @@ debug!(event = "core.terminal.applescript_executing", terminal = terminal_name);
 info!(event = "ui.watcher.started", path = %sessions_dir.display());
 warn!(event = "ui.watcher.create_failed", error = %e, "File watcher unavailable");
 debug!(event = "ui.watcher.event_detected", kind = ?event.kind, paths = ?event.paths);
+
+// CLI daemon operations
+info!(event = "cli.daemon.start_started", foreground = foreground);
+info!(event = "cli.attach_started", branch = branch);
 
 // Structured fields - use Display (%e) for errors, Debug (?val) for complex types
 error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
@@ -331,6 +357,7 @@ grep 'event":"peek\.cli\.'  # kild-peek CLI events
 # By domain
 grep 'core\.session\.'  # Session events
 grep 'core\.terminal\.' # Terminal events
+grep 'core\.daemon\.'   # Daemon client events
 grep 'core\.git\.'      # Git events
 grep 'core\.forge\.'    # Forge/PR events
 grep 'core\.projects\.' # Project management events
@@ -339,6 +366,13 @@ grep 'peek\.core\.window\.'     # Window enumeration events
 grep 'peek\.core\.screenshot\.' # Screenshot capture events
 grep 'peek\.core\.interact\.'   # UI interaction events
 grep 'peek\.core\.element\.'    # Element enumeration events
+
+# Daemon server events
+grep 'event":"daemon\.'   # Daemon server events
+grep 'daemon\.session\.'     # Session state machine events
+grep 'daemon\.pty\.'         # PTY lifecycle events
+grep 'daemon\.server\.'      # Server startup/shutdown
+grep 'daemon\.connection\.'  # Client connection events
 
 # By outcome
 grep '_failed"'         # All failures
@@ -391,6 +425,28 @@ Override auto-detection with `[git] forge = "github"` in config. PR types (PrInf
 Priority (highest wins): CLI args → project config (`./.kild/config.toml`) → user config (`~/.kild/config.toml`) → defaults
 
 **Array Merging:** `include_patterns.patterns` arrays are merged (deduplicated) from user and project configs. Other config values follow standard override behavior.
+
+**Daemon Runtime Config:** Control whether sessions run in daemon-owned PTYs or external terminals via `[daemon]` section:
+
+```toml
+[daemon]
+enabled = false      # Use daemon mode by default for `kild create`
+auto_start = true    # Auto-start daemon if not running
+```
+
+Runtime mode resolution for `kild create`:
+1. `--daemon` flag → Daemon mode
+2. `--no-daemon` flag → Terminal mode
+3. Config `daemon.enabled = true` → Daemon mode
+4. Default → Terminal mode
+
+Sessions created with `--daemon` store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect (Ctrl+C to detach).
+
+**Experimental status (Phase 1b):** The daemon runtime is experimental. Known limitations:
+- `auto_start` config option is not yet implemented
+- Daemon runs in foreground only (`kild daemon start --foreground`)
+- Scrollback replay on attach is not yet implemented
+- PTY exit notification to session manager is incomplete
 
 ## Error Handling
 

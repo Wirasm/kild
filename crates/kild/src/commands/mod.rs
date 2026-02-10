@@ -7,12 +7,14 @@ pub mod helpers;
 mod json_types;
 
 mod agent_status;
+mod attach;
 mod cd;
 mod cleanup;
 mod code;
 mod commits;
 mod complete;
 mod create;
+mod daemon;
 mod destroy;
 mod diff;
 mod focus;
@@ -57,6 +59,8 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("sync", sub_matches)) => sync::handle_sync_command(sub_matches),
         Some(("cleanup", sub_matches)) => cleanup::handle_cleanup_command(sub_matches),
         Some(("health", sub_matches)) => health::handle_health_command(sub_matches),
+        Some(("daemon", sub_matches)) => daemon::handle_daemon_command(sub_matches),
+        Some(("attach", sub_matches)) => attach::handle_attach_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");
             Err("Unknown command".into())

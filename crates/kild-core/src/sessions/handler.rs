@@ -205,35 +205,97 @@ pub fn create_session(
         branch = worktree.branch
     );
 
-    // 5. Launch terminal (I/O) - pass spawn_id for unique PID files and Ghostty window titles
+    // 5. Launch agent — branch on runtime mode
     let spawn_id = compute_spawn_id(&session_id, 0);
-    let spawn_result = terminal::handler::spawn_terminal(
-        &worktree.path,
-        &validated.command,
-        kild_config,
-        Some(&spawn_id),
-        Some(&base_config.kild_dir),
-    )
-    .map_err(|e| SessionError::TerminalError { source: e })?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let initial_agent = match request.runtime_mode {
+        crate::state::types::RuntimeMode::Terminal => {
+            // Existing path: spawn in external terminal
+            let spawn_result = terminal::handler::spawn_terminal(
+                &worktree.path,
+                &validated.command,
+                kild_config,
+                Some(&spawn_id),
+                Some(&base_config.kild_dir),
+            )
+            .map_err(|e| SessionError::TerminalError { source: e })?;
+
+            let command = if spawn_result.command_executed.trim().is_empty() {
+                format!("{} (command not captured)", validated.agent)
+            } else {
+                spawn_result.command_executed.clone()
+            };
+            AgentProcess::new(
+                validated.agent.clone(),
+                spawn_id,
+                spawn_result.process_id,
+                spawn_result.process_name.clone(),
+                spawn_result.process_start_time,
+                Some(spawn_result.terminal_type.clone()),
+                spawn_result.terminal_window_id.clone(),
+                command,
+                now.clone(),
+                None,
+            )?
+        }
+        crate::state::types::RuntimeMode::Daemon => {
+            // New path: request daemon to create PTY session.
+            // The daemon is a pure PTY manager — it spawns a command in a
+            // working directory. Worktree creation and session persistence
+            // are handled here in kild-core.
+
+            // Split "claude --dangerously-skip-permissions" into ["claude", "--dangerously-skip-permissions"]
+            // CommandBuilder::new() expects just the executable, not the full command string.
+            let parts: Vec<&str> = validated.command.split_whitespace().collect();
+            let (cmd, cmd_args) = parts
+                .split_first()
+                .ok_or_else(|| SessionError::DaemonError {
+                    message: "Empty command string".to_string(),
+                })?;
+            let cmd_args: Vec<String> = cmd_args.iter().map(|s| s.to_string()).collect();
+
+            // Inherit essential env vars so the daemon PTY can find executables.
+            // The daemon process itself has env vars, but portable-pty's
+            // CommandBuilder uses env vars passed explicitly via the IPC message.
+            let mut env_vars = Vec::new();
+            for key in &["PATH", "HOME", "SHELL", "USER", "LANG", "TERM"] {
+                if let Ok(val) = std::env::var(key) {
+                    env_vars.push((key.to_string(), val));
+                }
+            }
+
+            let daemon_request = crate::daemon::client::DaemonCreateRequest {
+                request_id: &spawn_id,
+                session_id: &session_id,
+                working_directory: &worktree.path,
+                command: cmd,
+                args: &cmd_args,
+                env_vars: &env_vars,
+                rows: 24,
+                cols: 80,
+            };
+            let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
+                .map_err(|e| SessionError::DaemonError {
+                    message: e.to_string(),
+                })?;
+
+            AgentProcess::new(
+                validated.agent.clone(),
+                spawn_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                validated.command.clone(),
+                now.clone(),
+                Some(daemon_result.daemon_session_id),
+            )?
+        }
+    };
 
     // 6. Create session record
-    let now = chrono::Utc::now().to_rfc3339();
-    let command = if spawn_result.command_executed.trim().is_empty() {
-        format!("{} (command not captured)", validated.agent)
-    } else {
-        spawn_result.command_executed.clone()
-    };
-    let initial_agent = AgentProcess::new(
-        validated.agent.clone(),
-        spawn_id,
-        spawn_result.process_id,
-        spawn_result.process_name.clone(),
-        spawn_result.process_start_time,
-        Some(spawn_result.terminal_type.clone()),
-        spawn_result.terminal_window_id.clone(),
-        command.clone(),
-        now.clone(),
-    )?;
     let session = Session::new(
         session_id.clone(),
         project.id,
@@ -450,6 +512,7 @@ pub fn restart_session(
         spawn_result.terminal_window_id.clone(),
         command,
         now.clone(),
+        None,
     )?;
 
     session.agent = agent;
@@ -624,6 +687,7 @@ pub fn open_session(
         spawn_result.terminal_window_id.clone(),
         command.clone(),
         now.clone(),
+        None,
     )?;
 
     // When bare shell, keep session Stopped (no agent is running).
@@ -679,48 +743,64 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             );
         }
 
-        // Iterate all tracked agents
-        for agent_proc in session.agents() {
-            if let (Some(terminal_type), Some(window_id)) =
-                (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-            {
-                info!(
-                    event = "core.session.stop_close_terminal",
-                    terminal_type = ?terminal_type,
-                    agent = agent_proc.agent(),
-                );
-                terminal::handler::close_terminal(terminal_type, Some(window_id));
-            }
-        }
-
+        // Iterate all tracked agents — branch on daemon vs terminal
         let mut kill_errors: Vec<(u32, String)> = Vec::new();
         for agent_proc in session.agents() {
-            let Some(pid) = agent_proc.process_id() else {
-                continue;
-            };
-
-            info!(
-                event = "core.session.stop_kill_started",
-                pid = pid,
-                agent = agent_proc.agent()
-            );
-
-            let result = crate::process::kill_process(
-                pid,
-                agent_proc.process_name(),
-                agent_proc.process_start_time(),
-            );
-
-            match result {
-                Ok(()) => {
-                    info!(event = "core.session.stop_kill_completed", pid = pid);
+            if let Some(daemon_sid) = agent_proc.daemon_session_id() {
+                // Daemon-managed: stop via IPC
+                info!(
+                    event = "core.session.stop_daemon_session",
+                    daemon_session_id = daemon_sid,
+                    agent = agent_proc.agent()
+                );
+                if let Err(e) = crate::daemon::client::stop_daemon_session(daemon_sid) {
+                    error!(
+                        event = "core.session.stop_daemon_failed",
+                        daemon_session_id = daemon_sid,
+                        error = %e
+                    );
+                    kill_errors.push((0, e.to_string()));
                 }
-                Err(crate::process::ProcessError::NotFound { .. }) => {
-                    info!(event = "core.session.stop_kill_already_dead", pid = pid);
+            } else {
+                // Terminal-managed: close window + kill process
+                if let (Some(terminal_type), Some(window_id)) =
+                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+                {
+                    info!(
+                        event = "core.session.stop_close_terminal",
+                        terminal_type = ?terminal_type,
+                        agent = agent_proc.agent(),
+                    );
+                    terminal::handler::close_terminal(terminal_type, Some(window_id));
                 }
-                Err(e) => {
-                    error!(event = "core.session.stop_kill_failed", pid = pid, error = %e);
-                    kill_errors.push((pid, e.to_string()));
+
+                let Some(pid) = agent_proc.process_id() else {
+                    continue;
+                };
+
+                info!(
+                    event = "core.session.stop_kill_started",
+                    pid = pid,
+                    agent = agent_proc.agent()
+                );
+
+                let result = crate::process::kill_process(
+                    pid,
+                    agent_proc.process_name(),
+                    agent_proc.process_start_time(),
+                );
+
+                match result {
+                    Ok(()) => {
+                        info!(event = "core.session.stop_kill_completed", pid = pid);
+                    }
+                    Err(crate::process::ProcessError::NotFound { .. }) => {
+                        info!(event = "core.session.stop_kill_already_dead", pid = pid);
+                    }
+                    Err(e) => {
+                        error!(event = "core.session.stop_kill_failed", pid = pid, error = %e);
+                        kill_errors.push((pid, e.to_string()));
+                    }
                 }
             }
         }
@@ -919,6 +999,7 @@ mod tests {
                 Some("1596".to_string()),
                 "test-command".to_string(),
                 chrono::Utc::now().to_rfc3339(),
+                None,
             )
             .unwrap();
             let session = Session::new(
@@ -993,6 +1074,7 @@ mod tests {
             Some("1596".to_string()),
             "test-command".to_string(),
             chrono::Utc::now().to_rfc3339(),
+            None,
         )
         .unwrap();
         let session = Session::new(
@@ -1130,6 +1212,7 @@ mod tests {
             Some("1596".to_string()),
             "test-command".to_string(),
             chrono::Utc::now().to_rfc3339(),
+            None,
         )
         .unwrap();
         let mut session = Session::new(
@@ -1161,6 +1244,7 @@ mod tests {
             Some("kild-restart-test".to_string()),
             "test-command".to_string(),
             chrono::Utc::now().to_rfc3339(),
+            None,
         )
         .unwrap();
         session.status = SessionStatus::Active;
@@ -1242,6 +1326,7 @@ mod tests {
             Some("test-window".to_string()),
             "test-command".to_string(),
             chrono::Utc::now().to_rfc3339(),
+            None,
         )
         .unwrap();
         let session = Session::new(

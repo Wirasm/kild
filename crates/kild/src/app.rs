@@ -76,6 +76,20 @@ pub fn build_cli() -> Command {
                         .conflicts_with("startup-command")
                         .conflicts_with("flags")
                 )
+                .arg(
+                    Arg::new("daemon")
+                        .long("daemon")
+                        .help("Launch agent in daemon-owned PTY (overrides config)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("no-daemon")
+                )
+                .arg(
+                    Arg::new("no-daemon")
+                        .long("no-daemon")
+                        .help("Launch agent in external terminal window (overrides config)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("daemon")
+                )
         )
         .subcommand(
             Command::new("list")
@@ -497,6 +511,46 @@ pub fn build_cli() -> Command {
                         .help("Refresh interval in seconds (default: 5)")
                         .value_parser(clap::value_parser!(u64))
                         .default_value("5")
+                )
+        )
+        .subcommand(
+            Command::new("daemon")
+                .about("Manage the KILD daemon")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("start")
+                        .about("Start the KILD daemon in the background")
+                        .arg(
+                            Arg::new("foreground")
+                                .long("foreground")
+                                .help("Run daemon in the foreground (for debugging)")
+                                .action(ArgAction::SetTrue),
+                        )
+                )
+                .subcommand(
+                    Command::new("stop")
+                        .about("Stop the running KILD daemon")
+                )
+                .subcommand(
+                    Command::new("status")
+                        .about("Show daemon status")
+                        .arg(
+                            Arg::new("json")
+                                .long("json")
+                                .help("Output as JSON")
+                                .action(ArgAction::SetTrue),
+                        )
+                )
+        )
+        .subcommand(
+            Command::new("attach")
+                .about("Attach to a daemon-managed kild session")
+                .arg(
+                    Arg::new("branch")
+                        .help("Branch name of the kild to attach to")
+                        .required(true)
+                        .index(1),
                 )
         )
 }

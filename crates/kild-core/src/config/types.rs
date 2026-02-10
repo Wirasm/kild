@@ -87,6 +87,10 @@ pub struct KildConfig {
     /// Editor configuration for `kild code`
     #[serde(default)]
     pub editor: EditorConfig,
+
+    /// Daemon runtime configuration (whether to use daemon mode by default).
+    #[serde(default)]
+    pub(crate) daemon: DaemonRuntimeConfig,
 }
 
 impl Default for KildConfig {
@@ -99,6 +103,49 @@ impl Default for KildConfig {
             health: HealthConfig::default(),
             git: GitConfig::default(),
             editor: <EditorConfig as Default>::default(),
+            daemon: DaemonRuntimeConfig::default(),
+        }
+    }
+}
+
+/// Daemon runtime configuration.
+///
+/// Controls whether the daemon is the default runtime for new sessions
+/// and auto-start behavior. This struct is crate-internal; the CLI accesses
+/// these values via `KildConfig::is_daemon_enabled()` and
+/// `KildConfig::daemon_auto_start()`.
+///
+/// Fields are `Option<bool>` to support proper config hierarchy merging:
+/// only explicitly-set values override lower-priority configs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct DaemonRuntimeConfig {
+    /// Whether daemon mode is the default for new sessions.
+    /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
+    /// Default: false
+    pub(crate) enabled: Option<bool>,
+
+    /// Auto-start the daemon if not running when daemon mode is requested.
+    /// Default: true
+    pub(crate) auto_start: Option<bool>,
+}
+
+impl DaemonRuntimeConfig {
+    /// Whether daemon mode is the default for new sessions. Default: false.
+    pub(crate) fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(false)
+    }
+
+    /// Whether to auto-start the daemon if not running. Default: true.
+    pub(crate) fn auto_start(&self) -> bool {
+        self.auto_start.unwrap_or(true)
+    }
+
+    /// Merge two daemon runtime configs. Override takes precedence for set fields.
+    pub(crate) fn merge(base: &Self, override_config: &Self) -> Self {
+        Self {
+            enabled: override_config.enabled.or(base.enabled),
+            auto_start: override_config.auto_start.or(base.auto_start),
         }
     }
 }

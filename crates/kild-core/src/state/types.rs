@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::sessions::types::AgentStatus;
 
+/// How the agent process should be hosted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeMode {
+    /// Launch in an external terminal window (Ghostty, iTerm, etc.)
+    Terminal,
+    /// Launch in a daemon-owned PTY
+    Daemon,
+}
+
 /// What to launch when opening a kild terminal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpenMode {

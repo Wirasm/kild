@@ -41,8 +41,15 @@ core-graphics = { version = "0.24", features = ["highsierra"] }
 core-foundation = "0.10"
 accessibility-sys = "0.2"
 
+# Daemon dependencies
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "signal", "time", "sync", "macros", "fs", "process"] }
+portable-pty = "0.8"
+nix = { version = "0.29", features = ["signal", "process", "term", "ioctl"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
 # Internal workspace dependencies
 kild-core = { path = "crates/kild-core" }
+kild-daemon = { path = "crates/kild-daemon" }
 kild-peek-core = { path = "crates/kild-peek-core" }
 
 # UI dependencies
