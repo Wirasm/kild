@@ -164,6 +164,15 @@ pub struct Session {
     #[serde(default)]
     pub note: Option<String>,
 
+    /// Agent session ID for resume support.
+    ///
+    /// Generated on `kild create` and fresh `kild open` for resume-capable agents (e.g., Claude Code).
+    /// Injected as `--session-id <uuid>` on initial create or fresh open, and as `--resume <uuid>`
+    /// when reopening with `kild open --resume`.
+    /// Stored at the Session level (not AgentProcess) so it survives `clear_agents()` on stop.
+    #[serde(default)]
+    pub agent_session_id: Option<String>,
+
     /// All agent processes opened in this kild session.
     ///
     /// Populated by `kild create` (initial agent) and `kild open` (additional agents).
@@ -372,6 +381,7 @@ impl Session {
         last_activity: Option<String>,
         note: Option<String>,
         agents: Vec<AgentProcess>,
+        agent_session_id: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -387,6 +397,7 @@ impl Session {
             last_activity,
             note,
             agents,
+            agent_session_id,
         }
     }
 
@@ -454,6 +465,7 @@ impl Session {
             last_activity: None,
             note: None,
             agents: vec![],
+            agent_session_id: None,
         }
     }
 }
@@ -643,6 +655,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         assert_eq!(session.branch, "branch");
@@ -808,6 +821,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![agent],
+            None,
         );
 
         // Test serialization round-trip
@@ -908,6 +922,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         );
 
         assert!(session.is_worktree_valid());
@@ -932,6 +947,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         );
 
         assert!(!session.is_worktree_valid());
@@ -1316,6 +1332,7 @@ mod tests {
                 )
                 .unwrap(),
             ],
+            None,
         );
         let json = serde_json::to_string_pretty(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
@@ -1470,5 +1487,89 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         let parsed: AgentStatusInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, info);
+    }
+
+    // --- agent_session_id tests ---
+
+    #[test]
+    fn test_session_backward_compatibility_agent_session_id() {
+        // Old session JSON without agent_session_id should deserialize with None
+        let json = r#"{
+            "id": "test/branch",
+            "project_id": "test",
+            "branch": "branch",
+            "worktree_path": "/tmp/test",
+            "agent": "claude",
+            "status": "Active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "port_range_start": 3000,
+            "port_range_end": 3009,
+            "port_count": 10
+        }"#;
+
+        let session: Session = serde_json::from_str(json).unwrap();
+        assert_eq!(session.agent_session_id, None);
+        assert_eq!(session.branch, "branch");
+    }
+
+    #[test]
+    fn test_session_with_agent_session_id_roundtrip() {
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![],
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        );
+
+        assert_eq!(
+            session.agent_session_id,
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string())
+        );
+
+        // Verify round-trip preserves agent_session_id
+        let serialized = serde_json::to_string(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.agent_session_id, session.agent_session_id);
+    }
+
+    #[test]
+    fn test_session_agent_session_id_survives_clear_agents() {
+        let mut session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![],
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        );
+
+        // Simulate stop: clear agents
+        session.clear_agents();
+        session.status = SessionStatus::Stopped;
+
+        // agent_session_id should survive clear_agents()
+        assert_eq!(
+            session.agent_session_id,
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string())
+        );
+        assert!(!session.has_agents());
     }
 }

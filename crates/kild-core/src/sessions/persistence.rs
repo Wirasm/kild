@@ -356,6 +356,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save session
@@ -400,6 +401,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save session
@@ -446,6 +448,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         let session_file = temp_dir.join("test_atomic-behavior.json");
@@ -495,6 +498,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Create a directory where the final file should be to force rename failure
@@ -549,6 +553,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         let session2 = Session::new(
@@ -565,6 +570,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save sessions
@@ -623,6 +629,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save session
@@ -667,6 +674,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save session
@@ -712,6 +720,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
         save_session_to_file(&valid_session, &temp_dir).unwrap();
 
@@ -765,6 +774,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         let session_file = temp_dir.join("test_orphaned.json");
@@ -820,6 +830,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Session 2: missing worktree
@@ -837,6 +848,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
         );
 
         // Save both sessions

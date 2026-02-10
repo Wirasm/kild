@@ -655,6 +655,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -702,6 +703,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -761,6 +763,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -802,6 +805,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -845,6 +849,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -906,6 +911,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -964,6 +970,7 @@ mod tests {
                 None,
                 None,
                 vec![],
+                None,
             )
         };
 
@@ -1023,6 +1030,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         )
     }
 

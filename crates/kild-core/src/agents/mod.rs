@@ -31,6 +31,7 @@
 pub mod backends;
 pub mod errors;
 pub mod registry;
+pub mod resume;
 pub mod traits;
 pub mod types;
 

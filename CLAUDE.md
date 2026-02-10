@@ -73,11 +73,14 @@ cargo run -p kild -- cd my-branch                # Print worktree path for shell
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (additive)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
 cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
+cargo run -p kild -- open my-branch --resume     # Resume previous agent session (restore conversation context)
+cargo run -p kild -- open my-branch -r           # Short form of --resume
 cargo run -p kild -- open my-branch --daemon     # Open in daemon-owned PTY
 cargo run -p kild -- open my-branch --no-daemon  # Force external terminal (override config)
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
+cargo run -p kild -- open --all --resume         # Resume all stopped kilds with previous session context
 cargo run -p kild -- code my-branch              # Open worktree in editor (config > $EDITOR > code)
 cargo run -p kild -- code my-branch --editor vim # Override editor
 cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
@@ -201,7 +204,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 **Key modules in kild-core:**
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
-- `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode)
+- `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
 - `daemon/` - Daemon client for IPC communication (sync Unix socket client)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations

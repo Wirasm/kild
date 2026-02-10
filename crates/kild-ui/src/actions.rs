@@ -140,6 +140,7 @@ pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, St
             branch,
             mode,
             runtime_mode: RuntimeMode::Terminal,
+            resume: false,
         },
         "ui.open_kild",
     )
@@ -174,6 +175,7 @@ pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>
                     branch: branch.to_string(),
                     mode: OpenMode::DefaultAgent,
                     runtime_mode: RuntimeMode::Terminal,
+                    resume: false,
                 },
                 "ui.open_all_stopped.dispatch",
             )
@@ -346,6 +348,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         )
     }
 

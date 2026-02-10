@@ -113,6 +113,11 @@ kild open <branch>
 # Open with different agent
 kild open <branch> --agent <agent>
 
+# Resume previous agent session (restore conversation context)
+# Currently only supported by Claude Code agent
+kild open <branch> --resume
+kild open <branch> -r  # Short form
+
 # Open bare terminal with $SHELL instead of an agent
 kild open <branch> --no-agent
 
@@ -127,6 +132,9 @@ kild open --all
 
 # Open all stopped kilds with specific agent
 kild open --all --agent <agent>
+
+# Resume all stopped kilds with previous session context
+kild open --all --resume
 
 # Open bare terminals in all stopped kilds
 kild open --all --no-agent

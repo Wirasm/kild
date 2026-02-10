@@ -69,6 +69,9 @@ pub enum Command {
         mode: OpenMode,
         /// How the agent process should be hosted (terminal window or daemon PTY).
         runtime_mode: RuntimeMode,
+        /// Resume the previous agent conversation instead of starting fresh.
+        #[serde(default)]
+        resume: bool,
     },
     /// Stop the agent process in a kild without destroying it.
     StopKild { branch: String },
@@ -150,6 +153,7 @@ mod tests {
                 branch: "feature".to_string(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: RuntimeMode::Terminal,
+                resume: false,
             },
             Command::StopKild {
                 branch: "feature".to_string(),
@@ -203,6 +207,7 @@ mod tests {
                 branch: "test".to_string(),
                 mode: OpenMode::Agent("gemini".to_string()),
                 runtime_mode: RuntimeMode::Terminal,
+                resume: false,
             },
             Command::StopKild {
                 branch: "test".to_string(),
@@ -233,5 +238,21 @@ mod tests {
             let roundtripped: Command = serde_json::from_str(&json).unwrap();
             assert_eq!(cmd, roundtripped);
         }
+    }
+
+    #[test]
+    fn test_open_kild_with_resume_true_serde_roundtrip() {
+        let cmd = Command::OpenKild {
+            branch: "feature-auth".to_string(),
+            mode: OpenMode::DefaultAgent,
+            runtime_mode: RuntimeMode::Daemon,
+            resume: true,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let roundtripped: Command = serde_json::from_str(&json).unwrap();
+        assert_eq!(cmd, roundtripped);
+
+        // Verify the resume field is actually in the JSON
+        assert!(json.contains("\"resume\":true"));
     }
 }

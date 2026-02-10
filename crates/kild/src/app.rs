@@ -185,6 +185,14 @@ pub fn build_cli() -> Command {
                         .conflicts_with("branch")
                 )
                 .arg(
+                    Arg::new("resume")
+                        .long("resume")
+                        .short('r')
+                        .help("Resume the previous agent conversation instead of starting fresh")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("no-agent")
+                )
+                .arg(
                     Arg::new("daemon")
                         .long("daemon")
                         .help("Launch agent in daemon-owned PTY (overrides config)")

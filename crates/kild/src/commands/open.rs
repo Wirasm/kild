@@ -16,10 +16,11 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let daemon_flag = matches.get_flag("daemon");
     let no_daemon_flag = matches.get_flag("no-daemon");
     let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, &config);
+    let resume = matches.get_flag("resume");
 
     // Check for --all flag first
     if matches.get_flag("all") {
-        return handle_open_all(mode, runtime_mode);
+        return handle_open_all(mode, runtime_mode, resume);
     }
 
     // Single branch operation
@@ -34,7 +35,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         super::helpers::ensure_daemon_running(&config)?;
     }
 
-    match session_ops::open_session(branch, mode.clone(), runtime_mode) {
+    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume) {
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
@@ -42,7 +43,11 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                     println!("   Agent: (none - bare shell)");
                 }
                 _ => {
-                    println!("✅ Opened new agent in kild '{}'", branch);
+                    if resume {
+                        println!("✅ Resumed agent in kild '{}'", branch);
+                    } else {
+                        println!("✅ Opened new agent in kild '{}'", branch);
+                    }
                     println!("   Agent: {}", session.agent);
                 }
             }
@@ -69,6 +74,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 fn handle_open_all(
     mode: kild_core::OpenMode,
     runtime_mode: kild_core::RuntimeMode,
+    resume: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", mode = ?mode);
 
@@ -94,7 +100,8 @@ fn handle_open_all(
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in stopped {
-        match session_ops::open_session(&session.branch, mode.clone(), runtime_mode.clone()) {
+        match session_ops::open_session(&session.branch, mode.clone(), runtime_mode.clone(), resume)
+        {
             Ok(s) => {
                 info!(
                     event = "cli.open_completed",

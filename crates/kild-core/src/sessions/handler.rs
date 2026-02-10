@@ -115,6 +115,26 @@ pub fn create_session(
         }
     };
 
+    // Generate agent session ID for resume-capable agents
+    let agent_session_id = if agents::resume::supports_resume(&agent) {
+        Some(agents::resume::generate_session_id())
+    } else {
+        None
+    };
+
+    // Append --session-id to agent command for resume-capable agents
+    let agent_command = if let Some(ref sid) = agent_session_id {
+        let extra_args = agents::resume::create_session_args(&agent, sid);
+        if extra_args.is_empty() {
+            agent_command
+        } else {
+            info!(event = "core.session.agent_session_id_set", session_id = %sid);
+            format!("{} {}", agent_command, extra_args.join(" "))
+        }
+    } else {
+        agent_command
+    };
+
     info!(
         event = "core.session.create_started",
         branch = request.branch,
@@ -372,6 +392,7 @@ pub fn create_session(
         Some(now),
         request.note.clone(),
         vec![initial_agent],
+        agent_session_id,
     );
 
     // 7. Save session to file
@@ -610,6 +631,7 @@ pub fn open_session(
     name: &str,
     mode: crate::state::types::OpenMode,
     runtime_mode: crate::state::types::RuntimeMode,
+    resume: bool,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -717,7 +739,42 @@ pub fn open_session(
             }
         };
 
-    // 4. Spawn NEW agent — branch on whether session was daemon-managed
+    // 4. Apply resume / session-id logic to agent command
+    let (agent_command, new_agent_session_id) = if resume && !is_bare_shell {
+        if let Some(ref sid) = session.agent_session_id {
+            if agents::resume::supports_resume(&agent) {
+                let extra = agents::resume::resume_session_args(&agent, sid);
+                let cmd = format!("{} {}", agent_command, extra.join(" "));
+                info!(event = "core.session.resume_started", session_id = %sid, agent = %agent);
+                (cmd, Some(sid.clone()))
+            } else {
+                error!(event = "core.session.resume_unsupported", agent = %agent);
+                return Err(SessionError::ResumeUnsupported {
+                    agent: agent.clone(),
+                });
+            }
+        } else {
+            error!(event = "core.session.resume_no_session_id", branch = name);
+            return Err(SessionError::ResumeNoSessionId {
+                branch: name.to_string(),
+            });
+        }
+    } else if !is_bare_shell && agents::resume::supports_resume(&agent) {
+        // Fresh open: generate new session ID for future resume capability
+        let sid = agents::resume::generate_session_id();
+        let extra = agents::resume::create_session_args(&agent, &sid);
+        let cmd = if extra.is_empty() {
+            agent_command
+        } else {
+            info!(event = "core.session.agent_session_id_set", session_id = %sid);
+            format!("{} {}", agent_command, extra.join(" "))
+        };
+        (cmd, Some(sid))
+    } else {
+        (agent_command, None)
+    };
+
+    // 5. Spawn NEW agent — branch on whether session was daemon-managed
     let spawn_index = session.agent_count();
     let spawn_id = compute_spawn_id(&session.id, spawn_index);
     info!(
@@ -805,6 +862,11 @@ pub fn open_session(
     }
     session.last_activity = Some(now);
     session.add_agent(new_agent);
+
+    // Update agent session ID for resume support
+    if let Some(sid) = new_agent_session_id {
+        session.agent_session_id = Some(sid);
+    }
 
     // 6. Save updated session
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
@@ -1296,6 +1358,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![],
+            None,
         );
 
         // Create worktree directory so validation passes
@@ -1404,6 +1467,7 @@ mod tests {
                 Some(chrono::Utc::now().to_rfc3339()),
                 None,
                 vec![agent],
+                None,
             );
 
             persistence::save_session_to_file(&session, &sessions_dir)
@@ -1479,6 +1543,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![agent],
+            None,
         );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
@@ -1543,6 +1608,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![], // No agents (old session)
+            None,
         );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
@@ -1617,6 +1683,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![iterm_agent],
+            None,
         );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
@@ -1673,6 +1740,7 @@ mod tests {
             "non-existent",
             crate::state::types::OpenMode::DefaultAgent,
             crate::state::types::RuntimeMode::Terminal,
+            false,
         );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
@@ -1735,6 +1803,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![agent],
+            None,
         );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
@@ -1892,6 +1961,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -1932,6 +2002,7 @@ mod tests {
             None,
             None,
             vec![agent],
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -1958,6 +2029,7 @@ mod tests {
             None,
             None,
             vec![], // No agents
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -2174,6 +2246,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![],
+            None,
         );
 
         // Save the session
@@ -2217,5 +2290,281 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    // --- Session Resume tests ---
+
+    /// Tests the resume decision logic that open_session uses internally.
+    ///
+    /// These test the exact branching conditions from handler.rs lines 742-789
+    /// without needing terminal/daemon infrastructure (Config::new reads from $HOME).
+    #[test]
+    fn test_resume_decision_unsupported_agent_with_session_id() {
+        // Scenario: resume=true, agent=kiro (unsupported), session has session_id
+        // Expected: ResumeUnsupported error
+        use crate::agents;
+        use crate::errors::KildError;
+
+        let agent = "kiro";
+        let session_has_id = true;
+        let resume = true;
+        let is_bare_shell = false;
+
+        // This replicates the decision logic in open_session
+        if resume && !is_bare_shell {
+            if session_has_id {
+                if agents::resume::supports_resume(agent) {
+                    panic!("kiro should not support resume");
+                } else {
+                    // This is the path that should produce ResumeUnsupported
+                    let error = SessionError::ResumeUnsupported {
+                        agent: agent.to_string(),
+                    };
+                    assert_eq!(error.error_code(), "RESUME_UNSUPPORTED");
+                    assert!(error.to_string().contains("kiro"));
+                }
+            } else {
+                panic!("session_has_id should be true in this test");
+            }
+        } else {
+            panic!("resume && !is_bare_shell should be true");
+        }
+    }
+
+    #[test]
+    fn test_resume_decision_no_session_id() {
+        // Scenario: resume=true, agent=claude (supported), session has NO session_id
+        // Expected: ResumeNoSessionId error
+        use crate::errors::KildError;
+
+        let resume = true;
+        let is_bare_shell = false;
+        let session_has_id = false;
+
+        if resume && !is_bare_shell {
+            if session_has_id {
+                panic!("session_has_id should be false in this test");
+            } else {
+                // This is the path that should produce ResumeNoSessionId
+                let error = SessionError::ResumeNoSessionId {
+                    branch: "my-feature".to_string(),
+                };
+                assert_eq!(error.error_code(), "RESUME_NO_SESSION_ID");
+                assert!(error.to_string().contains("my-feature"));
+            }
+        } else {
+            panic!("resume && !is_bare_shell should be true");
+        }
+    }
+
+    #[test]
+    fn test_resume_decision_agent_switch_to_unsupported() {
+        // Scenario: Session created with Claude + session_id, user opens with --agent kiro --resume
+        // The agent variable at decision point will be "kiro" (from OpenMode::Agent)
+        // Expected: ResumeUnsupported because kiro doesn't support resume
+        use crate::agents;
+        use crate::errors::KildError;
+
+        let agent = "kiro"; // User switched agent
+        let resume = true;
+        let is_bare_shell = false;
+        let session_agent_session_id = Some("550e8400-e29b-41d4-a716-446655440000");
+
+        if resume && !is_bare_shell {
+            if session_agent_session_id.is_some() {
+                // The key check: even though session HAS a session_id,
+                // the NEW agent (kiro) doesn't support resume
+                assert!(
+                    !agents::resume::supports_resume(agent),
+                    "kiro should not support resume"
+                );
+                // → ResumeUnsupported error
+                let error = SessionError::ResumeUnsupported {
+                    agent: agent.to_string(),
+                };
+                assert!(error.is_user_error());
+            } else {
+                panic!("session should have id");
+            }
+        }
+    }
+
+    #[test]
+    fn test_resume_decision_happy_path_claude() {
+        // Scenario: resume=true, agent=claude, session has session_id
+        // Expected: resume args generated, same session_id preserved
+        use crate::agents;
+
+        let agent = "claude";
+        let sid = "550e8400-e29b-41d4-a716-446655440000";
+        let resume = true;
+        let is_bare_shell = false;
+
+        if resume && !is_bare_shell {
+            assert!(agents::resume::supports_resume(agent));
+            let extra = agents::resume::resume_session_args(agent, sid);
+            assert_eq!(extra, vec!["--resume", sid]);
+
+            let base_cmd = "claude --print";
+            let cmd = format!("{} {}", base_cmd, extra.join(" "));
+            assert_eq!(cmd, format!("claude --print --resume {}", sid));
+        }
+    }
+
+    #[test]
+    fn test_resume_decision_fresh_open_generates_new_session_id() {
+        // Scenario: resume=false, agent=claude (supports resume)
+        // Expected: new session ID generated with --session-id args
+        use crate::agents;
+
+        let agent = "claude";
+        let resume = false;
+        let is_bare_shell = false;
+
+        if !resume && !is_bare_shell && agents::resume::supports_resume(agent) {
+            let sid = agents::resume::generate_session_id();
+            assert!(!sid.is_empty());
+            assert!(uuid::Uuid::parse_str(&sid).is_ok());
+
+            let extra = agents::resume::create_session_args(agent, &sid);
+            assert_eq!(extra.len(), 2);
+            assert_eq!(extra[0], "--session-id");
+            assert_eq!(extra[1], sid);
+        } else {
+            panic!("Should enter fresh-open-with-session-id branch");
+        }
+    }
+
+    #[test]
+    fn test_resume_decision_bare_shell_skips_all() {
+        // Scenario: resume=true, is_bare_shell=true
+        // Expected: resume logic is entirely skipped, no session ID changes
+        let resume = true;
+        let is_bare_shell = true;
+
+        // The condition `resume && !is_bare_shell` should be false
+        assert!(
+            !(resume && !is_bare_shell),
+            "bare shell should skip resume logic"
+        );
+        // And bare shell doesn't support resume either
+        assert!(
+            !((!is_bare_shell) && crate::agents::resume::supports_resume("claude")),
+            "bare shell should skip session ID generation"
+        );
+    }
+
+    #[test]
+    fn test_session_id_survives_stop_lifecycle() {
+        // Verify agent_session_id persists across stop (clear_agents + save + load)
+        use crate::sessions::persistence;
+        use crate::sessions::types::{Session, SessionStatus};
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir = std::env::temp_dir().join(format!("kild_test_sid_lifecycle_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        let session_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test-project_sid-lifecycle_0".to_string(),
+            Some(12345),
+            Some("claude".to_string()),
+            Some(1234567890),
+            None,
+            None,
+            "claude --session-id 550e8400-e29b-41d4-a716-446655440000".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            None,
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "test-project_sid-lifecycle".to_string(),
+            "test-project".to_string(),
+            "sid-lifecycle".to_string(),
+            worktree_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![agent],
+            Some(session_id.clone()),
+        );
+
+        // Save initial session
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
+
+        // Simulate stop: clear agents, set stopped, save
+        let mut stopped = persistence::find_session_by_name(&sessions_dir, "sid-lifecycle")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        stopped.clear_agents();
+        stopped.status = SessionStatus::Stopped;
+        persistence::save_session_to_file(&stopped, &sessions_dir)
+            .expect("Failed to save stopped session");
+
+        // Reload and verify session ID survived
+        let reloaded = persistence::find_session_by_name(&sessions_dir, "sid-lifecycle")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert_eq!(reloaded.status, SessionStatus::Stopped);
+        assert!(!reloaded.has_agents(), "Agents should be cleared");
+        assert_eq!(
+            reloaded.agent_session_id,
+            Some(session_id),
+            "agent_session_id must survive stop lifecycle"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_create_session_generates_session_id_for_claude() {
+        // Verify that agent_session_id generation works for resume-capable agents
+        use crate::agents;
+
+        assert!(agents::resume::supports_resume("claude"));
+        assert!(!agents::resume::supports_resume("kiro"));
+
+        // Claude should get --session-id args
+        let sid = agents::resume::generate_session_id();
+        let args = agents::resume::create_session_args("claude", &sid);
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "--session-id");
+        assert_eq!(args[1], sid);
+
+        // Non-Claude should get empty args
+        let args = agents::resume::create_session_args("kiro", &sid);
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_resume_args_generated_correctly_for_claude() {
+        use crate::agents;
+
+        let sid = "550e8400-e29b-41d4-a716-446655440000";
+        let args = agents::resume::resume_session_args("claude", sid);
+        assert_eq!(args, vec!["--resume", sid]);
+
+        // Non-Claude should get nothing
+        let args = agents::resume::resume_session_args("kiro", sid);
+        assert!(args.is_empty());
     }
 }

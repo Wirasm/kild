@@ -74,6 +74,14 @@ pub enum SessionError {
 
     #[error("Daemon error: {message}")]
     DaemonError { message: String },
+
+    #[error("Agent '{agent}' does not support session resume. Only 'claude' supports --resume.")]
+    ResumeUnsupported { agent: String },
+
+    #[error(
+        "No previous session ID found for '{branch}'. Cannot resume — this kild was created before resume support was added."
+    )]
+    ResumeNoSessionId { branch: String },
 }
 
 impl KildError for SessionError {
@@ -99,6 +107,8 @@ impl KildError for SessionError {
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
             SessionError::DaemonError { .. } => "DAEMON_ERROR",
+            SessionError::ResumeUnsupported { .. } => "RESUME_UNSUPPORTED",
+            SessionError::ResumeNoSessionId { .. } => "RESUME_NO_SESSION_ID",
         }
     }
 
@@ -118,6 +128,8 @@ impl KildError for SessionError {
                 | SessionError::InvalidAgentStatus { .. }
                 | SessionError::ConfigError { .. }
                 | SessionError::UncommittedChanges { .. }
+                | SessionError::ResumeUnsupported { .. }
+                | SessionError::ResumeNoSessionId { .. }
         )
     }
 }
@@ -182,6 +194,32 @@ mod tests {
             "Invalid agent status: 'bogus'. Valid: working, idle, waiting, done, error"
         );
         assert_eq!(error.error_code(), "INVALID_AGENT_STATUS");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_resume_unsupported_error() {
+        let error = SessionError::ResumeUnsupported {
+            agent: "kiro".to_string(),
+        };
+        assert!(error.to_string().contains("kiro"));
+        assert!(
+            error
+                .to_string()
+                .contains("does not support session resume")
+        );
+        assert_eq!(error.error_code(), "RESUME_UNSUPPORTED");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_resume_no_session_id_error() {
+        let error = SessionError::ResumeNoSessionId {
+            branch: "my-feature".to_string(),
+        };
+        assert!(error.to_string().contains("my-feature"));
+        assert!(error.to_string().contains("No previous session ID"));
+        assert_eq!(error.error_code(), "RESUME_NO_SESSION_ID");
         assert!(error.is_user_error());
     }
 }
