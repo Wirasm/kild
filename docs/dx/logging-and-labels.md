@@ -15,7 +15,7 @@ Both systems use: `{layer}.{domain}`
 
 **Domains:**
 - `session` - Session lifecycle
-- `terminal` - Terminal backends
+- `terminal` - Terminal backends (core), terminal rendering (ui)
 - `git` - Worktree operations
 - `cleanup` - Orphaned resource cleanup
 - `health` - Health monitoring
@@ -23,6 +23,7 @@ Both systems use: `{layer}.{domain}`
 - `config` - Configuration system
 - `agents` - Agent backends
 - `files` - File operations
+- `input` - Keystroke translation (UI)
 - `projects` - Project management (UI)
 - `watcher` - File system watcher (UI)
 - `window` - Window enumeration (kild-peek)
