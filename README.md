@@ -240,6 +240,11 @@ kild attach <branch>
 # Press Ctrl+C to detach
 ```
 
+**Note**: Daemon mode is experimental (Phase 1b). Known limitations:
+- `auto_start` config option not yet implemented
+- Daemon runs in foreground only with `--foreground` flag
+- Scrollback replay on attach not yet implemented
+
 ### Stop a kild
 ```bash
 # Stop agent, preserve worktree

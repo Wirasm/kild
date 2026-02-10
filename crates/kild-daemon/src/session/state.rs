@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::error;
 
+use crate::errors::DaemonError;
 use crate::pty::output::ScrollbackBuffer;
 use crate::types::SessionInfo;
 
@@ -110,39 +111,48 @@ impl DaemonSession {
     // --- State transitions ---
 
     /// Transition to Running state with a broadcast sender for PTY output.
-    pub fn set_running(&mut self, output_tx: broadcast::Sender<Vec<u8>>, pty_pid: Option<u32>) {
+    ///
+    /// # Errors
+    /// Returns `InvalidStateTransition` if the session is not in Creating state.
+    pub fn set_running(
+        &mut self,
+        output_tx: broadcast::Sender<Vec<u8>>,
+        pty_pid: Option<u32>,
+    ) -> Result<(), DaemonError> {
         if !matches!(self.state, SessionState::Creating) {
-            panic!(
-                "BUG: set_running called on non-Creating session (state: {:?})",
+            return Err(DaemonError::InvalidStateTransition(format!(
+                "set_running requires Creating state, got {}",
                 self.state
-            );
+            )));
         }
         self.state = SessionState::Running;
         self.output_tx = Some(output_tx);
         self.pty_pid = pty_pid;
+        Ok(())
     }
 
     /// Transition to Stopped state, clearing PTY resources.
     /// Idempotent: calling on an already-stopped session is a no-op.
     ///
-    /// # Panics
-    /// Panics if called when state is neither Running, Creating, nor Stopped.
-    pub fn set_stopped(&mut self) {
+    /// Valid from Running (normal stop) or Creating (early termination during
+    /// session creation failure, e.g. PTY spawn fails after session object is created).
+    ///
+    /// # Errors
+    /// Returns `InvalidStateTransition` if called from an unexpected state.
+    pub fn set_stopped(&mut self) -> Result<(), DaemonError> {
         if self.state == SessionState::Stopped {
-            return;
+            return Ok(());
         }
-        if !matches!(
-            self.state,
-            SessionState::Running | SessionState::Creating | SessionState::Stopped
-        ) {
-            panic!(
-                "BUG: set_stopped called from unexpected state: {:?}",
+        if !matches!(self.state, SessionState::Running | SessionState::Creating) {
+            return Err(DaemonError::InvalidStateTransition(format!(
+                "set_stopped requires Running or Creating state, got {}",
                 self.state
-            );
+            )));
         }
         self.state = SessionState::Stopped;
         self.output_tx = None;
         self.pty_pid = None;
+        Ok(())
     }
 
     /// Attach a client to this session.
@@ -225,7 +235,7 @@ mod tests {
     fn test_set_running() {
         let mut session = test_session();
         let (tx, _) = broadcast::channel(16);
-        session.set_running(tx, Some(12345));
+        session.set_running(tx, Some(12345)).unwrap();
         assert_eq!(session.state(), SessionState::Running);
         assert!(session.has_output());
         assert_eq!(session.pty_pid(), Some(12345));
@@ -235,8 +245,8 @@ mod tests {
     fn test_set_stopped() {
         let mut session = test_session();
         let (tx, _) = broadcast::channel(16);
-        session.set_running(tx, Some(12345));
-        session.set_stopped();
+        session.set_running(tx, Some(12345)).unwrap();
+        session.set_stopped().unwrap();
         assert_eq!(session.state(), SessionState::Stopped);
         assert!(!session.has_output());
         assert!(session.pty_pid().is_none());
@@ -270,7 +280,7 @@ mod tests {
         assert!(session.subscribe_output().is_none());
 
         let (tx, _) = broadcast::channel(16);
-        session.set_running(tx, None);
+        session.set_running(tx, None).unwrap();
         assert!(session.subscribe_output().is_some());
     }
 
@@ -299,5 +309,41 @@ mod tests {
         assert_eq!(SessionState::Creating.to_string(), "creating");
         assert_eq!(SessionState::Running.to_string(), "running");
         assert_eq!(SessionState::Stopped.to_string(), "stopped");
+    }
+
+    #[test]
+    fn test_set_running_on_running_returns_error() {
+        let mut session = test_session();
+        let (tx, _) = broadcast::channel(16);
+        session.set_running(tx.clone(), Some(12345)).unwrap();
+        let err = session.set_running(tx, Some(12345)).unwrap_err();
+        assert!(err.to_string().contains("set_running requires Creating"));
+    }
+
+    #[test]
+    fn test_set_running_on_stopped_returns_error() {
+        let mut session = test_session();
+        session.set_stopped().unwrap();
+        let (tx, _) = broadcast::channel(16);
+        let err = session.set_running(tx, Some(12345)).unwrap_err();
+        assert!(err.to_string().contains("set_running requires Creating"));
+    }
+
+    #[test]
+    fn test_set_stopped_on_creating_succeeds() {
+        let mut session = test_session();
+        assert_eq!(session.state(), SessionState::Creating);
+        session.set_stopped().unwrap();
+        assert_eq!(session.state(), SessionState::Stopped);
+    }
+
+    #[test]
+    fn test_set_stopped_idempotent() {
+        let mut session = test_session();
+        let (tx, _) = broadcast::channel(16);
+        session.set_running(tx, Some(12345)).unwrap();
+        session.set_stopped().unwrap();
+        session.set_stopped().unwrap(); // second call is no-op
+        assert_eq!(session.state(), SessionState::Stopped);
     }
 }

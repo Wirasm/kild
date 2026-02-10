@@ -1,5 +1,6 @@
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+#[allow(unused_imports)]
+use tracing::{error, info};
 
 /// Wait for a shutdown signal (SIGTERM or SIGINT/Ctrl-C).
 ///
@@ -25,8 +26,18 @@ pub async fn wait_for_shutdown_signal(token: CancellationToken) -> Result<(), st
 
     #[cfg(not(unix))]
     {
-        ctrl_c.await.ok();
-        info!(event = "daemon.server.signal_received", signal = "SIGINT");
+        match ctrl_c.await {
+            Ok(()) => {
+                info!(event = "daemon.server.signal_received", signal = "SIGINT");
+            }
+            Err(e) => {
+                error!(
+                    event = "daemon.server.signal_handler_failed",
+                    error = %e,
+                    "Ctrl-C signal handler failed, initiating shutdown anyway",
+                );
+            }
+        }
     }
 
     token.cancel();

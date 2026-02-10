@@ -23,6 +23,9 @@ pub enum DaemonError {
     #[error("session not running: {0}")]
     SessionNotRunning(String),
 
+    #[error("invalid state transition: {0}")]
+    InvalidStateTransition(String),
+
     #[error("PTY error: {0}")]
     PtyError(String),
 
@@ -57,6 +60,7 @@ impl KildError for DaemonError {
             DaemonError::SessionNotFound(_) => "session_not_found",
             DaemonError::SessionAlreadyExists(_) => "session_already_exists",
             DaemonError::SessionNotRunning(_) => "session_not_running",
+            DaemonError::InvalidStateTransition(_) => "invalid_state_transition",
             DaemonError::PtyError(_) => "pty_error",
             DaemonError::ConfigInvalid(_) => "config_invalid",
             DaemonError::AlreadyRunning(_) => "daemon_already_running",
@@ -126,6 +130,10 @@ mod tests {
             ),
             (DaemonError::AlreadyRunning(1234), "daemon_already_running"),
             (DaemonError::ShutdownTimeout, "shutdown_timeout"),
+            (
+                DaemonError::InvalidStateTransition("test".to_string()),
+                "invalid_state_transition",
+            ),
         ];
 
         for (err, expected_code) in cases {
@@ -144,6 +152,7 @@ mod tests {
         assert!(!DaemonError::NotRunning.is_user_error());
         assert!(!DaemonError::PtyError("x".to_string()).is_user_error());
         assert!(!DaemonError::ShutdownTimeout.is_user_error());
+        assert!(!DaemonError::InvalidStateTransition("x".to_string()).is_user_error());
     }
 
     #[test]

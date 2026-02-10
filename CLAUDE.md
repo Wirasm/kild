@@ -230,7 +230,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
-**Module pattern:** Each domain starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects).
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files.
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
@@ -278,6 +278,8 @@ Note: `projects` domain events are `core.projects.*` (in kild-core), while UI-sp
 
 Note: `core.daemon.*` = daemon client IPC (in kild-core), `daemon.*` = daemon server/PTY operations (in kild-daemon).
 
+Daemon server sub-domains: `session`, `pty`, `server`, `connection`, `client`, `pid`, `config`
+
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
 ### Logging Examples
@@ -311,6 +313,10 @@ debug!(event = "core.terminal.applescript_executing", terminal = terminal_name);
 info!(event = "ui.watcher.started", path = %sessions_dir.display());
 warn!(event = "ui.watcher.create_failed", error = %e, "File watcher unavailable");
 debug!(event = "ui.watcher.event_detected", kind = ?event.kind, paths = ?event.paths);
+
+// CLI daemon operations
+info!(event = "cli.daemon.start_started", foreground = foreground);
+info!(event = "cli.attach_started", branch = branch);
 
 // Structured fields - use Display (%e) for errors, Debug (?val) for complex types
 error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
@@ -363,6 +369,10 @@ grep 'peek\.core\.element\.'    # Element enumeration events
 
 # Daemon server events
 grep 'event":"daemon\.'   # Daemon server events
+grep 'daemon\.session\.'     # Session state machine events
+grep 'daemon\.pty\.'         # PTY lifecycle events
+grep 'daemon\.server\.'      # Server startup/shutdown
+grep 'daemon\.connection\.'  # Client connection events
 
 # By outcome
 grep '_failed"'         # All failures

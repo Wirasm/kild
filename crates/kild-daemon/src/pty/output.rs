@@ -3,7 +3,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 /// Ring buffer for recent PTY output (scrollback replay on attach).
 pub struct ScrollbackBuffer {
@@ -81,8 +81,12 @@ impl PtyOutputBroadcaster {
     /// Feed bytes into the broadcaster: stores in scrollback and sends to subscribers.
     pub fn feed(&mut self, data: &[u8]) {
         self.scrollback.push(data);
-        // Ignore send errors — no receivers means no one is attached
-        let _ = self.tx.send(data.to_vec());
+        if self.tx.send(data.to_vec()).is_err() {
+            debug!(
+                event = "daemon.pty.broadcast_no_receivers",
+                "No receivers attached, output buffered in scrollback only"
+            );
+        }
     }
 
     /// Number of currently subscribed receivers.
@@ -135,8 +139,14 @@ pub fn spawn_pty_reader(
                             sb.push(&data);
                         }
                     }
-                    // Ignore send errors — no receivers is fine
-                    let _ = output_tx.send(data);
+                    if output_tx.send(data).is_err() {
+                        debug!(
+                            event = "daemon.pty.reader_channel_closed",
+                            session_id = session_id,
+                            "Output channel closed, stopping reader",
+                        );
+                        break;
+                    }
                 }
                 Err(e) => {
                     error!(
@@ -159,10 +169,10 @@ pub fn spawn_pty_reader(
                 })
                 .is_err()
         {
-            debug!(
-                event = "daemon.pty.exit_notification_dropped",
+            warn!(
+                event = "daemon.pty.exit_notification_failed",
                 session_id = session_id,
-                "PTY exit notification dropped (daemon shutting down)",
+                "PTY exit notification channel closed — daemon may not clean up session",
             );
         }
     })

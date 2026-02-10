@@ -171,7 +171,17 @@ async fn dispatch_message(
                     }
                 };
 
-                let scrollback = mgr.scrollback_contents(&session_id).unwrap_or_default();
+                let scrollback = match mgr.scrollback_contents(&session_id) {
+                    Some(data) => data,
+                    None => {
+                        warn!(
+                            event = "daemon.connection.scrollback_not_found",
+                            session_id = session_id,
+                            "Session not found during scrollback fetch",
+                        );
+                        Vec::new()
+                    }
+                };
 
                 (rx, scrollback, resize_failed)
             };

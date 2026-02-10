@@ -3,7 +3,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::errors::DaemonError;
 
@@ -162,7 +162,14 @@ impl PtyManager {
         let writer = match pair.master.take_writer() {
             Ok(w) => w,
             Err(e) => {
-                let _ = child.kill();
+                if let Err(kill_err) = child.kill() {
+                    error!(
+                        event = "daemon.pty.create_cleanup_failed",
+                        session_id = session_id,
+                        error = %kill_err,
+                        "Failed to kill child process during PTY creation cleanup",
+                    );
+                }
                 return Err(DaemonError::PtyError(format!("take writer: {}", e)));
             }
         };

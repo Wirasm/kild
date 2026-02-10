@@ -115,7 +115,7 @@ impl SessionManager {
         );
 
         // Transition session to Running
-        session.set_running(output_tx, pty_pid);
+        session.set_running(output_tx, pty_pid)?;
 
         let info = session.to_session_info();
         self.sessions.insert(session_id.to_string(), session);
@@ -245,7 +245,7 @@ impl SessionManager {
         }
 
         if let Some(session) = self.sessions.get_mut(session_id) {
-            session.set_stopped();
+            session.set_stopped()?;
         }
 
         info!(
@@ -348,12 +348,33 @@ impl SessionManager {
         info!(event = "daemon.session.pty_exited", session_id = session_id,);
 
         // Clean up PTY resources
-        let _ = self.pty_manager.remove(session_id);
+        match self.pty_manager.remove(session_id) {
+            Some(_) => {
+                debug!(
+                    event = "daemon.session.pty_removed",
+                    session_id = session_id,
+                );
+            }
+            None => {
+                warn!(
+                    event = "daemon.session.pty_already_removed",
+                    session_id = session_id,
+                    "PTY already removed (race with stop or natural exit)",
+                );
+            }
+        }
 
         // Transition session to Stopped
         if let Some(session) = self.sessions.get_mut(session_id) {
             let output_tx = session.output_tx();
-            session.set_stopped();
+            if let Err(e) = session.set_stopped() {
+                error!(
+                    event = "daemon.session.stop_transition_failed",
+                    session_id = session_id,
+                    error = %e,
+                );
+                return None;
+            }
             return output_tx;
         }
 

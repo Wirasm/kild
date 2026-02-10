@@ -29,7 +29,15 @@ pub fn write_pid_file(path: &Path) -> Result<(), DaemonError> {
 pub fn read_pid_file(path: &Path) -> Option<u32> {
     let content = match fs::read_to_string(path) {
         Ok(s) => s,
-        Err(_) => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            warn!(
+                event = "daemon.pid.read_failed",
+                path = %path.display(),
+                error = %e,
+            );
+            return None;
+        }
     };
     match content.trim().parse::<u32>() {
         Ok(pid) => Some(pid),

@@ -354,4 +354,45 @@ mod tests {
         let open_error = format_partial_failure_error("open", 2, 4);
         assert_eq!(open_error, "Partial failure: 2 of 4 kild(s) failed to open");
     }
+
+    fn config_with_daemon_enabled() -> KildConfig {
+        let mut value = serde_json::to_value(KildConfig::default()).unwrap();
+        value["daemon"]["enabled"] = serde_json::Value::Bool(true);
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_daemon_flag_wins() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(true, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_no_daemon_flag_wins() {
+        let config = config_with_daemon_enabled();
+        let mode = resolve_runtime_mode(false, true, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_config_enabled() {
+        let config = config_with_daemon_enabled();
+        let mode = resolve_runtime_mode(false, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_default_terminal() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(false, false, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_both_flags_daemon_wins() {
+        let config = KildConfig::default();
+        let mode = resolve_runtime_mode(true, true, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
+    }
 }

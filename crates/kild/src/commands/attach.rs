@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 
 use clap::ArgMatches;
 use nix::sys::termios;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub(crate) fn handle_attach_command(
     matches: &ArgMatches,
@@ -72,10 +72,13 @@ fn attach_to_daemon_session(daemon_session_id: &str) -> Result<(), Box<dyn std::
 
     let ack: serde_json::Value = serde_json::from_str(line.trim())?;
     if ack.get("type").and_then(|t| t.as_str()) == Some("error") {
-        let msg = ack
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown error");
+        let msg = match ack.get("message").and_then(|m| m.as_str()) {
+            Some(m) => m.to_string(),
+            None => {
+                error!(event = "cli.attach.malformed_error_response", response = %ack);
+                "Unknown error (daemon returned error with no message)".to_string()
+            }
+        };
         return Err(format!("Attach failed: {}", msg).into());
     }
 
@@ -97,7 +100,9 @@ fn attach_to_daemon_session(daemon_session_id: &str) -> Result<(), Box<dyn std::
     drop(_raw_guard);
     eprintln!("\r\nDetached from session. (Reconnect with: kild attach)");
 
-    let _ = stdin_handle.join();
+    if let Err(e) = stdin_handle.join() {
+        error!(event = "cli.attach.stdin_thread_panicked", error = ?e);
+    }
     Ok(())
 }
 
@@ -155,7 +160,11 @@ fn forward_stdin_to_daemon(stream: &mut UnixStream, session_id: &str) {
         let n = match stdin.lock().read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
-            Err(_) => break,
+            Err(e) => {
+                error!(event = "cli.attach.stdin_read_failed", error = %e);
+                eprintln!("\r\nError: Failed to read from stdin. Detaching.");
+                break;
+            }
         };
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
@@ -237,11 +246,17 @@ fn forward_daemon_to_stdout_buffered(
                             break;
                         }
                         "resize_failed" => {
-                            let detail = msg
+                            let detail = match msg
                                 .get("details")
                                 .and_then(|d| d.get("message"))
                                 .and_then(|m| m.as_str())
-                                .unwrap_or("Terminal resize failed. Display may be garbled.");
+                            {
+                                Some(m) => m.to_string(),
+                                None => {
+                                    warn!(event = "cli.attach.malformed_resize_warning", response = %msg);
+                                    "Terminal resize failed. Display may be garbled.".to_string()
+                                }
+                            };
                             eprintln!("\r\nWarning: {}", detail);
                         }
                         _ => {}
