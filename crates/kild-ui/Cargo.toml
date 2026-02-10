@@ -19,8 +19,13 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
+thiserror.workspace = true
 regex.workspace = true
 notify.workspace = true
+portable-pty.workspace = true
+alacritty_terminal.workspace = true
+vte.workspace = true
+futures.workspace = true
 
 # core-text is macOS-only; pinned to fix gpui font-kit conflict
 [target.'cfg(target_os = "macos")'.dependencies]

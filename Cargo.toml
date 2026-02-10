@@ -44,6 +44,9 @@ accessibility-sys = "0.2"
 # Daemon dependencies
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "signal", "time", "sync", "macros", "fs", "process"] }
 portable-pty = "0.8"
+alacritty_terminal = "0.25"
+vte = "0.15"
+futures = "0.3"
 nix = { version = "0.29", features = ["signal", "process", "term", "ioctl"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 

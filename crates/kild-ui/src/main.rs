@@ -12,6 +12,7 @@ mod actions;
 mod components;
 mod refresh;
 mod state;
+mod terminal;
 mod theme;
 mod theme_bridge;
 mod views;

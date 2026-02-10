@@ -214,3 +214,70 @@ pub const STATUS_BADGE_DOT_SIZE: f32 = 6.0;
 pub fn overlay() -> Rgba {
     gpui::rgba(0x08090ACC)
 }
+
+// =============================================================================
+// TERMINAL COLORS — ANSI 16 mapped to Tallinn Night (vivid for readability)
+// =============================================================================
+
+// Standard ANSI colors (0-7)
+pub fn ansi_black() -> Rgba {
+    gpui::rgb(0x151719)
+} // Surface
+pub fn ansi_red() -> Rgba {
+    gpui::rgb(0xF87171)
+} // Ember (vivid)
+pub fn ansi_green() -> Rgba {
+    gpui::rgb(0x34D399)
+} // Aurora (vivid)
+pub fn ansi_yellow() -> Rgba {
+    gpui::rgb(0xFBBF24)
+} // Copper (vivid)
+pub fn ansi_blue() -> Rgba {
+    gpui::rgb(0x38BDF8)
+} // Ice (vivid)
+pub fn ansi_magenta() -> Rgba {
+    gpui::rgb(0xA78BFA)
+} // Kiri (vivid)
+pub fn ansi_cyan() -> Rgba {
+    gpui::rgb(0x22D3EE)
+} // Frost
+pub fn ansi_white() -> Rgba {
+    gpui::rgb(0xB8C0CC)
+} // Text
+
+// Bright ANSI colors (8-15)
+pub fn ansi_bright_black() -> Rgba {
+    gpui::rgb(0x5C6370)
+} // Text Muted
+pub fn ansi_bright_red() -> Rgba {
+    gpui::rgb(0xFCA5A5)
+}
+pub fn ansi_bright_green() -> Rgba {
+    gpui::rgb(0x6EE7B7)
+}
+pub fn ansi_bright_yellow() -> Rgba {
+    gpui::rgb(0xFDE68A)
+}
+pub fn ansi_bright_blue() -> Rgba {
+    gpui::rgb(0x7DD3FC)
+} // Ice Bright
+pub fn ansi_bright_magenta() -> Rgba {
+    gpui::rgb(0xC4B5FD)
+}
+pub fn ansi_bright_cyan() -> Rgba {
+    gpui::rgb(0x67E8F9)
+}
+pub fn ansi_bright_white() -> Rgba {
+    gpui::rgb(0xF8FAFC)
+} // Text White
+
+// Terminal special colors
+pub fn terminal_foreground() -> Rgba {
+    text()
+} // #B8C0CC
+pub fn terminal_background() -> Rgba {
+    void()
+} // #08090A
+pub fn terminal_cursor() -> Rgba {
+    gpui::rgb(0x38BDF8)
+} // Ice (vivid)
