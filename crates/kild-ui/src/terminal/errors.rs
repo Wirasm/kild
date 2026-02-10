@@ -23,6 +23,9 @@ pub enum TerminalError {
 
     #[error("Channel send failed: {0}")]
     ChannelSend(String),
+
+    #[error("Channels already taken (take_channels called more than once)")]
+    ChannelsAlreadyTaken,
 }
 
 #[allow(dead_code)]
@@ -36,6 +39,7 @@ impl TerminalError {
             TerminalError::PtyFlush(_) => "terminal.pty_flush_failed",
             TerminalError::WriterLockPoisoned => "terminal.writer_lock_poisoned",
             TerminalError::ChannelSend(_) => "terminal.channel_send_failed",
+            TerminalError::ChannelsAlreadyTaken => "terminal.channels_already_taken",
         }
     }
 

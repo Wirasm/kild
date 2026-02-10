@@ -66,6 +66,8 @@ pub struct Terminal {
     /// Pending channels for event batching. Taken once by TerminalView.
     pending_byte_rx: Option<UnboundedReceiver<Vec<u8>>>,
     pending_event_rx: Option<UnboundedReceiver<AlacEvent>>,
+    /// Shared error state set on critical failures (channel errors, write failures, lock poisoning).
+    error_state: Arc<Mutex<Option<String>>>,
 }
 
 impl Terminal {
@@ -169,6 +171,7 @@ impl Terminal {
                         }
                         Ok(n) => {
                             if byte_tx.unbounded_send(buf[..n].to_vec()).is_err() {
+                                tracing::error!(event = "ui.terminal.byte_send_failed", bytes = n);
                                 break;
                             }
                         }
@@ -183,9 +186,14 @@ impl Terminal {
                 }
             });
             if done_rx.await.is_err() {
-                tracing::warn!(event = "ui.terminal.done_recv_failed");
+                tracing::warn!(
+                    event = "ui.terminal.done_recv_failed",
+                    "PTY reader thread dropped done_tx without sending — thread may have panicked"
+                );
             }
         });
+
+        tracing::info!(event = "ui.terminal.create_completed");
 
         Ok(Self {
             term,
@@ -194,6 +202,7 @@ impl Terminal {
             _child: child,
             pending_byte_rx: Some(byte_rx),
             pending_event_rx: Some(event_rx),
+            error_state: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -201,16 +210,18 @@ impl Terminal {
     ///
     /// Must be called exactly once after construction. The caller (TerminalView)
     /// uses these to run the batching loop where it can notify GPUI to repaint.
-    pub fn take_channels(&mut self) -> (UnboundedReceiver<Vec<u8>>, UnboundedReceiver<AlacEvent>) {
-        let byte_rx = self
-            .pending_byte_rx
-            .take()
-            .expect("take_channels called more than once");
-        let event_rx = self
-            .pending_event_rx
-            .take()
-            .expect("take_channels called more than once");
-        (byte_rx, event_rx)
+    pub fn take_channels(
+        &mut self,
+    ) -> Result<(UnboundedReceiver<Vec<u8>>, UnboundedReceiver<AlacEvent>), TerminalError> {
+        let byte_rx = self.pending_byte_rx.take().ok_or_else(|| {
+            tracing::error!(event = "ui.terminal.take_channels_double_call");
+            TerminalError::ChannelsAlreadyTaken
+        })?;
+        let event_rx = self.pending_event_rx.take().ok_or_else(|| {
+            tracing::error!(event = "ui.terminal.take_channels_double_call");
+            TerminalError::ChannelsAlreadyTaken
+        })?;
+        Ok((byte_rx, event_rx))
     }
 
     /// Run the event batching loop. Called from TerminalView's cx.spawn() task.
@@ -221,6 +232,7 @@ impl Terminal {
     pub async fn run_batch_loop(
         term: Arc<FairMutex<Term<KildListener>>>,
         pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        error_state: Arc<Mutex<Option<String>>>,
         mut byte_rx: UnboundedReceiver<Vec<u8>>,
         mut event_rx: UnboundedReceiver<AlacEvent>,
         executor: gpui::BackgroundExecutor,
@@ -267,6 +279,9 @@ impl Terminal {
                                     event = "ui.terminal.pty_write_loop_failed",
                                     error = %e
                                 );
+                                if let Ok(mut err) = error_state.lock() {
+                                    *err = Some(format!("PTY write failed: {e}"));
+                                }
                             }
                             if let Err(e) = writer.flush() {
                                 tracing::error!(
@@ -277,9 +292,13 @@ impl Terminal {
                         }
                         Err(e) => {
                             tracing::error!(
-                                event = "ui.terminal.writer_lock_failed",
+                                event = "ui.terminal.writer_lock_poisoned",
                                 error = %e
                             );
+                            if let Ok(mut err) = error_state.lock() {
+                                *err = Some("PTY writer lock poisoned".to_string());
+                            }
+                            break;
                         }
                     },
                     _ => {}
@@ -303,12 +322,32 @@ impl Terminal {
     }
 
     /// Get access to the terminal emulator (locked).
-    pub fn term(&self) -> &Arc<FairMutex<Term<KildListener>>> {
+    pub(super) fn term(&self) -> &Arc<FairMutex<Term<KildListener>>> {
         &self.term
     }
 
     /// Get access to the PTY writer (for event batching loop).
-    pub fn pty_writer(&self) -> &Arc<Mutex<Box<dyn Write + Send>>> {
+    pub(super) fn pty_writer(&self) -> &Arc<Mutex<Box<dyn Write + Send>>> {
         &self.pty_writer
+    }
+
+    /// Get the shared error state for use in the batch loop.
+    pub(super) fn error_state(&self) -> &Arc<Mutex<Option<String>>> {
+        &self.error_state
+    }
+
+    /// Read the current error message, if any critical failure has occurred.
+    pub fn error_message(&self) -> Option<String> {
+        self.error_state.lock().ok().and_then(|guard| guard.clone())
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        tracing::info!(event = "ui.terminal.cleanup_started");
+        // Child gets SIGHUP from PTY closure, but explicit kill is safer
+        if let Err(e) = self._child.kill() {
+            tracing::warn!(event = "ui.terminal.kill_failed", error = %e);
+        }
     }
 }

@@ -938,6 +938,7 @@ impl MainView {
                         }
                         Err(e) => {
                             tracing::error!(event = "ui.terminal.create_failed", error = %e);
+                            self.show_terminal = false;
                             self.state
                                 .push_error(format!("Terminal creation failed: {}", e));
                             cx.notify();

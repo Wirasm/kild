@@ -1,6 +1,6 @@
 use gpui::{
     Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render, Task, Window, div,
-    prelude::*,
+    prelude::*, px,
 };
 
 use super::input;
@@ -35,15 +35,27 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle);
 
-        let (byte_rx, event_rx) = terminal.take_channels();
+        // take_channels is called exactly once; a double-call is a logic bug
+        let (byte_rx, event_rx) = terminal.take_channels().expect(
+            "take_channels failed: channels already taken — this is a logic bug in TerminalView",
+        );
         let term = terminal.term().clone();
         let pty_writer = terminal.pty_writer().clone();
+        let error_state = terminal.error_state().clone();
         let executor = cx.background_executor().clone();
 
         let event_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            Terminal::run_batch_loop(term, pty_writer, byte_rx, event_rx, executor, || {
-                let _ = this.update(cx, |_, cx| cx.notify());
-            })
+            Terminal::run_batch_loop(
+                term,
+                pty_writer,
+                error_state,
+                byte_rx,
+                event_rx,
+                executor,
+                || {
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                },
+            )
             .await;
         });
 
@@ -89,12 +101,27 @@ impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let term = self.terminal.term().clone();
         let has_focus = self.focus_handle.is_focused(window);
+        let error = self.terminal.error_message();
 
-        div()
+        let mut container = div()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
             .size_full()
-            .bg(theme::terminal_background())
-            .child(TerminalElement::new(term, has_focus))
+            .bg(theme::terminal_background());
+
+        if let Some(msg) = error {
+            container = container.child(
+                div()
+                    .w_full()
+                    .px(px(theme::SPACE_3))
+                    .py(px(theme::SPACE_2))
+                    .bg(theme::ember())
+                    .text_color(theme::text_white())
+                    .text_size(px(theme::TEXT_SM))
+                    .child(format!("Terminal error: {msg}. Press Ctrl+T to close.")),
+            );
+        }
+
+        container.child(TerminalElement::new(term, has_focus))
     }
 }

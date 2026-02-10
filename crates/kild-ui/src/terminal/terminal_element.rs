@@ -166,6 +166,8 @@ impl Element for TerminalElement {
             };
         }
 
+        // FairMutex (alacritty_terminal::sync) does not poison — it's not
+        // std::sync::Mutex. lock() will always succeed (may block, never Err).
         let term = self.term.lock();
         let content = term.renderable_content();
 
@@ -491,7 +493,11 @@ impl Element for TerminalElement {
                 );
 
                 if let Err(e) = shaped.paint(point(x, y), prepaint.cell_height, window, cx) {
-                    tracing::error!(event = "ui.terminal.paint_failed", error = %e);
+                    tracing::error!(
+                        event = "ui.terminal.paint_failed",
+                        error = %e,
+                        "Text rendering failed — terminal output may be incomplete"
+                    );
                 }
             }
         }
