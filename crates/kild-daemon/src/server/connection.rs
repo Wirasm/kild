@@ -110,6 +110,7 @@ async fn dispatch_message(
             env_vars,
             rows,
             cols,
+            use_login_shell,
         } => {
             let mut mgr = session_manager.lock().await;
             let env_pairs: Vec<(String, String)> = env_vars.into_iter().collect();
@@ -122,6 +123,7 @@ async fn dispatch_message(
                 &env_pairs,
                 rows,
                 cols,
+                use_login_shell,
             ) {
                 Ok(session_info) => Some(DaemonMessage::SessionCreated {
                     id,

@@ -118,6 +118,7 @@ impl PtyManager {
         rows: u16,
         cols: u16,
         env_vars: &[(String, String)],
+        use_login_shell: bool,
     ) -> Result<&ManagedPty, DaemonError> {
         if self.ptys.contains_key(session_id) {
             return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
@@ -135,9 +136,18 @@ impl PtyManager {
             .openpty(size)
             .map_err(|e| DaemonError::PtyError(format!("openpty: {}", e)))?;
 
-        let mut cmd = CommandBuilder::new(command);
-        cmd.args(args);
-        cmd.cwd(working_dir);
+        let mut cmd = if use_login_shell {
+            // Use portable-pty's built-in login shell setup: $SHELL with argv[0] = "-zsh".
+            // IMPORTANT: new_default_prog() panics if .arg() is called on it.
+            let mut c = CommandBuilder::new_default_prog();
+            c.cwd(working_dir);
+            c
+        } else {
+            let mut c = CommandBuilder::new(command);
+            c.args(args);
+            c.cwd(working_dir);
+            c
+        };
 
         for (key, value) in env_vars {
             cmd.env(key, value);
@@ -267,6 +277,7 @@ mod tests {
             24,
             80,
             &[],
+            false,
         );
         match result {
             Err(DaemonError::PtyError(msg)) => {
@@ -284,11 +295,11 @@ mod tests {
         let mut mgr = PtyManager::new();
         let tmpdir = tempfile::tempdir().unwrap();
 
-        mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[])
+        mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[], false)
             .unwrap();
         assert_eq!(mgr.count(), 1);
 
-        let result = mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[]);
+        let result = mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[], false);
         match result {
             Err(DaemonError::SessionAlreadyExists(id)) => assert_eq!(id, "s1"),
             Err(other) => panic!("expected SessionAlreadyExists, got: {:?}", other),
@@ -312,6 +323,7 @@ mod tests {
             24,
             80,
             &[],
+            false,
         );
 
         assert!(mgr.get("fail-session").is_none());
@@ -323,7 +335,7 @@ mod tests {
         let mut mgr = PtyManager::new();
         let tmpdir = tempfile::tempdir().unwrap();
 
-        mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[])
+        mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[], false)
             .unwrap();
         assert_eq!(mgr.count(), 1);
         assert!(mgr.get("s1").is_some());
@@ -331,6 +343,16 @@ mod tests {
         mgr.destroy("s1").unwrap();
         assert_eq!(mgr.count(), 0);
         assert!(mgr.get("s1").is_none());
+    }
+
+    #[test]
+    fn test_create_with_login_shell_uses_default_prog() {
+        let mut mgr = PtyManager::new();
+        let tmpdir = tempfile::tempdir().unwrap();
+        // use_login_shell=true should succeed (uses $SHELL via new_default_prog)
+        let result = mgr.create("s1", "", &[], tmpdir.path(), 24, 80, &[], true);
+        assert!(result.is_ok(), "Login shell mode should succeed");
+        mgr.destroy("s1").unwrap();
     }
 
     #[test]

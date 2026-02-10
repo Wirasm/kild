@@ -136,6 +136,9 @@ pub struct DaemonCreateRequest<'a> {
     pub rows: u16,
     /// Initial PTY columns.
     pub cols: u16,
+    /// When true, use native login shell (`CommandBuilder::new_default_prog()`)
+    /// instead of executing the command directly. Used for bare shell sessions.
+    pub use_login_shell: bool,
 }
 
 /// Create a new PTY session in the daemon.
@@ -170,6 +173,7 @@ pub fn create_pty_session(
         "env_vars": env_map,
         "rows": request.rows,
         "cols": request.cols,
+        "use_login_shell": request.use_login_shell,
     });
 
     let mut stream = connect(&socket_path)?;

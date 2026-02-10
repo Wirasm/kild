@@ -58,6 +58,7 @@ impl SessionManager {
         env_vars: &[(String, String)],
         rows: u16,
         cols: u16,
+        use_login_shell: bool,
     ) -> Result<SessionInfo, DaemonError> {
         if self.sessions.contains_key(session_id) {
             return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
@@ -91,6 +92,7 @@ impl SessionManager {
             rows,
             cols,
             env_vars,
+            use_login_shell,
         )?;
 
         let pty_pid = managed_pty.child_process_id();
@@ -345,15 +347,28 @@ impl SessionManager {
     /// Returns the session_id and output_tx if the session had attached clients
     /// (so the caller can broadcast a session_event notification).
     pub fn handle_pty_exit(&mut self, session_id: &str) -> Option<broadcast::Sender<Vec<u8>>> {
-        info!(event = "daemon.session.pty_exited", session_id = session_id,);
-
-        // Clean up PTY resources
-        match self.pty_manager.remove(session_id) {
-            Some(_) => {
+        // Clean up PTY resources and capture exit code
+        let exit_code = match self.pty_manager.remove(session_id) {
+            Some(mut pty) => {
+                // Child has already exited (reader got EOF), so wait() returns immediately
+                let code = match pty.wait() {
+                    Ok(status) => {
+                        if status.success() { Some(0) } else { None }
+                    }
+                    Err(e) => {
+                        debug!(
+                            event = "daemon.session.exit_code_unavailable",
+                            session_id = session_id,
+                            error = %e,
+                        );
+                        None
+                    }
+                };
                 debug!(
                     event = "daemon.session.pty_removed",
                     session_id = session_id,
                 );
+                code
             }
             None => {
                 warn!(
@@ -361,8 +376,15 @@ impl SessionManager {
                     session_id = session_id,
                     "PTY already removed (race with stop or natural exit)",
                 );
+                None
             }
-        }
+        };
+
+        info!(
+            event = "daemon.session.pty_exited",
+            session_id = session_id,
+            exit_code = ?exit_code,
+        );
 
         // Transition session to Stopped
         if let Some(session) = self.sessions.get_mut(session_id) {
@@ -441,7 +463,7 @@ mod tests {
         let wd = tmpdir.path().to_str().unwrap();
 
         // Create a session running "echo hello" (exits immediately)
-        mgr.create_session("s1", wd, "echo", &["hello".to_string()], &[], 24, 80)
+        mgr.create_session("s1", wd, "echo", &["hello".to_string()], &[], 24, 80, false)
             .unwrap();
 
         // Verify it starts as Running
@@ -471,7 +493,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "echo", &["hi".to_string()], &[], 24, 80)
+        mgr.create_session("s1", wd, "echo", &["hi".to_string()], &[], 24, 80, false)
             .unwrap();
 
         assert_eq!(mgr.active_pty_count(), 1);
@@ -489,7 +511,7 @@ mod tests {
         let wd = tmpdir.path().to_str().unwrap();
 
         // Use "sleep" to keep the session running during the test
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80)
+        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
             .unwrap();
 
         assert_eq!(mgr.client_count("s1"), Some(0));
@@ -513,7 +535,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80)
+        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
             .unwrap();
 
         // Detaching a client that was never attached should succeed without error
@@ -531,10 +553,10 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80)
+        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
             .unwrap();
 
-        let result = mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80);
+        let result = mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false);
         assert!(result.is_err());
         match result.unwrap_err() {
             DaemonError::SessionAlreadyExists(id) => assert_eq!(id, "s1"),

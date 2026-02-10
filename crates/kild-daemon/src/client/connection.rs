@@ -99,6 +99,7 @@ impl DaemonClient {
         env_vars: &HashMap<String, String>,
         rows: u16,
         cols: u16,
+        use_login_shell: bool,
     ) -> Result<SessionInfo, DaemonError> {
         let id = self.next_id();
         let msg = ClientMessage::CreateSession {
@@ -110,6 +111,7 @@ impl DaemonClient {
             env_vars: env_vars.clone(),
             rows,
             cols,
+            use_login_shell,
         };
 
         let response = self.request(&msg).await?;

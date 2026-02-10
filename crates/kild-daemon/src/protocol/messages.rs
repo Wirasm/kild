@@ -36,6 +36,10 @@ pub enum ClientMessage {
         /// Initial PTY columns.
         #[serde(default = "default_cols")]
         cols: u16,
+        /// When true, use `CommandBuilder::new_default_prog()` for a native login shell
+        /// instead of `CommandBuilder::new(command)`. Used for bare shell sessions.
+        #[serde(default)]
+        use_login_shell: bool,
     },
 
     #[serde(rename = "attach")]
@@ -192,6 +196,7 @@ mod tests {
             )]),
             rows: 24,
             cols: 80,
+            use_login_shell: false,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"create_session"#));
@@ -244,6 +249,7 @@ mod tests {
                 working_directory: "/tmp".to_string(),
                 command: "bash".to_string(),
                 args: vec![],
+                use_login_shell: false,
                 env_vars: HashMap::new(),
                 rows: 24,
                 cols: 80,

@@ -70,6 +70,7 @@ async fn test_create_session_and_list() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();
@@ -120,6 +121,7 @@ async fn test_attach_and_read_output() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();
@@ -209,13 +211,31 @@ async fn test_duplicate_session_id_rejected() {
 
     // Create first session
     client
-        .create_session("dup-test", "/tmp", "/bin/sh", &[], &HashMap::new(), 24, 80)
+        .create_session(
+            "dup-test",
+            "/tmp",
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+            false,
+        )
         .await
         .unwrap();
 
     // Try to create a session with the same ID
     let result = client
-        .create_session("dup-test", "/tmp", "/bin/sh", &[], &HashMap::new(), 24, 80)
+        .create_session(
+            "dup-test",
+            "/tmp",
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+            false,
+        )
         .await;
     assert!(result.is_err());
 
@@ -248,6 +268,7 @@ async fn test_create_session_with_invalid_command() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await;
     assert!(result.is_err(), "Should fail with invalid command");
@@ -278,6 +299,7 @@ async fn test_multiple_clients_attach_to_session() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();
@@ -328,6 +350,7 @@ async fn test_pty_exit_transitions_session_to_stopped() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();
@@ -394,6 +417,7 @@ async fn test_stop_session_idempotent() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();
@@ -439,6 +463,7 @@ async fn test_destroy_running_session() {
             &HashMap::new(),
             24,
             80,
+            false,
         )
         .await
         .unwrap();

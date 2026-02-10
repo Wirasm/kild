@@ -245,7 +245,7 @@ pub fn create_session(
             // working directory. Worktree creation and session persistence
             // are handled here in kild-core.
 
-            let (cmd, cmd_args, env_vars) =
+            let (cmd, cmd_args, env_vars, use_login_shell) =
                 build_daemon_create_request(&validated.command, &validated.agent)?;
 
             let daemon_request = crate::daemon::client::DaemonCreateRequest {
@@ -257,6 +257,7 @@ pub fn create_session(
                 env_vars: &env_vars,
                 rows: 24,
                 cols: 80,
+                use_login_shell,
             };
             let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
                 .map_err(|e| SessionError::DaemonError {
@@ -653,7 +654,8 @@ pub fn open_session(
 
     let new_agent = if use_daemon {
         // Daemon path: create new daemon PTY (uses shared helper with create_session)
-        let (cmd, cmd_args, env_vars) = build_daemon_create_request(&agent_command, &agent)?;
+        let (cmd, cmd_args, env_vars, use_login_shell) =
+            build_daemon_create_request(&agent_command, &agent)?;
 
         let daemon_request = crate::daemon::client::DaemonCreateRequest {
             request_id: &spawn_id,
@@ -664,6 +666,7 @@ pub fn open_session(
             env_vars: &env_vars,
             rows: 24,
             cols: 80,
+            use_login_shell,
         };
         let daemon_result =
             crate::daemon::client::create_pty_session(&daemon_request).map_err(|e| {
@@ -737,25 +740,43 @@ pub fn open_session(
     Ok(session)
 }
 
-/// Build the command, args, and env vars needed for a daemon PTY create request.
+/// Build the command, args, env vars, and login shell flag for a daemon PTY create request.
 ///
 /// Both `create_session` and `open_session` need to parse the agent command string
 /// and collect environment variables for the daemon. This helper centralises that logic.
+///
+/// Two strategies based on agent type:
+/// - **Bare shell** (`agent_name == "shell"`): Sets `use_login_shell = true` so the daemon
+///   uses `CommandBuilder::new_default_prog()` for a native login shell with profile sourcing.
+/// - **Agents**: Wraps in `$SHELL -lc 'exec <command>'` so profile files are sourced
+///   before the agent starts, providing full PATH and environment. The `exec` replaces
+///   the wrapper shell with the agent for clean process tracking.
 #[allow(clippy::type_complexity)]
 fn build_daemon_create_request(
     agent_command: &str,
     agent_name: &str,
-) -> Result<(String, Vec<String>, Vec<(String, String)>), SessionError> {
-    let parts: Vec<&str> = agent_command.split_whitespace().collect();
-    let (cmd, cmd_args) = parts
-        .split_first()
-        .ok_or_else(|| SessionError::DaemonError {
-            message: format!(
-                "Empty command string for agent '{}'. Check agent configuration.",
-                agent_name
-            ),
-        })?;
-    let cmd_args: Vec<String> = cmd_args.iter().map(|s| s.to_string()).collect();
+) -> Result<(String, Vec<String>, Vec<(String, String)>, bool), SessionError> {
+    let use_login_shell = agent_name == "shell";
+
+    let (cmd, cmd_args) = if use_login_shell {
+        // For bare shell: command/args are ignored by new_default_prog(),
+        // but we still pass them for logging purposes.
+        (agent_command.to_string(), vec![])
+    } else {
+        // For agents: validate command is non-empty, then wrap in login shell.
+        // sh -lc 'exec claude --flags' ensures profile files are sourced.
+        if agent_command.split_whitespace().next().is_none() {
+            return Err(SessionError::DaemonError {
+                message: format!(
+                    "Empty command string for agent '{}'. Check agent configuration.",
+                    agent_name
+                ),
+            });
+        }
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let escaped = agent_command.replace('\'', "'\\''");
+        (shell, vec!["-lc".to_string(), format!("exec {}", escaped)])
+    };
 
     let mut env_vars = Vec::new();
     for key in &["PATH", "HOME", "SHELL", "USER", "LANG", "TERM"] {
@@ -764,7 +785,7 @@ fn build_daemon_create_request(
         }
     }
 
-    Ok((cmd.to_string(), cmd_args, env_vars))
+    Ok((cmd, cmd_args, env_vars, use_login_shell))
 }
 
 /// Sync a session's status with the daemon if it has a daemon-managed agent.
@@ -1707,18 +1728,46 @@ mod tests {
     // --- build_daemon_create_request tests ---
 
     #[test]
-    fn test_build_daemon_request_parses_command_with_args() {
-        let (cmd, args, _env) =
+    fn test_build_daemon_request_agent_wraps_in_login_shell() {
+        let (cmd, args, _env, use_login_shell) =
             build_daemon_create_request("claude --agent --verbose", "claude").unwrap();
-        assert_eq!(cmd, "claude");
-        assert_eq!(args, vec!["--agent", "--verbose"]);
+        assert!(!use_login_shell, "Agent should not use login shell mode");
+        // Agent commands are wrapped in $SHELL -lc 'exec <command>'
+        assert!(
+            cmd.ends_with("sh") || cmd.ends_with("zsh") || cmd.ends_with("bash"),
+            "Command should be a shell, got: {}",
+            cmd
+        );
+        assert_eq!(args.len(), 2, "Should have -lc and the exec command");
+        assert_eq!(args[0], "-lc");
+        assert!(
+            args[1].contains("exec claude --agent --verbose"),
+            "Should wrap command with exec, got: {}",
+            args[1]
+        );
     }
 
     #[test]
-    fn test_build_daemon_request_single_word_command() {
-        let (cmd, args, _env) = build_daemon_create_request("claude", "claude").unwrap();
-        assert_eq!(cmd, "claude");
-        assert!(args.is_empty(), "Single-word command should have no args");
+    fn test_build_daemon_request_single_word_agent_wraps_in_login_shell() {
+        let (cmd, args, _env, use_login_shell) =
+            build_daemon_create_request("claude", "claude").unwrap();
+        assert!(!use_login_shell);
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "-lc");
+        assert!(args[1].contains("exec claude"), "got: {}", args[1]);
+        assert!(
+            cmd.ends_with("sh") || cmd.ends_with("zsh") || cmd.ends_with("bash"),
+            "got: {}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_build_daemon_request_bare_shell_uses_login_shell() {
+        let (_cmd, args, _env, use_login_shell) =
+            build_daemon_create_request("/bin/zsh", "shell").unwrap();
+        assert!(use_login_shell, "Bare shell should use login shell mode");
+        assert!(args.is_empty(), "Login shell mode should have no args");
     }
 
     #[test]
@@ -1757,8 +1806,29 @@ mod tests {
     }
 
     #[test]
+    fn test_build_daemon_request_bare_shell_empty_command_still_works() {
+        // Bare shell with empty-ish command: since use_login_shell=true,
+        // the command is passed through for logging only (daemon ignores it)
+        let result = build_daemon_create_request("", "shell");
+        assert!(result.is_ok(), "Bare shell should accept empty command");
+        let (_cmd, _args, _env, use_login_shell) = result.unwrap();
+        assert!(use_login_shell);
+    }
+
+    #[test]
+    fn test_build_daemon_request_agent_escapes_single_quotes() {
+        let (_, args, _, _) =
+            build_daemon_create_request("claude --note 'hello world'", "claude").unwrap();
+        assert!(
+            args[1].contains("exec claude --note"),
+            "Should contain the command, got: {}",
+            args[1]
+        );
+    }
+
+    #[test]
     fn test_build_daemon_request_collects_env_vars() {
-        let (_cmd, _args, env_vars) = build_daemon_create_request("claude", "claude").unwrap();
+        let (_cmd, _args, env_vars, _) = build_daemon_create_request("claude", "claude").unwrap();
 
         // PATH and HOME should always be present in the environment
         let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();

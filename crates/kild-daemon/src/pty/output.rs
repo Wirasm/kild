@@ -105,6 +105,7 @@ impl PtyOutputBroadcaster {
 /// Notification that a PTY reader has exited (child process ended or read error).
 pub struct PtyExitEvent {
     pub session_id: String,
+    pub exit_code: Option<i32>,
 }
 
 pub fn spawn_pty_reader(
@@ -166,6 +167,7 @@ pub fn spawn_pty_reader(
             && tx
                 .send(PtyExitEvent {
                     session_id: session_id.clone(),
+                    exit_code: None,
                 })
                 .is_err()
         {
