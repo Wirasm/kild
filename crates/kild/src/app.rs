@@ -184,6 +184,20 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                         .conflicts_with("branch")
                 )
+                .arg(
+                    Arg::new("daemon")
+                        .long("daemon")
+                        .help("Launch agent in daemon-owned PTY (overrides config)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("no-daemon")
+                )
+                .arg(
+                    Arg::new("no-daemon")
+                        .long("no-daemon")
+                        .help("Launch agent in external terminal window (overrides config)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("daemon")
+                )
         )
         .subcommand(
             Command::new("stop")

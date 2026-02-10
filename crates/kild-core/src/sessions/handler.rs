@@ -540,9 +540,14 @@ pub fn restart_session(
 ///
 /// This is the preferred way to add agents to a kild. Unlike restart, this does NOT
 /// close existing terminals - multiple agents can run in the same kild.
+///
+/// The `runtime_mode` parameter controls whether the agent spawns in an external terminal
+/// or a daemon-owned PTY. The CLI resolves this from `--daemon`/`--no-daemon` flags and
+/// config, similar to `create_session`.
 pub fn open_session(
     name: &str,
     mode: crate::state::types::OpenMode,
+    runtime_mode: crate::state::types::RuntimeMode,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -650,7 +655,7 @@ pub fn open_session(
             }
         };
 
-    // 4. Spawn NEW terminal (additive - don't touch existing)
+    // 4. Spawn NEW agent — branch on whether session was daemon-managed
     let spawn_index = session.agent_count();
     let spawn_id = compute_spawn_id(&session.id, spawn_index);
     info!(
@@ -658,37 +663,89 @@ pub fn open_session(
         worktree = %session.worktree_path.display(),
         spawn_id = %spawn_id
     );
-    let spawn_result = terminal::handler::spawn_terminal(
-        &session.worktree_path,
-        &agent_command,
-        &kild_config,
-        Some(&spawn_id),
-        Some(&config.kild_dir),
-    )
-    .map_err(|e| SessionError::TerminalError { source: e })?;
 
-    // Capture process metadata immediately for PID reuse protection
-    let (process_name, process_start_time) = capture_process_metadata(&spawn_result, "open");
+    let use_daemon = runtime_mode == crate::state::types::RuntimeMode::Daemon && !is_bare_shell;
 
-    // 5. Update session with new process info
     let now = chrono::Utc::now().to_rfc3339();
-    let command = if spawn_result.command_executed.trim().is_empty() {
-        format!("{} (command not captured)", agent)
+
+    let new_agent = if use_daemon {
+        // Daemon path: create new daemon PTY (mirrors create_session daemon branch)
+        let parts: Vec<&str> = agent_command.split_whitespace().collect();
+        let (cmd, cmd_args) = parts
+            .split_first()
+            .ok_or_else(|| SessionError::DaemonError {
+                message: "Empty command string".to_string(),
+            })?;
+        let cmd_args: Vec<String> = cmd_args.iter().map(|s| s.to_string()).collect();
+
+        let mut env_vars = Vec::new();
+        for key in &["PATH", "HOME", "SHELL", "USER", "LANG", "TERM"] {
+            if let Ok(val) = std::env::var(key) {
+                env_vars.push((key.to_string(), val));
+            }
+        }
+
+        let daemon_request = crate::daemon::client::DaemonCreateRequest {
+            request_id: &spawn_id,
+            session_id: &session.id,
+            working_directory: &session.worktree_path,
+            command: cmd,
+            args: &cmd_args,
+            env_vars: &env_vars,
+            rows: 24,
+            cols: 80,
+        };
+        let daemon_result =
+            crate::daemon::client::create_pty_session(&daemon_request).map_err(|e| {
+                SessionError::DaemonError {
+                    message: e.to_string(),
+                }
+            })?;
+
+        AgentProcess::new(
+            agent.clone(),
+            spawn_id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            agent_command.clone(),
+            now.clone(),
+            Some(daemon_result.daemon_session_id),
+        )?
     } else {
-        spawn_result.command_executed.clone()
+        // Terminal path: spawn in external terminal (existing behavior)
+        let spawn_result = terminal::handler::spawn_terminal(
+            &session.worktree_path,
+            &agent_command,
+            &kild_config,
+            Some(&spawn_id),
+            Some(&config.kild_dir),
+        )
+        .map_err(|e| SessionError::TerminalError { source: e })?;
+
+        let (process_name, process_start_time) = capture_process_metadata(&spawn_result, "open");
+
+        let command = if spawn_result.command_executed.trim().is_empty() {
+            format!("{} (command not captured)", agent)
+        } else {
+            spawn_result.command_executed.clone()
+        };
+
+        AgentProcess::new(
+            agent.clone(),
+            spawn_id,
+            spawn_result.process_id,
+            process_name.clone(),
+            process_start_time,
+            Some(spawn_result.terminal_type.clone()),
+            spawn_result.terminal_window_id.clone(),
+            command,
+            now.clone(),
+            None,
+        )?
     };
-    let new_agent = AgentProcess::new(
-        agent.clone(),
-        spawn_id,
-        spawn_result.process_id,
-        process_name.clone(),
-        process_start_time,
-        Some(spawn_result.terminal_type.clone()),
-        spawn_result.terminal_window_id.clone(),
-        command.clone(),
-        now.clone(),
-        None,
-    )?;
 
     // When bare shell, keep session Stopped (no agent is running).
     // Otherwise, mark as Active.
@@ -708,6 +765,58 @@ pub fn open_session(
     );
 
     Ok(session)
+}
+
+/// Sync a session's status with the daemon if it has a daemon-managed agent.
+///
+/// When a daemon PTY exits naturally (or the daemon crashes), the kild-core session
+/// JSON still says Active. This function queries the daemon for the real status and
+/// updates the session file if stale.
+///
+/// Returns `true` if the session was updated (status changed to Stopped).
+/// This is a best-effort operation — daemon unreachable is treated as "stopped".
+pub fn sync_daemon_session_status(session: &mut Session) -> bool {
+    // Only sync Active sessions with daemon_session_id
+    if session.status != SessionStatus::Active {
+        return false;
+    }
+
+    let daemon_sid = match session.latest_agent().and_then(|a| a.daemon_session_id()) {
+        Some(id) => id.to_string(),
+        None => return false,
+    };
+
+    let status = crate::daemon::client::get_session_status(&daemon_sid);
+
+    // If daemon reports "running", the session is still active — no sync needed.
+    if status.as_deref() == Some("running") {
+        return false;
+    }
+
+    // Daemon reports "stopped", session not found, or daemon not running — mark as Stopped.
+    info!(
+        event = "core.session.daemon_status_sync",
+        session_id = session.id,
+        daemon_session_id = daemon_sid,
+        daemon_status = ?status,
+        "Syncing stale session status to Stopped"
+    );
+
+    session.clear_agents();
+    session.status = SessionStatus::Stopped;
+    session.last_activity = Some(chrono::Utc::now().to_rfc3339());
+
+    let config = Config::new();
+    if let Err(e) = persistence::save_session_to_file(session, &config.sessions_dir()) {
+        warn!(
+            event = "core.session.daemon_status_sync_save_failed",
+            session_id = session.id,
+            error = %e,
+            "Failed to persist synced status — next list will retry"
+        );
+    }
+
+    true
 }
 
 /// Stops the agent process in a kild without destroying the kild.
@@ -1281,7 +1390,11 @@ mod tests {
 
     #[test]
     fn test_open_session_not_found() {
-        let result = open_session("non-existent", crate::state::types::OpenMode::DefaultAgent);
+        let result = open_session(
+            "non-existent",
+            crate::state::types::OpenMode::DefaultAgent,
+            crate::state::types::RuntimeMode::Terminal,
+        );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
     }

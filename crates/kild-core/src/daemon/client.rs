@@ -283,6 +283,85 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
     }
 }
 
+/// Query the daemon for a session's current status.
+///
+/// Returns `Some("running")` or `Some("stopped")` if the daemon is reachable
+/// and knows about this session. Returns `None` if the daemon is not running
+/// or the session is not found — callers should treat `None` as "stopped"
+/// for stale status recovery.
+pub fn get_session_status(daemon_session_id: &str) -> Option<String> {
+    let socket_path = crate::daemon::socket_path();
+
+    debug!(
+        event = "core.daemon.get_session_status_started",
+        daemon_session_id = daemon_session_id
+    );
+
+    let request = serde_json::json!({
+        "id": format!("status-{}", daemon_session_id),
+        "type": "get_session",
+        "session_id": daemon_session_id,
+    });
+
+    let mut stream = match connect(&socket_path) {
+        Ok(s) => s,
+        Err(DaemonClientError::NotRunning { .. }) => {
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                result = "daemon_not_running"
+            );
+            return None;
+        }
+        Err(e) => {
+            debug!(
+                event = "core.daemon.get_session_status_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e
+            );
+            return None;
+        }
+    };
+
+    // Use a short timeout for status queries
+    if let Err(e) = stream.set_read_timeout(Some(Duration::from_secs(2))) {
+        debug!(
+            event = "core.daemon.get_session_status_failed",
+            daemon_session_id = daemon_session_id,
+            error = %e
+        );
+        return None;
+    }
+
+    match send_request(&mut stream, request) {
+        Ok(response) => {
+            // Response is DaemonMessage::SessionInfo { session: { status: "running"|"stopped" } }
+            let status = response
+                .get("session")
+                .and_then(|s| s.get("status"))
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                status = ?status
+            );
+
+            status
+        }
+        Err(e) => {
+            // Session not found in daemon, or protocol error
+            debug!(
+                event = "core.daemon.get_session_status_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e
+            );
+            None
+        }
+    }
+}
+
 /// Request the daemon to shut down gracefully.
 pub fn request_shutdown() -> Result<(), DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
