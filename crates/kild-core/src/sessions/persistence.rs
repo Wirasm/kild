@@ -162,6 +162,7 @@ pub fn find_session_by_name(
 ///
 /// This preserves unknown fields that may exist from newer binary versions,
 /// preventing data loss when older binaries update session files (e.g., agent-status hook).
+/// Writes are atomic via temp file + rename, consistent with `save_session_to_file()`.
 pub fn patch_session_json_field(
     sessions_dir: &Path,
     session_id: &str,
@@ -176,9 +177,13 @@ pub fn patch_session_json_field(
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
         })?;
 
-    if let Some(obj) = json.as_object_mut() {
-        obj.insert(field.to_string(), value);
-    }
+    let obj = json.as_object_mut().ok_or_else(|| SessionError::IoError {
+        source: std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "session JSON root is not an object",
+        ),
+    })?;
+    obj.insert(field.to_string(), value);
 
     let updated = serde_json::to_string_pretty(&json).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -1000,6 +1005,33 @@ mod tests {
         assert_eq!(
             patched["branch"], "my-branch",
             "Existing fields must be preserved"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_patch_session_json_field_fails_on_non_object() {
+        use std::env;
+
+        let temp_dir = env::temp_dir().join("kild_test_patch_non_object");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Write an array instead of an object
+        let session_file = temp_dir.join("proj_branch.json");
+        std::fs::write(&session_file, "[]").unwrap();
+
+        let result = patch_session_json_field(
+            &temp_dir,
+            "proj/branch",
+            "last_activity",
+            serde_json::Value::String("2024-06-15T12:00:00Z".to_string()),
+        );
+
+        assert!(
+            result.is_err(),
+            "Should fail when JSON root is not an object"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);

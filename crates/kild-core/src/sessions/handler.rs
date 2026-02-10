@@ -240,7 +240,7 @@ pub fn create_session(
 
     let initial_agent = match request.runtime_mode {
         crate::state::types::RuntimeMode::Terminal => {
-            // Existing path: spawn in external terminal
+            // Terminal path: spawn in external terminal
             // Prepend task list env var export for agents that support it
             let terminal_command = if let Some(ref tlid) = task_list_id {
                 let env_prefix = agents::resume::task_list_env_vars(&agent, tlid);
@@ -869,7 +869,7 @@ pub fn open_session(
             Some(daemon_result.daemon_session_id),
         )?
     } else {
-        // Terminal path: spawn in external terminal (existing behavior)
+        // Terminal path: spawn in external terminal
         // Prepend task list env var export for agents that support it
         let terminal_command = if let Some(ref tlid) = new_task_list_id {
             let env_prefix = agents::resume::task_list_env_vars(&agent, tlid);

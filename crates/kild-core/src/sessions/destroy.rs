@@ -86,7 +86,7 @@ pub fn cleanup_task_list(session_id: &str, task_list_id: &str, home_dir: &std::p
     let task_dir = home_dir.join(".claude").join("tasks").join(task_list_id);
     if task_dir.exists() {
         if let Err(e) = std::fs::remove_dir_all(&task_dir) {
-            error!(
+            warn!(
                 event = "core.session.task_list_cleanup_failed",
                 session_id = session_id,
                 task_list_id = task_list_id,
