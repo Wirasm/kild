@@ -9,6 +9,7 @@ use crate::sessions::{errors::SessionError, persistence, types::*};
 pub fn update_agent_status(
     name: &str,
     status: super::types::AgentStatus,
+    notify: bool,
 ) -> Result<(), SessionError> {
     info!(
         event = "core.session.agent_status_update_started",
@@ -40,6 +41,20 @@ pub fn update_agent_status(
         session_id = session.id,
         status = %status,
     );
+
+    if notify && matches!(status, AgentStatus::Waiting | AgentStatus::Error) {
+        info!(
+            event = "core.session.agent_status_notify_triggered",
+            branch = session.branch,
+            status = %status,
+        );
+        let message = format!(
+            "Agent {} in {} needs input ({})",
+            session.agent, session.branch, status
+        );
+        crate::notify::send_notification("KILD", &message);
+    }
+
     Ok(())
 }
 

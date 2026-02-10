@@ -370,6 +370,12 @@ pub fn build_cli() -> Command {
                         .help("Auto-detect session from current working directory")
                         .action(ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("notify")
+                        .long("notify")
+                        .help("Send desktop notification if status needs attention (waiting, error)")
+                        .action(ArgAction::SetTrue)
+                )
         )
         .subcommand(
             Command::new("rebase")
@@ -1449,6 +1455,42 @@ mod tests {
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0], "idle");
         assert!(sub.get_flag("self"));
+    }
+
+    #[test]
+    fn test_cli_agent_status_with_notify_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "agent-status",
+            "my-branch",
+            "waiting",
+            "--notify",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("agent-status").unwrap();
+        assert!(sub.get_flag("notify"));
+        assert!(!sub.get_flag("self"));
+    }
+
+    #[test]
+    fn test_cli_agent_status_with_self_and_notify() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "agent-status",
+            "--self",
+            "--notify",
+            "waiting",
+        ]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("agent-status").unwrap();
+        assert!(sub.get_flag("self"));
+        assert!(sub.get_flag("notify"));
     }
 
     #[test]

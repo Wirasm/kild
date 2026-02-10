@@ -8,6 +8,7 @@ pub(crate) fn handle_agent_status_command(
     matches: &ArgMatches,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let use_self = matches.get_flag("self");
+    let notify = matches.get_flag("notify");
     let targets: Vec<&String> = matches.get_many::<String>("target").unwrap().collect();
 
     // Parse branch and status from positional args
@@ -35,7 +36,7 @@ pub(crate) fn handle_agent_status_command(
 
     info!(event = "cli.agent_status_started", branch = %branch, status = %status);
 
-    if let Err(e) = session_ops::update_agent_status(&branch, status) {
+    if let Err(e) = session_ops::update_agent_status(&branch, status, notify) {
         error!(event = "cli.agent_status_failed", error = %e);
         return Err(e.into());
     }

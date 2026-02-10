@@ -23,6 +23,7 @@ pub mod forge;
 pub mod git;
 pub mod health;
 pub mod logging;
+pub mod notify;
 pub mod process;
 pub mod projects;
 pub mod sessions;
