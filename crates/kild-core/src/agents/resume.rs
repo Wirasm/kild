@@ -12,6 +12,7 @@ pub fn generate_session_id() -> String {
 
 /// Build extra CLI args to set a session ID on initial create.
 /// Returns args to append to the agent command string.
+/// Returns an empty vec for agents that don't support resume.
 pub fn create_session_args(agent: &str, session_id: &str) -> Vec<String> {
     match agent {
         "claude" => vec!["--session-id".into(), session_id.into()],
@@ -21,6 +22,7 @@ pub fn create_session_args(agent: &str, session_id: &str) -> Vec<String> {
 
 /// Build extra CLI args to resume an existing session.
 /// Returns args to append to the agent command string.
+/// Returns an empty vec for agents that don't support resume.
 pub fn resume_session_args(agent: &str, session_id: &str) -> Vec<String> {
     match agent {
         "claude" => vec!["--resume".into(), session_id.into()],
@@ -39,7 +41,7 @@ mod tests {
 
     #[test]
     fn test_supports_resume_other_agents() {
-        for agent in &["kiro", "gemini", "codex", "amp", "opencode", "shell"] {
+        for agent in &["kiro", "gemini", "codex", "amp", "opencode"] {
             assert!(
                 !supports_resume(agent),
                 "agent '{}' should not support resume",

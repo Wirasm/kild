@@ -166,8 +166,9 @@ pub struct Session {
 
     /// Agent session ID for resume support.
     ///
-    /// Generated on `kild create` for resume-capable agents (e.g., Claude Code).
-    /// Injected as `--session-id <uuid>` on create, `--resume <uuid>` on open with `--resume`.
+    /// Generated on `kild create` and fresh `kild open` for resume-capable agents (e.g., Claude Code).
+    /// Injected as `--session-id <uuid>` on initial create or fresh open, and as `--resume <uuid>`
+    /// when reopening with `kild open --resume`.
     /// Stored at the Session level (not AgentProcess) so it survives `clear_agents()` on stop.
     #[serde(default)]
     pub agent_session_id: Option<String>,
