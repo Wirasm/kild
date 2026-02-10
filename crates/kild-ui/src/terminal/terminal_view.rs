@@ -42,6 +42,7 @@ impl TerminalView {
         let term = terminal.term().clone();
         let pty_writer = terminal.pty_writer().clone();
         let error_state = terminal.error_state().clone();
+        let exited = terminal.exited_flag().clone();
         let executor = cx.background_executor().clone();
 
         let event_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
@@ -49,6 +50,7 @@ impl TerminalView {
                 term,
                 pty_writer,
                 error_state,
+                exited,
                 byte_rx,
                 event_rx,
                 executor,
@@ -64,6 +66,11 @@ impl TerminalView {
             focus_handle,
             _event_task: event_task,
         }
+    }
+
+    /// Access the underlying terminal state (e.g. to check `has_exited()`).
+    pub fn terminal(&self) -> &Terminal {
+        &self.terminal
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {

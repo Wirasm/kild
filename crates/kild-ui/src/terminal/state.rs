@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
@@ -68,6 +69,8 @@ pub struct Terminal {
     pending_event_rx: Option<UnboundedReceiver<AlacEvent>>,
     /// Shared error state set on critical failures (channel errors, write failures, lock poisoning).
     error_state: Arc<Mutex<Option<String>>>,
+    /// Set to true when the batch loop exits (shell exited or PTY closed).
+    exited: Arc<AtomicBool>,
 }
 
 impl Terminal {
@@ -203,6 +206,7 @@ impl Terminal {
             pending_byte_rx: Some(byte_rx),
             pending_event_rx: Some(event_rx),
             error_state: Arc::new(Mutex::new(None)),
+            exited: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -229,10 +233,12 @@ impl Terminal {
     /// Batches PTY output in 4ms windows (250Hz max, 100 event cap), processes
     /// bytes through alacritty_terminal, and returns after each batch so the
     /// caller can notify GPUI to repaint.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_batch_loop(
         term: Arc<FairMutex<Term<KildListener>>>,
         pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
         error_state: Arc<Mutex<Option<String>>>,
+        exited: Arc<AtomicBool>,
         mut byte_rx: UnboundedReceiver<Vec<u8>>,
         mut event_rx: UnboundedReceiver<AlacEvent>,
         executor: gpui::BackgroundExecutor,
@@ -308,6 +314,17 @@ impl Terminal {
             // Signal GPUI to repaint — this is the critical line that was missing.
             notify();
         }
+
+        // Batch loop ended — shell exited or PTY closed.
+        tracing::info!(event = "ui.terminal.batch_loop_ended");
+        exited.store(true, Ordering::Release);
+        if let Ok(mut err) = error_state.lock()
+            && err.is_none()
+        {
+            *err = Some("Shell exited".to_string());
+        }
+        // Final repaint to show the exit state to the user.
+        notify();
     }
 
     /// Write bytes to the PTY stdin.
@@ -339,6 +356,16 @@ impl Terminal {
     /// Read the current error message, if any critical failure has occurred.
     pub fn error_message(&self) -> Option<String> {
         self.error_state.lock().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Returns true if the shell has exited and the terminal is no longer active.
+    pub fn has_exited(&self) -> bool {
+        self.exited.load(Ordering::Acquire)
+    }
+
+    /// Get the shared exited flag for use in the batch loop.
+    pub(super) fn exited_flag(&self) -> &Arc<AtomicBool> {
+        &self.exited
     }
 }
 

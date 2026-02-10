@@ -926,7 +926,14 @@ impl MainView {
                 // Return focus to main view
                 window.focus(&self.focus_handle);
             } else {
-                // Lazy-create terminal on first toggle
+                // Drop dead terminal so a fresh one gets created
+                if let Some(view) = &self.terminal_view
+                    && view.read(cx).terminal().has_exited()
+                {
+                    tracing::info!(event = "ui.terminal.recycled");
+                    self.terminal_view = None;
+                }
+                // Lazy-create terminal on first toggle (or after shell exit)
                 if self.terminal_view.is_none() {
                     tracing::info!(event = "ui.terminal.create_started");
                     match crate::terminal::state::Terminal::new(cx) {
