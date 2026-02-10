@@ -352,11 +352,9 @@ impl SessionManager {
             Some(mut pty) => {
                 // Child has already exited (reader got EOF), so wait() returns immediately
                 let code = match pty.wait() {
-                    Ok(status) => {
-                        if status.success() { Some(0) } else { None }
-                    }
+                    Ok(status) => Some(status.exit_code() as i32),
                     Err(e) => {
-                        debug!(
+                        warn!(
                             event = "daemon.session.exit_code_unavailable",
                             session_id = session_id,
                             error = %e,

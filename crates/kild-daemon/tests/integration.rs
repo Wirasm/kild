@@ -493,6 +493,48 @@ async fn test_destroy_running_session() {
 }
 
 #[tokio::test]
+async fn test_create_session_with_login_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+    let socket_path = config.socket_path.clone();
+
+    let server_handle = tokio::spawn(async move { kild_daemon::run_server(config).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut client = DaemonClient::connect(&socket_path).await.unwrap();
+
+    // Create session with login shell mode (bare shell)
+    let working_dir = dir.path().to_string_lossy().to_string();
+    let session = client
+        .create_session(
+            "shell-test",
+            &working_dir,
+            "", // Command is ignored in login shell mode
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+            true, // use_login_shell=true
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, "shell-test");
+    assert_eq!(session.status, "running");
+
+    // Verify session is listed
+    let sessions = client.list_sessions(None).await.unwrap();
+    assert_eq!(sessions.len(), 1);
+
+    // Cleanup
+    client.stop_session("shell-test").await.unwrap();
+    client.shutdown().await.unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(3), server_handle).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
 async fn test_invalid_json_does_not_crash_server() {
     let dir = tempfile::tempdir().unwrap();
     let config = test_config(dir.path());
