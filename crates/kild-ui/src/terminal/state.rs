@@ -7,6 +7,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Config as TermConfig;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::Processor;
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::Task;
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 
@@ -48,7 +49,10 @@ impl EventListener for KildListener {
 /// Manages:
 /// - VT100 emulation via `alacritty_terminal::Term`
 /// - PTY process (spawn, read, write)
-/// - 4ms event batching for performance
+///
+/// After construction, call `take_channels()` to get the byte/event receivers
+/// needed for event batching. The caller (TerminalView) owns the batching task
+/// so it can notify GPUI to repaint after each batch.
 pub struct Terminal {
     /// The terminal emulator state, protected by FairMutex to prevent
     /// lock starvation between the PTY reader and the GPUI renderer.
@@ -57,10 +61,11 @@ pub struct Terminal {
     pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
     /// Background PTY reader task. Stored to prevent cancellation.
     _pty_reader_task: Task<()>,
-    /// Event batching task. Stored to prevent cancellation.
-    _event_task: Task<()>,
     /// Child process handle. Stored for shutdown.
     _child: Box<dyn Child + Send + Sync>,
+    /// Pending channels for event batching. Taken once by TerminalView.
+    pending_byte_rx: Option<UnboundedReceiver<Vec<u8>>>,
+    pending_event_rx: Option<UnboundedReceiver<AlacEvent>>,
 }
 
 impl Terminal {
@@ -182,74 +187,108 @@ impl Terminal {
             }
         });
 
-        // Spawn event batching task (4ms window, 100 event cap).
-        // 4ms ≈ 250 Hz max refresh — fast enough for smooth terminal output
-        // while leaving CPU headroom. 100 event cap prevents unbounded memory
-        // growth during output bursts (e.g. `cat` on a large file).
-        // Uses background_executor since it doesn't need entity references.
-        let term_batcher = term.clone();
-        let pty_writer_for_events = pty_writer.clone();
-        let executor = cx.background_executor().clone();
-        let event_task = cx.background_executor().spawn(async move {
-            use futures::StreamExt;
-            let mut processor: Processor = Processor::new();
-            let mut byte_rx = byte_rx;
-            let mut event_rx = event_rx;
-
-            while let Some(first_chunk) = byte_rx.next().await {
-                let mut batch = vec![first_chunk];
-                let batch_start = std::time::Instant::now();
-                let batch_duration = std::time::Duration::from_millis(4);
-
-                while batch.len() < 100 {
-                    match byte_rx.try_next() {
-                        Ok(Some(chunk)) => batch.push(chunk),
-                        Ok(None) => break,
-                        Err(_) => {
-                            if batch_start.elapsed() >= batch_duration {
-                                break;
-                            }
-                            executor.timer(std::time::Duration::from_micros(500)).await;
-                        }
-                    }
-                }
-
-                {
-                    let mut term = term_batcher.lock();
-                    for chunk in &batch {
-                        processor.advance(&mut *term, chunk);
-                    }
-                }
-
-                while let Ok(Some(event)) = event_rx.try_next() {
-                    match event {
-                        AlacEvent::Wakeup => {}
-                        AlacEvent::PtyWrite(text) => match pty_writer_for_events.lock() {
-                            Ok(mut writer) => {
-                                if let Err(e) = writer.write_all(text.as_bytes()) {
-                                    tracing::error!(event = "ui.terminal.pty_write_loop_failed", error = %e);
-                                }
-                                if let Err(e) = writer.flush() {
-                                    tracing::error!(event = "ui.terminal.pty_flush_loop_failed", error = %e);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(event = "ui.terminal.writer_lock_failed", error = %e);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        });
-
         Ok(Self {
             term,
             pty_writer,
             _pty_reader_task: pty_reader_task,
-            _event_task: event_task,
             _child: child,
+            pending_byte_rx: Some(byte_rx),
+            pending_event_rx: Some(event_rx),
         })
+    }
+
+    /// Take the byte and event channels for event batching.
+    ///
+    /// Must be called exactly once after construction. The caller (TerminalView)
+    /// uses these to run the batching loop where it can notify GPUI to repaint.
+    pub fn take_channels(&mut self) -> (UnboundedReceiver<Vec<u8>>, UnboundedReceiver<AlacEvent>) {
+        let byte_rx = self
+            .pending_byte_rx
+            .take()
+            .expect("take_channels called more than once");
+        let event_rx = self
+            .pending_event_rx
+            .take()
+            .expect("take_channels called more than once");
+        (byte_rx, event_rx)
+    }
+
+    /// Run the event batching loop. Called from TerminalView's cx.spawn() task.
+    ///
+    /// Batches PTY output in 4ms windows (250Hz max, 100 event cap), processes
+    /// bytes through alacritty_terminal, and returns after each batch so the
+    /// caller can notify GPUI to repaint.
+    pub async fn run_batch_loop(
+        term: Arc<FairMutex<Term<KildListener>>>,
+        pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        mut byte_rx: UnboundedReceiver<Vec<u8>>,
+        mut event_rx: UnboundedReceiver<AlacEvent>,
+        executor: gpui::BackgroundExecutor,
+        mut notify: impl FnMut(),
+    ) {
+        use futures::StreamExt;
+        let mut processor: Processor = Processor::new();
+
+        // Batching: 4ms ≈ 250 Hz max refresh — fast enough for smooth terminal
+        // output while leaving CPU headroom. 100 event cap prevents unbounded
+        // memory growth during output bursts (e.g. `cat` on a large file).
+        while let Some(first_chunk) = byte_rx.next().await {
+            let mut batch = vec![first_chunk];
+            let batch_start = std::time::Instant::now();
+            let batch_duration = std::time::Duration::from_millis(4);
+
+            while batch.len() < 100 {
+                match byte_rx.try_next() {
+                    Ok(Some(chunk)) => batch.push(chunk),
+                    Ok(None) => break,
+                    Err(_) => {
+                        if batch_start.elapsed() >= batch_duration {
+                            break;
+                        }
+                        executor.timer(std::time::Duration::from_micros(500)).await;
+                    }
+                }
+            }
+
+            {
+                let mut term = term.lock();
+                for chunk in &batch {
+                    processor.advance(&mut *term, chunk);
+                }
+            }
+
+            while let Ok(Some(event)) = event_rx.try_next() {
+                match event {
+                    AlacEvent::Wakeup => {}
+                    AlacEvent::PtyWrite(text) => match pty_writer.lock() {
+                        Ok(mut writer) => {
+                            if let Err(e) = writer.write_all(text.as_bytes()) {
+                                tracing::error!(
+                                    event = "ui.terminal.pty_write_loop_failed",
+                                    error = %e
+                                );
+                            }
+                            if let Err(e) = writer.flush() {
+                                tracing::error!(
+                                    event = "ui.terminal.pty_flush_loop_failed",
+                                    error = %e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                event = "ui.terminal.writer_lock_failed",
+                                error = %e
+                            );
+                        }
+                    },
+                    _ => {}
+                }
+            }
+
+            // Signal GPUI to repaint — this is the critical line that was missing.
+            notify();
+        }
     }
 
     /// Write bytes to the PTY stdin.
@@ -266,5 +305,10 @@ impl Terminal {
     /// Get access to the terminal emulator (locked).
     pub fn term(&self) -> &Arc<FairMutex<Term<KildListener>>> {
         &self.term
+    }
+
+    /// Get access to the PTY writer (for event batching loop).
+    pub fn pty_writer(&self) -> &Arc<Mutex<Box<dyn Write + Send>>> {
+        &self.pty_writer
     }
 }
