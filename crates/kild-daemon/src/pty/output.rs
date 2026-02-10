@@ -139,14 +139,10 @@ pub fn spawn_pty_reader(
                             sb.push(&data);
                         }
                     }
-                    if output_tx.send(data).is_err() {
-                        debug!(
-                            event = "daemon.pty.reader_channel_closed",
-                            session_id = session_id,
-                            "Output channel closed, stopping reader",
-                        );
-                        break;
-                    }
+                    // broadcast::send returns Err when there are no receivers,
+                    // which is normal — nobody may be attached yet. The scrollback
+                    // buffer already captured the data above for replay on attach.
+                    let _ = output_tx.send(data);
                 }
                 Err(e) => {
                     error!(
