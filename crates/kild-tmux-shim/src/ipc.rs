@@ -226,6 +226,7 @@ mod tests {
             &HashMap::new(),
             24,
             80,
+            true,
         );
         assert!(result.is_err());
         match result.unwrap_err() {
