@@ -330,6 +330,33 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         );
     }
 
+    // 3c. Clean up Claude Code task list directory
+    if let (Some(task_list_id), Some(home)) = (&session.task_list_id, dirs::home_dir()) {
+        let task_dir = home.join(".claude").join("tasks").join(task_list_id);
+        if task_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&task_dir) {
+                error!(
+                    event = "core.session.task_list_cleanup_failed",
+                    session_id = session.id,
+                    task_list_id = task_list_id,
+                    path = %task_dir.display(),
+                    error = %e,
+                );
+                eprintln!(
+                    "Warning: Failed to remove task list at {}: {}",
+                    task_dir.display(),
+                    e
+                );
+            } else {
+                info!(
+                    event = "core.session.task_list_cleanup_completed",
+                    session_id = session.id,
+                    task_list_id = task_list_id,
+                );
+            }
+        }
+    }
+
     // 4. Remove git worktree
     if force {
         info!(

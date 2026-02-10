@@ -170,6 +170,15 @@ pub fn create_session(
     let config = Config::new();
     let session_id = ports::generate_session_id(&project.id, &validated.name);
 
+    // Generate task list ID for agents that support it (depends on session_id)
+    let task_list_id = if agents::resume::supports_resume(&agent) {
+        let tlid = agents::resume::generate_task_list_id(&session_id);
+        info!(event = "core.session.task_list_id_set", task_list_id = %tlid);
+        Some(tlid)
+    } else {
+        None
+    };
+
     // Ensure sessions directory exists
     persistence::ensure_sessions_directory(&config.sessions_dir())?;
 
@@ -232,9 +241,24 @@ pub fn create_session(
     let initial_agent = match request.runtime_mode {
         crate::state::types::RuntimeMode::Terminal => {
             // Existing path: spawn in external terminal
+            // Prepend task list env var export for agents that support it
+            let terminal_command = if let Some(ref tlid) = task_list_id {
+                let env_prefix = agents::resume::task_list_env_vars(&agent, tlid);
+                if env_prefix.is_empty() {
+                    validated.command.clone()
+                } else {
+                    let exports: Vec<String> = env_prefix
+                        .iter()
+                        .map(|(k, v)| format!("export {}={}", k, v))
+                        .collect();
+                    format!("{}; {}", exports.join("; "), validated.command)
+                }
+            } else {
+                validated.command.clone()
+            };
             let spawn_result = terminal::handler::spawn_terminal(
                 &worktree.path,
-                &validated.command,
+                &terminal_command,
                 kild_config,
                 Some(&spawn_id),
                 Some(&base_config.kild_dir),
@@ -290,8 +314,12 @@ pub fn create_session(
                 }
             }
 
-            let (cmd, cmd_args, env_vars, use_login_shell) =
-                build_daemon_create_request(&validated.command, &validated.agent, &session_id)?;
+            let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
+                &validated.command,
+                &validated.agent,
+                &session_id,
+                task_list_id.as_deref(),
+            )?;
 
             let daemon_request = crate::daemon::client::DaemonCreateRequest {
                 request_id: &spawn_id,
@@ -393,6 +421,7 @@ pub fn create_session(
         request.note.clone(),
         vec![initial_agent],
         agent_session_id,
+        task_list_id,
     );
 
     // 7. Save session to file
@@ -774,6 +803,19 @@ pub fn open_session(
         (agent_command, None)
     };
 
+    // 4b. Determine task list ID for agents that support it
+    let new_task_list_id = if resume && !is_bare_shell {
+        // Resume: reuse existing task_list_id so tasks persist
+        session.task_list_id.clone()
+    } else if !is_bare_shell && agents::resume::supports_resume(&agent) {
+        // Fresh open: generate new task_list_id for a clean task list
+        let tlid = agents::resume::generate_task_list_id(&session.id);
+        info!(event = "core.session.task_list_id_set", task_list_id = %tlid);
+        Some(tlid)
+    } else {
+        None
+    };
+
     // 5. Spawn NEW agent — branch on whether session was daemon-managed
     let spawn_index = session.agent_count();
     let spawn_id = compute_spawn_id(&session.id, spawn_index);
@@ -789,8 +831,12 @@ pub fn open_session(
 
     let new_agent = if use_daemon {
         // Daemon path: create new daemon PTY (uses shared helper with create_session)
-        let (cmd, cmd_args, env_vars, use_login_shell) =
-            build_daemon_create_request(&agent_command, &agent, &session.id)?;
+        let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
+            &agent_command,
+            &agent,
+            &session.id,
+            new_task_list_id.as_deref(),
+        )?;
 
         let daemon_request = crate::daemon::client::DaemonCreateRequest {
             request_id: &spawn_id,
@@ -824,9 +870,24 @@ pub fn open_session(
         )?
     } else {
         // Terminal path: spawn in external terminal (existing behavior)
+        // Prepend task list env var export for agents that support it
+        let terminal_command = if let Some(ref tlid) = new_task_list_id {
+            let env_prefix = agents::resume::task_list_env_vars(&agent, tlid);
+            if env_prefix.is_empty() {
+                agent_command.clone()
+            } else {
+                let exports: Vec<String> = env_prefix
+                    .iter()
+                    .map(|(k, v)| format!("export {}={}", k, v))
+                    .collect();
+                format!("{}; {}", exports.join("; "), agent_command)
+            }
+        } else {
+            agent_command.clone()
+        };
         let spawn_result = terminal::handler::spawn_terminal(
             &session.worktree_path,
-            &agent_command,
+            &terminal_command,
             &kild_config,
             Some(&spawn_id),
             Some(&config.kild_dir),
@@ -866,6 +927,11 @@ pub fn open_session(
     // Update agent session ID for resume support
     if let Some(sid) = new_agent_session_id {
         session.agent_session_id = Some(sid);
+    }
+
+    // Update task list ID for task list persistence
+    if let Some(tlid) = new_task_list_id {
+        session.task_list_id = Some(tlid);
     }
 
     // 6. Save updated session
@@ -949,6 +1015,7 @@ fn build_daemon_create_request(
     agent_command: &str,
     agent_name: &str,
     session_id: &str,
+    task_list_id: Option<&str>,
 ) -> Result<(String, Vec<String>, Vec<(String, String)>, bool), SessionError> {
     let use_login_shell = agent_name == "shell";
 
@@ -1033,6 +1100,12 @@ fn build_daemon_create_request(
 
     // $KILD_SHIM_SESSION tells the shim where to find its state
     env_vars.push(("KILD_SHIM_SESSION".to_string(), session_id.to_string()));
+
+    // $CLAUDE_CODE_TASK_LIST_ID for task list persistence across sessions
+    if let Some(tlid) = task_list_id {
+        let task_env = agents::resume::task_list_env_vars(agent_name, tlid);
+        env_vars.extend(task_env);
+    }
 
     Ok((cmd, cmd_args, env_vars, use_login_shell))
 }
@@ -1363,6 +1436,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         // Create worktree directory so validation passes
@@ -1472,6 +1546,7 @@ mod tests {
                 None,
                 vec![agent],
                 None,
+                None,
             );
 
             persistence::save_session_to_file(&session, &sessions_dir)
@@ -1548,6 +1623,7 @@ mod tests {
             None,
             vec![agent],
             None,
+            None,
         );
 
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save session");
@@ -1612,6 +1688,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![], // No agents (old session)
+            None,
             None,
         );
 
@@ -1687,6 +1764,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![iterm_agent],
+            None,
             None,
         );
 
@@ -1807,6 +1885,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![agent],
+            None,
             None,
         );
 
@@ -1966,6 +2045,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -2007,6 +2087,7 @@ mod tests {
             None,
             vec![agent],
             None,
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -2034,6 +2115,7 @@ mod tests {
             None,
             vec![], // No agents
             None,
+            None,
         );
 
         let changed = sync_daemon_session_status(&mut session);
@@ -2046,7 +2128,7 @@ mod tests {
     #[test]
     fn test_build_daemon_request_agent_wraps_in_login_shell() {
         let (cmd, args, _env, use_login_shell) =
-            build_daemon_create_request("claude --agent --verbose", "claude", "test-session")
+            build_daemon_create_request("claude --agent --verbose", "claude", "test-session", None)
                 .unwrap();
         assert!(!use_login_shell, "Agent should not use login shell mode");
         // Agent commands are wrapped in $SHELL -lc 'exec <command>'
@@ -2067,7 +2149,7 @@ mod tests {
     #[test]
     fn test_build_daemon_request_single_word_agent_wraps_in_login_shell() {
         let (cmd, args, _env, use_login_shell) =
-            build_daemon_create_request("claude", "claude", "test-session").unwrap();
+            build_daemon_create_request("claude", "claude", "test-session", None).unwrap();
         assert!(!use_login_shell);
         assert_eq!(args.len(), 2);
         assert_eq!(args[0], "-lc");
@@ -2082,14 +2164,14 @@ mod tests {
     #[test]
     fn test_build_daemon_request_bare_shell_uses_login_shell() {
         let (_cmd, args, _env, use_login_shell) =
-            build_daemon_create_request("/bin/zsh", "shell", "test-session").unwrap();
+            build_daemon_create_request("/bin/zsh", "shell", "test-session", None).unwrap();
         assert!(use_login_shell, "Bare shell should use login shell mode");
         assert!(args.is_empty(), "Login shell mode should have no args");
     }
 
     #[test]
     fn test_build_daemon_request_empty_command_returns_error() {
-        let result = build_daemon_create_request("", "claude", "test-session");
+        let result = build_daemon_create_request("", "claude", "test-session", None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
@@ -2111,7 +2193,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_whitespace_only_command_returns_error() {
-        let result = build_daemon_create_request("   ", "kiro", "test-session");
+        let result = build_daemon_create_request("   ", "kiro", "test-session", None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
@@ -2126,7 +2208,7 @@ mod tests {
     fn test_build_daemon_request_bare_shell_empty_command_still_works() {
         // Bare shell with empty-ish command: since use_login_shell=true,
         // the command is passed through for logging only (daemon ignores it)
-        let result = build_daemon_create_request("", "shell", "test-session");
+        let result = build_daemon_create_request("", "shell", "test-session", None);
         assert!(result.is_ok(), "Bare shell should accept empty command");
         let (_cmd, _args, _env, use_login_shell) = result.unwrap();
         assert!(use_login_shell);
@@ -2134,9 +2216,13 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_agent_escapes_single_quotes() {
-        let (_, args, _, _) =
-            build_daemon_create_request("claude --note 'hello world'", "claude", "test-session")
-                .unwrap();
+        let (_, args, _, _) = build_daemon_create_request(
+            "claude --note 'hello world'",
+            "claude",
+            "test-session",
+            None,
+        )
+        .unwrap();
         assert!(
             args[1].contains("exec claude --note"),
             "Should contain the command, got: {}",
@@ -2147,7 +2233,7 @@ mod tests {
     #[test]
     fn test_build_daemon_request_collects_env_vars() {
         let (_cmd, _args, env_vars, _) =
-            build_daemon_create_request("claude", "claude", "test-session").unwrap();
+            build_daemon_create_request("claude", "claude", "test-session", None).unwrap();
 
         // PATH and HOME should always be present in the environment
         let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
@@ -2166,7 +2252,7 @@ mod tests {
     #[test]
     fn test_build_daemon_request_includes_shim_env_vars() {
         let (_cmd, _args, env_vars, _) =
-            build_daemon_create_request("claude", "claude", "proj_my-branch").unwrap();
+            build_daemon_create_request("claude", "claude", "proj_my-branch", None).unwrap();
 
         let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
 
@@ -2250,6 +2336,7 @@ mod tests {
             Some(chrono::Utc::now().to_rfc3339()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -2510,6 +2597,7 @@ mod tests {
             None,
             vec![agent],
             Some(session_id.clone()),
+            None,
         );
 
         // Save initial session

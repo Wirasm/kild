@@ -357,6 +357,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         // Save session
@@ -401,6 +402,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -448,6 +450,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -498,6 +501,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -554,6 +558,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         let session2 = Session::new(
@@ -570,6 +575,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -630,6 +636,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         // Save session
@@ -674,6 +681,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -720,6 +728,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
         save_session_to_file(&valid_session, &temp_dir).unwrap();
@@ -774,6 +783,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 
@@ -831,6 +841,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         // Session 2: missing worktree
@@ -848,6 +859,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
 

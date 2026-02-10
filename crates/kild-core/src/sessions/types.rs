@@ -173,6 +173,16 @@ pub struct Session {
     #[serde(default)]
     pub agent_session_id: Option<String>,
 
+    /// Task list ID for Claude Code task list persistence.
+    ///
+    /// Generated on `kild create` and fresh `kild open` for Claude agents.
+    /// Set as `CLAUDE_CODE_TASK_LIST_ID` env var when spawning the agent.
+    /// On resume: reuses existing ID so tasks survive across restarts.
+    /// On fresh open: generates new ID for a clean task list.
+    /// Cleaned up on `kild destroy` by removing `~/.claude/tasks/{task_list_id}/`.
+    #[serde(default)]
+    pub task_list_id: Option<String>,
+
     /// All agent processes opened in this kild session.
     ///
     /// Populated by `kild create` (initial agent) and `kild open` (additional agents).
@@ -382,6 +392,7 @@ impl Session {
         note: Option<String>,
         agents: Vec<AgentProcess>,
         agent_session_id: Option<String>,
+        task_list_id: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -398,6 +409,7 @@ impl Session {
             note,
             agents,
             agent_session_id,
+            task_list_id,
         }
     }
 
@@ -466,6 +478,7 @@ impl Session {
             note: None,
             agents: vec![],
             agent_session_id: None,
+            task_list_id: None,
         }
     }
 }
@@ -656,6 +669,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         assert_eq!(session.branch, "branch");
@@ -822,6 +836,7 @@ mod tests {
             None,
             vec![agent],
             None,
+            None,
         );
 
         // Test serialization round-trip
@@ -923,6 +938,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
 
         assert!(session.is_worktree_valid());
@@ -947,6 +963,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
             None,
         );
 
@@ -1333,6 +1350,7 @@ mod tests {
                 .unwrap(),
             ],
             None,
+            None,
         );
         let json = serde_json::to_string_pretty(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
@@ -1529,6 +1547,7 @@ mod tests {
             None,
             vec![],
             Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+            None,
         );
 
         assert_eq!(
@@ -1559,6 +1578,7 @@ mod tests {
             None,
             vec![],
             Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+            None,
         );
 
         // Simulate stop: clear agents

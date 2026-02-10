@@ -145,6 +145,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
         assert!(validate_session_structure(&valid_session).is_ok());
 
@@ -163,6 +164,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
         let result = validate_session_structure(&invalid_session);
@@ -187,6 +189,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
         let result2 = validate_session_structure(&invalid_session2);
@@ -213,6 +216,7 @@ mod tests {
             Some("2024-01-01T00:00:00Z".to_string()),
             None,
             vec![],
+            None,
             None,
         );
         assert!(validate_session_structure(&session_missing_worktree).is_ok());
@@ -245,6 +249,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
         let result = validate_session_structure(&session_empty_project);
         assert!(matches!(
@@ -267,6 +272,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
             None,
         );
         let result = validate_session_structure(&session_empty_branch);
@@ -291,6 +297,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         );
         let result = validate_session_structure(&session_empty_agent);
         assert!(matches!(
@@ -313,6 +320,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
             None,
         );
         let result = validate_session_structure(&session_empty_created_at);
