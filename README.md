@@ -15,6 +15,7 @@ KILD eliminates context switching between scattered terminals when working with 
 - **Isolated Worktrees**: Each kild gets its own Git worktree with unique `kild/<branch>` branch
 - **Dual Runtime Modes**: Choose between external terminal windows or daemon-owned PTYs
 - **Session Persistence**: Daemon-managed sessions survive terminal restarts (experimental)
+- **Agent Teams**: Daemon sessions support Claude Code agent teams via tmux-compatible shim
 - **Session Tracking**: Persistent registry tracks all active kilds
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Agent-Friendly**: Designed for programmatic use by AI assistants
@@ -247,7 +248,7 @@ kild attach <branch>
 # Press Ctrl+C to detach
 ```
 
-**Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands.
+**Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands. Daemon sessions automatically enable Claude Code agent teams by injecting a tmux-compatible shim.
 
 ### Stop a kild
 ```bash

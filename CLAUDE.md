@@ -177,7 +177,14 @@ cargo run -p kild-peek -- assert --window "KILD" --visible
 cargo run -p kild-peek -- assert --window "KILD" --exists --wait  # Wait for window to appear
 cargo run -p kild-peek -- assert --window "KILD" --exists --wait --timeout 5000  # Custom timeout
 cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
+
+# kild-tmux-shim - tmux compatibility shim for agent teams
+cargo run -p kild-tmux-shim -- -V                # Show version (reports "tmux 3.4")
+KILD_SHIM_SESSION=<session_id> TMUX_PANE=%0 cargo run -p kild-tmux-shim -- display-message -p "#{pane_id}"  # Test shim
+KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based logging
 ```
+
+**Note**: The shim is automatically symlinked as `~/.kild/bin/tmux` when creating daemon sessions. Manual invocation is primarily for testing.
 
 ## Architecture
 
@@ -185,6 +192,7 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
 - `crates/kild-daemon` - Daemon server for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration)
+- `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
 - `crates/kild-peek-core` - Core library for native app inspection and interaction (window listing, screenshots, image comparison, assertions, UI automation)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
@@ -233,7 +241,15 @@ cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
-**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files.
+**Key modules in kild-tmux-shim:**
+- `parser.rs` - Hand-rolled tmux argument parser for ~15 subcommands + aliases
+- `commands.rs` - Command handlers dispatching to daemon IPC or local state
+- `state.rs` - File-based pane registry with flock concurrency control
+- `ipc.rs` - Sync JSONL client over Unix socket (no kild-core dependency)
+- `main.rs` - Entry point, file-based logging controlled by KILD_SHIM_LOG env var
+- `errors.rs` - ShimError type
+
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `handler.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`persistence.rs`/`validation.rs` for sessions, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim is a flat CLI crate with per-module files (no nested mod structure).
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
@@ -271,11 +287,12 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 | `cli` | `crates/kild/` | User-facing CLI commands |
 | `core` | `crates/kild-core/` | Core library logic |
 | `daemon` | `crates/kild-daemon/` | Daemon server and PTY management |
+| `shim` | `crates/kild-tmux-shim/` | tmux shim binary operations |
 | `ui` | `crates/kild-ui/` | GPUI native GUI |
 | `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
 | `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`
+**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`, `split_window`, `send_keys`, `list_panes`, `kill_pane`, `display_message`, `select_pane`, `set_option`, `select_layout`, `resize_pane`, `has_session`, `new_session`, `new_window`, `list_windows`, `break_pane`, `join_pane`, `ipc`
 
 UI-specific domains: `terminal` (for kild-ui terminal rendering), `input` (for keystroke translation)
 
@@ -379,6 +396,13 @@ grep 'daemon\.pty\.'         # PTY lifecycle events
 grep 'daemon\.server\.'      # Server startup/shutdown
 grep 'daemon\.connection\.'  # Client connection events
 
+# tmux shim events
+grep 'event":"shim\.'        # All shim events
+grep 'shim\.split_window'    # Pane creation events
+grep 'shim\.send_keys'       # Stdin write events
+grep 'shim\.kill_pane'       # Pane destruction events
+grep 'shim\.ipc\.'           # IPC communication with daemon
+
 # By outcome
 grep '_failed"'         # All failures
 grep '_completed"'      # All completions
@@ -405,6 +429,35 @@ Backends registered in `terminal/registry.rs`. Detection preference varies by pl
 - Linux: Alacritty (requires Hyprland window manager)
 
 Status detection uses PID tracking by default. Ghostty uses window-based detection as fallback when PID is unavailable. Alacritty on Linux uses Hyprland IPC for window management.
+
+## tmux Shim for Agent Teams
+
+**Purpose:** Makes Claude Code agent teams work transparently inside daemon-managed kild sessions.
+
+**How it works:**
+
+1. `kild create --daemon` sets `$TMUX` + `$TMUX_PANE` + prepends `~/.kild/bin` to `$PATH` in the PTY environment
+2. Claude Code detects `$TMUX` and uses tmux pane backend for agent teams
+3. `kild-core` symlinks `kild-tmux-shim` binary as `~/.kild/bin/tmux` during first daemon session creation
+4. When Claude Code calls `tmux split-window`, `tmux send-keys`, etc., those calls hit the shim
+5. Shim creates new daemon PTYs for teammates via IPC, manages pane state locally in `~/.kild/shim/<session>/`
+6. `kild destroy` automatically cleans up all child shim PTYs
+
+**Supported tmux commands:** `split-window` (creates daemon PTYs), `send-keys` (writes to PTY stdin with key name translation), `kill-pane` (destroys PTYs), `display-message` (expands format strings), `list-panes`, `select-pane`, `set-option`, `select-layout` (no-op), `resize-pane` (no-op), `has-session`, `new-session`, `new-window`, `list-windows`, `break-pane`, `join-pane`.
+
+**State management:** File-based pane registry at `~/.kild/shim/<session_id>/panes.json` with flock-based concurrency control. Each pane maps to a daemon session ID.
+
+**Environment variables:**
+- `$TMUX` - Set by kild-core, triggers Claude Code's tmux backend
+- `$TMUX_PANE` - Current pane ID (e.g., `%0` for leader, `%1`, `%2` for teammates)
+- `$KILD_SHIM_SESSION` - Session ID for shim state lookup
+- `$KILD_SHIM_LOG` - Enable shim logging (file path or `1` for `~/.kild/shim/<session>/shim.log`)
+
+**Integration points in kild-core:**
+- `handler.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
+- `handler.rs:build_daemon_create_request()` - Injects shim env vars into daemon PTY requests
+- `handler.rs:create_session()` - Initializes shim state directory and `panes.json` after daemon session creation
+- `destroy.rs:destroy_session()` - Destroys child shim PTYs via daemon IPC and removes `~/.kild/shim/<session>/`
 
 ## Forge Backend Pattern
 
@@ -454,6 +507,8 @@ Runtime mode resolution for `kild open`:
 4. Default → Terminal mode
 
 **Daemon status:** The daemon runtime supports both foreground (`--foreground`) and background modes, auto-start via config, scrollback replay on attach, PTY exit notification with session state transitions, lazy status sync on `kild list`/`kild status` (daemon-managed sessions auto-update to Stopped when daemon reports exit), and `kild open` with daemon runtime mode.
+
+**Agent teams:** Daemon sessions automatically inject `$TMUX` environment variable and configure the tmux shim (see "tmux Shim for Agent Teams" section) to enable Claude Code agent teams without external tmux installation.
 
 ## Error Handling
 
