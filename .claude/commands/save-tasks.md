@@ -1,31 +1,26 @@
-# Save Task List for Reuse
+# Resume Task List
 
-Save the current session's task list so it can be reused in future sessions.
+Task lists now transfer automatically across kild sessions when using `--resume`.
 
-## Instructions
+## How It Works
 
-1. **Find the current task list ID** by looking at the scratchpad path or checking `~/.claude/tasks/` for the most recently modified directory.
+KILD automatically manages task list persistence:
 
-2. **Make sure the recently modified directory matches** the most recently modified directory to find the task list, then make sur you use the corect task list by comparing to your on going or completed tasks.
+1. When you `kild create` a session with Claude, a task list ID is generated
+2. When you `kild open --resume`, the task list is preserved from the previous session
+3. When you `kild destroy`, the task list is cleaned up automatically
 
-3. **Copy and store the task list ID** the id will be used to restore the task list in future sessions.
+## Usage
 
-4. **Output the startup command** for the user:
+```bash
+# Create a new kild (task list is created automatically)
+kild create my-feature --agent claude
 
-   ```
-   To continue with this task list in a new session:
+# Stop the agent
+kild stop my-feature
 
-   CLAUDE_CODE_TASK_LIST_ID=<task_list_id> claude
-   ```
-
-5. **Show the current task summary** so the user knows what's preserved.
-
-## Example Usage
-
-```
-/save-tasks
+# Resume with the same task list
+kild open my-feature --resume
 ```
 
-This will:
-
-- Output: `CLAUDE_CODE_TASK_LIST_ID=<task_list_id> claude`
+No manual task list management needed - it just works.

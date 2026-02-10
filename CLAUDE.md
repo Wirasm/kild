@@ -469,7 +469,7 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `handler.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
 - `handler.rs:build_daemon_create_request()` - Injects shim env vars into daemon PTY requests
 - `handler.rs:create_session()` - Initializes shim state directory and `panes.json` after daemon session creation
-- `destroy.rs:destroy_session()` - Destroys child shim PTYs via daemon IPC and removes `~/.kild/shim/<session>/`
+- `destroy.rs:destroy_session()` - Destroys child shim PTYs via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
 
 ## Forge Backend Pattern
 
