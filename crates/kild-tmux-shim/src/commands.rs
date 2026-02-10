@@ -31,7 +31,12 @@ pub fn execute(cmd: TmuxCommand) -> Result<i32, ShimError> {
 
 fn session_id() -> Result<String, ShimError> {
     env::var("KILD_SHIM_SESSION").map_err(|_| {
-        ShimError::state("KILD_SHIM_SESSION not set - not running inside a KILD shim session")
+        ShimError::state(
+            "Not running inside a KILD daemon session. \
+             This tmux binary is a shim for agent teams. \
+             Use 'kild create --daemon' to start a session, \
+             or use the system tmux at /usr/bin/tmux.",
+        )
     })
 }
 
@@ -40,7 +45,11 @@ fn current_pane_id() -> String {
 }
 
 /// Resolve a target pane specifier to a pane ID.
-/// Supports: `%N` (direct), bare (use current), or `session:window.pane` (extract %pane).
+///
+/// Supports:
+/// - `%N` - Direct pane ID (returned as-is)
+/// - `session:window.%N` - Extracts `%N` from session:window.pane format
+/// - Any other string or None - Falls back to current pane from `$TMUX_PANE` (or `%0`)
 fn resolve_pane_id(target: Option<&str>) -> String {
     match target {
         Some(t) if t.starts_with('%') => t.to_string(),
@@ -116,8 +125,8 @@ fn expand_format(
 fn create_pty_pane(registry: &mut PaneRegistry, window_id: &str) -> Result<String, ShimError> {
     let sid = session_id()?;
     let pane_id = state::allocate_pane_id(registry);
-    let pane_num = registry.next_pane_id - 1; // just allocated
-    let daemon_session_id = format!("{}_shim_{}", sid, pane_num);
+    let daemon_session_index = registry.next_pane_id - 1;
+    let daemon_session_id = format!("{}_shim_{}", sid, daemon_session_index);
 
     let cwd = env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -210,6 +219,13 @@ fn handle_split_window(args: SplitWindowArgs) -> Result<i32, ShimError> {
     Ok(0)
 }
 
+/// Translate tmux-style Ctrl key notation (`C-x`) to control characters.
+///
+/// Supports the standard ASCII control character range:
+/// - `C-a` through `C-z` (case-insensitive) -> 0x01-0x1A
+/// - Special: `C-[` (ESC), `C-\`, `C-]`, `C-^`, `C-_`, `C-?` (DEL)
+///
+/// Returns `None` for unsupported combinations (digits, most punctuation).
 fn translate_ctrl_key(key: &str) -> Option<u8> {
     if !key.starts_with("C-") || key.len() != 3 {
         return None;
@@ -315,6 +331,11 @@ fn handle_list_panes(args: ListPanesArgs) -> Result<i32, ShimError> {
     Ok(0)
 }
 
+/// Kill a pane by destroying its daemon PTY and removing it from the registry.
+///
+/// Error handling: if the daemon is unreachable or the session is already gone,
+/// the pane is still removed from the registry (safe). If the daemon returns
+/// another error, we fail without removing to avoid orphaning a running PTY.
 fn handle_kill_pane(args: KillPaneArgs) -> Result<i32, ShimError> {
     debug!(event = "shim.kill_pane_started", target = ?args.target);
 
@@ -328,13 +349,11 @@ fn handle_kill_pane(args: KillPaneArgs) -> Result<i32, ShimError> {
         .ok_or_else(|| ShimError::state(format!("pane {} not found in registry", pane_id)))?;
 
     let daemon_session_id = pane.daemon_session_id.clone();
-    let window_id = pane.window_id.clone();
 
     // Destroy the daemon session
     match ipc::destroy_session(&daemon_session_id, true) {
         Ok(()) => {}
         Err(ShimError::DaemonNotRunning) => {
-            // Daemon gone → PTY definitely gone → safe to remove from registry
             debug!(
                 event = "shim.kill_pane.daemon_not_running",
                 daemon_session_id = daemon_session_id,
@@ -342,7 +361,6 @@ fn handle_kill_pane(args: KillPaneArgs) -> Result<i32, ShimError> {
             );
         }
         Err(ShimError::IpcError { ref message }) if message.contains("session_not_found") => {
-            // Session already gone in daemon → safe to remove from registry
             debug!(
                 event = "shim.kill_pane.session_already_gone",
                 daemon_session_id = daemon_session_id,
@@ -350,7 +368,6 @@ fn handle_kill_pane(args: KillPaneArgs) -> Result<i32, ShimError> {
             );
         }
         Err(e) => {
-            // Daemon might still have this PTY → don't orphan it
             error!(
                 event = "shim.kill_pane.destroy_failed",
                 daemon_session_id = daemon_session_id,
@@ -364,11 +381,7 @@ fn handle_kill_pane(args: KillPaneArgs) -> Result<i32, ShimError> {
         }
     }
 
-    // Remove from registry
-    registry.panes.remove(&pane_id);
-    if let Some(window) = registry.windows.get_mut(&window_id) {
-        window.pane_ids.retain(|id| id != &pane_id);
-    }
+    registry.remove_pane(&pane_id);
     state::save(&sid, &registry)?;
 
     debug!(event = "shim.kill_pane_completed", pane_id = pane_id);

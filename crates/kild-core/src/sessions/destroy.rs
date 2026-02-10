@@ -232,12 +232,8 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     }
 
     // 3b. Clean up tmux shim state and destroy child shim panes
-    {
-        let shim_dir = dirs::home_dir()
-            .expect("HOME not set")
-            .join(".kild")
-            .join("shim")
-            .join(&session.id);
+    if let Some(home) = dirs::home_dir() {
+        let shim_dir = home.join(".kild").join("shim").join(&session.id);
         if shim_dir.exists() {
             // Destroy any child shim panes that may still be running
             if let Ok(content) = std::fs::read_to_string(shim_dir.join("panes.json"))
@@ -263,7 +259,10 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                                 pane_id = pane_id,
                                 daemon_session_id = child_sid,
                                 error = %e,
-                                "Failed to destroy child shim PTY; daemon session may be orphaned"
+                            );
+                            eprintln!(
+                                "Warning: Failed to destroy agent team PTY {}: {}",
+                                pane_id, e
                             );
                         }
                     }
@@ -276,7 +275,11 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                     session_id = session.id,
                     path = %shim_dir.display(),
                     error = %e,
-                    "Failed to remove shim state directory; manual cleanup may be needed"
+                );
+                eprintln!(
+                    "Warning: Failed to remove agent team state at {}: {}",
+                    shim_dir.display(),
+                    e
                 );
             } else {
                 info!(
@@ -285,6 +288,12 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 );
             }
         }
+    } else {
+        warn!(
+            event = "core.session.shim_cleanup_skipped",
+            session_id = session.id,
+            "HOME not set, skipping shim cleanup"
+        );
     }
 
     // 4. Remove git worktree

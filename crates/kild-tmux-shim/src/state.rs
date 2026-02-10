@@ -17,6 +17,46 @@ pub struct PaneRegistry {
     pub sessions: HashMap<String, SessionEntry>,
 }
 
+impl PaneRegistry {
+    /// Validate referential integrity of the registry.
+    ///
+    /// Checks that all pane `window_id` references exist in `windows`,
+    /// and all window `pane_ids` references exist in `panes`.
+    pub fn validate(&self) -> Result<(), ShimError> {
+        for (pane_id, pane) in &self.panes {
+            if !self.windows.contains_key(&pane.window_id) {
+                return Err(ShimError::state(format!(
+                    "corrupt registry: pane {} references non-existent window {}",
+                    pane_id, pane.window_id
+                )));
+            }
+        }
+        for (window_id, window) in &self.windows {
+            for pane_id in &window.pane_ids {
+                if !self.panes.contains_key(pane_id) {
+                    return Err(ShimError::state(format!(
+                        "corrupt registry: window {} references non-existent pane {}",
+                        window_id, pane_id
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a pane and clean up its window reference.
+    pub fn remove_pane(&mut self, pane_id: &str) -> Option<PaneEntry> {
+        if let Some(pane) = self.panes.remove(pane_id) {
+            if let Some(window) = self.windows.get_mut(&pane.window_id) {
+                window.pane_ids.retain(|id| id != pane_id);
+            }
+            Some(pane)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneEntry {
     pub daemon_session_id: String,
@@ -38,24 +78,27 @@ pub struct SessionEntry {
     pub windows: Vec<String>,
 }
 
-pub fn state_dir(session_id: &str) -> PathBuf {
-    dirs::home_dir()
-        .expect("home directory not found")
-        .join(".kild")
-        .join("shim")
-        .join(session_id)
+pub fn state_dir(session_id: &str) -> Result<PathBuf, ShimError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| ShimError::state("home directory not found - $HOME not set"))?;
+    Ok(home.join(".kild").join("shim").join(session_id))
 }
 
-fn lock_path(session_id: &str) -> PathBuf {
-    state_dir(session_id).join("panes.lock")
+fn lock_path(session_id: &str) -> Result<PathBuf, ShimError> {
+    Ok(state_dir(session_id)?.join("panes.lock"))
 }
 
-fn panes_path(session_id: &str) -> PathBuf {
-    state_dir(session_id).join("panes.json")
+fn panes_path(session_id: &str) -> Result<PathBuf, ShimError> {
+    Ok(state_dir(session_id)?.join("panes.json"))
 }
 
+/// Acquire an exclusive file lock for the pane registry.
+///
+/// Uses flock to prevent race conditions when multiple tmux shim commands
+/// run concurrently (common with agent teams). Lock is automatically
+/// released when the returned Flock handle is dropped.
 fn acquire_lock(session_id: &str) -> Result<Flock<fs::File>, ShimError> {
-    let lock = lock_path(session_id);
+    let lock = lock_path(session_id)?;
     if let Some(parent) = lock.parent() {
         fs::create_dir_all(parent).map_err(|e| ShimError::StateError {
             message: format!(
@@ -81,7 +124,7 @@ fn acquire_lock(session_id: &str) -> Result<Flock<fs::File>, ShimError> {
 }
 
 pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
-    let data_path = panes_path(session_id);
+    let data_path = panes_path(session_id)?;
     let _lock = acquire_lock(session_id)?;
 
     let content = fs::read_to_string(&data_path).map_err(|e| ShimError::StateError {
@@ -93,12 +136,13 @@ pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
             message: format!("failed to parse pane registry: {}", e),
         })?;
 
-    // Lock released on _lock drop
+    registry.validate()?;
+
     Ok(registry)
 }
 
 pub fn save(session_id: &str, registry: &PaneRegistry) -> Result<(), ShimError> {
-    let data_path = panes_path(session_id);
+    let data_path = panes_path(session_id)?;
     let _lock = acquire_lock(session_id)?;
 
     let content = serde_json::to_string_pretty(registry).map_err(|e| ShimError::StateError {
@@ -111,7 +155,6 @@ pub fn save(session_id: &str, registry: &PaneRegistry) -> Result<(), ShimError> 
     file.write_all(content.as_bytes())?;
     file.flush()?;
 
-    // Lock released on _lock drop
     Ok(())
 }
 
@@ -123,11 +166,10 @@ pub fn allocate_pane_id(registry: &mut PaneRegistry) -> String {
 
 #[allow(dead_code)]
 pub fn init_registry(session_id: &str, daemon_session_id: &str) -> Result<(), ShimError> {
-    let dir = state_dir(session_id);
+    let dir = state_dir(session_id)?;
     fs::create_dir_all(&dir)?;
 
-    // Create lock file
-    let lock = lock_path(session_id);
+    let lock = lock_path(session_id)?;
     fs::File::create(&lock)?;
 
     let mut panes = HashMap::new();
@@ -196,7 +238,7 @@ mod tests {
     #[test]
     fn test_init_and_load_registry() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
 
         init_registry(&test_id, "daemon-abc-123").unwrap();
 
@@ -214,18 +256,12 @@ mod tests {
     #[test]
     fn test_save_and_load_roundtrip() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
         fs::create_dir_all(&dir).unwrap();
-        fs::File::create(lock_path(&test_id)).unwrap();
+        fs::File::create(lock_path(&test_id).unwrap()).unwrap();
 
-        let mut registry = PaneRegistry {
-            next_pane_id: 2,
-            session_name: "kild_0".to_string(),
-            panes: HashMap::new(),
-            windows: HashMap::new(),
-            sessions: HashMap::new(),
-        };
-        registry.panes.insert(
+        let mut panes = HashMap::new();
+        panes.insert(
             "%0".to_string(),
             PaneEntry {
                 daemon_session_id: "d-1".to_string(),
@@ -235,7 +271,7 @@ mod tests {
                 hidden: false,
             },
         );
-        registry.panes.insert(
+        panes.insert(
             "%1".to_string(),
             PaneEntry {
                 daemon_session_id: "d-2".to_string(),
@@ -245,6 +281,23 @@ mod tests {
                 hidden: false,
             },
         );
+
+        let mut windows = HashMap::new();
+        windows.insert(
+            "0".to_string(),
+            WindowEntry {
+                name: "main".to_string(),
+                pane_ids: vec!["%0".to_string(), "%1".to_string()],
+            },
+        );
+
+        let registry = PaneRegistry {
+            next_pane_id: 2,
+            session_name: "kild_0".to_string(),
+            panes,
+            windows,
+            sessions: HashMap::new(),
+        };
 
         save(&test_id, &registry).unwrap();
         let loaded = load(&test_id).unwrap();
@@ -258,14 +311,14 @@ mod tests {
 
     #[test]
     fn test_state_dir_path() {
-        let dir = state_dir("my-session");
+        let dir = state_dir("my-session").unwrap();
         assert!(dir.ends_with(".kild/shim/my-session"));
     }
 
     #[test]
     fn test_load_invalid_json() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("panes.json"), "not valid json{{{").unwrap();
 
@@ -284,9 +337,8 @@ mod tests {
     #[test]
     fn test_load_missing_panes_file() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
         fs::create_dir_all(&dir).unwrap();
-        // Lock file exists but no panes.json
 
         let result = load(&test_id);
         assert!(result.is_err());
@@ -299,7 +351,7 @@ mod tests {
     #[test]
     fn test_load_empty_json_file() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("panes.json"), "").unwrap();
 
@@ -318,9 +370,8 @@ mod tests {
     #[test]
     fn test_load_partial_json() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
+        let dir = state_dir(&test_id).unwrap();
         fs::create_dir_all(&dir).unwrap();
-        // Valid JSON but missing required fields
         fs::write(dir.join("panes.json"), r#"{"next_pane_id": 1}"#).unwrap();
 
         let result = load(&test_id);
@@ -338,8 +389,7 @@ mod tests {
     #[test]
     fn test_save_and_load_without_pre_created_lock() {
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let dir = state_dir(&test_id);
-        // Don't create dir or lock file — acquire_lock should handle it
+        let dir = state_dir(&test_id).unwrap();
 
         let registry = PaneRegistry {
             next_pane_id: 1,
@@ -349,7 +399,6 @@ mod tests {
             sessions: HashMap::new(),
         };
 
-        // save should succeed because acquire_lock now creates the lock file on-demand
         save(&test_id, &registry).unwrap();
 
         let loaded = load(&test_id).unwrap();
@@ -357,5 +406,149 @@ mod tests {
         assert_eq!(loaded.session_name, "kild_0");
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_validate_valid_registry() {
+        let mut panes = HashMap::new();
+        panes.insert(
+            "%0".to_string(),
+            PaneEntry {
+                daemon_session_id: "d-1".to_string(),
+                title: String::new(),
+                border_style: String::new(),
+                window_id: "0".to_string(),
+                hidden: false,
+            },
+        );
+
+        let mut windows = HashMap::new();
+        windows.insert(
+            "0".to_string(),
+            WindowEntry {
+                name: "main".to_string(),
+                pane_ids: vec!["%0".to_string()],
+            },
+        );
+
+        let registry = PaneRegistry {
+            next_pane_id: 1,
+            session_name: "kild_0".to_string(),
+            panes,
+            windows,
+            sessions: HashMap::new(),
+        };
+
+        assert!(registry.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_dangling_pane_window_ref() {
+        let mut panes = HashMap::new();
+        panes.insert(
+            "%0".to_string(),
+            PaneEntry {
+                daemon_session_id: "d-1".to_string(),
+                title: String::new(),
+                border_style: String::new(),
+                window_id: "999".to_string(),
+                hidden: false,
+            },
+        );
+
+        let registry = PaneRegistry {
+            next_pane_id: 1,
+            session_name: "kild_0".to_string(),
+            panes,
+            windows: HashMap::new(),
+            sessions: HashMap::new(),
+        };
+
+        let err = registry.validate().unwrap_err();
+        assert!(err.to_string().contains("non-existent window"));
+    }
+
+    #[test]
+    fn test_validate_dangling_window_pane_ref() {
+        let mut windows = HashMap::new();
+        windows.insert(
+            "0".to_string(),
+            WindowEntry {
+                name: "main".to_string(),
+                pane_ids: vec!["%99".to_string()],
+            },
+        );
+
+        let registry = PaneRegistry {
+            next_pane_id: 1,
+            session_name: "kild_0".to_string(),
+            panes: HashMap::new(),
+            windows,
+            sessions: HashMap::new(),
+        };
+
+        let err = registry.validate().unwrap_err();
+        assert!(err.to_string().contains("non-existent pane"));
+    }
+
+    #[test]
+    fn test_remove_pane() {
+        let mut panes = HashMap::new();
+        panes.insert(
+            "%0".to_string(),
+            PaneEntry {
+                daemon_session_id: "d-1".to_string(),
+                title: String::new(),
+                border_style: String::new(),
+                window_id: "0".to_string(),
+                hidden: false,
+            },
+        );
+        panes.insert(
+            "%1".to_string(),
+            PaneEntry {
+                daemon_session_id: "d-2".to_string(),
+                title: String::new(),
+                border_style: String::new(),
+                window_id: "0".to_string(),
+                hidden: false,
+            },
+        );
+
+        let mut windows = HashMap::new();
+        windows.insert(
+            "0".to_string(),
+            WindowEntry {
+                name: "main".to_string(),
+                pane_ids: vec!["%0".to_string(), "%1".to_string()],
+            },
+        );
+
+        let mut registry = PaneRegistry {
+            next_pane_id: 2,
+            session_name: "kild_0".to_string(),
+            panes,
+            windows,
+            sessions: HashMap::new(),
+        };
+
+        let removed = registry.remove_pane("%1");
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().daemon_session_id, "d-2");
+        assert!(!registry.panes.contains_key("%1"));
+        assert_eq!(registry.windows["0"].pane_ids, vec!["%0".to_string()]);
+    }
+
+    #[test]
+    fn test_remove_pane_not_found() {
+        let mut registry = PaneRegistry {
+            next_pane_id: 1,
+            session_name: "kild_0".to_string(),
+            panes: HashMap::new(),
+            windows: HashMap::new(),
+            sessions: HashMap::new(),
+        };
+
+        assert!(registry.remove_pane("%99").is_none());
     }
 }

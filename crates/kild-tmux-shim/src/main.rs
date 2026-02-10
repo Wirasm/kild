@@ -39,11 +39,13 @@ fn setup_logging() {
             if session_id.is_empty() {
                 return;
             }
-            let dir = dirs::home_dir()
-                .expect("home directory not found")
-                .join(".kild")
-                .join("shim")
-                .join(&session_id);
+            let dir = match dirs::home_dir() {
+                Some(h) => h.join(".kild").join("shim").join(&session_id),
+                None => {
+                    eprintln!("tmux: $HOME not set, cannot create log directory");
+                    return;
+                }
+            };
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 eprintln!(
                     "tmux: failed to create log directory {}: {}",

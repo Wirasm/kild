@@ -246,7 +246,11 @@ pub fn create_session(
             // are handled here in kild-core.
 
             // Ensure the tmux shim binary is installed at ~/.kild/bin/tmux
-            ensure_shim_binary();
+            if let Err(msg) = ensure_shim_binary() {
+                warn!(event = "core.session.shim_binary_failed", error = %msg);
+                eprintln!("Warning: {}", msg);
+                eprintln!("Agent teams will not work in this session.");
+            }
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed
             let _ = crate::daemon::client::destroy_daemon_session(&session_id, true);
@@ -271,20 +275,15 @@ pub fn create_session(
                 })?;
 
             // Initialize tmux shim state directory
-            let shim_dir = dirs::home_dir()
-                .expect("HOME not set")
-                .join(".kild")
-                .join("shim")
-                .join(&session_id);
-            if let Err(e) = std::fs::create_dir_all(&shim_dir) {
-                error!(
-                    event = "core.session.shim_dir_create_failed",
-                    session_id = session_id,
-                    error = %e,
-                    "Failed to create shim state directory; agent team commands will not work"
-                );
-            } else {
-                // Write initial panes.json with %0 mapped to this session's daemon ID
+            let shim_init_result = (|| -> Result<(), String> {
+                let shim_dir = dirs::home_dir()
+                    .ok_or("HOME not set")?
+                    .join(".kild")
+                    .join("shim")
+                    .join(&session_id);
+                std::fs::create_dir_all(&shim_dir)
+                    .map_err(|e| format!("failed to create shim state directory: {}", e))?;
+
                 let initial_state = serde_json::json!({
                     "next_pane_id": 1,
                     "session_name": "kild_0",
@@ -304,29 +303,28 @@ pub fn create_session(
                         "kild_0": { "name": "kild_0", "windows": ["0"] }
                     }
                 });
-                // Create lock file for flock-based concurrency control
+
                 let lock_path = shim_dir.join("panes.lock");
-                if let Err(e) = std::fs::File::create(&lock_path) {
-                    error!(
-                        event = "core.session.shim_lock_create_failed",
-                        session_id = session_id,
-                        error = %e,
-                        "Failed to create shim lock file; agent team commands may not work"
-                    );
-                }
+                std::fs::File::create(&lock_path)
+                    .map_err(|e| format!("failed to create shim lock file: {}", e))?;
 
                 let panes_path = shim_dir.join("panes.json");
-                if let Err(e) = std::fs::write(
-                    &panes_path,
-                    serde_json::to_string_pretty(&initial_state).unwrap_or_default(),
-                ) {
-                    error!(
-                        event = "core.session.shim_state_init_failed",
-                        session_id = session_id,
-                        error = %e,
-                        "Failed to write initial pane registry; agent team commands will not work"
-                    );
-                }
+                let json = serde_json::to_string_pretty(&initial_state)
+                    .map_err(|e| format!("failed to serialize shim state: {}", e))?;
+                std::fs::write(&panes_path, json)
+                    .map_err(|e| format!("failed to write shim state: {}", e))?;
+
+                Ok(())
+            })();
+
+            if let Err(e) = shim_init_result {
+                error!(
+                    event = "core.session.shim_init_failed",
+                    session_id = session_id,
+                    error = %e,
+                );
+                eprintln!("Warning: Failed to initialize agent team support: {}", e);
+                eprintln!("Agent teams will not work in this session.");
             }
 
             AgentProcess::new(
@@ -808,70 +806,51 @@ pub fn open_session(
 /// Ensure the tmux shim binary is installed at `~/.kild/bin/tmux`.
 ///
 /// Looks for `kild-tmux-shim` next to the running `kild` binary and symlinks
-/// it as `tmux` in `~/.kild/bin/`. This is a best-effort operation — failures
-/// are logged as warnings but do not block session creation.
-fn ensure_shim_binary() {
+/// it as `tmux` in `~/.kild/bin/`. Agent teams require this binary.
+fn ensure_shim_binary() -> Result<(), String> {
     let shim_bin_dir = dirs::home_dir()
-        .expect("HOME not set")
+        .ok_or("HOME not set — cannot install tmux shim")?
         .join(".kild")
         .join("bin");
     let shim_link = shim_bin_dir.join("tmux");
 
     if shim_link.exists() {
-        return;
+        return Ok(());
     }
 
-    // Find kild-tmux-shim binary next to our own binary
-    let our_binary = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(event = "core.session.shim_current_exe_failed", error = %e,
-                  "Could not determine binary path; tmux shim will not be installed");
-            return;
-        }
-    };
-    let bin_dir = match our_binary.parent() {
-        Some(p) => p,
-        None => {
-            warn!(event = "core.session.shim_parent_dir_failed",
-                  binary = %our_binary.display(),
-                  "Binary has no parent directory; tmux shim will not be installed");
-            return;
-        }
-    };
+    let our_binary =
+        std::env::current_exe().map_err(|e| format!("could not determine binary path: {}", e))?;
+    let bin_dir = our_binary
+        .parent()
+        .ok_or_else(|| format!("binary has no parent directory: {}", our_binary.display()))?;
     let shim_binary = bin_dir.join("kild-tmux-shim");
 
     if !shim_binary.exists() {
-        warn!(
-            event = "core.session.shim_binary_not_found",
-            expected_path = %shim_binary.display(),
-            "kild-tmux-shim binary not found next to kild binary"
-        );
-        return;
+        return Err(format!(
+            "kild-tmux-shim binary not found at {}",
+            shim_binary.display()
+        ));
     }
 
-    if let Err(e) = std::fs::create_dir_all(&shim_bin_dir) {
-        warn!(event = "core.session.shim_dir_create_failed", error = %e);
-        return;
-    }
+    std::fs::create_dir_all(&shim_bin_dir)
+        .map_err(|e| format!("failed to create {}: {}", shim_bin_dir.display(), e))?;
 
-    // Symlink the shim binary as "tmux"
     #[cfg(unix)]
-    {
-        if let Err(e) = std::os::unix::fs::symlink(&shim_binary, &shim_link) {
-            warn!(
-                event = "core.session.shim_symlink_failed",
-                source = %shim_binary.display(),
-                target = %shim_link.display(),
-                error = %e
-            );
-        } else {
-            info!(
-                event = "core.session.shim_binary_installed",
-                path = %shim_link.display()
-            );
-        }
-    }
+    std::os::unix::fs::symlink(&shim_binary, &shim_link).map_err(|e| {
+        format!(
+            "failed to symlink {} -> {}: {}",
+            shim_binary.display(),
+            shim_link.display(),
+            e
+        )
+    })?;
+
+    info!(
+        event = "core.session.shim_binary_installed",
+        path = %shim_link.display()
+    );
+
+    Ok(())
 }
 
 /// Build the command, args, env vars, and login shell flag for a daemon PTY create request.
@@ -925,7 +904,9 @@ fn build_daemon_create_request(
 
     // tmux shim environment for daemon sessions
     let shim_bin_dir = dirs::home_dir()
-        .expect("HOME not set")
+        .ok_or_else(|| SessionError::DaemonError {
+            message: "HOME not set — cannot configure tmux shim PATH".to_string(),
+        })?
         .join(".kild")
         .join("bin");
 

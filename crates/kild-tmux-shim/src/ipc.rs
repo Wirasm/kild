@@ -9,15 +9,14 @@ use tracing::debug;
 
 use crate::errors::ShimError;
 
-fn socket_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("home directory not found")
-        .join(".kild")
-        .join("daemon.sock")
+fn socket_path() -> Result<PathBuf, ShimError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| ShimError::state("home directory not found - $HOME not set"))?;
+    Ok(home.join(".kild").join("daemon.sock"))
 }
 
 fn connect() -> Result<UnixStream, ShimError> {
-    let path = socket_path();
+    let path = socket_path()?;
     if !path.exists() {
         return Err(ShimError::DaemonNotRunning);
     }
@@ -39,8 +38,10 @@ fn connect() -> Result<UnixStream, ShimError> {
 fn send_request(
     stream: &mut UnixStream,
     request: serde_json::Value,
+    operation: &str,
 ) -> Result<serde_json::Value, ShimError> {
-    let msg = serde_json::to_string(&request).map_err(|e| ShimError::ipc(e.to_string()))?;
+    let msg = serde_json::to_string(&request)
+        .map_err(|e| ShimError::ipc(format!("{}: serialization failed: {}", operation, e)))?;
 
     writeln!(stream, "{}", msg)?;
     stream.flush()?;
@@ -50,11 +51,14 @@ fn send_request(
     reader.read_line(&mut line)?;
 
     if line.is_empty() {
-        return Err(ShimError::ipc("empty response from daemon"));
+        return Err(ShimError::ipc(format!(
+            "{}: empty response from daemon",
+            operation
+        )));
     }
 
-    let response: serde_json::Value =
-        serde_json::from_str(&line).map_err(|e| ShimError::ipc(format!("invalid JSON: {}", e)))?;
+    let response: serde_json::Value = serde_json::from_str(&line)
+        .map_err(|e| ShimError::ipc(format!("{}: invalid JSON response: {}", operation, e)))?;
 
     if response.get("type").and_then(|t| t.as_str()) == Some("error") {
         let code = response
@@ -65,7 +69,10 @@ fn send_request(
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("unknown daemon error");
-        return Err(ShimError::ipc(format!("[{}] {}", code, message)));
+        return Err(ShimError::ipc(format!(
+            "{}: [{}] {}",
+            operation, code, message
+        )));
     }
 
     Ok(response)
@@ -107,13 +114,13 @@ pub fn create_session(
     });
 
     let mut stream = connect()?;
-    let response = send_request(&mut stream, request)?;
+    let response = send_request(&mut stream, request, "create_session")?;
 
     let daemon_session_id = response
         .get("session")
         .and_then(|s| s.get("id"))
         .and_then(|id| id.as_str())
-        .ok_or_else(|| ShimError::ipc("response missing session.id"))?
+        .ok_or_else(|| ShimError::ipc("create_session: response missing session.id"))?
         .to_string();
 
     debug!(
@@ -141,7 +148,7 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
     });
 
     let mut stream = connect()?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, request, "write_stdin")?;
 
     debug!(
         event = "shim.ipc.write_stdin_completed",
@@ -165,7 +172,7 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
     });
 
     let mut stream = connect()?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, request, "destroy_session")?;
 
     debug!(
         event = "shim.ipc.destroy_session_completed",
@@ -192,7 +199,7 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
     });
 
     let mut stream = connect()?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, request, "resize_pty")?;
 
     debug!(
         event = "shim.ipc.resize_pty_completed",
@@ -209,10 +216,7 @@ mod tests {
     fn test_connect_daemon_not_running() {
         // With no daemon socket file, connect should return DaemonNotRunning.
         // Skip if daemon happens to be running.
-        let path = dirs::home_dir()
-            .expect("home dir")
-            .join(".kild")
-            .join("daemon.sock");
+        let path = socket_path().unwrap();
         if path.exists() {
             // Daemon might be running — can't reliably test DaemonNotRunning
             return;
@@ -237,10 +241,7 @@ mod tests {
 
     #[test]
     fn test_write_stdin_daemon_not_running() {
-        let path = dirs::home_dir()
-            .expect("home dir")
-            .join(".kild")
-            .join("daemon.sock");
+        let path = socket_path().unwrap();
         if path.exists() {
             return;
         }
@@ -255,10 +256,7 @@ mod tests {
 
     #[test]
     fn test_destroy_session_daemon_not_running() {
-        let path = dirs::home_dir()
-            .expect("home dir")
-            .join(".kild")
-            .join("daemon.sock");
+        let path = socket_path().unwrap();
         if path.exists() {
             return;
         }
@@ -303,7 +301,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request);
+        let result = send_request(&mut stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("session_not_found"), "got: {}", err);
@@ -337,7 +335,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request);
+        let result = send_request(&mut stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("empty response"), "got: {}", err);
@@ -373,7 +371,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request);
+        let result = send_request(&mut stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid JSON"), "got: {}", err);
@@ -410,7 +408,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request);
+        let result = send_request(&mut stream, request, "test_op");
         assert!(result.is_ok());
         let val = result.unwrap();
         assert_eq!(val["type"], "ok");
