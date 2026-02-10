@@ -2,7 +2,6 @@ use gpui::{
     Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render, Window, div, prelude::*,
 };
 
-use super::errors::TerminalError;
 use super::input;
 use super::state::Terminal;
 use super::terminal_element::TerminalElement;
@@ -20,15 +19,17 @@ pub struct TerminalView {
 }
 
 impl TerminalView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self, TerminalError> {
-        let terminal = Terminal::new(cx)?;
+    /// Create a TerminalView from a pre-built Terminal.
+    ///
+    /// Terminal creation (fallible) happens outside `cx.new()` so errors can
+    /// be handled before entering the infallible closure.
+    pub fn from_terminal(terminal: Terminal, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle);
-
-        Ok(Self {
+        Self {
             terminal,
             focus_handle,
-        })
+        }
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -43,7 +44,9 @@ impl TerminalView {
 
         match input::keystroke_to_escape(&event.keystroke, app_cursor) {
             Some(bytes) => {
-                self.terminal.write_to_pty(&bytes);
+                if let Err(e) = self.terminal.write_to_pty(&bytes) {
+                    tracing::error!(event = "ui.terminal.key_write_failed", error = %e);
+                }
                 cx.notify();
             }
             None => {

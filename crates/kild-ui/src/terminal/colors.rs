@@ -125,7 +125,7 @@ fn resolve_indexed(idx: u8) -> Hsla {
     }
 }
 
-/// Reduce lightness by 33% for dim variants.
+/// Reduce lightness to 67% for dim variants.
 fn dim(color: Hsla) -> Hsla {
     Hsla {
         l: color.l * 0.67,

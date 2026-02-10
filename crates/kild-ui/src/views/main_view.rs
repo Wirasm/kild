@@ -929,11 +929,21 @@ impl MainView {
                 // Lazy-create terminal on first toggle
                 if self.terminal_view.is_none() {
                     tracing::info!(event = "ui.terminal.create_started");
-                    let view = cx.new(|cx| {
-                        crate::terminal::TerminalView::new(window, cx)
-                            .expect("PTY creation should succeed on developer machine")
-                    });
-                    self.terminal_view = Some(view);
+                    match crate::terminal::state::Terminal::new(cx) {
+                        Ok(terminal) => {
+                            let view = cx.new(|cx| {
+                                crate::terminal::TerminalView::from_terminal(terminal, window, cx)
+                            });
+                            self.terminal_view = Some(view);
+                        }
+                        Err(e) => {
+                            tracing::error!(event = "ui.terminal.create_failed", error = %e);
+                            self.state
+                                .push_error(format!("Terminal creation failed: {}", e));
+                            cx.notify();
+                            return;
+                        }
+                    }
                 }
                 self.show_terminal = true;
                 tracing::info!(event = "ui.terminal.toggle_on");

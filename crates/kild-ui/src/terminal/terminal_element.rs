@@ -187,7 +187,9 @@ impl Element for TerminalElement {
         let mut run_strikethrough = false;
         let mut run_start_col: usize = 0;
 
-        // Background merging state
+        // Background merging state — runs of identical bg color are merged into
+        // single rectangles. Backgrounds matching terminal_bg are skipped entirely
+        // since the default background is already painted as the first layer.
         let mut bg_start_col: usize = 0;
         let mut bg_color: Option<Hsla> = None;
         let mut bg_line: i32 = -1;
@@ -228,15 +230,15 @@ impl Element for TerminalElement {
             if line_idx != current_line {
                 // Flush text run
                 if !run_text.is_empty() {
-                    current_runs.push(BatchedTextRun {
-                        text: std::mem::take(&mut run_text),
-                        fg: run_fg,
-                        bold: run_bold,
-                        italic: run_italic,
-                        underline: run_underline,
-                        strikethrough: run_strikethrough,
-                        start_col: run_start_col,
-                    });
+                    current_runs.push(BatchedTextRun::new(
+                        std::mem::take(&mut run_text),
+                        run_fg,
+                        run_start_col,
+                        run_bold,
+                        run_italic,
+                        run_underline,
+                        run_strikethrough,
+                    ));
                 }
                 // Flush bg
                 flush_bg(
@@ -321,15 +323,15 @@ impl Element for TerminalElement {
                 && strikethrough == run_strikethrough;
 
             if !same_style && !run_text.is_empty() {
-                current_runs.push(BatchedTextRun {
-                    text: std::mem::take(&mut run_text),
-                    fg: run_fg,
-                    bold: run_bold,
-                    italic: run_italic,
-                    underline: run_underline,
-                    strikethrough: run_strikethrough,
-                    start_col: run_start_col,
-                });
+                current_runs.push(BatchedTextRun::new(
+                    std::mem::take(&mut run_text),
+                    run_fg,
+                    run_start_col,
+                    run_bold,
+                    run_italic,
+                    run_underline,
+                    run_strikethrough,
+                ));
                 run_start_col = col;
             }
 
@@ -352,15 +354,15 @@ impl Element for TerminalElement {
 
         // Flush final run/line/bg
         if !run_text.is_empty() {
-            current_runs.push(BatchedTextRun {
-                text: std::mem::take(&mut run_text),
-                fg: run_fg,
-                bold: run_bold,
-                italic: run_italic,
-                underline: run_underline,
-                strikethrough: run_strikethrough,
-                start_col: run_start_col,
-            });
+            current_runs.push(BatchedTextRun::new(
+                std::mem::take(&mut run_text),
+                run_fg,
+                run_start_col,
+                run_bold,
+                run_italic,
+                run_underline,
+                run_strikethrough,
+            ));
         }
         if !current_runs.is_empty() {
             text_lines.push(PreparedLine {
@@ -428,68 +430,73 @@ impl Element for TerminalElement {
         let terminal_bg = Hsla::from(theme::terminal_background());
         let font_size = px(theme::TEXT_BASE);
 
-        // 1. Fill terminal background
+        // Painter's algorithm — layers are painted back-to-front so later
+        // draws occlude earlier ones without needing a depth buffer.
+
+        // Layer 1: Terminal background (base layer, fills entire bounds)
         window.paint_quad(fill(bounds, terminal_bg));
 
-        // 2. Paint background regions
+        // Layer 2: Cell background regions (colored backgrounds on top of base)
         for region in &prepaint.bg_regions {
             window.paint_quad(fill(region.bounds, region.color));
         }
 
-        // 3. Paint text runs
+        // Layer 3: Text runs (glyphs on top of backgrounds)
         for line in &prepaint.text_runs {
             let y = bounds.origin.y + line.line_idx as f32 * prepaint.cell_height;
 
             for run in &line.runs {
-                let x = bounds.origin.x + run.start_col as f32 * prepaint.cell_width;
+                let x = bounds.origin.x + run.start_col() as f32 * prepaint.cell_width;
 
-                let f = match (run.bold, run.italic) {
+                let f = match (run.bold(), run.italic()) {
                     (true, true) => Self::bold_italic_font(),
                     (true, false) => Self::bold_font(),
                     (false, true) => Self::italic_font(),
                     (false, false) => Self::terminal_font(),
                 };
 
-                let underline = if run.underline {
+                let underline = if run.underline() {
                     Some(gpui::UnderlineStyle {
                         thickness: px(1.0),
-                        color: Some(run.fg),
+                        color: Some(run.fg()),
                         wavy: false,
                     })
                 } else {
                     None
                 };
 
-                let strikethrough = if run.strikethrough {
+                let strikethrough = if run.strikethrough() {
                     Some(gpui::StrikethroughStyle {
                         thickness: px(1.0),
-                        color: Some(run.fg),
+                        color: Some(run.fg()),
                     })
                 } else {
                     None
                 };
 
                 let text_run = TextRun {
-                    len: run.text.len(),
+                    len: run.text().len(),
                     font: f,
-                    color: run.fg,
+                    color: run.fg(),
                     background_color: None,
                     underline,
                     strikethrough,
                 };
 
                 let shaped = window.text_system().shape_line(
-                    SharedString::from(run.text.clone()),
+                    SharedString::from(run.text().to_owned()),
                     font_size,
                     &[text_run],
                     None,
                 );
 
-                let _ = shaped.paint(point(x, y), prepaint.cell_height, window, cx);
+                if let Err(e) = shaped.paint(point(x, y), prepaint.cell_height, window, cx) {
+                    tracing::error!(event = "ui.terminal.paint_failed", error = %e);
+                }
             }
         }
 
-        // 4. Paint cursor
+        // Layer 4: Cursor (topmost, always visible over text)
         if let Some(cursor) = &prepaint.cursor {
             window.paint_quad(fill(cursor.bounds, cursor.color));
         }

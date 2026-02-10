@@ -37,7 +37,9 @@ pub(crate) struct KildListener {
 
 impl EventListener for KildListener {
     fn send_event(&self, event: AlacEvent) {
-        let _ = self.sender.unbounded_send(event);
+        if let Err(e) = self.sender.unbounded_send(event) {
+            tracing::error!(event = "ui.terminal.event_send_failed", error = %e);
+        }
     }
 }
 
@@ -93,7 +95,9 @@ impl Terminal {
         };
         let pair = pty_system
             .openpty(pty_size)
-            .map_err(|e| TerminalError::PtyCreation(format!("openpty: {}", e)))?;
+            .map_err(|e| TerminalError::PtyOpen {
+                message: e.to_string(),
+            })?;
 
         let mut cmd = CommandBuilder::new(&shell);
         // Set TERM for proper escape sequence support
@@ -106,8 +110,13 @@ impl Terminal {
         let child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| TerminalError::PtyCreation(format!("spawn: {}", e)))?;
-        // Drop slave after spawning (important: frees the slave side)
+            .map_err(|e| TerminalError::ShellSpawn {
+                shell: shell.clone(),
+                message: e.to_string(),
+            })?;
+        // Drop our copy of the slave fd. The child process inherited it during
+        // spawn, so it remains open there. If we kept ours, the kernel would never
+        // deliver EOF on the master when the child exits (two open references).
         drop(pair.slave);
 
         tracing::info!(
@@ -120,13 +129,17 @@ impl Terminal {
         let writer = pair
             .master
             .take_writer()
-            .map_err(|e| TerminalError::PtyIo(format!("take_writer: {}", e)))?;
+            .map_err(|e| TerminalError::PtyOpen {
+                message: format!("take_writer: {}", e),
+            })?;
         let pty_writer = Arc::new(Mutex::new(writer));
 
         let reader = pair
             .master
             .try_clone_reader()
-            .map_err(|e| TerminalError::PtyIo(format!("clone_reader: {}", e)))?;
+            .map_err(|e| TerminalError::PtyOpen {
+                message: format!("clone_reader: {}", e),
+            })?;
 
         // Keep master alive — dropping it would close the PTY
         let _pty_master = pair.master;
@@ -160,12 +173,19 @@ impl Terminal {
                         }
                     }
                 }
-                let _ = done_tx.send(());
+                if done_tx.send(()).is_err() {
+                    tracing::debug!(event = "ui.terminal.done_send_failed");
+                }
             });
-            let _ = done_rx.await;
+            if done_rx.await.is_err() {
+                tracing::warn!(event = "ui.terminal.done_recv_failed");
+            }
         });
 
-        // Spawn event batching task (4ms window, 100 event cap)
+        // Spawn event batching task (4ms window, 100 event cap).
+        // 4ms ≈ 250 Hz max refresh — fast enough for smooth terminal output
+        // while leaving CPU headroom. 100 event cap prevents unbounded memory
+        // growth during output bursts (e.g. `cat` on a large file).
         // Uses background_executor since it doesn't need entity references.
         let term_batcher = term.clone();
         let pty_writer_for_events = pty_writer.clone();
@@ -204,10 +224,17 @@ impl Terminal {
                 while let Ok(Some(event)) = event_rx.try_next() {
                     match event {
                         AlacEvent::Wakeup => {}
-                        AlacEvent::PtyWrite(text) => {
-                            if let Ok(mut writer) = pty_writer_for_events.lock() {
-                                let _ = writer.write_all(text.as_bytes());
-                                let _ = writer.flush();
+                        AlacEvent::PtyWrite(text) => match pty_writer_for_events.lock() {
+                            Ok(mut writer) => {
+                                if let Err(e) = writer.write_all(text.as_bytes()) {
+                                    tracing::error!(event = "ui.terminal.pty_write_loop_failed", error = %e);
+                                }
+                                if let Err(e) = writer.flush() {
+                                    tracing::error!(event = "ui.terminal.pty_flush_loop_failed", error = %e);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(event = "ui.terminal.writer_lock_failed", error = %e);
                             }
                         }
                         _ => {}
@@ -226,13 +253,14 @@ impl Terminal {
     }
 
     /// Write bytes to the PTY stdin.
-    pub fn write_to_pty(&self, data: &[u8]) {
-        if let Ok(mut writer) = self.pty_writer.lock() {
-            if let Err(e) = writer.write_all(data) {
-                tracing::error!(event = "ui.terminal.pty_write_failed", error = %e);
-            }
-            let _ = writer.flush();
-        }
+    pub fn write_to_pty(&self, data: &[u8]) -> Result<(), TerminalError> {
+        let mut writer = self.pty_writer.lock().map_err(|e| {
+            tracing::error!(event = "ui.terminal.writer_lock_failed", error = %e);
+            TerminalError::WriterLockPoisoned
+        })?;
+        writer.write_all(data).map_err(TerminalError::PtyWrite)?;
+        writer.flush().map_err(TerminalError::PtyFlush)?;
+        Ok(())
     }
 
     /// Get access to the terminal emulator (locked).
