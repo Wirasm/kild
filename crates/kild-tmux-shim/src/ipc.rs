@@ -465,11 +465,9 @@ mod tests {
             reader.read_line(&mut line).unwrap();
 
             use std::io::Write;
-            let data = base64::engine::general_purpose::STANDARD.encode(b"hello world");
-            let response = format!(
-                r#"{{"type":"scrollback_contents","id":"test","data":"{}"}}"#,
-                data
-            );
+            // Known-good base64 for b"hello world"
+            let response =
+                r#"{"type":"scrollback_contents","id":"test","data":"aGVsbG8gd29ybGQ="}"#;
             writeln!(stream, "{}", response).unwrap();
             stream.flush().unwrap();
         });

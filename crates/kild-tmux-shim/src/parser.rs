@@ -1,3 +1,5 @@
+use tracing::debug;
+
 use crate::errors::ShimError;
 
 #[derive(Debug)]
@@ -142,6 +144,8 @@ pub struct JoinPaneArgs {
 pub struct CapturePaneArgs {
     pub target: Option<String>,
     pub print: bool,
+    /// Start line for capture: `None` = all lines, negative = last N lines
+    /// (e.g. `-100` = last 100 lines), non-negative = offset from start.
     pub start_line: Option<i64>,
 }
 
@@ -562,7 +566,9 @@ fn parse_capture_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
                     ShimError::parse(format!("invalid start line '{}': {}", val, e))
                 })?);
             }
-            _ => {}
+            other => {
+                debug!(event = "shim.capture_pane.unknown_flag", flag = other);
+            }
         }
         i += 1;
     }

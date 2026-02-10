@@ -686,6 +686,15 @@ fn handle_join_pane(args: JoinPaneArgs) -> Result<i32, ShimError> {
 fn handle_capture_pane(args: CapturePaneArgs) -> Result<i32, ShimError> {
     debug!(event = "shim.capture_pane_started", target = ?args.target);
 
+    if !args.print {
+        debug!(
+            event = "shim.capture_pane_completed",
+            pane_id = "unknown",
+            bytes = 0
+        );
+        return Ok(0);
+    }
+
     let sid = session_id()?;
     let registry = state::load(&sid)?;
 
@@ -696,22 +705,19 @@ fn handle_capture_pane(args: CapturePaneArgs) -> Result<i32, ShimError> {
         .ok_or_else(|| ShimError::state(format!("pane {} not found in registry", pane_id)))?;
 
     let raw = ipc::read_scrollback(&pane.daemon_session_id)?;
+    let text = String::from_utf8_lossy(&raw);
 
-    if args.print {
-        let text = String::from_utf8_lossy(&raw);
+    let output = match args.start_line {
+        Some(n) if n < 0 => {
+            let lines: Vec<&str> = text.lines().collect();
+            let count = (-n) as usize;
+            let skip = lines.len().saturating_sub(count);
+            lines[skip..].join("\n")
+        }
+        _ => text.into_owned(),
+    };
 
-        let output = match args.start_line {
-            Some(n) if n < 0 => {
-                let lines: Vec<&str> = text.lines().collect();
-                let count = (-n) as usize;
-                let skip = lines.len().saturating_sub(count);
-                lines[skip..].join("\n")
-            }
-            _ => text.into_owned(),
-        };
-
-        print!("{}", output);
-    }
+    print!("{}", output);
 
     debug!(
         event = "shim.capture_pane_completed",
@@ -833,5 +839,65 @@ mod tests {
             "Enter".to_string(),
         ];
         assert_eq!(translate_keys(&keys), b"ls -la /tmp\n");
+    }
+
+    // -- capture_pane output formatting tests --
+
+    /// Helper: simulates the capture-pane output logic from handle_capture_pane
+    fn format_capture_output(raw: &[u8], start_line: Option<i64>) -> String {
+        let text = String::from_utf8_lossy(raw);
+        match start_line {
+            Some(n) if n < 0 => {
+                let lines: Vec<&str> = text.lines().collect();
+                let count = (-n) as usize;
+                let skip = lines.len().saturating_sub(count);
+                lines[skip..].join("\n")
+            }
+            _ => text.into_owned(),
+        }
+    }
+
+    #[test]
+    fn test_capture_pane_empty_scrollback() {
+        let output = format_capture_output(b"", None);
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_capture_pane_empty_scrollback_with_start_line() {
+        let output = format_capture_output(b"", Some(-10));
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_capture_pane_start_line_exceeds_buffer() {
+        let raw = b"line1\nline2\nline3";
+        let output = format_capture_output(raw, Some(-100));
+        assert_eq!(output, "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_capture_pane_start_line_last_two() {
+        let raw = b"line1\nline2\nline3\nline4\nline5";
+        let output = format_capture_output(raw, Some(-2));
+        assert_eq!(output, "line4\nline5");
+    }
+
+    #[test]
+    fn test_capture_pane_start_line_last_one() {
+        let raw = b"first\nsecond\nthird";
+        let output = format_capture_output(raw, Some(-1));
+        assert_eq!(output, "third");
+    }
+
+    #[test]
+    fn test_capture_pane_invalid_utf8() {
+        let raw: Vec<u8> = vec![
+            b'h', b'e', b'l', b'l', b'o', b'\n', 0xFF, 0xFE, b'\n', b'w', b'o', b'r', b'l', b'd',
+        ];
+        let output = format_capture_output(&raw, Some(-2));
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1], "world");
     }
 }
