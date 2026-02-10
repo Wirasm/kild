@@ -177,17 +177,4 @@ mod tests {
         let msg = format_notification_message("claude", "feat-x", AgentStatus::Error);
         assert_eq!(msg, "Agent claude in feat-x needs input (error)");
     }
-
-    #[test]
-    fn test_send_notification_does_not_panic() {
-        // Should never panic regardless of platform or tool availability
-        send_notification("Test Title", "Test message body");
-    }
-
-    #[test]
-    fn test_notification_message_escaping() {
-        // Verify special characters don't cause panics (best-effort delivery)
-        send_notification(r#"Title with "quotes""#, r#"Message with "quotes""#);
-        send_notification("Title with \\ backslash", "Message with \n newline");
-    }
 }

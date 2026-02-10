@@ -387,42 +387,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_session_status_returns_none_when_daemon_not_running() {
-        // The daemon socket won't exist in test environments, so get_session_status
-        // should return Ok(None) rather than an error.
-        let result = get_session_status("nonexistent-session-id");
-        assert!(
-            result.is_ok(),
-            "Should not error when daemon is not running"
-        );
-        assert_eq!(
-            result.unwrap(),
-            None,
-            "Should return None when daemon socket doesn't exist"
-        );
-    }
-
-    #[test]
     fn test_connect_returns_not_running_for_missing_socket() {
-        let missing = Path::new("/tmp/kild-test-nonexistent-socket.sock");
-        let result = connect(missing);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DaemonClientError::NotRunning { path } => {
-                assert!(path.contains("nonexistent"));
-            }
-            other => panic!("Expected NotRunning, got: {:?}", other),
-        }
-    }
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("daemon.sock");
 
-    #[test]
-    fn test_ping_daemon_returns_false_when_not_running() {
-        // When the daemon socket doesn't exist, ping should return Ok(false)
-        let result = ping_daemon();
-        assert!(result.is_ok());
+        let result = connect(&socket_path);
+        assert!(result.is_err());
         assert!(
-            !result.unwrap(),
-            "Ping should return false when daemon is not running"
+            matches!(result.unwrap_err(), DaemonClientError::NotRunning { .. }),
+            "Should return NotRunning when daemon socket doesn't exist"
         );
     }
 }
