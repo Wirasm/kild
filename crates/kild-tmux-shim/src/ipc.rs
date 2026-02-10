@@ -36,7 +36,7 @@ fn connect() -> Result<UnixStream, ShimError> {
 }
 
 fn send_request(
-    stream: &mut UnixStream,
+    mut stream: UnixStream,
     request: serde_json::Value,
     operation: &str,
 ) -> Result<serde_json::Value, ShimError> {
@@ -46,7 +46,7 @@ fn send_request(
     writeln!(stream, "{}", msg)?;
     stream.flush()?;
 
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
@@ -113,8 +113,8 @@ pub fn create_session(
         "use_login_shell": use_login_shell,
     });
 
-    let mut stream = connect()?;
-    let response = send_request(&mut stream, request, "create_session")?;
+    let stream = connect()?;
+    let response = send_request(stream, request, "create_session")?;
 
     let daemon_session_id = response
         .get("session")
@@ -147,8 +147,8 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
         "data": encoded,
     });
 
-    let mut stream = connect()?;
-    send_request(&mut stream, request, "write_stdin")?;
+    let stream = connect()?;
+    send_request(stream, request, "write_stdin")?;
 
     debug!(
         event = "shim.ipc.write_stdin_completed",
@@ -171,8 +171,8 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
         "force": force,
     });
 
-    let mut stream = connect()?;
-    send_request(&mut stream, request, "destroy_session")?;
+    let stream = connect()?;
+    send_request(stream, request, "destroy_session")?;
 
     debug!(
         event = "shim.ipc.destroy_session_completed",
@@ -198,8 +198,8 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
         "cols": cols,
     });
 
-    let mut stream = connect()?;
-    send_request(&mut stream, request, "resize_pty")?;
+    let stream = connect()?;
+    send_request(stream, request, "resize_pty")?;
 
     debug!(
         event = "shim.ipc.resize_pty_completed",
@@ -292,7 +292,7 @@ mod tests {
         });
 
         // Connect to mock server
-        let mut stream = UnixStream::connect(&sock_path).unwrap();
+        let stream = UnixStream::connect(&sock_path).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -301,7 +301,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request, "test_op");
+        let result = send_request(stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("session_not_found"), "got: {}", err);
@@ -326,7 +326,7 @@ mod tests {
             drop(stream);
         });
 
-        let mut stream = UnixStream::connect(&sock_path).unwrap();
+        let stream = UnixStream::connect(&sock_path).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -335,7 +335,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request, "test_op");
+        let result = send_request(stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("empty response"), "got: {}", err);
@@ -362,7 +362,7 @@ mod tests {
             stream.flush().unwrap();
         });
 
-        let mut stream = UnixStream::connect(&sock_path).unwrap();
+        let stream = UnixStream::connect(&sock_path).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -371,7 +371,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request, "test_op");
+        let result = send_request(stream, request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid JSON"), "got: {}", err);
@@ -399,7 +399,7 @@ mod tests {
             stream.flush().unwrap();
         });
 
-        let mut stream = UnixStream::connect(&sock_path).unwrap();
+        let stream = UnixStream::connect(&sock_path).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -408,7 +408,7 @@ mod tests {
             .unwrap();
 
         let request = serde_json::json!({"type": "test"});
-        let result = send_request(&mut stream, request, "test_op");
+        let result = send_request(stream, request, "test_op");
         assert!(result.is_ok());
         let val = result.unwrap();
         assert_eq!(val["type"], "ok");

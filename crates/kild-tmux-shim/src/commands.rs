@@ -79,7 +79,10 @@ fn build_child_env() -> HashMap<String, String> {
         let kild_bin = home.join(".kild").join("bin");
         let current_path = env_vars.get("PATH").cloned().unwrap_or_default();
         let kild_bin_str = kild_bin.to_string_lossy();
-        if !current_path.contains(kild_bin_str.as_ref()) {
+        let already_present = current_path
+            .split(':')
+            .any(|component| component == kild_bin_str.as_ref());
+        if !already_present {
             env_vars.insert(
                 "PATH".to_string(),
                 format!("{}:{}", kild_bin_str, current_path),

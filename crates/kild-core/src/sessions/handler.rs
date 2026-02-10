@@ -252,8 +252,23 @@ pub fn create_session(
                 eprintln!("Agent teams will not work in this session.");
             }
 
-            // Pre-emptive cleanup: remove stale daemon session if previous destroy failed
-            let _ = crate::daemon::client::destroy_daemon_session(&session_id, true);
+            // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
+            // Daemon-not-running and session-not-found are expected (normal case).
+            match crate::daemon::client::destroy_daemon_session(&session_id, true) {
+                Ok(()) => {
+                    debug!(
+                        event = "core.session.preemptive_cleanup_completed",
+                        session_id = session_id,
+                    );
+                }
+                Err(e) => {
+                    debug!(
+                        event = "core.session.preemptive_cleanup_skipped",
+                        session_id = session_id,
+                        error = %e,
+                    );
+                }
+            }
 
             let (cmd, cmd_args, env_vars, use_login_shell) =
                 build_daemon_create_request(&validated.command, &validated.agent, &session_id)?;
@@ -934,6 +949,11 @@ fn build_daemon_create_request(
             event = "core.session.zdotdir_setup_failed",
             session_id = session_id,
             error = %e,
+        );
+        eprintln!(
+            "Warning: Failed to set up shell PATH wrapper: {}. \
+             The tmux shim may not be found by agents (macOS path_helper can reorder PATH).",
+            e
         );
     } else {
         env_vars.push(("ZDOTDIR".to_string(), zdotdir.display().to_string()));
