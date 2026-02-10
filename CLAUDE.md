@@ -73,6 +73,8 @@ cargo run -p kild -- cd my-branch                # Print worktree path for shell
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (additive)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
 cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
+cargo run -p kild -- open my-branch --daemon     # Open in daemon-owned PTY
+cargo run -p kild -- open my-branch --no-daemon  # Force external terminal (override config)
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
@@ -442,11 +444,13 @@ Runtime mode resolution for `kild create`:
 
 Sessions created with `--daemon` store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect (Ctrl+C to detach).
 
-**Experimental status (Phase 1b):** The daemon runtime is experimental. Known limitations:
-- `auto_start` config option is not yet implemented
-- Daemon runs in foreground only (`kild daemon start --foreground`)
-- Scrollback replay on attach is not yet implemented
-- PTY exit notification to session manager is incomplete
+Runtime mode resolution for `kild open`:
+1. `--daemon` flag → Daemon mode
+2. `--no-daemon` flag → Terminal mode
+3. Config `daemon.enabled = true` → Daemon mode
+4. Default → Terminal mode
+
+**Daemon status:** The daemon runtime supports both foreground (`--foreground`) and background modes, auto-start via config, scrollback replay on attach, PTY exit notification with session state transitions, lazy status sync on `kild list`/`kild status` (daemon-managed sessions auto-update to Stopped when daemon reports exit), and `kild open` with daemon runtime mode.
 
 ## Error Handling
 

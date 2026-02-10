@@ -6,15 +6,20 @@ use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, OpenedKild, format_partial_failure_error, resolve_open_mode,
+    FailedOperation, OpenedKild, format_partial_failure_error, load_config_with_warning,
+    resolve_open_mode, resolve_runtime_mode,
 };
 
 pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let mode = resolve_open_mode(matches);
+    let config = load_config_with_warning();
+    let daemon_flag = matches.get_flag("daemon");
+    let no_daemon_flag = matches.get_flag("no-daemon");
+    let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, &config);
 
     // Check for --all flag first
     if matches.get_flag("all") {
-        return handle_open_all(mode);
+        return handle_open_all(mode, runtime_mode);
     }
 
     // Single branch operation
@@ -24,7 +29,12 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    match session_ops::open_session(branch, mode.clone()) {
+    // Ensure daemon is running if daemon mode is requested
+    if runtime_mode == kild_core::RuntimeMode::Daemon {
+        super::helpers::ensure_daemon_running(&config)?;
+    }
+
+    match session_ops::open_session(branch, mode.clone(), runtime_mode) {
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
@@ -56,8 +66,17 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 }
 
 /// Handle `kild open --all` - open agents in all stopped kilds
-fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_open_all(
+    mode: kild_core::OpenMode,
+    runtime_mode: kild_core::RuntimeMode,
+) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", mode = ?mode);
+
+    // Ensure daemon is running once if daemon mode is requested
+    if runtime_mode == kild_core::RuntimeMode::Daemon {
+        let config = load_config_with_warning();
+        super::helpers::ensure_daemon_running(&config)?;
+    }
 
     let sessions = session_ops::list_sessions()?;
     let stopped: Vec<_> = sessions
@@ -75,7 +94,7 @@ fn handle_open_all(mode: kild_core::OpenMode) -> Result<(), Box<dyn std::error::
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in stopped {
-        match session_ops::open_session(&session.branch, mode.clone()) {
+        match session_ops::open_session(&session.branch, mode.clone(), runtime_mode.clone()) {
             Ok(s) => {
                 info!(
                     event = "cli.open_completed",

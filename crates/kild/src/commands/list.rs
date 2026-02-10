@@ -12,7 +12,12 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     info!(event = "cli.list_started", json_output = json_output);
 
     match session_ops::list_sessions() {
-        Ok(sessions) => {
+        Ok(mut sessions) => {
+            // Sync daemon-managed sessions: if daemon says stopped, update JSON
+            for session in &mut sessions {
+                session_ops::sync_daemon_session_status(session);
+            }
+
             let session_count = sessions.len();
 
             if json_output {

@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Result of creating a PTY session in the daemon.
 #[derive(Debug, Clone)]
@@ -283,6 +283,83 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
     }
 }
 
+/// Query the daemon for a session's current status.
+///
+/// Returns `Ok(Some("running"))` or `Ok(Some("stopped"))` if the daemon is
+/// reachable and knows about this session. Returns `Ok(None)` if the daemon
+/// is not running or the session is not found in the daemon.
+/// Returns `Err(...)` for unexpected failures (connection errors, protocol errors).
+pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, DaemonClientError> {
+    let socket_path = crate::daemon::socket_path();
+
+    debug!(
+        event = "core.daemon.get_session_status_started",
+        daemon_session_id = daemon_session_id
+    );
+
+    let request = serde_json::json!({
+        "id": format!("status-{}", daemon_session_id),
+        "type": "get_session",
+        "session_id": daemon_session_id,
+    });
+
+    let mut stream = match connect(&socket_path) {
+        Ok(s) => s,
+        Err(DaemonClientError::NotRunning { .. }) => {
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                result = "daemon_not_running"
+            );
+            return Ok(None);
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    // Use a short timeout for status queries
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+
+    match send_request(&mut stream, request) {
+        Ok(response) => {
+            // Response is DaemonMessage::SessionInfo { session: { status: "running"|"stopped" } }
+            let status = response
+                .get("session")
+                .and_then(|s| s.get("status"))
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                status = ?status
+            );
+
+            Ok(status)
+        }
+        Err(DaemonClientError::DaemonError { ref message })
+            if message.contains("not_found") || message.contains("unknown_session") =>
+        {
+            // Session not found in daemon — expected when session was cleaned up
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                result = "session_not_found"
+            );
+            Ok(None)
+        }
+        Err(e) => {
+            warn!(
+                event = "core.daemon.get_session_status_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e
+            );
+            Err(e)
+        }
+    }
+}
+
 /// Request the daemon to shut down gracefully.
 pub fn request_shutdown() -> Result<(), DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
@@ -299,4 +376,49 @@ pub fn request_shutdown() -> Result<(), DaemonClientError> {
 
     info!(event = "core.daemon.shutdown_completed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_session_status_returns_none_when_daemon_not_running() {
+        // The daemon socket won't exist in test environments, so get_session_status
+        // should return Ok(None) rather than an error.
+        let result = get_session_status("nonexistent-session-id");
+        assert!(
+            result.is_ok(),
+            "Should not error when daemon is not running"
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "Should return None when daemon socket doesn't exist"
+        );
+    }
+
+    #[test]
+    fn test_connect_returns_not_running_for_missing_socket() {
+        let missing = Path::new("/tmp/kild-test-nonexistent-socket.sock");
+        let result = connect(missing);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DaemonClientError::NotRunning { path } => {
+                assert!(path.contains("nonexistent"));
+            }
+            other => panic!("Expected NotRunning, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_ping_daemon_returns_false_when_not_running() {
+        // When the daemon socket doesn't exist, ping should return Ok(false)
+        let result = ping_daemon();
+        assert!(result.is_ok());
+        assert!(
+            !result.unwrap(),
+            "Ping should return false when daemon is not running"
+        );
+    }
 }

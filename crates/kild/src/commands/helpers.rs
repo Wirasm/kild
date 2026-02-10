@@ -92,7 +92,11 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::err
     }
 
     if !config.daemon_auto_start() {
-        return Err("Daemon is not running. Start it with 'kild daemon start'.".into());
+        return Err("Daemon is not running. To fix this, either:\n  \
+             - Start it manually: kild daemon start\n  \
+             - Enable auto-start in config: [daemon] auto_start = true\n  \
+             - Use --no-daemon to launch in an external terminal instead"
+            .into());
     }
 
     eprintln!("Starting daemon...");
@@ -101,7 +105,7 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::err
     std::process::Command::new(&daemon_binary)
         .args(["daemon", "start", "--foreground"])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
         .stdin(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
@@ -116,7 +120,17 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::err
             return Ok(());
         }
         if start.elapsed() > timeout {
-            return Err("Daemon started but not ready after 5s".into());
+            if socket_path.exists() {
+                return Err(
+                    "Daemon socket exists but not responding to ping after 5s.\n\
+                     Try: kild daemon stop && kild daemon start"
+                        .into(),
+                );
+            } else {
+                return Err("Daemon process spawned but socket not created after 5s.\n\
+                     Check daemon logs: kild daemon start --foreground"
+                    .into());
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }

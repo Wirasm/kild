@@ -130,6 +130,7 @@ mod tests {
             .dispatch(Command::OpenKild {
                 branch: "feat".to_string(),
                 mode: crate::state::types::OpenMode::DefaultAgent,
+                runtime_mode: crate::state::types::RuntimeMode::Terminal,
             })
             .unwrap();
         assert!(matches!(&events[0], Event::KildOpened { branch, .. } if branch == "feat"));
@@ -232,6 +233,7 @@ mod tests {
             Command::OpenKild {
                 branch: "b".to_string(),
                 mode: crate::state::types::OpenMode::DefaultAgent,
+                runtime_mode: crate::state::types::RuntimeMode::Terminal,
             },
             Command::StopKild {
                 branch: "b".to_string(),

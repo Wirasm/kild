@@ -114,6 +114,12 @@ kild open <branch> --agent <agent>
 # Open bare terminal with $SHELL instead of an agent
 kild open <branch> --no-agent
 
+# Launch in daemon-owned PTY
+kild open <branch> --daemon
+
+# Force external terminal window (override config default)
+kild open <branch> --no-daemon
+
 # Open agents in all stopped kilds
 kild open --all
 
@@ -240,10 +246,7 @@ kild attach <branch>
 # Press Ctrl+C to detach
 ```
 
-**Note**: Daemon mode is experimental (Phase 1b). Known limitations:
-- `auto_start` config option not yet implemented
-- Daemon runs in foreground only with `--foreground` flag
-- Scrollback replay on attach not yet implemented
+**Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands.
 
 ### Stop a kild
 ```bash

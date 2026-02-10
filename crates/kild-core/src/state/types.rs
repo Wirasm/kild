@@ -67,6 +67,8 @@ pub enum Command {
         branch: String,
         /// What to launch: default agent, specific agent, or bare shell.
         mode: OpenMode,
+        /// How the agent process should be hosted (terminal window or daemon PTY).
+        runtime_mode: RuntimeMode,
     },
     /// Stop the agent process in a kild without destroying it.
     StopKild { branch: String },
@@ -147,6 +149,7 @@ mod tests {
             Command::OpenKild {
                 branch: "feature".to_string(),
                 mode: OpenMode::DefaultAgent,
+                runtime_mode: RuntimeMode::Terminal,
             },
             Command::StopKild {
                 branch: "feature".to_string(),
@@ -199,6 +202,7 @@ mod tests {
             Command::OpenKild {
                 branch: "test".to_string(),
                 mode: OpenMode::Agent("gemini".to_string()),
+                runtime_mode: RuntimeMode::Terminal,
             },
             Command::StopKild {
                 branch: "test".to_string(),
