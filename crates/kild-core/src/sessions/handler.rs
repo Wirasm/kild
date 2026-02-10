@@ -244,13 +244,34 @@ pub fn create_session(
             // The daemon is a pure PTY manager — it spawns a command in a
             // working directory. Worktree creation and session persistence
             // are handled here in kild-core.
+
+            // Split "claude --dangerously-skip-permissions" into ["claude", "--dangerously-skip-permissions"]
+            // CommandBuilder::new() expects just the executable, not the full command string.
+            let parts: Vec<&str> = validated.command.split_whitespace().collect();
+            let (cmd, cmd_args) = parts
+                .split_first()
+                .ok_or_else(|| SessionError::DaemonError {
+                    message: "Empty command string".to_string(),
+                })?;
+            let cmd_args: Vec<String> = cmd_args.iter().map(|s| s.to_string()).collect();
+
+            // Inherit essential env vars so the daemon PTY can find executables.
+            // The daemon process itself has env vars, but portable-pty's
+            // CommandBuilder uses env vars passed explicitly via the IPC message.
+            let mut env_vars = Vec::new();
+            for key in &["PATH", "HOME", "SHELL", "USER", "LANG", "TERM"] {
+                if let Ok(val) = std::env::var(key) {
+                    env_vars.push((key.to_string(), val));
+                }
+            }
+
             let daemon_request = crate::daemon::client::DaemonCreateRequest {
                 request_id: &spawn_id,
                 session_id: &session_id,
                 working_directory: &worktree.path,
-                command: &validated.command,
-                args: &[],
-                env_vars: &[],
+                command: cmd,
+                args: &cmd_args,
+                env_vars: &env_vars,
                 rows: 24,
                 cols: 80,
             };
