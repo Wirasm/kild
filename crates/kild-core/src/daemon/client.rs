@@ -63,7 +63,12 @@ fn connect(socket_path: &Path) -> Result<UnixStream, DaemonClientError> {
     Ok(stream)
 }
 
-/// Send a JSONL request and read the response line.
+/// Send a request and read one response over a JSONL connection.
+///
+/// Creates a new BufReader per call. This is safe because each public method
+/// opens a fresh connection via `connect()`. Do NOT reuse a stream across
+/// multiple `send_request` calls — BufReader's internal buffer would consume
+/// data meant for subsequent reads.
 fn send_request(
     stream: &mut UnixStream,
     request: serde_json::Value,

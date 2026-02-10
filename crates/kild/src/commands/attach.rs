@@ -168,13 +168,13 @@ fn forward_stdin_to_daemon(stream: &mut UnixStream, session_id: &str) {
         let serialized = match serde_json::to_string(&input_msg) {
             Ok(s) => s,
             Err(e) => {
-                error!(event = "cli.attach.stdin_serialize_failed", error = %e);
+                error!(event = "cli.attach.stdin_serialize_failed", error = %e, session_id = %session_id);
                 eprintln!("\r\nError: Failed to encode input. Detaching.");
                 break;
             }
         };
         if let Err(e) = writeln!(stream, "{}", serialized) {
-            error!(event = "cli.attach.stdin_write_failed", error = %e);
+            error!(event = "cli.attach.stdin_write_failed", error = %e, session_id = %session_id);
             eprintln!("\r\nError: Connection to daemon lost. Detaching.");
             break;
         }

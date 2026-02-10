@@ -229,9 +229,19 @@ impl SessionManager {
             return Err(DaemonError::SessionNotFound(session_id.to_string()));
         }
 
-        // PTY may already be gone (e.g., process exited naturally)
-        if self.pty_manager.get(session_id).is_some() {
-            self.pty_manager.destroy(session_id)?;
+        // Destroy PTY (may already be gone if process exited naturally)
+        match self.pty_manager.destroy(session_id) {
+            Ok(()) => {}
+            Err(DaemonError::SessionNotFound(_)) => {
+                // Expected: PTY already removed (process exited naturally)
+            }
+            Err(e) => {
+                warn!(
+                    event = "daemon.session.pty_destroy_warning",
+                    session_id = session_id,
+                    error = %e,
+                );
+            }
         }
 
         if let Some(session) = self.sessions.get_mut(session_id) {
@@ -248,8 +258,9 @@ impl SessionManager {
 
     /// Destroy a session entirely.
     ///
-    /// When `force` is true, PTY kill failures are logged but don't block cleanup.
-    /// When `force` is false, a PTY kill failure returns an error (session is still removed).
+    /// The session state is always removed, regardless of the force flag.
+    /// When `force` is true, PTY kill failures are logged but the operation succeeds.
+    /// When `force` is false, PTY kill failures return an error after session removal.
     pub fn destroy_session(&mut self, session_id: &str, force: bool) -> Result<(), DaemonError> {
         info!(
             event = "daemon.session.destroy_started",

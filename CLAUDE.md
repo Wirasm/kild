@@ -267,13 +267,16 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 |-------|-------|-------------|
 | `cli` | `crates/kild/` | User-facing CLI commands |
 | `core` | `crates/kild-core/` | Core library logic |
+| `daemon` | `crates/kild-daemon/` | Daemon server and PTY management |
 | `ui` | `crates/kild-ui/` | GPUI native GUI |
 | `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
 | `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`
+**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`
 
 Note: `projects` domain events are `core.projects.*` (in kild-core), while UI-specific events use `ui.*` prefix.
+
+Note: `core.daemon.*` = daemon client IPC (in kild-core), `daemon.*` = daemon server/PTY operations (in kild-daemon).
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
@@ -358,6 +361,9 @@ grep 'peek\.core\.screenshot\.' # Screenshot capture events
 grep 'peek\.core\.interact\.'   # UI interaction events
 grep 'peek\.core\.element\.'    # Element enumeration events
 
+# Daemon server events
+grep 'event":"daemon\.'   # Daemon server events
+
 # By outcome
 grep '_failed"'         # All failures
 grep '_completed"'      # All completions
@@ -425,6 +431,12 @@ Runtime mode resolution for `kild create`:
 4. Default → Terminal mode
 
 Sessions created with `--daemon` store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect (Ctrl+C to detach).
+
+**Experimental status (Phase 1b):** The daemon runtime is experimental. Known limitations:
+- `auto_start` config option is not yet implemented
+- Daemon runs in foreground only (`kild daemon start --foreground`)
+- Scrollback replay on attach is not yet implemented
+- PTY exit notification to session manager is incomplete
 
 ## Error Handling
 

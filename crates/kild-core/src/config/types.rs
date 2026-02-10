@@ -114,43 +114,38 @@ impl Default for KildConfig {
 /// and auto-start behavior. This struct is crate-internal; the CLI accesses
 /// these values via `KildConfig::is_daemon_enabled()` and
 /// `KildConfig::daemon_auto_start()`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Fields are `Option<bool>` to support proper config hierarchy merging:
+/// only explicitly-set values override lower-priority configs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct DaemonRuntimeConfig {
     /// Whether daemon mode is the default for new sessions.
     /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
     /// Default: false
-    #[serde(default)]
-    pub(crate) enabled: bool,
+    pub(crate) enabled: Option<bool>,
 
     /// Auto-start the daemon if not running when daemon mode is requested.
     /// Default: true
-    #[serde(default = "default_daemon_auto_start")]
-    pub(crate) auto_start: bool,
-}
-
-fn default_daemon_auto_start() -> bool {
-    true
-}
-
-impl Default for DaemonRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            auto_start: default_daemon_auto_start(),
-        }
-    }
+    pub(crate) auto_start: Option<bool>,
 }
 
 impl DaemonRuntimeConfig {
-    /// Merge two daemon runtime configs. Override takes precedence.
+    /// Whether daemon mode is the default for new sessions. Default: false.
+    pub(crate) fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(false)
+    }
+
+    /// Whether to auto-start the daemon if not running. Default: true.
+    pub(crate) fn auto_start(&self) -> bool {
+        self.auto_start.unwrap_or(true)
+    }
+
+    /// Merge two daemon runtime configs. Override takes precedence for set fields.
     pub(crate) fn merge(base: &Self, override_config: &Self) -> Self {
         Self {
-            enabled: override_config.enabled || base.enabled,
-            auto_start: if override_config.auto_start {
-                true
-            } else {
-                base.auto_start
-            },
+            enabled: override_config.enabled.or(base.enabled),
+            auto_start: override_config.auto_start.or(base.auto_start),
         }
     }
 }

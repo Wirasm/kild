@@ -13,8 +13,8 @@ pub struct ManagedPty {
     master: Box<dyn MasterPty + Send>,
     /// Child process handle. Used for wait/kill.
     child: Box<dyn Child + Send + Sync>,
-    /// Writer to PTY stdin. Wrapped in Arc<Mutex<>> because take_writer()
-    /// can only be called once, but we need to write from multiple contexts.
+    /// Writer to PTY stdin. Wrapped in Arc<Mutex<>> for shared mutable access
+    /// from multiple threads. Obtained once via take_writer() during creation.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     /// Current PTY dimensions.
     size: PtySize,
@@ -151,7 +151,7 @@ impl PtyManager {
             cols = cols,
         );
 
-        let child = pair
+        let mut child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| DaemonError::PtyError(format!("spawn: {}", e)))?;
@@ -159,10 +159,13 @@ impl PtyManager {
         let pid = child.process_id();
 
         // Take the writer once (portable-pty only allows one take_writer call)
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| DaemonError::PtyError(format!("take writer: {}", e)))?;
+        let writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = child.kill();
+                return Err(DaemonError::PtyError(format!("take writer: {}", e)));
+            }
+        };
 
         let managed = ManagedPty {
             master: pair.master,

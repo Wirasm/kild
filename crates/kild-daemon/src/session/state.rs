@@ -111,11 +111,12 @@ impl DaemonSession {
 
     /// Transition to Running state with a broadcast sender for PTY output.
     pub fn set_running(&mut self, output_tx: broadcast::Sender<Vec<u8>>, pty_pid: Option<u32>) {
-        debug_assert!(
-            matches!(self.state, SessionState::Creating),
-            "set_running called on non-Creating session (state: {:?})",
-            self.state
-        );
+        if !matches!(self.state, SessionState::Creating) {
+            panic!(
+                "BUG: set_running called on non-Creating session (state: {:?})",
+                self.state
+            );
+        }
         self.state = SessionState::Running;
         self.output_tx = Some(output_tx);
         self.pty_pid = pty_pid;
@@ -123,15 +124,22 @@ impl DaemonSession {
 
     /// Transition to Stopped state, clearing PTY resources.
     /// Idempotent: calling on an already-stopped session is a no-op.
+    ///
+    /// # Panics
+    /// Panics if called when state is neither Running, Creating, nor Stopped.
     pub fn set_stopped(&mut self) {
         if self.state == SessionState::Stopped {
             return;
         }
-        debug_assert!(
-            matches!(self.state, SessionState::Running | SessionState::Creating),
-            "set_stopped called from unexpected state: {:?}",
-            self.state
-        );
+        if !matches!(
+            self.state,
+            SessionState::Running | SessionState::Creating | SessionState::Stopped
+        ) {
+            panic!(
+                "BUG: set_stopped called from unexpected state: {:?}",
+                self.state
+            );
+        }
         self.state = SessionState::Stopped;
         self.output_tx = None;
         self.pty_pid = None;

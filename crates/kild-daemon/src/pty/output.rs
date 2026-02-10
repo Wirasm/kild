@@ -125,13 +125,14 @@ pub fn spawn_pty_reader(
                         Ok(mut sb) => sb.push(&data),
                         Err(e) => {
                             error!(
-                                event = "daemon.pty.scrollback_lock_failed",
+                                event = "daemon.pty.scrollback_lock_poisoned",
                                 session_id = session_id,
                                 error = %e,
-                                "Scrollback mutex poisoned, terminal history may be incomplete",
+                                "Mutex poisoned, clearing scrollback to avoid corrupt data",
                             );
-                            // Recover: a poisoned mutex still holds valid data
-                            e.into_inner().push(&data);
+                            let mut sb = e.into_inner();
+                            sb.clear();
+                            sb.push(&data);
                         }
                     }
                     // Ignore send errors — no receivers is fine
@@ -158,9 +159,10 @@ pub fn spawn_pty_reader(
                 })
                 .is_err()
         {
-            error!(
-                event = "daemon.pty.exit_notification_failed",
+            debug!(
+                event = "daemon.pty.exit_notification_dropped",
                 session_id = session_id,
+                "PTY exit notification dropped (daemon shutting down)",
             );
         }
     })

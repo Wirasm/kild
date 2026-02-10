@@ -82,11 +82,11 @@ impl KildConfig {
     ///
     /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
     pub fn is_daemon_enabled(&self) -> bool {
-        self.daemon.enabled
+        self.daemon.enabled()
     }
 
     /// Whether to auto-start the daemon if not running.
     pub fn daemon_auto_start(&self) -> bool {
-        self.daemon.auto_start
+        self.daemon.auto_start()
     }
 }
