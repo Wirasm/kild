@@ -1,4 +1,9 @@
+pub mod autostart;
 pub mod client;
+pub mod errors;
+
+pub use autostart::ensure_daemon_running;
+pub use errors::DaemonAutoStartError;
 
 use std::path::PathBuf;
 

@@ -84,58 +84,6 @@ pub fn format_partial_failure_error(operation: &str, failed: usize, total: usize
     )
 }
 
-/// Ensure the daemon is running. If not running and auto_start is enabled,
-/// spawns the daemon in the background and waits for it to become ready.
-pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), Box<dyn std::error::Error>> {
-    if kild_core::daemon::client::ping_daemon().unwrap_or(false) {
-        return Ok(());
-    }
-
-    if !config.daemon_auto_start() {
-        return Err("Daemon is not running. To fix this, either:\n  \
-             - Start it manually: kild daemon start\n  \
-             - Enable auto-start in config: [daemon] auto_start = true\n  \
-             - Use --no-daemon to launch in an external terminal instead"
-            .into());
-    }
-
-    eprintln!("Starting daemon...");
-
-    let daemon_binary = std::env::current_exe()?;
-    std::process::Command::new(&daemon_binary)
-        .args(["daemon", "start", "--foreground"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::inherit())
-        .stdin(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Failed to start daemon: {}", e))?;
-
-    let socket_path = kild_core::daemon::socket_path();
-    let timeout = std::time::Duration::from_secs(5);
-    let start = std::time::Instant::now();
-
-    loop {
-        if socket_path.exists() && kild_core::daemon::client::ping_daemon().unwrap_or(false) {
-            eprintln!("Daemon started.");
-            return Ok(());
-        }
-        if start.elapsed() > timeout {
-            if socket_path.exists() {
-                return Err(
-                    "Daemon socket exists but not responding to ping after 5s.\n\
-                     Try: kild daemon stop && kild daemon start"
-                        .into(),
-                );
-            } else {
-                return Err("Daemon process spawned but socket not created after 5s.\n\
-                     Check daemon logs: kild daemon start --foreground"
-                    .into());
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
 /// Resolve runtime mode from CLI flags and config.
 ///
 /// Priority: --daemon / --no-daemon flags > [daemon] enabled config > Terminal default

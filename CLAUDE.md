@@ -205,7 +205,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
-- `daemon/` - Daemon client for IPC communication (sync Unix socket client)
+- `daemon/` - Daemon client for IPC communication (sync Unix socket client) and auto-start logic
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
 - `config/` - Hierarchical TOML config (defaults → user → project → CLI)
@@ -303,7 +303,7 @@ UI-specific domains: `terminal` (for kild-ui terminal rendering), `input` (for k
 
 Note: `projects` domain events are `core.projects.*` (in kild-core), while UI-specific events use `ui.*` prefix.
 
-Note: `core.daemon.*` = daemon client IPC (in kild-core), `daemon.*` = daemon server/PTY operations (in kild-daemon).
+Note: `core.daemon.*` = daemon client IPC and auto-start (in kild-core), `daemon.*` = daemon server/PTY operations (in kild-daemon).
 
 Daemon server sub-domains: `session`, `pty`, `server`, `connection`, `client`, `pid`, `config`
 
@@ -345,6 +345,12 @@ debug!(event = "core.terminal.applescript_executing", terminal = terminal_name);
 info!(event = "ui.watcher.started", path = %sessions_dir.display());
 warn!(event = "ui.watcher.create_failed", error = %e, "File watcher unavailable");
 debug!(event = "ui.watcher.event_detected", kind = ?event.kind, paths = ?event.paths);
+
+// Daemon auto-start (core layer)
+info!(event = "core.daemon.auto_start_started");
+info!(event = "core.daemon.auto_start_completed");
+error!(event = "core.daemon.auto_start_failed", reason = "child_exited", status = %status);
+warn!(event = "core.daemon.ping_check_failed", error = %e);
 
 // CLI daemon operations
 info!(event = "cli.daemon.start_started", foreground = foreground);

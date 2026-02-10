@@ -30,11 +30,6 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    // Ensure daemon is running if daemon mode is requested
-    if runtime_mode == kild_core::RuntimeMode::Daemon {
-        super::helpers::ensure_daemon_running(&config)?;
-    }
-
     match session_ops::open_session(branch, mode.clone(), runtime_mode, resume) {
         Ok(session) => {
             match mode {
@@ -77,12 +72,6 @@ fn handle_open_all(
     resume: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", mode = ?mode);
-
-    // Ensure daemon is running once if daemon mode is requested
-    if runtime_mode == kild_core::RuntimeMode::Daemon {
-        let config = load_config_with_warning();
-        super::helpers::ensure_daemon_running(&config)?;
-    }
 
     let sessions = session_ops::list_sessions()?;
     let stopped: Vec<_> = sessions

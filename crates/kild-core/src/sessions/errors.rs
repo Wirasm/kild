@@ -75,6 +75,12 @@ pub enum SessionError {
     #[error("Daemon error: {message}")]
     DaemonError { message: String },
 
+    #[error("Daemon auto-start failed: {source}")]
+    DaemonAutoStartFailed {
+        #[from]
+        source: crate::daemon::errors::DaemonAutoStartError,
+    },
+
     #[error("Agent '{agent}' does not support session resume. Only 'claude' supports --resume.")]
     ResumeUnsupported { agent: String },
 
@@ -107,12 +113,16 @@ impl KildError for SessionError {
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
             SessionError::DaemonError { .. } => "DAEMON_ERROR",
+            SessionError::DaemonAutoStartFailed { .. } => "DAEMON_AUTO_START_FAILED",
             SessionError::ResumeUnsupported { .. } => "RESUME_UNSUPPORTED",
             SessionError::ResumeNoSessionId { .. } => "RESUME_NO_SESSION_ID",
         }
     }
 
     fn is_user_error(&self) -> bool {
+        if let SessionError::DaemonAutoStartFailed { source } = self {
+            return source.is_user_error();
+        }
         matches!(
             self,
             SessionError::AlreadyExists { .. }
