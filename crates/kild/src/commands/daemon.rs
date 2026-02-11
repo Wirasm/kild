@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub(crate) fn handle_daemon_command(
     matches: &ArgMatches,
@@ -73,7 +73,8 @@ fn handle_daemon_start(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
                 println!("Daemon started (PID: {})", pid);
                 info!(event = "cli.daemon.start_completed", pid = pid);
             }
-            Err(_) => {
+            Err(e) => {
+                warn!(event = "cli.daemon.pid_read_failed", error = %e);
                 println!("Daemon started (PID unknown)");
                 info!(event = "cli.daemon.start_completed");
             }
@@ -125,7 +126,12 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
 
     if json {
         let status = if running {
-            let pid = read_daemon_pid().ok();
+            let pid = read_daemon_pid()
+                .map_err(|e| {
+                    warn!(event = "cli.daemon.pid_read_failed", error = %e);
+                    e
+                })
+                .ok();
             serde_json::json!({
                 "running": true,
                 "pid": pid,
@@ -140,7 +146,10 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     } else if running {
         match read_daemon_pid() {
             Ok(pid) => println!("Daemon: running (PID: {})", pid),
-            Err(_) => println!("Daemon: running (PID unknown)"),
+            Err(e) => {
+                warn!(event = "cli.daemon.pid_read_failed", error = %e);
+                println!("Daemon: running (PID unknown)");
+            }
         }
         println!("Socket: {}", kild_core::daemon::socket_path().display());
     } else {
