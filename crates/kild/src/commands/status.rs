@@ -5,6 +5,8 @@ use kild_core::events;
 use kild_core::process;
 use kild_core::session_ops;
 
+use unicode_width::UnicodeWidthStr;
+
 use super::json_types::EnrichedSession;
 
 pub(crate) fn handle_status_command(
@@ -68,7 +70,6 @@ pub(crate) fn handle_status_command(
             rows.push(("Worktree:", session.worktree_path.display().to_string()));
 
             // Git stats rows
-            let mut changes_line = None;
             if let Some(ref stats) = git_stats {
                 if let Some(ref diff) = stats.diff_stats {
                     let base = format!(
@@ -89,7 +90,6 @@ pub(crate) fn handle_status_command(
                         }
                         _ => base,
                     };
-                    changes_line = Some(line.clone());
                     rows.push(("Changes:", line));
                 }
 
@@ -162,11 +162,15 @@ pub(crate) fn handle_status_command(
                 rows.push(("Process:", "No agents tracked".to_string()));
             }
 
-            // Compute max value width
+            // Compute max value width using display width for correct Unicode alignment
             let value_width = rows
                 .iter()
-                .map(|(_, v)| v.len())
-                .chain(agent_rows.iter().map(|r| r.len()))
+                .map(|(_, v)| UnicodeWidthStr::width(v.as_str()))
+                .chain(
+                    agent_rows
+                        .iter()
+                        .map(|r| UnicodeWidthStr::width(r.as_str())),
+                )
                 .max()
                 .unwrap_or(0);
 
@@ -201,9 +205,6 @@ pub(crate) fn handle_status_command(
             }
 
             println!("└{}┘", border);
-
-            // Suppress unused variable warning
-            let _ = changes_line;
 
             info!(
                 event = "cli.status_completed",
