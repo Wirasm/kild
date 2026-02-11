@@ -7,6 +7,7 @@ use crate::terminal::{errors::TerminalError, types::SpawnConfig};
 
 #[cfg(target_os = "macos")]
 use crate::escape::applescript_escape;
+#[cfg(target_os = "macos")]
 use crate::terminal::common::{
     applescript::{close_applescript_window, execute_spawn_script, hide_applescript_window},
     escape::build_cd_command,
