@@ -3383,6 +3383,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]

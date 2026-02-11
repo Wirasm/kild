@@ -57,7 +57,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                     .iter()
                     .map(|s| session_ops::read_pr_info(&s.id))
                     .collect();
-                let formatter = crate::table::TableFormatter::new(&sessions);
+                let formatter = crate::table::TableFormatter::new(&sessions, &statuses, &pr_infos);
                 formatter.print_table(&sessions, &statuses, &pr_infos);
             }
 

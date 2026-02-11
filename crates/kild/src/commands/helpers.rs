@@ -139,65 +139,6 @@ pub fn resolve_open_mode(matches: &clap::ArgMatches) -> kild_core::OpenMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::truncate;
-
-    #[test]
-    fn test_truncate() {
-        assert_eq!(truncate("short", 10), "short     ");
-        assert_eq!(truncate("this-is-a-very-long-string", 10), "this-is...");
-        assert_eq!(truncate("exact", 5), "exact");
-    }
-
-    #[test]
-    fn test_truncate_edge_cases() {
-        assert_eq!(truncate("", 5), "     ");
-        assert_eq!(truncate("abc", 3), "abc");
-        assert_eq!(truncate("abcd", 3), "...");
-    }
-
-    #[test]
-    fn test_truncate_utf8_safety() {
-        // Test that truncation handles multi-byte UTF-8 characters safely
-        // without panicking at byte boundaries
-
-        // Emoji are 4 bytes each
-        let emoji_note = "Test 🚀 rockets";
-        let result = truncate(emoji_note, 10);
-        assert_eq!(result.chars().count(), 10);
-        assert!(result.ends_with("..."));
-
-        // Multiple emoji
-        let multi_emoji = "🎉🎊🎁🎈🎆";
-        let result = truncate(multi_emoji, 4);
-        assert_eq!(result.chars().count(), 4);
-        assert!(result.ends_with("..."));
-
-        // Mixed ASCII and emoji
-        let mixed = "Hello 世界 🌍";
-        let result = truncate(mixed, 8);
-        assert_eq!(result.chars().count(), 8);
-
-        // CJK characters (3 bytes each)
-        let cjk = "日本語テスト";
-        let result = truncate(cjk, 5);
-        assert_eq!(result.chars().count(), 5);
-        assert!(result.ends_with("..."));
-    }
-
-    #[test]
-    fn test_truncate_note_display() {
-        // Test truncation at the note column width (30 chars)
-        let long_note = "This is a very long note that exceeds thirty characters";
-        let result = truncate(long_note, 30);
-        assert_eq!(result.chars().count(), 30);
-        assert!(result.contains("..."));
-
-        // Short note should be padded
-        let short_note = "Short";
-        let result = truncate(short_note, 30);
-        assert_eq!(result.chars().count(), 30);
-        assert!(!result.contains("..."));
-    }
 
     #[test]
     fn test_load_config_with_warning_returns_valid_config() {

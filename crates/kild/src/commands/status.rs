@@ -5,8 +5,6 @@ use kild_core::events;
 use kild_core::process;
 use kild_core::session_ops;
 
-use crate::table::truncate;
-
 use super::json_types::EnrichedSession;
 
 pub(crate) fn handle_status_command(
@@ -54,24 +52,23 @@ pub(crate) fn handle_status_command(
                 return Ok(());
             }
 
-            // Human-readable table output
-            println!("📊 KILD Status: {}", branch);
-            println!("┌─────────────────────────────────────────────────────────────┐");
-            println!("│ Branch:      {:<47} │", session.branch);
-            println!(
-                "│ Status:      {:<47} │",
-                format!("{:?}", session.status).to_lowercase()
-            );
-            if let Some(ref info) = status_info {
-                println!("│ Activity:    {:<47} │", info.status);
-            }
-            println!("│ Created:     {:<47} │", session.created_at);
-            if let Some(ref note) = session.note {
-                println!("│ Note:        {} │", truncate(note, 47));
-            }
-            println!("│ Worktree:    {:<47} │", session.worktree_path.display());
+            // Collect all label-value pairs for dynamic width computation
+            let label_width = 13; // "Port Range:  " is the longest label stem
+            let mut rows: Vec<(&str, String)> = Vec::new();
 
-            // Display git stats
+            rows.push(("Branch:", session.branch.clone()));
+            rows.push(("Status:", format!("{:?}", session.status).to_lowercase()));
+            if let Some(ref info) = status_info {
+                rows.push(("Activity:", info.status.to_string()));
+            }
+            rows.push(("Created:", session.created_at.clone()));
+            if let Some(ref note) = session.note {
+                rows.push(("Note:", note.clone()));
+            }
+            rows.push(("Worktree:", session.worktree_path.display().to_string()));
+
+            // Git stats rows
+            let mut changes_line = None;
             if let Some(ref stats) = git_stats {
                 if let Some(ref diff) = stats.diff_stats {
                     let base = format!(
@@ -79,7 +76,7 @@ pub(crate) fn handle_status_command(
                         diff.insertions, diff.deletions, diff.files_changed
                     );
 
-                    let changes_line = match &stats.worktree_status {
+                    let line = match &stats.worktree_status {
                         Some(ws) if ws.uncommitted_details.is_some() => {
                             let details = ws.uncommitted_details.as_ref().unwrap();
                             format!(
@@ -92,8 +89,8 @@ pub(crate) fn handle_status_command(
                         }
                         _ => base,
                     };
-
-                    println!("│ Changes:     {} │", truncate(&changes_line, 47));
+                    changes_line = Some(line.clone());
+                    rows.push(("Changes:", line));
                 }
 
                 if let Some(ref ws) = stats.worktree_status {
@@ -108,7 +105,7 @@ pub(crate) fn handle_status_command(
                             ws.unpushed_commit_count, ws.behind_commit_count
                         )
                     };
-                    println!("│ Commits:     {:<47} │", commits_line);
+                    rows.push(("Commits:", commits_line));
                     let remote_status = if !ws.has_remote_branch {
                         "Never pushed"
                     } else if ws.unpushed_commit_count == 0
@@ -123,28 +120,25 @@ pub(crate) fn handle_status_command(
                     } else {
                         "Diverged"
                     };
-                    println!("│ Remote:      {:<47} │", remote_status);
+                    rows.push(("Remote:", remote_status.to_string()));
                 }
             }
 
-            // Display PR info (if cached)
+            // PR rows
             if let Some(ref pr) = pr_info {
-                let pr_line = format!("PR #{} ({})", pr.number, pr.state);
-                println!("│ PR:          {:<47} │", truncate(&pr_line, 47));
+                rows.push(("PR:", format!("PR #{} ({})", pr.number, pr.state)));
                 if let Some(ref ci) = pr.ci_summary {
-                    println!("│ CI:          {:<47} │", truncate(ci, 47));
+                    rows.push(("CI:", ci.clone()));
                 }
                 if let Some(ref reviews) = pr.review_summary {
-                    println!("│ Reviews:     {:<47} │", truncate(reviews, 47));
+                    rows.push(("Reviews:", reviews.clone()));
                 }
             }
 
-            // Display agents
+            // Agent rows
+            let mut agent_rows: Vec<String> = Vec::new();
             if session.has_agents() {
-                println!(
-                    "│ Agents:      {:<47} │",
-                    format!("{} agent(s)", session.agent_count())
-                );
+                rows.push(("Agents:", format!("{} agent(s)", session.agent_count())));
                 for (i, agent_proc) in session.agents().iter().enumerate() {
                     let status = agent_proc.process_id().map_or("No PID".to_string(), |pid| {
                         match process::is_process_running(pid) {
@@ -161,14 +155,55 @@ pub(crate) fn handle_status_command(
                             }
                         }
                     });
-                    println!("│   {}. {:<6} {:<38} │", i + 1, agent_proc.agent(), status);
+                    agent_rows.push(format!("  {}. {:<6} {}", i + 1, agent_proc.agent(), status));
                 }
             } else {
-                println!("│ Agent:       {:<47} │", session.agent);
-                println!("│ Process:     {:<47} │", "No agents tracked");
+                rows.push(("Agent:", session.agent.clone()));
+                rows.push(("Process:", "No agents tracked".to_string()));
             }
 
-            println!("└─────────────────────────────────────────────────────────────┘");
+            // Compute max value width
+            let value_width = rows
+                .iter()
+                .map(|(_, v)| v.len())
+                .chain(agent_rows.iter().map(|r| r.len()))
+                .max()
+                .unwrap_or(0);
+
+            // Box width = "│ " + label_width + value_width + " │"
+            let inner_width = label_width + value_width;
+            let border = "─".repeat(inner_width + 2);
+
+            println!("📊 KILD Status: {}", branch);
+            println!("┌{}┐", border);
+
+            // Print main rows (up to but not including agent detail rows)
+            for (label, value) in &rows {
+                println!(
+                    "│ {:<label_w$}{:<value_w$} │",
+                    label,
+                    value,
+                    label_w = label_width,
+                    value_w = value_width,
+                );
+            }
+
+            // Print agent detail rows
+            for row in &agent_rows {
+                // Indent agent detail rows under the Agents label
+                println!(
+                    "│ {:<label_w$}{:<value_w$} │",
+                    "",
+                    row,
+                    label_w = label_width,
+                    value_w = value_width,
+                );
+            }
+
+            println!("└{}┘", border);
+
+            // Suppress unused variable warning
+            let _ = changes_line;
 
             info!(
                 event = "cli.status_completed",

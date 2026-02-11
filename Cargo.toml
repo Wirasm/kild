@@ -64,3 +64,4 @@ gpui-component = "0.5.1"
 # core-text 21.1.0 pulls in core-graphics 0.25.0, but gpui's font-kit dependency
 # requires core-graphics 0.24.0, causing type mismatches at compile time.
 core-text = "=21.0.0"
+unicode-width = "0.2"
