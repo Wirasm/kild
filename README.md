@@ -108,6 +108,7 @@ kcd my-branch
 ### Open a new agent in an existing kild
 ```bash
 # Open with same agent (additive - doesn't close existing terminals)
+# Auto-detects runtime mode (daemon vs terminal) from how the session was created
 kild open <branch>
 
 # Open with different agent
@@ -121,10 +122,10 @@ kild open <branch> -r  # Short form
 # Open bare terminal with $SHELL instead of an agent
 kild open <branch> --no-agent
 
-# Launch in daemon-owned PTY
+# Override: force daemon-owned PTY (ignores session's stored mode)
 kild open <branch> --daemon
 
-# Force external terminal window (override config default)
+# Override: force external terminal window (ignores session's stored mode)
 kild open <branch> --no-daemon
 
 # Open agents in all stopped kilds

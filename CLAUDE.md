@@ -72,13 +72,13 @@ cargo run -p kild -- list --json                 # JSON output for scripting
 cargo run -p kild -- status my-branch --json     # JSON output for single kild
 cargo run -p kild -- -v list                     # Verbose mode (enable JSON logs)
 cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
-cargo run -p kild -- open my-branch              # Open new agent in existing kild (additive)
+cargo run -p kild -- open my-branch              # Open new agent in existing kild (auto-detects runtime mode from session)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
 cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
 cargo run -p kild -- open my-branch --resume     # Resume previous agent session (restore conversation context)
 cargo run -p kild -- open my-branch -r           # Short form of --resume
-cargo run -p kild -- open my-branch --daemon     # Open in daemon-owned PTY
-cargo run -p kild -- open my-branch --no-daemon  # Force external terminal (override config)
+cargo run -p kild -- open my-branch --daemon     # Override: force daemon-owned PTY
+cargo run -p kild -- open my-branch --no-daemon  # Override: force external terminal
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
@@ -519,13 +519,14 @@ Runtime mode resolution for `kild create`:
 3. Config `daemon.enabled = true` → Daemon mode
 4. Default → Terminal mode
 
-Sessions created with `--daemon` store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect (Ctrl+C to detach).
+All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect to daemon sessions (Ctrl+C to detach).
 
 Runtime mode resolution for `kild open`:
 1. `--daemon` flag → Daemon mode
 2. `--no-daemon` flag → Terminal mode
-3. Config `daemon.enabled = true` → Daemon mode
-4. Default → Terminal mode
+3. Session's stored `runtime_mode` (auto-detect from creation) → Daemon or Terminal mode
+4. Config `daemon.enabled = true` → Daemon mode
+5. Default → Terminal mode
 
 **Daemon status:** The daemon runtime supports both foreground (`--foreground`) and background modes, auto-start via config, scrollback replay on attach, PTY exit notification with session state transitions, lazy status sync on `kild list`/`kild status` (daemon-managed sessions auto-update to Stopped when daemon reports exit), and `kild open` with daemon runtime mode.
 
