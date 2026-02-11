@@ -160,7 +160,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     session.status = SessionStatus::Stopped;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
-    // 7. Save updated session (keep worktree, keep session file)
+    // 6. Save updated session (keep worktree, keep session file)
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
