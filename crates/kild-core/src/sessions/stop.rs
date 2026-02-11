@@ -135,12 +135,32 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
     super::destroy::cleanup_session_pid_files(&session, &config.kild_dir, "stop");
 
-    // 4. Clear process info and set status to Stopped
+    // 4. Backfill runtime_mode for sessions created before this field existed.
+    // Infer from agents: if any agent has daemon_session_id, session was daemon-managed.
+    if session.runtime_mode.is_none() {
+        let is_daemon = session
+            .agents()
+            .iter()
+            .any(|a| a.daemon_session_id().is_some());
+        session.runtime_mode = Some(if is_daemon {
+            crate::state::types::RuntimeMode::Daemon
+        } else {
+            crate::state::types::RuntimeMode::Terminal
+        });
+        info!(
+            event = "core.session.runtime_mode_inferred",
+            session_id = session.id,
+            mode = ?session.runtime_mode,
+            "Inferred runtime_mode from agent metadata"
+        );
+    }
+
+    // 5. Clear process info and set status to Stopped
     session.clear_agents();
     session.status = SessionStatus::Stopped;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
-    // 6. Save updated session (keep worktree, keep session file)
+    // 7. Save updated session (keep worktree, keep session file)
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
@@ -160,6 +180,271 @@ mod tests {
         let result = stop_session("non-existent");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
+    }
+
+    #[test]
+    fn test_stop_infers_runtime_mode_daemon_from_agent() {
+        use crate::state::types::RuntimeMode;
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("kild_test_stop_infer_daemon_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create a session with runtime_mode: None but daemon_session_id on agent
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test-project_infer-daemon_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude --print".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            Some("daemon-session-123".to_string()),
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "test-project_infer-daemon".to_string(),
+            "test-project".to_string(),
+            "infer-daemon".to_string(),
+            worktree_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![agent],
+            None,
+            None,
+            None, // runtime_mode: None — simulates old session
+        );
+
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save");
+
+        // Simulate the inference logic from stop_session (without running real stop)
+        let mut loaded = persistence::find_session_by_name(&sessions_dir, "infer-daemon")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert!(loaded.runtime_mode.is_none(), "Should start as None");
+
+        // Apply the inference logic
+        if loaded.runtime_mode.is_none() {
+            let is_daemon = loaded
+                .agents()
+                .iter()
+                .any(|a| a.daemon_session_id().is_some());
+            loaded.runtime_mode = Some(if is_daemon {
+                RuntimeMode::Daemon
+            } else {
+                RuntimeMode::Terminal
+            });
+        }
+        loaded.clear_agents();
+        loaded.status = SessionStatus::Stopped;
+        persistence::save_session_to_file(&loaded, &sessions_dir).expect("Failed to save");
+
+        // Reload and verify
+        let reloaded = persistence::find_session_by_name(&sessions_dir, "infer-daemon")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert_eq!(
+            reloaded.runtime_mode,
+            Some(RuntimeMode::Daemon),
+            "Should infer Daemon from agent with daemon_session_id"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_stop_infers_runtime_mode_terminal_when_no_daemon() {
+        use crate::state::types::RuntimeMode;
+        use crate::terminal::types::TerminalType;
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("kild_test_stop_infer_terminal_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create a session with runtime_mode: None and terminal-based agent (no daemon_session_id)
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test-project_infer-terminal_0".to_string(),
+            Some(99999),
+            Some("fake-process".to_string()),
+            Some(1234567890),
+            Some(TerminalType::Ghostty),
+            Some("test-window".to_string()),
+            "claude --print".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            None, // no daemon_session_id
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "test-project_infer-terminal".to_string(),
+            "test-project".to_string(),
+            "infer-terminal".to_string(),
+            worktree_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![agent],
+            None,
+            None,
+            None, // runtime_mode: None
+        );
+
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save");
+
+        let mut loaded = persistence::find_session_by_name(&sessions_dir, "infer-terminal")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert!(loaded.runtime_mode.is_none());
+
+        // Apply inference logic
+        if loaded.runtime_mode.is_none() {
+            let is_daemon = loaded
+                .agents()
+                .iter()
+                .any(|a| a.daemon_session_id().is_some());
+            loaded.runtime_mode = Some(if is_daemon {
+                RuntimeMode::Daemon
+            } else {
+                RuntimeMode::Terminal
+            });
+        }
+        loaded.clear_agents();
+        loaded.status = SessionStatus::Stopped;
+        persistence::save_session_to_file(&loaded, &sessions_dir).expect("Failed to save");
+
+        let reloaded = persistence::find_session_by_name(&sessions_dir, "infer-terminal")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert_eq!(
+            reloaded.runtime_mode,
+            Some(RuntimeMode::Terminal),
+            "Should infer Terminal when no agent has daemon_session_id"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_stop_preserves_existing_runtime_mode() {
+        use crate::state::types::RuntimeMode;
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir =
+            std::env::temp_dir().join(format!("kild_test_stop_preserve_mode_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create a session with runtime_mode already set — should NOT be re-inferred
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test-project_preserve-mode_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude --print".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            Some("daemon-session-456".to_string()), // daemon agent
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "test-project_preserve-mode".to_string(),
+            "test-project".to_string(),
+            "preserve-mode".to_string(),
+            worktree_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![agent],
+            None,
+            None,
+            Some(RuntimeMode::Daemon), // already set
+        );
+
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save");
+
+        let mut loaded = persistence::find_session_by_name(&sessions_dir, "preserve-mode")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert_eq!(loaded.runtime_mode, Some(RuntimeMode::Daemon));
+
+        // The inference should NOT run because runtime_mode is already Some
+        if loaded.runtime_mode.is_none() {
+            panic!("Should not enter inference block when runtime_mode is already set");
+        }
+        loaded.clear_agents();
+        loaded.status = SessionStatus::Stopped;
+        persistence::save_session_to_file(&loaded, &sessions_dir).expect("Failed to save");
+
+        let reloaded = persistence::find_session_by_name(&sessions_dir, "preserve-mode")
+            .expect("Failed to find")
+            .expect("Session should exist");
+        assert_eq!(
+            reloaded.runtime_mode,
+            Some(RuntimeMode::Daemon),
+            "Should preserve existing runtime_mode without re-inference"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

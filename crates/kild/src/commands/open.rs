@@ -96,7 +96,7 @@ fn handle_open_all(
                     branch = s.branch,
                     session_id = s.id
                 );
-                opened.push((s.branch, s.agent));
+                opened.push((s.branch, s.agent, s.runtime_mode.clone()));
             }
             Err(e) => {
                 error!(
@@ -113,8 +113,13 @@ fn handle_open_all(
     // Report successes
     if !opened.is_empty() {
         println!("Opened {} kild(s):", opened.len());
-        for (branch, agent) in &opened {
-            println!("   {} ({})", branch, agent);
+        for (branch, agent, runtime_mode) in &opened {
+            let mode_label = match runtime_mode {
+                Some(kild_core::RuntimeMode::Daemon) => " [daemon]",
+                Some(kild_core::RuntimeMode::Terminal) => " [terminal]",
+                None => "",
+            };
+            println!("   {} ({}){}", branch, agent, mode_label);
         }
     }
 

@@ -4,8 +4,8 @@ use kild_core::Session;
 use kild_core::config::KildConfig;
 use kild_core::terminal::types::TerminalType;
 
-/// Branch name and agent name for a successfully opened kild
-pub type OpenedKild = (String, String);
+/// Branch name, agent name, and runtime mode for a successfully opened kild
+pub type OpenedKild = (String, String, Option<kild_core::RuntimeMode>);
 
 /// Branch name and error message for a failed operation
 pub type FailedOperation = (String, String);

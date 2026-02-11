@@ -716,6 +716,51 @@ mod tests {
         assert_eq!(source, "default");
     }
 
+    /// Validates the core of `open --all` behavior: when no explicit flag is passed,
+    /// each session's stored runtime_mode is respected.
+    #[test]
+    fn test_resolve_runtime_mode_none_explicit_with_daemon_session() {
+        use crate::state::types::RuntimeMode;
+
+        let config = crate::config::KildConfig::default();
+        // Simulates open --all (no flags): explicit=None, session has Daemon
+        let (mode, source) =
+            resolve_effective_runtime_mode(None, Some(RuntimeMode::Daemon), &config);
+        assert_eq!(mode, RuntimeMode::Daemon);
+        assert_eq!(source, "session");
+
+        // Same with Terminal session
+        let (mode, source) =
+            resolve_effective_runtime_mode(None, Some(RuntimeMode::Terminal), &config);
+        assert_eq!(mode, RuntimeMode::Terminal);
+        assert_eq!(source, "session");
+    }
+
+    /// Regression test: explicit flags should override all sessions (open --all --daemon)
+    #[test]
+    fn test_resolve_runtime_mode_explicit_overrides_session_in_open_all() {
+        use crate::state::types::RuntimeMode;
+
+        let config = crate::config::KildConfig::default();
+        // open --all --daemon: explicit=Daemon should override session=Terminal
+        let (mode, source) = resolve_effective_runtime_mode(
+            Some(RuntimeMode::Daemon),
+            Some(RuntimeMode::Terminal),
+            &config,
+        );
+        assert_eq!(mode, RuntimeMode::Daemon);
+        assert_eq!(source, "explicit");
+
+        // open --all --no-daemon: explicit=Terminal should override session=Daemon
+        let (mode, source) = resolve_effective_runtime_mode(
+            Some(RuntimeMode::Terminal),
+            Some(RuntimeMode::Daemon),
+            &config,
+        );
+        assert_eq!(mode, RuntimeMode::Terminal);
+        assert_eq!(source, "explicit");
+    }
+
     #[test]
     fn test_runtime_mode_persists_through_stop_reload_cycle() {
         use crate::state::types::RuntimeMode;
