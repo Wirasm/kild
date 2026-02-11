@@ -24,7 +24,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 let enriched: Vec<EnrichedSession> = sessions
                     .into_iter()
                     .map(|session| {
-                        let git_stats = kild_core::git::operations::collect_git_stats(
+                        let git_stats = kild_core::git::collect_git_stats(
                             &session.worktree_path,
                             &session.branch,
                         );

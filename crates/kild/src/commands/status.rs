@@ -28,8 +28,7 @@ pub(crate) fn handle_status_command(
             // Sync daemon-managed session: if daemon says stopped, update JSON
             session_ops::sync_daemon_session_status(&mut session);
 
-            let git_stats =
-                kild_core::git::operations::collect_git_stats(&session.worktree_path, branch);
+            let git_stats = kild_core::git::collect_git_stats(&session.worktree_path, branch);
             let status_info = session_ops::read_agent_status(&session.id);
             let pr_info = session_ops::read_pr_info(&session.id);
 

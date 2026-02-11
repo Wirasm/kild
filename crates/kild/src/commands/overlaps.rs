@@ -36,8 +36,7 @@ pub(crate) fn handle_overlaps_command(
     }
 
     let total = sessions.len();
-    let (report, errors) =
-        kild_core::git::operations::collect_file_overlaps(&sessions, base_branch);
+    let (report, errors) = kild_core::git::collect_file_overlaps(&sessions, base_branch);
 
     info!(
         event = "cli.overlaps_completed",

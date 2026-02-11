@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::git::operations::get_diff_stats;
+use kild_core::git::get_diff_stats;
 use kild_core::session_ops;
 
 pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
