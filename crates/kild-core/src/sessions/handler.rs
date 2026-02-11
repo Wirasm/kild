@@ -756,8 +756,7 @@ pub fn open_session(
                     fallback
                 });
                 info!(event = "core.session.open_shell_selected", shell = %shell);
-                // Keep the session's original agent — no agent is actually running
-                (session.agent.clone(), shell)
+                ("shell".to_string(), shell)
             }
             crate::state::types::OpenMode::Agent(name) => {
                 info!(event = "core.session.open_agent_selected", agent = name);
