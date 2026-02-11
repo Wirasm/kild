@@ -385,8 +385,10 @@ impl Element for TerminalElement {
                 bg_color = Some(bg);
             }
 
-            // Wide characters get their own text run to prevent accumulated
-            // width errors when mixed with normal-width characters.
+            // Wide characters get their own text run so each is positioned at
+            // its exact grid column. Batching them with normal chars causes the
+            // text shaper to misplace subsequent glyphs because it doesn't know
+            // about the 2-cell grid width.
             let is_wide = cell.flags.contains(CellFlags::WIDE_CHAR);
 
             if is_wide && indexed.point == cursor_point {
