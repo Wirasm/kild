@@ -1,14 +1,15 @@
 //! Synchronous IPC client for communicating with the KILD daemon.
 //!
 //! Uses `std::os::unix::net::UnixStream` — no tokio dependency.
-//! Constructs JSONL messages manually with `serde_json::json!()` to avoid
-//! importing types from kild-daemon (which depends on kild-core).
+//! Uses typed `ClientMessage`/`DaemonMessage` enums from `kild-protocol`
+//! for compile-checked protocol correctness.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+use kild_protocol::{ClientMessage, DaemonMessage};
 use tracing::{debug, info, warn};
 
 use crate::errors::KildError;
@@ -81,17 +82,12 @@ fn connect(socket_path: &Path) -> Result<UnixStream, DaemonClientError> {
     Ok(stream)
 }
 
-/// Send a request and read one response over a JSONL connection.
-///
-/// Creates a new BufReader per call. This is safe because public methods in
-/// this module open fresh connections for each operation. Do NOT reuse a stream
-/// across multiple `send_request` calls — BufReader's internal buffer would
-/// consume data meant for subsequent reads.
+/// Send a typed request and read one typed response over a JSONL connection.
 fn send_request(
     stream: &mut UnixStream,
-    request: serde_json::Value,
-) -> Result<serde_json::Value, DaemonClientError> {
-    let msg = serde_json::to_string(&request).map_err(|e| DaemonClientError::ProtocolError {
+    request: &ClientMessage,
+) -> Result<DaemonMessage, DaemonClientError> {
+    let msg = serde_json::to_string(request).map_err(|e| DaemonClientError::ProtocolError {
         message: e.to_string(),
     })?;
 
@@ -108,21 +104,13 @@ fn send_request(
         });
     }
 
-    let response: serde_json::Value =
+    let response: DaemonMessage =
         serde_json::from_str(&line).map_err(|e| DaemonClientError::ProtocolError {
             message: format!("Invalid JSON response: {}", e),
         })?;
 
     // Check for error responses
-    if response.get("type").and_then(|t| t.as_str()) == Some("error") {
-        let code = response
-            .get("code")
-            .and_then(|c| c.as_str())
-            .unwrap_or("unknown");
-        let message = response
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown daemon error");
+    if let DaemonMessage::Error { code, message, .. } = &response {
         return Err(DaemonClientError::DaemonError {
             message: format!("[{}] {}", code, message),
         });
@@ -175,36 +163,29 @@ pub fn create_pty_session(
         command = request.command,
     );
 
-    let env_map: serde_json::Map<String, serde_json::Value> = request
-        .env_vars
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
-
-    let msg = serde_json::json!({
-        "id": request.request_id,
-        "type": "create_session",
-        "session_id": request.session_id,
-        "working_directory": request.working_directory.to_string_lossy(),
-        "command": request.command,
-        "args": request.args,
-        "env_vars": env_map,
-        "rows": request.rows,
-        "cols": request.cols,
-        "use_login_shell": request.use_login_shell,
-    });
+    let msg = ClientMessage::CreateSession {
+        id: request.request_id.to_string(),
+        session_id: request.session_id.to_string(),
+        working_directory: request.working_directory.to_string_lossy().to_string(),
+        command: request.command.to_string(),
+        args: request.args.to_vec(),
+        env_vars: request.env_vars.iter().cloned().collect(),
+        rows: request.rows,
+        cols: request.cols,
+        use_login_shell: request.use_login_shell,
+    };
 
     let mut stream = connect(&socket_path)?;
-    let response = send_request(&mut stream, msg)?;
+    let response = send_request(&mut stream, &msg)?;
 
-    let session_id = response
-        .get("session")
-        .and_then(|s| s.get("id"))
-        .and_then(|id| id.as_str())
-        .ok_or_else(|| DaemonClientError::ProtocolError {
-            message: "Response missing session.id field".to_string(),
-        })?
-        .to_string();
+    let session_id = match response {
+        DaemonMessage::SessionCreated { session, .. } => session.id,
+        _ => {
+            return Err(DaemonClientError::ProtocolError {
+                message: "Expected SessionCreated response".to_string(),
+            });
+        }
+    };
 
     info!(
         event = "core.daemon.create_pty_session_completed",
@@ -225,14 +206,13 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
         daemon_session_id = daemon_session_id
     );
 
-    let request = serde_json::json!({
-        "id": format!("stop-{}", daemon_session_id),
-        "type": "stop_session",
-        "session_id": daemon_session_id,
-    });
+    let request = ClientMessage::StopSession {
+        id: format!("stop-{}", daemon_session_id),
+        session_id: daemon_session_id.to_string(),
+    };
 
     let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, &request)?;
 
     info!(
         event = "core.daemon.stop_session_completed",
@@ -255,15 +235,14 @@ pub fn destroy_daemon_session(
         force = force,
     );
 
-    let request = serde_json::json!({
-        "id": format!("destroy-{}", daemon_session_id),
-        "type": "destroy_session",
-        "session_id": daemon_session_id,
-        "force": force,
-    });
+    let request = ClientMessage::DestroySession {
+        id: format!("destroy-{}", daemon_session_id),
+        session_id: daemon_session_id.to_string(),
+        force,
+    };
 
     let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, &request)?;
 
     info!(
         event = "core.daemon.destroy_session_completed",
@@ -279,10 +258,9 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
 
     debug!(event = "core.daemon.ping_started");
 
-    let request = serde_json::json!({
-        "id": "ping",
-        "type": "ping",
-    });
+    let request = ClientMessage::Ping {
+        id: "ping".to_string(),
+    };
 
     let mut stream = match connect(&socket_path) {
         Ok(s) => s,
@@ -293,7 +271,7 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
     // Use a short timeout for ping
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, request) {
+    match send_request(&mut stream, &request) {
         Ok(_) => {
             debug!(event = "core.daemon.ping_completed", alive = true);
             Ok(true)
@@ -319,11 +297,10 @@ pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, Dae
         daemon_session_id = daemon_session_id
     );
 
-    let request = serde_json::json!({
-        "id": format!("status-{}", daemon_session_id),
-        "type": "get_session",
-        "session_id": daemon_session_id,
-    });
+    let request = ClientMessage::GetSession {
+        id: format!("status-{}", daemon_session_id),
+        session_id: daemon_session_id.to_string(),
+    };
 
     let mut stream = match connect(&socket_path) {
         Ok(s) => s,
@@ -343,27 +320,27 @@ pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, Dae
     // Use a short timeout for status queries
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, request) {
-        Ok(response) => {
-            // Response is DaemonMessage::SessionInfo { session: { status: "running"|"stopped" } }
-            let status = response
-                .get("session")
-                .and_then(|s| s.get("status"))
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string());
-
+    match send_request(&mut stream, &request) {
+        Ok(DaemonMessage::SessionInfo { session, .. }) => {
+            let status = session.status;
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
-                status = ?status
+                status = %status
             );
-
-            Ok(status)
+            Ok(Some(status))
+        }
+        Ok(_) => {
+            debug!(
+                event = "core.daemon.get_session_status_completed",
+                daemon_session_id = daemon_session_id,
+                result = "unexpected_response"
+            );
+            Ok(None)
         }
         Err(DaemonClientError::DaemonError { ref message })
             if message.contains("not_found") || message.contains("unknown_session") =>
         {
-            // Session not found in daemon — expected when session was cleaned up
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -391,11 +368,10 @@ pub fn get_session_info(
 ) -> Result<Option<(String, Option<i32>)>, DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
 
-    let request = serde_json::json!({
-        "id": format!("info-{}", daemon_session_id),
-        "type": "get_session",
-        "session_id": daemon_session_id,
-    });
+    let request = ClientMessage::GetSession {
+        id: format!("info-{}", daemon_session_id),
+        session_id: daemon_session_id.to_string(),
+    };
 
     let mut stream = match connect(&socket_path) {
         Ok(s) => s,
@@ -405,22 +381,11 @@ pub fn get_session_info(
 
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, request) {
-        Ok(response) => {
-            let session = response.get("session");
-            let status = session
-                .and_then(|s| s.get("status"))
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string());
-            let exit_code = session
-                .and_then(|s| s.get("exit_code"))
-                .and_then(|c| c.as_i64())
-                .map(|c| c as i32);
-            match status {
-                Some(s) => Ok(Some((s, exit_code))),
-                None => Ok(None),
-            }
+    match send_request(&mut stream, &request) {
+        Ok(DaemonMessage::SessionInfo { session, .. }) => {
+            Ok(Some((session.status, session.exit_code)))
         }
+        Ok(_) => Ok(None),
         Err(DaemonClientError::DaemonError { ref message })
             if message.contains("not_found") || message.contains("unknown_session") =>
         {
@@ -437,11 +402,10 @@ pub fn get_session_info(
 pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
 
-    let request = serde_json::json!({
-        "id": format!("scrollback-{}", daemon_session_id),
-        "type": "read_scrollback",
-        "session_id": daemon_session_id,
-    });
+    let request = ClientMessage::ReadScrollback {
+        id: format!("scrollback-{}", daemon_session_id),
+        session_id: daemon_session_id.to_string(),
+    };
 
     let mut stream = match connect(&socket_path) {
         Ok(s) => s,
@@ -451,15 +415,15 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
 
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, request) {
-        Ok(response) => {
-            let data = response.get("data").and_then(|d| d.as_str()).unwrap_or("");
+    match send_request(&mut stream, &request) {
+        Ok(DaemonMessage::ScrollbackContents { data, .. }) => {
             use base64::Engine;
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(data)
                 .unwrap_or_default();
             Ok(Some(decoded))
         }
+        Ok(_) => Ok(Some(Vec::new())),
         Err(DaemonClientError::DaemonError { ref message })
             if message.contains("not_found") || message.contains("unknown_session") =>
         {
@@ -475,13 +439,12 @@ pub fn request_shutdown() -> Result<(), DaemonClientError> {
 
     info!(event = "core.daemon.shutdown_started");
 
-    let request = serde_json::json!({
-        "id": "shutdown",
-        "type": "daemon_stop",
-    });
+    let request = ClientMessage::DaemonStop {
+        id: "shutdown".to_string(),
+    };
 
     let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, request)?;
+    send_request(&mut stream, &request)?;
 
     info!(event = "core.daemon.shutdown_completed");
     Ok(())

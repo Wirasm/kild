@@ -1,0 +1,10 @@
+[package]
+name = "kild-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared IPC protocol types for KILD daemon communication"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

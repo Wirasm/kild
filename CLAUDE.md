@@ -48,10 +48,12 @@ cargo build --all              # Clean build
 # Build
 cargo build --all              # Build all crates
 cargo build -p kild-core       # Build specific crate
+cargo build -p kild-protocol   # Build protocol types crate
 
 # Test
 cargo test --all               # Run all tests
 cargo test -p kild-core        # Test specific crate
+cargo test -p kild-protocol    # Test protocol types crate
 cargo test test_name           # Run single test by name
 
 # Lint & Format
@@ -193,9 +195,10 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 ## Architecture
 
 **Workspace structure:**
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo). Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
-- `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess.
+- `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
 - `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
 - `crates/kild-peek-core` - Core library for native app inspection and interaction (window listing, screenshots, image comparison, assertions, UI automation)

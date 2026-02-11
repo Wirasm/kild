@@ -54,6 +54,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 kild-core = { path = "crates/kild-core" }
 kild-daemon = { path = "crates/kild-daemon" }
 kild-peek-core = { path = "crates/kild-peek-core" }
+kild-protocol = { path = "crates/kild-protocol" }
 
 # UI dependencies
 gpui = "0.2"

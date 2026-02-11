@@ -3387,6 +3387,7 @@ dependencies = [
  "git2",
  "glob",
  "ignore",
+ "kild-protocol",
  "serde",
  "serde_json",
  "sysinfo 0.37.2",
@@ -3409,6 +3410,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "kild-core",
+ "kild-protocol",
  "nix 0.29.0",
  "portable-pty",
  "serde",
@@ -3451,11 +3453,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kild-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kild-tmux-shim"
 version = "0.1.0"
 dependencies = [
  "base64",
  "dirs 5.0.1",
+ "kild-protocol",
  "nix 0.29.0",
  "serde",
  "serde_json",

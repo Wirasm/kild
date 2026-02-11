@@ -17,6 +17,7 @@ dirs = { workspace = true }
 base64 = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 uuid = { workspace = true }
+kild-protocol = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

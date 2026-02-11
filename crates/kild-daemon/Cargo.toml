@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 kild-core.workspace = true
+kild-protocol.workspace = true
 
 # Async runtime
 tokio.workspace = true

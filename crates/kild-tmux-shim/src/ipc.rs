@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine;
+use kild_protocol::{ClientMessage, DaemonMessage};
 use tracing::debug;
 
 use crate::errors::ShimError;
@@ -37,10 +38,10 @@ fn connect() -> Result<UnixStream, ShimError> {
 
 fn send_request(
     mut stream: UnixStream,
-    request: serde_json::Value,
+    request: &ClientMessage,
     operation: &str,
-) -> Result<serde_json::Value, ShimError> {
-    let msg = serde_json::to_string(&request)
+) -> Result<DaemonMessage, ShimError> {
+    let msg = serde_json::to_string(request)
         .map_err(|e| ShimError::ipc(format!("{}: serialization failed: {}", operation, e)))?;
 
     writeln!(stream, "{}", msg)?;
@@ -57,18 +58,10 @@ fn send_request(
         )));
     }
 
-    let response: serde_json::Value = serde_json::from_str(&line)
+    let response: DaemonMessage = serde_json::from_str(&line)
         .map_err(|e| ShimError::ipc(format!("{}: invalid JSON response: {}", operation, e)))?;
 
-    if response.get("type").and_then(|t| t.as_str()) == Some("error") {
-        let code = response
-            .get("code")
-            .and_then(|c| c.as_str())
-            .unwrap_or("unknown");
-        let message = response
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown daemon error");
+    if let DaemonMessage::Error { code, message, .. } = &response {
         return Err(ShimError::ipc(format!(
             "{}: [{}] {}",
             operation, code, message
@@ -95,33 +88,29 @@ pub fn create_session(
         command = command,
     );
 
-    let env_map: serde_json::Map<String, serde_json::Value> = env_vars
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
-
-    let request = serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "type": "create_session",
-        "session_id": session_id,
-        "working_directory": working_directory,
-        "command": command,
-        "args": args,
-        "env_vars": env_map,
-        "rows": rows,
-        "cols": cols,
-        "use_login_shell": use_login_shell,
-    });
+    let request = ClientMessage::CreateSession {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        working_directory: working_directory.to_string(),
+        command: command.to_string(),
+        args: args.to_vec(),
+        env_vars: env_vars.clone(),
+        rows,
+        cols,
+        use_login_shell,
+    };
 
     let stream = connect()?;
-    let response = send_request(stream, request, "create_session")?;
+    let response = send_request(stream, &request, "create_session")?;
 
-    let daemon_session_id = response
-        .get("session")
-        .and_then(|s| s.get("id"))
-        .and_then(|id| id.as_str())
-        .ok_or_else(|| ShimError::ipc("create_session: response missing session.id"))?
-        .to_string();
+    let daemon_session_id = match response {
+        DaemonMessage::SessionCreated { session, .. } => session.id,
+        _ => {
+            return Err(ShimError::ipc(
+                "create_session: expected SessionCreated response",
+            ));
+        }
+    };
 
     debug!(
         event = "shim.ipc.create_session_completed",
@@ -140,15 +129,14 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(data);
 
-    let request = serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "type": "write_stdin",
-        "session_id": session_id,
-        "data": encoded,
-    });
+    let request = ClientMessage::WriteStdin {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        data: encoded,
+    };
 
     let stream = connect()?;
-    send_request(stream, request, "write_stdin")?;
+    send_request(stream, &request, "write_stdin")?;
 
     debug!(
         event = "shim.ipc.write_stdin_completed",
@@ -164,15 +152,14 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
         force = force,
     );
 
-    let request = serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "type": "destroy_session",
-        "session_id": session_id,
-        "force": force,
-    });
+    let request = ClientMessage::DestroySession {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        force,
+    };
 
     let stream = connect()?;
-    send_request(stream, request, "destroy_session")?;
+    send_request(stream, &request, "destroy_session")?;
 
     debug!(
         event = "shim.ipc.destroy_session_completed",
@@ -187,23 +174,24 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
         session_id = session_id,
     );
 
-    let request = serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "type": "read_scrollback",
-        "session_id": session_id,
-    });
+    let request = ClientMessage::ReadScrollback {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+    };
 
     let stream = connect()?;
-    let response = send_request(stream, request, "read_scrollback")?;
+    let response = send_request(stream, &request, "read_scrollback")?;
 
-    let encoded = response
-        .get("data")
-        .and_then(|d| d.as_str())
-        .ok_or_else(|| ShimError::ipc("read_scrollback: response missing data field"))?;
-
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|e| ShimError::ipc(format!("read_scrollback: base64 decode failed: {}", e)))?;
+    let decoded = match response {
+        DaemonMessage::ScrollbackContents { data, .. } => base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| ShimError::ipc(format!("read_scrollback: base64 decode failed: {}", e)))?,
+        _ => {
+            return Err(ShimError::ipc(
+                "read_scrollback: expected ScrollbackContents response",
+            ));
+        }
+    };
 
     debug!(
         event = "shim.ipc.read_scrollback_completed",
@@ -223,16 +211,15 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
         cols = cols,
     );
 
-    let request = serde_json::json!({
-        "id": uuid::Uuid::new_v4().to_string(),
-        "type": "resize_pty",
-        "session_id": session_id,
-        "rows": rows,
-        "cols": cols,
-    });
+    let request = ClientMessage::ResizePty {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        rows,
+        cols,
+    };
 
     let stream = connect()?;
-    send_request(stream, request, "resize_pty")?;
+    send_request(stream, &request, "resize_pty")?;
 
     debug!(
         event = "shim.ipc.resize_pty_completed",
@@ -318,8 +305,7 @@ mod tests {
             reader.read_line(&mut line).unwrap(); // read the request
 
             use std::io::Write;
-            let response =
-                r#"{"type":"error","code":"session_not_found","message":"no such session"}"#;
+            let response = r#"{"type":"error","id":"1","code":"session_not_found","message":"no such session"}"#;
             writeln!(stream, "{}", response).unwrap();
             stream.flush().unwrap();
         });
@@ -333,8 +319,10 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        let request = serde_json::json!({"type": "test"});
-        let result = send_request(stream, request, "test_op");
+        let request = ClientMessage::Ping {
+            id: "test".to_string(),
+        };
+        let result = send_request(stream, &request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("session_not_found"), "got: {}", err);
@@ -367,8 +355,10 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        let request = serde_json::json!({"type": "test"});
-        let result = send_request(stream, request, "test_op");
+        let request = ClientMessage::Ping {
+            id: "test".to_string(),
+        };
+        let result = send_request(stream, &request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("empty response"), "got: {}", err);
@@ -403,8 +393,10 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        let request = serde_json::json!({"type": "test"});
-        let result = send_request(stream, request, "test_op");
+        let request = ClientMessage::Ping {
+            id: "test".to_string(),
+        };
+        let result = send_request(stream, &request, "test_op");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid JSON"), "got: {}", err);
@@ -427,7 +419,7 @@ mod tests {
             reader.read_line(&mut line).unwrap();
 
             use std::io::Write;
-            let response = r#"{"type":"ok","session":{"id":"test-123"}}"#;
+            let response = r#"{"type":"ack","id":"test-123"}"#;
             writeln!(stream, "{}", response).unwrap();
             stream.flush().unwrap();
         });
@@ -440,12 +432,13 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        let request = serde_json::json!({"type": "test"});
-        let result = send_request(stream, request, "test_op");
+        let request = ClientMessage::Ping {
+            id: "test".to_string(),
+        };
+        let result = send_request(stream, &request, "test_op");
         assert!(result.is_ok());
-        let val = result.unwrap();
-        assert_eq!(val["type"], "ok");
-        assert_eq!(val["session"]["id"], "test-123");
+        let response = result.unwrap();
+        assert!(matches!(response, DaemonMessage::Ack { .. }));
 
         handle.join().unwrap();
     }
@@ -480,18 +473,20 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        let request = serde_json::json!({
-            "id": "test",
-            "type": "read_scrollback",
-            "session_id": "test-session",
-        });
-        let response = send_request(stream, request, "read_scrollback").unwrap();
+        let request = ClientMessage::ReadScrollback {
+            id: "test".to_string(),
+            session_id: "test-session".to_string(),
+        };
+        let response = send_request(stream, &request, "read_scrollback").unwrap();
 
-        let encoded = response.get("data").and_then(|d| d.as_str()).unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
-        assert_eq!(&decoded, b"hello world");
+        if let DaemonMessage::ScrollbackContents { data, .. } = response {
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap();
+            assert_eq!(&decoded, b"hello world");
+        } else {
+            panic!("expected ScrollbackContents, got: {:?}", response);
+        }
 
         handle.join().unwrap();
     }
