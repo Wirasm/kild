@@ -268,7 +268,19 @@ pub fn focus_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
             window_id = window.id,
             pid = pid
         );
-        ax_unminimize_and_raise_window(pid, &window.title)
+        match ax_unminimize_and_raise_window(pid, &window.title) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!(
+                    event = "core.terminal.native.focus_unminimize_failed",
+                    window_id = window.id,
+                    pid = pid,
+                    error = %e,
+                    message = "Failed to unminimize window via AX API — window may remain in Dock"
+                );
+                Err(e)
+            }
+        }
     } else {
         ax_raise_window(pid, &window.title)
     };
@@ -681,14 +693,20 @@ mod tests {
     }
 
     #[test]
-    fn test_window_action_variants() {
-        // Ensure all variants exist (compile-time check via exhaustive match)
-        let actions = [
-            WindowAction::Raise,
-            WindowAction::UnminimizeAndRaise,
-            WindowAction::Minimize,
-        ];
-        assert_eq!(actions.len(), 3);
+    fn test_window_action_exhaustive_match() {
+        // Exhaustive match ensures compile failure if a variant is added without handling
+        let test_action = |action: WindowAction| match action {
+            WindowAction::Raise => "raise",
+            WindowAction::UnminimizeAndRaise => "unminimize_and_raise",
+            WindowAction::Minimize => "minimize",
+        };
+
+        assert_eq!(test_action(WindowAction::Raise), "raise");
+        assert_eq!(
+            test_action(WindowAction::UnminimizeAndRaise),
+            "unminimize_and_raise"
+        );
+        assert_eq!(test_action(WindowAction::Minimize), "minimize");
     }
 
     #[test]
