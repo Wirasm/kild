@@ -65,7 +65,14 @@ pub fn get_history_dir() -> Result<PathBuf, std::io::Error> {
 
 pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
     let history_dir = get_history_dir()?;
-    fs::create_dir_all(&history_dir)?;
+    save_snapshot_to(&history_dir, snapshot)
+}
+
+pub fn save_snapshot_to(
+    history_dir: &std::path::Path,
+    snapshot: &HealthSnapshot,
+) -> Result<(), std::io::Error> {
+    fs::create_dir_all(history_dir)?;
 
     let filename = format!("{}.json", snapshot.timestamp.format("%Y-%m-%d"));
     let filepath = history_dir.join(filename);
@@ -97,11 +104,18 @@ pub fn save_snapshot(snapshot: &HealthSnapshot) -> Result<(), std::io::Error> {
 
 pub fn load_history(days: u64) -> Result<Vec<HealthSnapshot>, std::io::Error> {
     let history_dir = get_history_dir()?;
+    load_history_from(&history_dir, days)
+}
+
+pub fn load_history_from(
+    history_dir: &std::path::Path,
+    days: u64,
+) -> Result<Vec<HealthSnapshot>, std::io::Error> {
     let mut all_snapshots = Vec::new();
 
     let cutoff = Utc::now() - chrono::Duration::days(days as i64);
 
-    match fs::read_dir(&history_dir) {
+    match fs::read_dir(history_dir) {
         Ok(entries) => {
             for entry in entries {
                 match entry {
@@ -168,13 +182,20 @@ pub struct CleanupResult {
 
 pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io::Error> {
     let history_dir = get_history_dir()?;
+    cleanup_old_history_in(&history_dir, retention_days)
+}
+
+pub fn cleanup_old_history_in(
+    history_dir: &std::path::Path,
+    retention_days: u64,
+) -> Result<CleanupResult, std::io::Error> {
     let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
     let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
 
     let mut removed = 0;
     let mut failed = 0;
 
-    match fs::read_dir(&history_dir) {
+    match fs::read_dir(history_dir) {
         Ok(entries) => {
             for entry in entries {
                 match entry {
@@ -227,4 +248,277 @@ pub fn cleanup_old_history(retention_days: u64) -> Result<CleanupResult, std::io
     }
 
     Ok(CleanupResult { removed, failed })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::health::types::*;
+    use chrono::{Duration, Utc};
+    use tempfile::TempDir;
+
+    fn make_test_snapshot(working: usize, idle: usize, crashed: usize) -> HealthSnapshot {
+        HealthSnapshot {
+            timestamp: Utc::now(),
+            total_kilds: working + idle + crashed,
+            working,
+            idle,
+            stuck: 0,
+            crashed,
+            avg_cpu_percent: Some(15.0),
+            total_memory_mb: Some(512),
+        }
+    }
+
+    fn make_test_health_output() -> HealthOutput {
+        let metrics = HealthMetrics {
+            cpu_usage_percent: Some(20.0),
+            memory_usage_mb: Some(256),
+            process_status: "Running".to_string(),
+            last_activity: None,
+            status: HealthStatus::Working,
+            status_icon: "check".to_string(),
+        };
+        let kild = KildHealth {
+            session_id: "s1".to_string(),
+            project_id: "p1".to_string(),
+            branch: "main".to_string(),
+            agent: "claude".to_string(),
+            worktree_path: "/tmp/wt".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            metrics,
+        };
+        HealthOutput {
+            kilds: vec![kild],
+            total_count: 1,
+            working_count: 1,
+            idle_count: 0,
+            stuck_count: 0,
+            crashed_count: 0,
+        }
+    }
+
+    // --- HealthSnapshot From<&HealthOutput> tests ---
+
+    #[test]
+    fn test_snapshot_from_health_output_with_metrics() {
+        let output = make_test_health_output();
+        let snapshot = HealthSnapshot::from(&output);
+
+        assert_eq!(snapshot.total_kilds, 1);
+        assert_eq!(snapshot.working, 1);
+        assert_eq!(snapshot.avg_cpu_percent, Some(20.0));
+        assert_eq!(snapshot.total_memory_mb, Some(256));
+    }
+
+    #[test]
+    fn test_snapshot_from_empty_output() {
+        let output = HealthOutput {
+            kilds: vec![],
+            total_count: 0,
+            working_count: 0,
+            idle_count: 0,
+            stuck_count: 0,
+            crashed_count: 0,
+        };
+        let snapshot = HealthSnapshot::from(&output);
+
+        assert_eq!(snapshot.total_kilds, 0);
+        assert_eq!(snapshot.avg_cpu_percent, None);
+        assert_eq!(snapshot.total_memory_mb, None);
+    }
+
+    #[test]
+    fn test_snapshot_from_output_no_metrics() {
+        let metrics = HealthMetrics {
+            cpu_usage_percent: None,
+            memory_usage_mb: None,
+            process_status: "Stopped".to_string(),
+            last_activity: None,
+            status: HealthStatus::Crashed,
+            status_icon: "x".to_string(),
+        };
+        let kild = KildHealth {
+            session_id: "s1".to_string(),
+            project_id: "p1".to_string(),
+            branch: "b".to_string(),
+            agent: "a".to_string(),
+            worktree_path: "/tmp".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            metrics,
+        };
+        let output = HealthOutput {
+            kilds: vec![kild],
+            total_count: 1,
+            working_count: 0,
+            idle_count: 0,
+            stuck_count: 0,
+            crashed_count: 1,
+        };
+        let snapshot = HealthSnapshot::from(&output);
+
+        assert_eq!(snapshot.avg_cpu_percent, None);
+        assert_eq!(snapshot.total_memory_mb, None);
+    }
+
+    // --- save_snapshot / load round-trip tests ---
+
+    #[test]
+    fn test_save_and_load_snapshot_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let snapshot = make_test_snapshot(2, 1, 0);
+
+        save_snapshot_to(dir.path(), &snapshot).unwrap();
+
+        let loaded = load_history_from(dir.path(), 1).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].working, 2);
+        assert_eq!(loaded[0].idle, 1);
+    }
+
+    #[test]
+    fn test_save_multiple_snapshots_same_day() {
+        let dir = TempDir::new().unwrap();
+        let s1 = make_test_snapshot(1, 0, 0);
+        let s2 = make_test_snapshot(0, 1, 0);
+
+        save_snapshot_to(dir.path(), &s1).unwrap();
+        save_snapshot_to(dir.path(), &s2).unwrap();
+
+        let loaded = load_history_from(dir.path(), 1).unwrap();
+        assert_eq!(loaded.len(), 2);
+    }
+
+    #[test]
+    fn test_load_history_empty_directory() {
+        let dir = TempDir::new().unwrap();
+        let loaded = load_history_from(dir.path(), 7).unwrap();
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_load_history_nonexistent_directory() {
+        let dir = TempDir::new().unwrap();
+        let nonexistent = dir.path().join("does_not_exist");
+        let loaded = load_history_from(&nonexistent, 7).unwrap();
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_load_history_skips_corrupted_files() {
+        let dir = TempDir::new().unwrap();
+
+        let snapshot = make_test_snapshot(1, 0, 0);
+        save_snapshot_to(dir.path(), &snapshot).unwrap();
+
+        let corrupted_path = dir.path().join("2025-01-01.json");
+        fs::write(&corrupted_path, "not valid json").unwrap();
+
+        let loaded = load_history_from(dir.path(), 365).unwrap();
+        assert!(loaded.len() >= 1);
+    }
+
+    #[test]
+    fn test_save_snapshot_overwrites_corrupted_daily_file() {
+        let dir = TempDir::new().unwrap();
+
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let filepath = dir.path().join(format!("{}.json", today));
+        fs::write(&filepath, "corrupted data").unwrap();
+
+        let snapshot = make_test_snapshot(1, 0, 0);
+        save_snapshot_to(dir.path(), &snapshot).unwrap();
+
+        let loaded = load_history_from(dir.path(), 1).unwrap();
+        assert_eq!(loaded.len(), 1);
+    }
+
+    // --- cleanup tests ---
+
+    #[test]
+    fn test_cleanup_removes_old_files() {
+        let dir = TempDir::new().unwrap();
+
+        let old_date = (Utc::now() - Duration::days(30))
+            .format("%Y-%m-%d")
+            .to_string();
+        let old_file = dir.path().join(format!("{}.json", old_date));
+        fs::write(&old_file, "[]").unwrap();
+
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let today_file = dir.path().join(format!("{}.json", today));
+        fs::write(&today_file, "[]").unwrap();
+
+        let result = cleanup_old_history_in(dir.path(), 7).unwrap();
+
+        assert_eq!(result.removed, 1);
+        assert_eq!(result.failed, 0);
+        assert!(!old_file.exists());
+        assert!(today_file.exists());
+    }
+
+    #[test]
+    fn test_cleanup_empty_directory() {
+        let dir = TempDir::new().unwrap();
+        let result = cleanup_old_history_in(dir.path(), 7).unwrap();
+        assert_eq!(result.removed, 0);
+        assert_eq!(result.failed, 0);
+    }
+
+    #[test]
+    fn test_cleanup_ignores_non_json_files() {
+        let dir = TempDir::new().unwrap();
+
+        let old_date = (Utc::now() - Duration::days(30))
+            .format("%Y-%m-%d")
+            .to_string();
+        let txt_file = dir.path().join(format!("{}.txt", old_date));
+        fs::write(&txt_file, "not json").unwrap();
+
+        let result = cleanup_old_history_in(dir.path(), 7).unwrap();
+        assert_eq!(result.removed, 0);
+        assert!(txt_file.exists());
+    }
+
+    #[test]
+    fn test_cleanup_nonexistent_directory() {
+        let dir = TempDir::new().unwrap();
+        let nonexistent = dir.path().join("nope");
+        let result = cleanup_old_history_in(&nonexistent, 7).unwrap();
+        assert_eq!(result.removed, 0);
+        assert_eq!(result.failed, 0);
+    }
+
+    // --- load_history date filtering ---
+
+    #[test]
+    fn test_load_history_filters_by_days() {
+        let dir = TempDir::new().unwrap();
+
+        let old_ts = Utc::now() - Duration::days(10);
+        let old_snapshot = HealthSnapshot {
+            timestamp: old_ts,
+            total_kilds: 1,
+            working: 1,
+            idle: 0,
+            stuck: 0,
+            crashed: 0,
+            avg_cpu_percent: None,
+            total_memory_mb: None,
+        };
+        let old_date = old_ts.format("%Y-%m-%d").to_string();
+        let old_path = dir.path().join(format!("{}.json", old_date));
+        fs::write(
+            &old_path,
+            serde_json::to_string(&vec![old_snapshot]).unwrap(),
+        )
+        .unwrap();
+
+        let recent_snapshot = make_test_snapshot(2, 0, 0);
+        save_snapshot_to(dir.path(), &recent_snapshot).unwrap();
+
+        let loaded = load_history_from(dir.path(), 3).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].working, 2);
+    }
 }
