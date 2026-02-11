@@ -3,8 +3,6 @@ use std::path::Path;
 use git2::{Repository, Status, StatusOptions};
 use tracing::{debug, warn};
 
-use git2::Oid;
-
 use crate::git::errors::GitError;
 use crate::git::types::{
     BaseBranchDrift, CommitCounts, DiffStats, GitStats, UncommittedDetails, WorktreeStatus,
@@ -396,7 +394,7 @@ fn compute_base_metrics(
     let repo = match Repository::open(worktree_path) {
         Ok(r) => r,
         Err(e) => {
-            debug!(
+            warn!(
                 event = "core.git.stats.base_metrics_repo_open_failed",
                 branch = branch,
                 error = %e
@@ -406,22 +404,23 @@ fn compute_base_metrics(
     };
 
     let kild_branch = crate::git::naming::kild_branch_name(branch);
-    let branch_oid = match resolve_branch_oid(&repo, &kild_branch) {
+    let branch_oid = match super::health::resolve_branch_oid(&repo, &kild_branch) {
         Some(oid) => oid,
         None => {
-            debug!(
+            warn!(
                 event = "core.git.stats.kild_branch_not_found",
                 branch = %kild_branch
             );
             return (None, None);
         }
     };
-    let base_oid = match resolve_branch_oid(&repo, base_branch) {
+    let base_oid = match super::health::resolve_branch_oid(&repo, base_branch) {
         Some(oid) => oid,
         None => {
-            debug!(
+            warn!(
                 event = "core.git.stats.base_branch_not_found",
-                base = base_branch
+                base = base_branch,
+                "Base branch not found — check git.base_branch config"
             );
             return (None, None);
         }
@@ -438,11 +437,6 @@ fn compute_base_metrics(
         merge_base.and_then(|mb| super::health::diff_against_base(&repo, branch_oid, mb));
 
     (drift, diff_vs_base)
-}
-
-/// Resolve a branch name to its OID, delegating to health module.
-fn resolve_branch_oid(repo: &Repository, branch_name: &str) -> Option<Oid> {
-    super::health::resolve_branch_oid(repo, branch_name)
 }
 
 #[cfg(test)]
@@ -934,6 +928,188 @@ mod tests {
         assert_eq!(status.unpushed_commit_count, 0);
         assert!(status.has_remote_branch);
         assert!(!status.behind_count_failed);
+    }
+
+    // --- collect_git_stats tests ---
+
+    // --- compute_base_metrics tests ---
+
+    #[test]
+    fn test_base_metrics_happy_path() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Initial commit on main
+        fs::write(dir.path().join("base.txt"), "base").unwrap();
+        git_add_commit(dir.path(), "base commit");
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create kild/feature branch with 2 commits
+        Command::new("git")
+            .args(["checkout", "-b", "kild/feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("feat1.txt"), "feature work").unwrap();
+        git_add_commit(dir.path(), "feature commit 1");
+        fs::write(dir.path().join("feat2.txt"), "more work").unwrap();
+        git_add_commit(dir.path(), "feature commit 2");
+
+        let stats = collect_git_stats(dir.path(), "feature", "main").unwrap();
+
+        let drift = stats.drift.expect("drift should be Some");
+        assert_eq!(drift.ahead, 2);
+        assert_eq!(drift.behind, 0);
+        assert_eq!(drift.base_branch, "main");
+
+        let dvb = stats.diff_vs_base.expect("diff_vs_base should be Some");
+        assert_eq!(dvb.files_changed, 2);
+        assert!(dvb.insertions > 0);
+    }
+
+    #[test]
+    fn test_base_metrics_behind_base() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Initial commit on main
+        fs::write(dir.path().join("base.txt"), "base").unwrap();
+        git_add_commit(dir.path(), "base commit");
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Branch off for kild
+        Command::new("git")
+            .args(["checkout", "-b", "kild/old-feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("old.txt"), "old work").unwrap();
+        git_add_commit(dir.path(), "old feature work");
+
+        // Main gets 2 new commits
+        Command::new("git")
+            .args(["checkout", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("new1.txt"), "new on main").unwrap();
+        git_add_commit(dir.path(), "main commit 1");
+        fs::write(dir.path().join("new2.txt"), "more main").unwrap();
+        git_add_commit(dir.path(), "main commit 2");
+
+        // Switch back to kild branch for stats collection
+        Command::new("git")
+            .args(["checkout", "kild/old-feature"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let stats = collect_git_stats(dir.path(), "old-feature", "main").unwrap();
+
+        let drift = stats.drift.expect("drift should be Some");
+        assert_eq!(drift.ahead, 1);
+        assert_eq!(drift.behind, 2);
+    }
+
+    #[test]
+    fn test_base_metrics_missing_base_branch() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        git_add_commit(dir.path(), "commit");
+        Command::new("git")
+            .args(["checkout", "-b", "kild/test"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let stats = collect_git_stats(dir.path(), "test", "nonexistent-base").unwrap();
+
+        assert!(
+            stats.drift.is_none(),
+            "drift should be None when base branch missing"
+        );
+        assert!(
+            stats.diff_vs_base.is_none(),
+            "diff_vs_base should be None when base branch missing"
+        );
+        // Uncommitted metrics should still work independently
+        assert!(stats.uncommitted_diff.is_some());
+    }
+
+    #[test]
+    fn test_base_metrics_missing_kild_branch() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        git_add_commit(dir.path(), "commit");
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Request stats for branch that doesn't exist (no kild/nonexistent)
+        let stats = collect_git_stats(dir.path(), "nonexistent", "main").unwrap();
+
+        assert!(
+            stats.drift.is_none(),
+            "drift should be None when kild branch missing"
+        );
+        assert!(
+            stats.diff_vs_base.is_none(),
+            "diff_vs_base should be None when kild branch missing"
+        );
+    }
+
+    #[test]
+    fn test_base_metrics_independent_from_uncommitted() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Base commit on main
+        fs::write(dir.path().join("base.txt"), "base content").unwrap();
+        git_add_commit(dir.path(), "base commit");
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create feature branch with committed work
+        Command::new("git")
+            .args(["checkout", "-b", "kild/test"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        fs::write(dir.path().join("feature.txt"), "committed feature work").unwrap();
+        git_add_commit(dir.path(), "feature commit");
+
+        // Add uncommitted changes (different from committed work)
+        fs::write(dir.path().join("wip.txt"), "work in progress").unwrap();
+
+        let stats = collect_git_stats(dir.path(), "test", "main").unwrap();
+
+        // diff_vs_base reflects committed work only (1 file: feature.txt)
+        let dvb = stats.diff_vs_base.expect("diff_vs_base should be Some");
+        assert_eq!(
+            dvb.files_changed, 1,
+            "Only feature.txt is committed vs base"
+        );
+
+        // uncommitted_diff reflects local WIP changes (untracked wip.txt won't show
+        // in index-to-workdir diff, but the test validates independence)
+        assert!(stats.uncommitted_diff.is_some());
     }
 
     // --- collect_git_stats tests ---

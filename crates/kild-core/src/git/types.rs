@@ -152,13 +152,21 @@ impl UncommittedDetails {
 ///
 /// Combines diff stats, worktree status, and base-branch metrics into a single response.
 /// All fields are optional to support graceful degradation when individual git operations fail.
+///
+/// # Field Dependencies
+/// - `drift` and `diff_vs_base` are computed together but may fail independently.
+///   Both are `None` when branch OIDs cannot be resolved.
+///   `drift` may be `Some` while `diff_vs_base` is `None` (merge base not found).
+/// - `uncommitted_diff` and `worktree_status` are computed independently from base-branch metrics.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GitStats {
     /// Total committed changes from merge base to branch tip (how big the PR will be).
-    /// `None` if merge base cannot be found or computation fails.
+    /// `None` if merge base cannot be found or diff computation fails.
+    /// May be `None` even when `drift` is `Some` (merge base not found).
     pub diff_vs_base: Option<DiffStats>,
     /// Branch position relative to base branch.
     /// `None` if branch or base branch OIDs cannot be resolved.
+    /// May be `Some` even when `diff_vs_base` is `None` (drift doesn't require merge base).
     pub drift: Option<BaseBranchDrift>,
     /// Uncommitted changes (index vs working directory). Renamed from `diff_stats`.
     pub uncommitted_diff: Option<DiffStats>,
@@ -168,12 +176,18 @@ pub struct GitStats {
 impl GitStats {
     /// Returns true if any git data was successfully collected.
     pub fn has_data(&self) -> bool {
-        self.uncommitted_diff.is_some() || self.worktree_status.is_some()
+        self.diff_vs_base.is_some()
+            || self.drift.is_some()
+            || self.uncommitted_diff.is_some()
+            || self.worktree_status.is_some()
     }
 
     /// Returns true if all git operations failed.
     pub fn is_empty(&self) -> bool {
-        self.uncommitted_diff.is_none() && self.worktree_status.is_none()
+        self.diff_vs_base.is_none()
+            && self.drift.is_none()
+            && self.uncommitted_diff.is_none()
+            && self.worktree_status.is_none()
     }
 }
 

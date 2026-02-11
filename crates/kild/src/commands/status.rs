@@ -104,6 +104,11 @@ pub(crate) fn handle_status_command(
                         drift.ahead, drift.behind, drift.base_branch
                     );
                     rows.push(("Commits:", commits_line));
+                } else if stats.diff_vs_base.is_none() {
+                    rows.push((
+                        "Commits:",
+                        "(unavailable — run with -v for details)".to_string(),
+                    ));
                 }
 
                 // Show remote status (push state)
