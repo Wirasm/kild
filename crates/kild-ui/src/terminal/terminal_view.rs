@@ -10,7 +10,7 @@ const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
 use super::input;
 use super::state::Terminal;
-use super::terminal_element::TerminalElement;
+use super::terminal_element::{MouseState, TerminalElement};
 use crate::theme;
 
 /// GPUI View wrapping TerminalElement with focus management and keyboard routing.
@@ -26,6 +26,9 @@ pub struct TerminalView {
     _event_task: Task<()>,
     /// Whether the cursor is currently visible in the blink cycle.
     cursor_visible: bool,
+    /// Mouse state passed to TerminalElement on each render.
+    /// TerminalElement is reconstructed every frame -- do not cache instances.
+    mouse_state: MouseState,
     /// Monotonic epoch incremented on each blink reset. Stale timers detect
     /// mismatched epochs and exit, preventing old timers from toggling state.
     blink_epoch: usize,
@@ -83,6 +86,10 @@ impl TerminalView {
             cursor_visible: true,
             blink_epoch,
             _blink_task: blink_task,
+            mouse_state: MouseState {
+                position: None,
+                cmd_held: false,
+            },
         }
     }
 
@@ -142,6 +149,34 @@ impl TerminalView {
     fn set_error(&self, msg: String) {
         if let Ok(mut err) = self.terminal.error_state().lock() {
             *err = Some(msg);
+        }
+    }
+
+    fn on_mouse_move(
+        &mut self,
+        event: &gpui::MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_cmd = event.modifiers.platform;
+        let new_pos = Some(event.position);
+        if self.mouse_state.position != new_pos || self.mouse_state.cmd_held != new_cmd {
+            self.mouse_state.position = new_pos;
+            self.mouse_state.cmd_held = new_cmd;
+            cx.notify();
+        }
+    }
+
+    fn on_modifiers_changed(
+        &mut self,
+        event: &gpui::ModifiersChangedEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_cmd = event.modifiers.platform;
+        if self.mouse_state.cmd_held != new_cmd {
+            self.mouse_state.cmd_held = new_cmd;
+            cx.notify();
         }
     }
 
@@ -219,6 +254,8 @@ impl Render for TerminalView {
         let mut container = div()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
             .size_full()
             .bg(theme::terminal_background());
 
@@ -243,6 +280,10 @@ impl Render for TerminalView {
             has_focus,
             resize_handle,
             cursor_visible,
+            MouseState {
+                position: self.mouse_state.position,
+                cmd_held: self.mouse_state.cmd_held,
+            },
         ))
     }
 }

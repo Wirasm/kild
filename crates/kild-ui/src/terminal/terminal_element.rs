@@ -7,11 +7,12 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use gpui::{
-    App, Bounds, DispatchPhase, Element, ElementId, Font, FontWeight, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, ScrollWheelEvent, SharedString, Size, Style, TextRun, Window, fill,
-    font, point, px, size,
+    App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, Font, FontWeight, GlobalElementId,
+    Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, ScrollWheelEvent, SharedString, Size, Style, TextRun,
+    Window, fill, font, point, px, size,
 };
+use linkify::{LinkFinder, LinkKind};
 
 use super::colors;
 use super::state::{KildListener, ResizeHandle};
@@ -23,6 +24,7 @@ pub struct PrepaintState {
     text_runs: Vec<PreparedLine>,
     bg_regions: Vec<PreparedBgRegion>,
     selection_rects: Vec<PreparedBgRegion>,
+    url_regions: Vec<PreparedUrlRegion>,
     cursor: Option<PreparedCursor>,
     cell_width: Pixels,
     cell_height: Pixels,
@@ -46,12 +48,30 @@ struct PreparedCursor {
     color: Hsla,
 }
 
+/// Per-line text data for URL scanning: (line_index, line_text, col_offsets).
+/// Each col_offset entry maps a char index to (grid_column, cell_width_in_columns).
+type LineText = (i32, String, Vec<(usize, usize)>);
+
+/// A detected URL region in terminal output with precomputed pixel bounds.
+pub(crate) struct PreparedUrlRegion {
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) url: String,
+}
+
+/// Mouse interaction state for URL hover detection.
+/// Both fields must be updated together to prevent stale highlights.
+pub(crate) struct MouseState {
+    pub(crate) position: Option<gpui::Point<Pixels>>,
+    pub(crate) cmd_held: bool,
+}
+
 /// Custom GPUI Element that renders terminal cells as GPU draw calls.
 pub struct TerminalElement {
     term: Arc<FairMutex<Term<KildListener>>>,
     has_focus: bool,
     resize_handle: ResizeHandle,
     cursor_visible: bool,
+    mouse_state: MouseState,
 }
 
 impl TerminalElement {
@@ -60,12 +80,14 @@ impl TerminalElement {
         has_focus: bool,
         resize_handle: ResizeHandle,
         cursor_visible: bool,
+        mouse_state: MouseState,
     ) -> Self {
         Self {
             term,
             has_focus,
             resize_handle,
             cursor_visible,
+            mouse_state,
         }
     }
 
@@ -192,6 +214,7 @@ impl Element for TerminalElement {
                 text_runs: vec![],
                 bg_regions: vec![],
                 selection_rects: vec![],
+                url_regions: vec![],
                 cursor: None,
                 cell_width,
                 cell_height,
@@ -208,6 +231,7 @@ impl Element for TerminalElement {
                 text_runs: vec![],
                 bg_regions: vec![],
                 selection_rects: vec![],
+                url_regions: vec![],
                 cursor: None,
                 cell_width,
                 cell_height,
@@ -263,6 +287,14 @@ impl Element for TerminalElement {
         let mut bg_start_col: usize = 0;
         let mut bg_color: Option<Hsla> = None;
         let mut bg_line: i32 = -1;
+
+        // Per-line text accumulation for URL scanning.
+        // Each entry: (line_index, line_text, col_offsets).
+        // col_offsets maps char index to (grid_column, cell_width) to handle wide chars.
+        let mut line_texts: Vec<LineText> = Vec::with_capacity(rows);
+        let mut current_line_text = String::new();
+        let mut current_col_offsets: Vec<(usize, usize)> = Vec::new();
+        let mut url_text_line: i32 = -1;
 
         let flush_bg = |bg_color: Option<Hsla>,
                         bg_line: i32,
@@ -329,6 +361,15 @@ impl Element for TerminalElement {
                         runs: std::mem::take(&mut current_runs),
                     });
                 }
+                // Flush line text for URL scanning
+                if !current_line_text.is_empty() {
+                    line_texts.push((
+                        url_text_line,
+                        std::mem::take(&mut current_line_text),
+                        std::mem::take(&mut current_col_offsets),
+                    ));
+                }
+                url_text_line = line_idx;
                 current_line = line_idx;
                 run_start_col = col;
                 bg_line = line_idx;
@@ -420,6 +461,9 @@ impl Element for TerminalElement {
                     underline,
                     strikethrough,
                 ));
+                // Track for URL scanning (wide char = 1 char, 2 grid columns)
+                current_col_offsets.push((col, 2));
+                current_line_text.push(wch);
                 continue;
             }
 
@@ -453,11 +497,11 @@ impl Element for TerminalElement {
             }
 
             let ch = cell.c;
-            if ch != ' ' && ch != '\0' {
-                run_text.push(ch);
-            } else {
-                run_text.push(' ');
-            }
+            let display_ch = if ch != ' ' && ch != '\0' { ch } else { ' ' };
+            run_text.push(display_ch);
+            // Track for URL scanning (normal char = 1 grid column)
+            current_col_offsets.push((col, 1));
+            current_line_text.push(display_ch);
         }
 
         // Flush final run/line/bg
@@ -489,6 +533,13 @@ impl Element for TerminalElement {
             cell_width,
             cell_height,
         );
+        // Flush final line text
+        if !current_line_text.is_empty() {
+            line_texts.push((url_text_line, current_line_text, current_col_offsets));
+        }
+
+        // URL detection — scan accumulated line texts with linkify
+        let url_regions = detect_urls(&line_texts, bounds, cell_width, cell_height);
 
         // Selection highlight rectangles
         let selection_color = Hsla::from(theme::terminal_selection());
@@ -564,6 +615,7 @@ impl Element for TerminalElement {
             text_runs: text_lines,
             bg_regions,
             selection_rects,
+            url_regions,
             cursor,
             cell_width,
             cell_height,
@@ -600,6 +652,33 @@ impl Element for TerminalElement {
         // Layer 2.5: Selection highlight (between cell bg and text)
         for rect in &prepaint.selection_rects {
             window.paint_quad(fill(rect.bounds, rect.color));
+        }
+
+        // Layer 2.7: URL underline highlights (Cmd+hover)
+        if self.mouse_state.cmd_held
+            && let Some(mouse_pos) = self.mouse_state.position
+        {
+            let url_color = Hsla {
+                a: 0.5,
+                ..Hsla::from(theme::ice())
+            };
+            let mut hovering_url = false;
+            for region in &prepaint.url_regions {
+                if region.bounds.contains(&mouse_pos) {
+                    hovering_url = true;
+                    let underline_y = region.bounds.origin.y + prepaint.cell_height - px(1.5);
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(region.bounds.origin.x, underline_y),
+                            size(region.bounds.size.width, px(1.5)),
+                        ),
+                        url_color,
+                    ));
+                }
+            }
+            if hovering_url {
+                window.set_cursor_style(CursorStyle::PointingHand, &prepaint.hitbox);
+            }
         }
 
         // Layer 3: Text runs (glyphs on top of backgrounds)
@@ -734,17 +813,64 @@ impl Element for TerminalElement {
             }
         });
 
-        // Mouse down handler — starts new selection (replaces any existing).
+        // Mouse down handler — Cmd+click opens URL, otherwise starts selection.
         let hitbox = prepaint.hitbox.clone();
         let term = self.term.clone();
         let cell_width = prepaint.cell_width;
         let cell_height = prepaint.cell_height;
         let sel_bounds = prepaint.bounds;
+        let click_url_regions: Vec<(Bounds<Pixels>, String)> = prepaint
+            .url_regions
+            .iter()
+            .map(|r| (r.bounds, r.url.clone()))
+            .collect();
         window.on_mouse_event::<MouseDownEvent>(move |event, phase, window, _cx| {
             if phase == DispatchPhase::Bubble
                 && event.button == MouseButton::Left
                 && hitbox.is_hovered(window)
             {
+                // Cmd+click on URL → open in browser
+                if event.modifiers.platform {
+                    for (url_bounds, url) in &click_url_regions {
+                        if url_bounds.contains(&event.position) {
+                            // Only allow http/https schemes to prevent opening
+                            // file://, javascript:, or other potentially dangerous URLs.
+                            if !url.starts_with("http://") && !url.starts_with("https://") {
+                                tracing::warn!(
+                                    event = "ui.terminal.url_open_blocked",
+                                    url = url,
+                                    reason =
+                                        "unsupported scheme, only http:// and https:// allowed",
+                                );
+                                return;
+                            }
+                            tracing::info!(event = "ui.terminal.url_open_started", url = url);
+                            match open::that(url) {
+                                Ok(()) => {
+                                    tracing::info!(
+                                        event = "ui.terminal.url_open_completed",
+                                        url = url
+                                    );
+                                }
+                                Err(e) => {
+                                    // TODO: Surface to user via UI error state. Currently the
+                                    // paint closure doesn't have access to TerminalView's
+                                    // set_error(), so we can only log. The user sees nothing
+                                    // on failure — this violates "No Silent Failures" but
+                                    // requires an architecture change to fix (e.g., shared
+                                    // error channel between Element and View).
+                                    tracing::error!(
+                                        event = "ui.terminal.url_open_failed",
+                                        url = url,
+                                        error = %e,
+                                    );
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+
                 let (grid_point, side) =
                     Self::pixel_to_grid(event.position, sel_bounds, cell_width, cell_height);
                 let ty = match event.click_count {
@@ -774,5 +900,300 @@ impl Element for TerminalElement {
                 }
             }
         });
+    }
+}
+
+/// Extract URLs from terminal line texts and compute their pixel bounds.
+///
+/// Each entry in `line_texts` is `(line_index, line_text, col_offsets)` where
+/// `col_offsets` maps each char index to `(grid_column, cell_width_in_columns)`.
+/// Wide characters have `cell_width_in_columns = 2`, normal characters `1`.
+pub(crate) fn detect_urls(
+    line_texts: &[LineText],
+    bounds: Bounds<Pixels>,
+    cell_width: Pixels,
+    cell_height: Pixels,
+) -> Vec<PreparedUrlRegion> {
+    let mut url_regions: Vec<PreparedUrlRegion> = Vec::new();
+    let mut finder = LinkFinder::new();
+    finder.kinds(&[LinkKind::Url]);
+    for (line_idx, text, col_offsets) in line_texts {
+        // Build byte-offset → char-index lookup for multi-byte char support.
+        // linkify returns byte offsets, but col_offsets is indexed by char position.
+        let byte_to_char: Vec<usize> = {
+            let mut map = vec![0usize; text.len() + 1];
+            for (char_idx, (byte_idx, _)) in text.char_indices().enumerate() {
+                map[byte_idx] = char_idx;
+            }
+            // Sentinel for exclusive end offset
+            map[text.len()] = text.chars().count();
+            map
+        };
+
+        for link in finder.links(text) {
+            let start_byte = link.start();
+            let end_byte = link.end();
+            let start_char = byte_to_char[start_byte];
+            let end_char = byte_to_char[end_byte]; // exclusive char index
+            if start_char >= col_offsets.len() || end_char == 0 {
+                continue;
+            }
+            let (start_col, _) = col_offsets[start_char];
+            // end_char is exclusive, so subtract 1 to get the last inclusive
+            // char index, then clamp to valid range. The end grid column is
+            // last_col + last_width to account for wide chars occupying 2
+            // grid columns.
+            let unclamped = end_char - 1;
+            let last_idx = unclamped.min(col_offsets.len() - 1);
+            if unclamped != last_idx {
+                tracing::debug!(
+                    event = "ui.terminal.url_bounds_clamped",
+                    url = link.as_str(),
+                    end_char = end_char,
+                    col_offsets_len = col_offsets.len(),
+                );
+            }
+            let (last_col, last_width) = col_offsets[last_idx];
+            let end_col = last_col + last_width;
+            debug_assert!(
+                end_col > start_col,
+                "URL region width must be positive: start_col={start_col}, end_col={end_col}, url={}",
+                link.as_str()
+            );
+            let x = bounds.origin.x + start_col as f32 * cell_width;
+            let y = bounds.origin.y + *line_idx as f32 * cell_height;
+            let w = (end_col - start_col) as f32 * cell_width;
+            url_regions.push(PreparedUrlRegion {
+                bounds: Bounds::new(point(x, y), size(w, cell_height)),
+                url: link.as_str().to_string(),
+            });
+        }
+    }
+    url_regions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Bounds, point, px, size};
+
+    /// Build col_offsets for a line where each char is either wide (2 cols) or normal (1 col).
+    /// `wide_indices` lists the char indices that are wide (2 grid columns).
+    fn build_col_offsets(text: &str, wide_indices: &[usize]) -> Vec<(usize, usize)> {
+        let mut offsets = Vec::new();
+        let mut grid_col = 0usize;
+        for (i, _ch) in text.chars().enumerate() {
+            let width = if wide_indices.contains(&i) { 2 } else { 1 };
+            offsets.push((grid_col, width));
+            grid_col += width;
+        }
+        offsets
+    }
+
+    fn test_bounds() -> Bounds<Pixels> {
+        Bounds::new(point(px(0.0), px(0.0)), size(px(800.0), px(600.0)))
+    }
+
+    fn cell_w() -> Pixels {
+        px(10.0)
+    }
+
+    fn cell_h() -> Pixels {
+        px(20.0)
+    }
+
+    #[test]
+    fn single_url_basic() {
+        let text = "Check https://example.com here".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
+        // "Check " = 6 chars, so URL starts at col 6
+        assert_eq!(regions[0].bounds.origin.x, px(60.0));
+        assert_eq!(regions[0].bounds.origin.y, px(0.0));
+        // "https://example.com" = 19 chars = 19 cols wide
+        assert_eq!(regions[0].bounds.size.width, px(190.0));
+        assert_eq!(regions[0].bounds.size.height, cell_h());
+    }
+
+    #[test]
+    fn url_at_column_zero() {
+        let text = "https://example.com rest".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
+        assert_eq!(regions[0].bounds.origin.x, px(0.0));
+    }
+
+    #[test]
+    fn url_at_end_of_line() {
+        let text = "prefix https://example.com".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
+        // "prefix " = 7 chars
+        assert_eq!(regions[0].bounds.origin.x, px(70.0));
+        // 19 cols wide
+        assert_eq!(regions[0].bounds.size.width, px(190.0));
+    }
+
+    #[test]
+    fn empty_line_no_panic() {
+        let text = "".to_string();
+        let col_offsets: Vec<(usize, usize)> = vec![];
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn no_urls_in_plain_text() {
+        let text = "just plain text with no links".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn empty_input_vec() {
+        let line_texts: Vec<(i32, String, Vec<(usize, usize)>)> = vec![];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn url_with_query_string() {
+        let text = "https://example.com/path?q=1&b=2".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text.clone(), col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, text);
+        assert_eq!(regions[0].bounds.origin.x, px(0.0));
+        // 32 chars = 32 cols
+        assert_eq!(regions[0].bounds.size.width, px(320.0));
+    }
+
+    #[test]
+    fn multiple_urls_non_overlapping() {
+        let text = "Visit https://a.com or https://b.com end".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].url, "https://a.com");
+        assert_eq!(regions[1].url, "https://b.com");
+
+        // Verify non-overlapping: first region ends before second starts
+        let first_end_x = regions[0].bounds.origin.x + regions[0].bounds.size.width;
+        let second_start_x = regions[1].bounds.origin.x;
+        assert!(
+            first_end_x <= second_start_x,
+            "URL regions overlap: first ends at {first_end_x:?}, second starts at {second_start_x:?}"
+        );
+
+        // Same line, same y coordinate
+        assert_eq!(regions[0].bounds.origin.y, regions[1].bounds.origin.y);
+    }
+
+    #[test]
+    fn emoji_before_url_wide_char_bounds() {
+        // Rocket emoji is a wide char (2 grid cols), then space (1 col), then URL
+        // Grid layout: cols 0-1 = rocket, col 2 = space, cols 3+ = URL
+        let text = "\u{1F680} https://example.com".to_string();
+        let col_offsets = build_col_offsets(&text, &[0]); // index 0 is the emoji (wide)
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
+        // Emoji=2 cols + space=1 col = URL starts at grid col 3
+        assert_eq!(regions[0].bounds.origin.x, px(30.0));
+        // 19 chars, all normal width = 19 cols
+        assert_eq!(regions[0].bounds.size.width, px(190.0));
+    }
+
+    #[test]
+    fn cjk_before_url_wide_char_bounds() {
+        // Two CJK chars (each 2 grid cols), then space, then URL
+        // Grid layout: cols 0-1 = first CJK, cols 2-3 = second CJK, col 4 = space, cols 5+ = URL
+        let text = "\u{4F60}\u{597D} https://example.com".to_string();
+        let col_offsets = build_col_offsets(&text, &[0, 1]); // indices 0,1 are CJK (wide)
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
+        // 2 wide chars = 4 cols + space = 1 col → URL starts at grid col 5
+        assert_eq!(regions[0].bounds.origin.x, px(50.0));
+        assert_eq!(regions[0].bounds.size.width, px(190.0));
+    }
+
+    #[test]
+    fn url_on_different_line_index() {
+        let text = "https://example.com".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        // Line index 3 means y offset = 3 * cell_height
+        let line_texts = vec![(3i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].bounds.origin.y, px(60.0)); // 3 * 20.0
+    }
+
+    #[test]
+    fn bounds_origin_offset() {
+        let text = "https://example.com".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let offset_bounds = Bounds::new(point(px(100.0), px(50.0)), size(px(800.0), px(600.0)));
+        let regions = detect_urls(&line_texts, offset_bounds, cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 1);
+        // x should be offset by bounds origin
+        assert_eq!(regions[0].bounds.origin.x, px(100.0));
+        assert_eq!(regions[0].bounds.origin.y, px(50.0));
+    }
+
+    #[test]
+    fn bare_domain_without_scheme_not_matched() {
+        // linkify with LinkKind::Url should not match bare domains without a scheme
+        let text = "not a url example.com something".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn multiple_lines_with_urls() {
+        let text1 = "line1 https://a.com".to_string();
+        let offsets1 = build_col_offsets(&text1, &[]);
+        let text2 = "line2 https://b.com".to_string();
+        let offsets2 = build_col_offsets(&text2, &[]);
+        let line_texts = vec![(0i32, text1, offsets1), (2i32, text2, offsets2)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].url, "https://a.com");
+        assert_eq!(regions[0].bounds.origin.y, px(0.0)); // line 0
+        assert_eq!(regions[1].url, "https://b.com");
+        assert_eq!(regions[1].bounds.origin.y, px(40.0)); // line 2 * 20.0
     }
 }
