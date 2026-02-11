@@ -77,7 +77,7 @@ async fn test_create_session_and_list() {
 
     assert_eq!(session.id, "test-session");
     assert_eq!(session.command, "/bin/sh");
-    assert_eq!(session.status, "running");
+    assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // List sessions
     let sessions = client.list_sessions(None).await.unwrap();
@@ -318,7 +318,7 @@ async fn test_multiple_clients_attach_to_session() {
     // Verify session still running with a fresh connection
     let mut admin_client = DaemonClient::connect(&socket_path).await.unwrap();
     let info = admin_client.get_session("multi-attach").await.unwrap();
-    assert_eq!(info.status, "running");
+    assert_eq!(info.status, kild_protocol::SessionStatus::Running);
     assert_eq!(info.client_count, Some(3));
 
     // Clean up
@@ -361,7 +361,8 @@ async fn test_pty_exit_transitions_session_to_stopped() {
     // Session should have transitioned to stopped
     let info = client.get_session("exit-test").await.unwrap();
     assert_eq!(
-        info.status, "stopped",
+        info.status,
+        kild_protocol::SessionStatus::Stopped,
         "Session should be stopped after PTY exit"
     );
 
@@ -427,14 +428,14 @@ async fn test_stop_session_idempotent() {
 
     // Verify stopped
     let info = client.get_session("idempotent-stop").await.unwrap();
-    assert_eq!(info.status, "stopped");
+    assert_eq!(info.status, kild_protocol::SessionStatus::Stopped);
 
     // Second stop should also succeed (idempotent)
     client.stop_session("idempotent-stop").await.unwrap();
 
     // Still stopped
     let info = client.get_session("idempotent-stop").await.unwrap();
-    assert_eq!(info.status, "stopped");
+    assert_eq!(info.status, kild_protocol::SessionStatus::Stopped);
 
     client.shutdown().await.unwrap();
 
@@ -467,7 +468,7 @@ async fn test_destroy_running_session() {
         )
         .await
         .unwrap();
-    assert_eq!(session.status, "running");
+    assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // Destroy it while running (force=true)
     client
@@ -520,7 +521,7 @@ async fn test_create_session_with_login_shell() {
         .unwrap();
 
     assert_eq!(session.id, "shell-test");
-    assert_eq!(session.status, "running");
+    assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // Verify session is listed
     let sessions = client.list_sessions(None).await.unwrap();
@@ -578,7 +579,7 @@ async fn test_destroy_then_recreate_same_session_id() {
         .await
         .unwrap();
     assert_eq!(session.id, "reopen-test");
-    assert_eq!(session.status, "running");
+    assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // Clean up
     client.destroy_session("reopen-test", false).await.unwrap();

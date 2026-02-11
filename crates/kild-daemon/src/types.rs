@@ -164,7 +164,7 @@ pub struct DaemonStatus {
     pub active_connections: usize,
 }
 
-pub use kild_protocol::SessionInfo;
+pub use kild_protocol::{SessionInfo, SessionStatus};
 
 #[cfg(test)]
 mod tests {

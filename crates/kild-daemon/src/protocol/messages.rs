@@ -1,1 +1,1 @@
-pub use kild_protocol::{ClientMessage, DaemonMessage};
+pub use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode};

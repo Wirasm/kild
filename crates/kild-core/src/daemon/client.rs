@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use kild_protocol::{ClientMessage, DaemonMessage};
+use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode, SessionStatus};
 use tracing::{debug, info, warn};
 
 use crate::errors::KildError;
@@ -30,8 +30,8 @@ pub enum DaemonClientError {
     #[error("Connection failed: {message}")]
     ConnectionFailed { message: String },
 
-    #[error("Daemon returned error: {message}")]
-    DaemonError { message: String },
+    #[error("Daemon returned error [{code}]: {message}")]
+    DaemonError { code: ErrorCode, message: String },
 
     #[error("IPC protocol error: {message}")]
     ProtocolError { message: String },
@@ -110,10 +110,8 @@ fn send_request(
         })?;
 
     // Check for error responses
-    if let DaemonMessage::Error { code, message, .. } = &response {
-        return Err(DaemonClientError::DaemonError {
-            message: format!("[{}] {}", code, message),
-        });
+    if let DaemonMessage::Error { code, message, .. } = response {
+        return Err(DaemonClientError::DaemonError { code, message });
     }
 
     Ok(response)
@@ -285,11 +283,13 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
 
 /// Query the daemon for a session's current status.
 ///
-/// Returns `Ok(Some("running"))` or `Ok(Some("stopped"))` if the daemon is
-/// reachable and knows about this session. Returns `Ok(None)` if the daemon
-/// is not running or the session is not found in the daemon.
+/// Returns `Ok(Some(SessionStatus))` if the daemon is reachable and knows
+/// about this session. Returns `Ok(None)` if the daemon is not running or the
+/// session is not found in the daemon.
 /// Returns `Err(...)` for unexpected failures (connection errors, protocol errors).
-pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, DaemonClientError> {
+pub fn get_session_status(
+    daemon_session_id: &str,
+) -> Result<Option<SessionStatus>, DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
 
     debug!(
@@ -322,24 +322,26 @@ pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, Dae
 
     match send_request(&mut stream, &request) {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
-            let status = session.status;
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
-                status = %status
+                status = %session.status
             );
-            Ok(Some(status))
+            Ok(Some(session.status))
         }
-        Ok(_) => {
-            debug!(
-                event = "core.daemon.get_session_status_completed",
+        Ok(unexpected) => {
+            warn!(
+                event = "core.daemon.get_session_status_failed",
                 daemon_session_id = daemon_session_id,
-                result = "unexpected_response"
+                response = ?unexpected,
+                "Unexpected response type from daemon"
             );
-            Ok(None)
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected SessionInfo response".to_string(),
+            })
         }
-        Err(DaemonClientError::DaemonError { ref message })
-            if message.contains("not_found") || message.contains("unknown_session") =>
+        Err(DaemonClientError::DaemonError { ref code, .. })
+            if *code == ErrorCode::SessionNotFound =>
         {
             debug!(
                 event = "core.daemon.get_session_status_completed",
@@ -365,7 +367,7 @@ pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, Dae
 /// Returns `Ok(None)` if the daemon is not running or the session is not found.
 pub fn get_session_info(
     daemon_session_id: &str,
-) -> Result<Option<(String, Option<i32>)>, DaemonClientError> {
+) -> Result<Option<(SessionStatus, Option<i32>)>, DaemonClientError> {
     let socket_path = crate::daemon::socket_path();
 
     let request = ClientMessage::GetSession {
@@ -385,9 +387,19 @@ pub fn get_session_info(
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
             Ok(Some((session.status, session.exit_code)))
         }
-        Ok(_) => Ok(None),
-        Err(DaemonClientError::DaemonError { ref message })
-            if message.contains("not_found") || message.contains("unknown_session") =>
+        Ok(unexpected) => {
+            warn!(
+                event = "core.daemon.get_session_info_failed",
+                daemon_session_id = daemon_session_id,
+                response = ?unexpected,
+                "Unexpected response type from daemon"
+            );
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected SessionInfo response".to_string(),
+            })
+        }
+        Err(DaemonClientError::DaemonError { ref code, .. })
+            if *code == ErrorCode::SessionNotFound =>
         {
             Ok(None)
         }
@@ -420,12 +432,24 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             use base64::Engine;
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(data)
-                .unwrap_or_default();
+                .map_err(|e| DaemonClientError::ProtocolError {
+                    message: format!("Invalid base64 in scrollback response: {}", e),
+                })?;
             Ok(Some(decoded))
         }
-        Ok(_) => Ok(Some(Vec::new())),
-        Err(DaemonClientError::DaemonError { ref message })
-            if message.contains("not_found") || message.contains("unknown_session") =>
+        Ok(unexpected) => {
+            warn!(
+                event = "core.daemon.read_scrollback_failed",
+                daemon_session_id = daemon_session_id,
+                response = ?unexpected,
+                "Unexpected response type from daemon"
+            );
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected ScrollbackContents response".to_string(),
+            })
+        }
+        Err(DaemonClientError::DaemonError { ref code, .. })
+            if *code == ErrorCode::SessionNotFound =>
         {
             Ok(None)
         }
@@ -485,6 +509,7 @@ mod tests {
         );
         assert_eq!(
             DaemonClientError::DaemonError {
+                code: ErrorCode::SessionNotFound,
                 message: "internal".to_string()
             }
             .error_code(),
@@ -521,6 +546,7 @@ mod tests {
         );
         assert!(
             !DaemonClientError::DaemonError {
+                code: ErrorCode::SessionNotFound,
                 message: "internal".to_string()
             }
             .is_user_error()

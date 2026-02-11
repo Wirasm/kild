@@ -6,7 +6,7 @@ use tracing::error;
 
 use crate::errors::DaemonError;
 use crate::pty::output::ScrollbackBuffer;
-use crate::types::SessionInfo;
+use crate::types::{SessionInfo, SessionStatus};
 
 /// Unique identifier for a connected client.
 pub type ClientId = u64;
@@ -207,11 +207,16 @@ impl DaemonSession {
 
     /// Convert to wire format `SessionInfo`.
     pub fn to_session_info(&self) -> SessionInfo {
+        let status = match self.state {
+            SessionState::Creating => SessionStatus::Creating,
+            SessionState::Running => SessionStatus::Running,
+            SessionState::Stopped => SessionStatus::Stopped,
+        };
         SessionInfo {
             id: self.id.clone(),
             working_directory: self.working_directory.clone(),
             command: self.command.clone(),
-            status: self.state.to_string(),
+            status,
             created_at: self.created_at.clone(),
             client_count: Some(self.client_count()),
             pty_pid: self.pty_pid,
@@ -312,7 +317,7 @@ mod tests {
         assert_eq!(info.id, "myapp_feature");
         assert_eq!(info.working_directory, "/tmp/wt");
         assert_eq!(info.command, "claude");
-        assert_eq!(info.status, "creating");
+        assert_eq!(info.status, SessionStatus::Creating);
         assert_eq!(info.client_count, Some(2));
     }
 

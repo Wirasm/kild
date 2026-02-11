@@ -7,7 +7,7 @@ use tracing::debug;
 
 use crate::errors::DaemonError;
 use crate::protocol::codec::{read_message, write_message};
-use crate::protocol::messages::{ClientMessage, DaemonMessage};
+use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
 use crate::types::SessionInfo;
 
 /// Client for communicating with the daemon over IPC.
@@ -66,17 +66,17 @@ impl DaemonClient {
     /// Check if a response is an error, and if so, convert it.
     fn check_error(response: &DaemonMessage) -> Result<(), DaemonError> {
         if let DaemonMessage::Error { code, message, .. } = response {
-            match code.as_str() {
-                "session_not_found" => {
+            match code {
+                ErrorCode::SessionNotFound => {
                     return Err(DaemonError::SessionNotFound(message.clone()));
                 }
-                "session_already_exists" => {
+                ErrorCode::SessionAlreadyExists => {
                     return Err(DaemonError::SessionAlreadyExists(message.clone()));
                 }
-                "session_not_running" => {
+                ErrorCode::SessionNotRunning => {
                     return Err(DaemonError::SessionNotRunning(message.clone()));
                 }
-                "pty_error" => return Err(DaemonError::PtyError(message.clone())),
+                ErrorCode::PtyError => return Err(DaemonError::PtyError(message.clone())),
                 _ => {
                     return Err(DaemonError::ProtocolError(format!("{}: {}", code, message)));
                 }
@@ -300,7 +300,7 @@ mod tests {
     fn test_check_error_session_not_found() {
         let msg = DaemonMessage::Error {
             id: "req-1".to_string(),
-            code: "session_not_found".to_string(),
+            code: ErrorCode::SessionNotFound,
             message: "no such session".to_string(),
         };
         let result = DaemonClient::check_error(&msg);
@@ -315,7 +315,7 @@ mod tests {
     fn test_check_error_session_already_exists() {
         let msg = DaemonMessage::Error {
             id: "req-2".to_string(),
-            code: "session_already_exists".to_string(),
+            code: ErrorCode::SessionAlreadyExists,
             message: "duplicate".to_string(),
         };
         let result = DaemonClient::check_error(&msg);
@@ -329,7 +329,7 @@ mod tests {
     fn test_check_error_session_not_running() {
         let msg = DaemonMessage::Error {
             id: "req-3".to_string(),
-            code: "session_not_running".to_string(),
+            code: ErrorCode::SessionNotRunning,
             message: "stopped".to_string(),
         };
         let result = DaemonClient::check_error(&msg);
@@ -343,7 +343,7 @@ mod tests {
     fn test_check_error_pty_error() {
         let msg = DaemonMessage::Error {
             id: "req-4".to_string(),
-            code: "pty_error".to_string(),
+            code: ErrorCode::PtyError,
             message: "alloc failed".to_string(),
         };
         let result = DaemonClient::check_error(&msg);
@@ -354,7 +354,7 @@ mod tests {
     fn test_check_error_unknown_code_maps_to_protocol_error() {
         let msg = DaemonMessage::Error {
             id: "req-5".to_string(),
-            code: "some_unknown_error".to_string(),
+            code: ErrorCode::Unknown,
             message: "unexpected".to_string(),
         };
         let result = DaemonClient::check_error(&msg);

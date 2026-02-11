@@ -137,7 +137,7 @@ mod tests {
                 id: "myapp_feature-auth".to_string(),
                 working_directory: "/tmp/wt".to_string(),
                 command: "claude".to_string(),
-                status: "running".to_string(),
+                status: kild_protocol::SessionStatus::Running,
                 created_at: "2026-02-09T14:30:00Z".to_string(),
                 client_count: Some(1),
                 pty_pid: Some(12345),

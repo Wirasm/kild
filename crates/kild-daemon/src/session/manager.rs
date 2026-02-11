@@ -467,14 +467,14 @@ mod tests {
 
         // Verify it starts as Running
         let info = mgr.get_session("s1").unwrap();
-        assert_eq!(info.status, "running");
+        assert_eq!(info.status, kild_protocol::SessionStatus::Running);
 
         // Simulate PTY exit
         mgr.handle_pty_exit("s1");
 
         // Session should now be Stopped
         let info = mgr.get_session("s1").unwrap();
-        assert_eq!(info.status, "stopped");
+        assert_eq!(info.status, kild_protocol::SessionStatus::Stopped);
     }
 
     #[test]

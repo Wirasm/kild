@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use kild_core::errors::KildError;
 
 use crate::protocol::codec::{read_message, write_message};
-use crate::protocol::messages::{ClientMessage, DaemonMessage};
+use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
 use crate::session::manager::SessionManager;
 use crate::session::state::ClientId;
 
@@ -131,7 +131,7 @@ async fn dispatch_message(
                 }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -167,7 +167,7 @@ async fn dispatch_message(
                     Err(e) => {
                         return Some(DaemonMessage::Error {
                             id,
-                            code: e.error_code().to_string(),
+                            code: ErrorCode::from_code(e.error_code()),
                             message: e.to_string(),
                         });
                     }
@@ -262,7 +262,7 @@ async fn dispatch_message(
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -279,7 +279,7 @@ async fn dispatch_message(
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -295,7 +295,7 @@ async fn dispatch_message(
                 Err(e) => {
                     return Some(DaemonMessage::Error {
                         id,
-                        code: "base64_decode_error".to_string(),
+                        code: ErrorCode::Base64DecodeError,
                         message: e.to_string(),
                     });
                 }
@@ -306,7 +306,7 @@ async fn dispatch_message(
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -318,7 +318,7 @@ async fn dispatch_message(
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -334,7 +334,7 @@ async fn dispatch_message(
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
                     id,
-                    code: e.error_code().to_string(),
+                    code: ErrorCode::from_code(e.error_code()),
                     message: e.to_string(),
                 }),
             }
@@ -352,7 +352,7 @@ async fn dispatch_message(
                 Some(session) => Some(DaemonMessage::SessionInfo { id, session }),
                 None => Some(DaemonMessage::Error {
                     id,
-                    code: "session_not_found".to_string(),
+                    code: ErrorCode::SessionNotFound,
                     message: format!("No session found with id '{}'", session_id),
                 }),
             }
@@ -371,7 +371,7 @@ async fn dispatch_message(
                 }
                 None => Some(DaemonMessage::Error {
                     id,
-                    code: "session_not_found".to_string(),
+                    code: ErrorCode::SessionNotFound,
                     message: format!("No session found with id '{}'", session_id),
                 }),
             }

@@ -4,6 +4,63 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::SessionInfo;
 
+/// Error codes returned by the daemon in error responses.
+///
+/// Maps 1:1 with `DaemonError` variants on the server side. Unknown codes
+/// from future daemon versions deserialize to `Unknown` via `#[serde(other)]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    SessionNotFound,
+    SessionAlreadyExists,
+    SessionNotRunning,
+    InvalidStateTransition,
+    PtyError,
+    ConfigInvalid,
+    DaemonAlreadyRunning,
+    ShutdownTimeout,
+    DaemonNotRunning,
+    ConnectionFailed,
+    ProtocolError,
+    IoError,
+    SerializationError,
+    Base64DecodeError,
+    SessionError,
+    #[serde(other)]
+    Unknown,
+}
+
+impl ErrorCode {
+    /// Convert a string error code (from `KildError::error_code()`) to an `ErrorCode`.
+    pub fn from_code(code: &str) -> Self {
+        serde_json::from_value(serde_json::Value::String(code.to_string()))
+            .unwrap_or(ErrorCode::Unknown)
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorCode::SessionNotFound => write!(f, "session_not_found"),
+            ErrorCode::SessionAlreadyExists => write!(f, "session_already_exists"),
+            ErrorCode::SessionNotRunning => write!(f, "session_not_running"),
+            ErrorCode::InvalidStateTransition => write!(f, "invalid_state_transition"),
+            ErrorCode::PtyError => write!(f, "pty_error"),
+            ErrorCode::ConfigInvalid => write!(f, "config_invalid"),
+            ErrorCode::DaemonAlreadyRunning => write!(f, "daemon_already_running"),
+            ErrorCode::ShutdownTimeout => write!(f, "shutdown_timeout"),
+            ErrorCode::DaemonNotRunning => write!(f, "daemon_not_running"),
+            ErrorCode::ConnectionFailed => write!(f, "connection_failed"),
+            ErrorCode::ProtocolError => write!(f, "protocol_error"),
+            ErrorCode::IoError => write!(f, "io_error"),
+            ErrorCode::SerializationError => write!(f, "serialization_error"),
+            ErrorCode::Base64DecodeError => write!(f, "base64_decode_error"),
+            ErrorCode::SessionError => write!(f, "session_error"),
+            ErrorCode::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 /// Client -> Daemon request messages.
 ///
 /// Each variant maps to a JSONL message with `"type"` as the tag field.
@@ -153,7 +210,7 @@ pub enum DaemonMessage {
     #[serde(rename = "error")]
     Error {
         id: String,
-        code: String,
+        code: ErrorCode,
         message: String,
     },
 
@@ -330,7 +387,7 @@ mod tests {
                 id: "myapp_feature-auth".to_string(),
                 working_directory: "/tmp/worktrees/feature-auth".to_string(),
                 command: "claude".to_string(),
-                status: "running".to_string(),
+                status: crate::types::SessionStatus::Running,
                 created_at: "2026-02-09T14:30:00Z".to_string(),
                 client_count: None,
                 pty_pid: None,
@@ -369,15 +426,48 @@ mod tests {
     fn test_daemon_message_error_roundtrip() {
         let msg = DaemonMessage::Error {
             id: "req-001".to_string(),
-            code: "session_not_found".to_string(),
+            code: ErrorCode::SessionNotFound,
             message: "No session found with id 'myapp_feature-auth'".to_string(),
         };
         let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""code":"session_not_found""#));
         let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
         if let DaemonMessage::Error { id, code, message } = parsed {
             assert_eq!(id, "req-001");
-            assert_eq!(code, "session_not_found");
+            assert_eq!(code, ErrorCode::SessionNotFound);
             assert!(message.contains("myapp_feature-auth"));
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn test_error_code_from_code() {
+        assert_eq!(
+            ErrorCode::from_code("session_not_found"),
+            ErrorCode::SessionNotFound
+        );
+        assert_eq!(ErrorCode::from_code("pty_error"), ErrorCode::PtyError);
+        assert_eq!(
+            ErrorCode::from_code("something_totally_new"),
+            ErrorCode::Unknown
+        );
+    }
+
+    #[test]
+    fn test_error_code_display() {
+        assert_eq!(ErrorCode::SessionNotFound.to_string(), "session_not_found");
+        assert_eq!(ErrorCode::PtyError.to_string(), "pty_error");
+        assert_eq!(ErrorCode::Unknown.to_string(), "unknown");
+    }
+
+    #[test]
+    fn test_error_code_unknown_deserialization() {
+        // Unknown codes from future daemon versions should deserialize to Unknown
+        let json = r#"{"type":"error","id":"1","code":"some_future_error","message":"new"}"#;
+        let parsed: DaemonMessage = serde_json::from_str(json).unwrap();
+        if let DaemonMessage::Error { code, .. } = parsed {
+            assert_eq!(code, ErrorCode::Unknown);
         } else {
             panic!("wrong variant");
         }

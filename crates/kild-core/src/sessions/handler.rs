@@ -348,7 +348,7 @@ pub fn create_session(
 
             if let Ok(Some((status, exit_code))) =
                 crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
-                && status == "stopped"
+                && status == kild_protocol::SessionStatus::Stopped
             {
                 let scrollback_tail =
                     crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
@@ -901,7 +901,7 @@ pub fn open_session(
 
         if let Ok(Some((status, exit_code))) =
             crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
-            && status == "stopped"
+            && status == kild_protocol::SessionStatus::Stopped
         {
             let scrollback_tail =
                 crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
@@ -1254,8 +1254,8 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
         }
     };
 
-    // If daemon reports "running", the session is still active — no sync needed.
-    if status.as_deref() == Some("running") {
+    // If daemon reports Running, the session is still active — no sync needed.
+    if status == Some(kild_protocol::SessionStatus::Running) {
         return false;
     }
 
