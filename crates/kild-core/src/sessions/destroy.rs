@@ -367,7 +367,10 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         cleanup_task_list(&session.id, task_list_id, &home);
     }
 
-    // 4. Remove git worktree
+    // 4. Resolve main repo path before worktree removal (needed for branch cleanup)
+    let main_repo_path = git::removal::find_main_repo_root(&session.worktree_path);
+
+    // 5. Remove git worktree
     if force {
         info!(
             event = "core.session.destroy_worktree_force",
@@ -386,14 +389,20 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         worktree_path = %session.worktree_path.display()
     );
 
-    // 5. Clean up PID files (best-effort, don't fail if missing)
+    // 6. Delete local kild branch (best-effort, don't block destroy)
+    if let Some(repo_path) = &main_repo_path {
+        let kild_branch = git::naming::kild_branch_name(&session.branch);
+        git::removal::delete_branch_if_exists(repo_path, &kild_branch);
+    }
+
+    // 7. Clean up PID files (best-effort, don't fail if missing)
     cleanup_session_pid_files(&session, &config.kild_dir, "destroy");
 
-    // 6. Remove sidecar files (best-effort)
+    // 8. Remove sidecar files (best-effort)
     persistence::remove_agent_status_file(&config.sessions_dir(), &session.id);
     persistence::remove_pr_info_file(&config.sessions_dir(), &session.id);
 
-    // 7. Remove session file (automatically frees port range)
+    // 9. Remove session file (automatically frees port range)
     persistence::remove_session_file(&config.sessions_dir(), &session.id)?;
 
     info!(

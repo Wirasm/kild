@@ -192,6 +192,39 @@ fn delete_kild_branch_if_managed(repo: &Repository, branch_name: &str, worktree_
     }
 }
 
+/// Find the root path of the main repository for a given worktree.
+///
+/// Returns the working directory of the main repository, suitable for
+/// passing to `delete_branch_if_exists`. Must be called while the
+/// worktree directory still exists on disk.
+pub fn find_main_repo_root(worktree_path: &Path) -> Option<std::path::PathBuf> {
+    find_main_repository(worktree_path)
+        .ok()
+        .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()))
+}
+
+/// Delete a local git branch if it exists.
+///
+/// `repo_root` is the path to the main repository (not the worktree).
+/// Best-effort: logs failures but never returns an error, matching the
+/// non-fatal pattern used throughout destroy operations.
+pub fn delete_branch_if_exists(repo_root: &Path, branch_name: &str) {
+    let repo = match Repository::open(repo_root) {
+        Ok(repo) => repo,
+        Err(e) => {
+            warn!(
+                event = "core.git.branch.delete_repo_not_found",
+                branch = branch_name,
+                repo_root = %repo_root.display(),
+                error = %e,
+            );
+            return;
+        }
+    };
+
+    delete_kild_branch_if_managed(&repo, branch_name, repo_root);
+}
+
 pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
     info!(
         event = "core.git.worktree.remove_by_path_started",
@@ -336,6 +369,69 @@ mod tests {
 
         let result = remove_worktree_force(nonexistent);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_delete_branch_if_exists_cleans_up_kild_branch() {
+        let repo_dir = create_temp_test_dir("kild_test_delete_branch_repo");
+        let worktree_base = create_temp_test_dir("kild_test_delete_branch_wt");
+        init_test_repo(&repo_dir);
+
+        let repo = Repository::open(&repo_dir).unwrap();
+        let head = repo.head().unwrap();
+        let head_commit = head.peel_to_commit().unwrap();
+
+        // Create a kild/feature branch
+        repo.branch("kild/feature", &head_commit, false).unwrap();
+
+        // Create a worktree using the branch
+        let worktree_path = worktree_base.join("kild-feature");
+        let branch_ref = repo
+            .find_branch("kild/feature", git2::BranchType::Local)
+            .unwrap()
+            .into_reference();
+        let mut opts = WorktreeAddOptions::new();
+        opts.reference(Some(&branch_ref));
+        repo.worktree("kild-feature", &worktree_path, Some(&opts))
+            .unwrap();
+
+        // Verify the branch exists
+        assert!(
+            repo.find_branch("kild/feature", git2::BranchType::Local)
+                .is_ok()
+        );
+
+        // Canonicalize the path (macOS /tmp -> /private/tmp)
+        let canonical_worktree_path = worktree_path.canonicalize().unwrap();
+
+        // Force remove the worktree (simulating kild destroy --force)
+        remove_worktree_force(&canonical_worktree_path).unwrap();
+
+        // Delete branch using the main repo root (not the worktree path)
+        let canonical_repo_dir = repo_dir.canonicalize().unwrap();
+        delete_branch_if_exists(&canonical_repo_dir, "kild/feature");
+
+        // Reopen repo to see branch changes
+        let repo = Repository::open(&repo_dir).unwrap();
+        assert!(
+            repo.find_branch("kild/feature", git2::BranchType::Local)
+                .is_err(),
+            "kild/feature branch should be deleted after delete_branch_if_exists"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo_dir);
+        let _ = std::fs::remove_dir_all(&worktree_base);
+    }
+
+    #[test]
+    fn test_delete_branch_if_exists_noop_for_nonexistent_branch() {
+        let repo_dir = create_temp_test_dir("kild_test_delete_noop_repo");
+        init_test_repo(&repo_dir);
+
+        // Calling with a branch that doesn't exist should not panic
+        delete_branch_if_exists(&repo_dir, "kild/no-such-branch");
+
+        let _ = std::fs::remove_dir_all(&repo_dir);
     }
 
     #[test]

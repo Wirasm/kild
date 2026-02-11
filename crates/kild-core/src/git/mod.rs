@@ -21,7 +21,10 @@ pub use naming::{
 };
 pub use overlaps::collect_file_overlaps;
 pub use remote::{fetch_remote, rebase_worktree};
-pub use removal::{remove_worktree, remove_worktree_by_path, remove_worktree_force};
+pub use removal::{
+    delete_branch_if_exists, find_main_repo_root, remove_worktree, remove_worktree_by_path,
+    remove_worktree_force,
+};
 pub use status::{collect_git_stats, get_diff_stats, get_worktree_status};
 pub use types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,

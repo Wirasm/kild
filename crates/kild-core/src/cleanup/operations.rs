@@ -65,8 +65,10 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
     // Check each branch to see if it's orphaned
     for (branch, _) in branches.flatten() {
         if let Some(branch_name) = branch.name().ok().flatten() {
-            // Check if this is a worktree branch that's not actively used
-            if branch_name.starts_with("worktree-") && !active_branches.contains(branch_name) {
+            // Check if this is a kild-managed branch that's not actively used by a worktree
+            let is_kild_branch = branch_name.starts_with(crate::git::naming::KILD_BRANCH_PREFIX)
+                || branch_name.starts_with("kild_");
+            if is_kild_branch && !active_branches.contains(branch_name) {
                 orphaned_branches.push(branch_name.to_string());
             }
         }
@@ -558,6 +560,120 @@ mod tests {
 
         let stale_sessions = detect_stale_sessions(temp_dir.path()).unwrap();
         assert_eq!(stale_sessions.len(), 0);
+    }
+
+    #[test]
+    fn test_detect_orphaned_branches_finds_kild_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        // Initialize repo with initial commit
+        let repo = Repository::init(repo_path).unwrap();
+        let sig = repo
+            .signature()
+            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+        let commit = repo.find_commit(commit_oid).unwrap();
+
+        // Create orphaned kild/ branch (no worktree)
+        repo.branch("kild/test-feature", &commit, false).unwrap();
+
+        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        assert_eq!(orphaned, vec!["kild/test-feature"]);
+    }
+
+    #[test]
+    fn test_detect_orphaned_branches_finds_legacy_kild_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        let repo = Repository::init(repo_path).unwrap();
+        let sig = repo
+            .signature()
+            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+        let commit = repo.find_commit(commit_oid).unwrap();
+
+        // Create orphaned legacy kild_ branch
+        repo.branch("kild_old-feature", &commit, false).unwrap();
+
+        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        assert_eq!(orphaned, vec!["kild_old-feature"]);
+    }
+
+    #[test]
+    fn test_detect_orphaned_branches_excludes_active_worktree_branches() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        let repo = Repository::init(repo_path).unwrap();
+        let sig = repo
+            .signature()
+            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+        let commit = repo.find_commit(commit_oid).unwrap();
+
+        // Create a kild/ branch
+        repo.branch("kild/active-feature", &commit, false).unwrap();
+
+        // Create a worktree checked out on that branch
+        let worktree_path = temp_dir.path().join("worktree-active");
+        let branch_ref = repo
+            .find_branch("kild/active-feature", git2::BranchType::Local)
+            .unwrap()
+            .into_reference();
+        let mut opts = git2::WorktreeAddOptions::new();
+        opts.reference(Some(&branch_ref));
+        repo.worktree("kild-active-feature", &worktree_path, Some(&opts))
+            .unwrap();
+
+        // Branch is actively used by a worktree — should NOT be detected as orphaned
+        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        assert!(
+            orphaned.is_empty(),
+            "Active worktree branch should not be orphaned, got: {:?}",
+            orphaned
+        );
+    }
+
+    #[test]
+    fn test_detect_orphaned_branches_ignores_non_kild_branches() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        let repo = Repository::init(repo_path).unwrap();
+        let sig = repo
+            .signature()
+            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+        let commit = repo.find_commit(commit_oid).unwrap();
+
+        // Create branches that are NOT kild-managed
+        repo.branch("feature/auth", &commit, false).unwrap();
+        repo.branch("worktree-old", &commit, false).unwrap();
+
+        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        assert!(
+            orphaned.is_empty(),
+            "Non-kild branches should not be detected, got: {:?}",
+            orphaned
+        );
     }
 
     #[test]
