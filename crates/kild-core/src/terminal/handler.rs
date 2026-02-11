@@ -152,7 +152,6 @@ pub fn spawn_terminal(
             let path = get_pid_file_path(sdir, sid);
 
             // Delete any stale PID file from a previous spawn with the same ID
-            // (e.g., restart_session reuses spawn_id 0)
             if path.exists()
                 && let Err(e) = std::fs::remove_file(&path)
             {

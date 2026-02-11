@@ -5,7 +5,7 @@
 //!
 //! # Main Entry Points
 //!
-//! - [`sessions`] - Create, list, destroy, restart sessions
+//! - [`sessions`] - Create, list, destroy sessions
 //! - [`health`] - Monitor kild health and metrics
 //! - [`cleanup`] - Clean up orphaned resources
 //! - [`config`] - Configuration management

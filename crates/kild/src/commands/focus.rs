@@ -22,7 +22,23 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
         }
     };
 
-    // 2. Get terminal type and window ID from latest agent
+    // 2. Check for daemon-managed session (no terminal window to focus)
+    if session
+        .latest_agent()
+        .and_then(|a| a.daemon_session_id())
+        .is_some()
+    {
+        eprintln!("❌ Cannot focus daemon-managed kild '{}'", branch);
+        eprintln!("   Use 'kild attach {}' to connect to the session.", branch);
+        error!(
+            event = "cli.focus_failed",
+            branch = branch,
+            error = "daemon_managed"
+        );
+        return Err("Cannot focus daemon-managed kild".into());
+    }
+
+    // 3. Get terminal type and window ID from latest agent
     let (term_type, window_id) = session
         .latest_agent()
         .map(|latest| {
@@ -53,7 +69,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
         "No window ID recorded for this kild"
     })?;
 
-    // 3. Focus the terminal window
+    // 4. Focus the terminal window
     match kild_core::terminal_ops::focus_terminal(&terminal_type, &window_id) {
         Ok(()) => {
             println!("✅ Focused kild '{}' terminal window", branch);

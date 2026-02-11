@@ -7,7 +7,7 @@
 // Operations
 pub use super::create::create_session;
 pub use super::list::{get_session, list_sessions, sync_daemon_session_status};
-pub use super::open::{open_session, restart_session};
+pub use super::open::open_session;
 pub use super::stop::stop_session;
 
 // Re-export from previously extracted modules

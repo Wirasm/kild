@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use kild_core::SessionStatus;
 use kild_core::events;
@@ -27,6 +27,22 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             return Err(e.into());
         }
     };
+
+    // Daemon-managed sessions have no terminal window to hide
+    if session
+        .latest_agent()
+        .and_then(|a| a.daemon_session_id())
+        .is_some()
+    {
+        eprintln!("❌ Cannot hide daemon-managed kild '{}'", branch);
+        eprintln!("   Use 'kild attach {}' to connect to the session.", branch);
+        error!(
+            event = "cli.hide_failed",
+            branch = branch,
+            error = "daemon_managed"
+        );
+        return Err("Cannot hide daemon-managed kild".into());
+    }
 
     let (terminal_type, window_id) = match get_terminal_info(&session) {
         Ok(info) => info,
@@ -69,9 +85,21 @@ fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut hidden: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in active {
+        // Skip daemon-managed sessions (no terminal window to hide)
+        if session
+            .latest_agent()
+            .and_then(|a| a.daemon_session_id())
+            .is_some()
+        {
+            debug!(event = "cli.hide_skipped_daemon", branch = session.branch);
+            skipped.push(session.branch);
+            continue;
+        }
+
         let (terminal_type, window_id) = match get_terminal_info(&session) {
             Ok(info) => info,
             Err(msg) => {
@@ -117,13 +145,22 @@ fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Report skipped daemon sessions (informational, not an error)
+    if !skipped.is_empty() {
+        println!(
+            "Skipped {} daemon-managed kild(s) (no terminal window)",
+            skipped.len()
+        );
+    }
+
     info!(
         event = "cli.hide_all_completed",
         hidden = hidden.len(),
+        skipped = skipped.len(),
         failed = errors.len()
     );
 
-    // Return error if any failures (for exit code)
+    // Return error only for actual failures (daemon skips don't count)
     if !errors.is_empty() {
         let total_count = hidden.len() + errors.len();
         return Err(format_partial_failure_error("hide", errors.len(), total_count).into());
