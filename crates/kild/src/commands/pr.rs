@@ -117,7 +117,8 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
                         "pr": null,
-                        "branch": format!("kild/{}", branch)
+                        "branch": format!("kild/{}", branch),
+                        "reason": "no_pr_found"
                     }))?
                 );
             } else {
