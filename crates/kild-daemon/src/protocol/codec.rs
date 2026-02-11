@@ -141,6 +141,7 @@ mod tests {
                 created_at: "2026-02-09T14:30:00Z".to_string(),
                 client_count: Some(1),
                 pty_pid: Some(12345),
+                exit_code: None,
             },
         };
 

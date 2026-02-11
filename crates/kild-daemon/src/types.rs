@@ -180,6 +180,8 @@ pub struct SessionInfo {
     pub client_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pty_pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
 }
 
 #[cfg(test)]
@@ -233,6 +235,7 @@ mod tests {
             created_at: "2026-02-09T14:30:00Z".to_string(),
             client_count: Some(2),
             pty_pid: Some(12345),
+            exit_code: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
@@ -307,9 +310,44 @@ default = "claude"
             created_at: "2026-02-09T14:30:00Z".to_string(),
             client_count: None,
             pty_pid: None,
+            exit_code: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(!json.contains("client_count"));
         assert!(!json.contains("pty_pid"));
+        assert!(!json.contains("exit_code"));
+    }
+
+    #[test]
+    fn test_session_info_with_exit_code() {
+        let info = SessionInfo {
+            id: "test".to_string(),
+            working_directory: "/tmp".to_string(),
+            command: "bash".to_string(),
+            status: "stopped".to_string(),
+            created_at: "2026-02-09T14:30:00Z".to_string(),
+            client_count: None,
+            pty_pid: None,
+            exit_code: Some(1),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":1"));
+    }
+
+    #[test]
+    fn test_session_info_exit_code_roundtrip() {
+        let info = SessionInfo {
+            id: "test".to_string(),
+            working_directory: "/tmp".to_string(),
+            command: "bash".to_string(),
+            status: "stopped".to_string(),
+            created_at: "2026-02-09T14:30:00Z".to_string(),
+            client_count: None,
+            pty_pid: None,
+            exit_code: Some(127),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.exit_code, Some(127));
     }
 }

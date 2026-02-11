@@ -49,6 +49,8 @@ pub struct DaemonSession {
     attached_clients: HashSet<ClientId>,
     /// Child process PID (only when Running).
     pty_pid: Option<u32>,
+    /// Exit code of the PTY child process. Set when the process exits.
+    exit_code: Option<i32>,
 }
 
 impl DaemonSession {
@@ -70,6 +72,7 @@ impl DaemonSession {
             scrollback: Arc::new(Mutex::new(ScrollbackBuffer::new(scrollback_capacity))),
             attached_clients: HashSet::new(),
             pty_pid: None,
+            exit_code: None,
         }
     }
 
@@ -85,6 +88,14 @@ impl DaemonSession {
 
     pub fn pty_pid(&self) -> Option<u32> {
         self.pty_pid
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub fn set_exit_code(&mut self, code: Option<i32>) {
+        self.exit_code = code;
     }
 
     pub fn created_at(&self) -> &str {
@@ -204,6 +215,7 @@ impl DaemonSession {
             created_at: self.created_at.clone(),
             client_count: Some(self.client_count()),
             pty_pid: self.pty_pid,
+            exit_code: self.exit_code,
         }
     }
 }
@@ -345,5 +357,39 @@ mod tests {
         session.set_stopped().unwrap();
         session.set_stopped().unwrap(); // second call is no-op
         assert_eq!(session.state(), SessionState::Stopped);
+    }
+
+    #[test]
+    fn test_exit_code_none_initially() {
+        let session = test_session();
+        assert_eq!(session.exit_code(), None);
+    }
+
+    #[test]
+    fn test_exit_code_stored_after_set() {
+        let mut session = test_session();
+        let (tx, _) = broadcast::channel(16);
+        session.set_running(tx, Some(123)).unwrap();
+        session.set_exit_code(Some(42));
+        session.set_stopped().unwrap();
+        assert_eq!(session.exit_code(), Some(42));
+    }
+
+    #[test]
+    fn test_exit_code_in_session_info() {
+        let mut session = test_session();
+        let (tx, _) = broadcast::channel(16);
+        session.set_running(tx, Some(123)).unwrap();
+        session.set_exit_code(Some(1));
+
+        let info = session.to_session_info();
+        assert_eq!(info.exit_code, Some(1));
+    }
+
+    #[test]
+    fn test_exit_code_none_in_session_info() {
+        let session = test_session();
+        let info = session.to_session_info();
+        assert_eq!(info.exit_code, None);
     }
 }

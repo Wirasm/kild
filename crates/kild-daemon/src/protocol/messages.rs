@@ -334,6 +334,7 @@ mod tests {
                 created_at: "2026-02-09T14:30:00Z".to_string(),
                 client_count: None,
                 pty_pid: None,
+                exit_code: None,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

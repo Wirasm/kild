@@ -75,6 +75,14 @@ pub enum SessionError {
     #[error("Daemon error: {message}")]
     DaemonError { message: String },
 
+    #[error(
+        "Daemon PTY exited immediately (exit code: {exit_code:?}). Last output:\n{scrollback_tail}"
+    )]
+    DaemonPtyExitedEarly {
+        exit_code: Option<i32>,
+        scrollback_tail: String,
+    },
+
     #[error("Daemon auto-start failed: {source}")]
     DaemonAutoStartFailed {
         #[from]
@@ -113,6 +121,7 @@ impl KildError for SessionError {
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
             SessionError::DaemonError { .. } => "DAEMON_ERROR",
+            SessionError::DaemonPtyExitedEarly { .. } => "DAEMON_PTY_EXITED_EARLY",
             SessionError::DaemonAutoStartFailed { .. } => "DAEMON_AUTO_START_FAILED",
             SessionError::ResumeUnsupported { .. } => "RESUME_UNSUPPORTED",
             SessionError::ResumeNoSessionId { .. } => "RESUME_NO_SESSION_ID",
@@ -231,5 +240,17 @@ mod tests {
         assert!(error.to_string().contains("No previous session ID"));
         assert_eq!(error.error_code(), "RESUME_NO_SESSION_ID");
         assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_daemon_pty_exited_early_error() {
+        let error = SessionError::DaemonPtyExitedEarly {
+            exit_code: Some(1),
+            scrollback_tail: "Error: agent failed to start".to_string(),
+        };
+        assert!(error.to_string().contains("exit code: Some(1)"));
+        assert!(error.to_string().contains("agent failed to start"));
+        assert_eq!(error.error_code(), "DAEMON_PTY_EXITED_EARLY");
+        assert!(!error.is_user_error());
     }
 }

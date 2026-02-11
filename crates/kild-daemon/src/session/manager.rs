@@ -384,8 +384,9 @@ impl SessionManager {
             exit_code = ?exit_code,
         );
 
-        // Transition session to Stopped
+        // Transition session to Stopped and record exit code
         if let Some(session) = self.sessions.get_mut(session_id) {
+            session.set_exit_code(exit_code);
             let output_tx = session.output_tx();
             if let Err(e) = session.set_stopped() {
                 error!(

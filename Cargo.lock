@@ -3382,6 +3382,7 @@ name = "kild-core"
 version = "0.1.0"
 dependencies = [
  "accessibility-sys",
+ "base64",
  "chrono",
  "core-foundation 0.10.0",
  "dirs 5.0.1",

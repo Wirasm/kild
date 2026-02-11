@@ -364,6 +364,93 @@ pub fn get_session_status(daemon_session_id: &str) -> Result<Option<String>, Dae
     }
 }
 
+/// Query the daemon for a session's status and exit code.
+///
+/// Returns `(status, exit_code)` if the daemon knows about this session.
+/// Returns `Ok(None)` if the daemon is not running or the session is not found.
+pub fn get_session_info(
+    daemon_session_id: &str,
+) -> Result<Option<(String, Option<i32>)>, DaemonClientError> {
+    let socket_path = crate::daemon::socket_path();
+
+    let request = serde_json::json!({
+        "id": format!("info-{}", daemon_session_id),
+        "type": "get_session",
+        "session_id": daemon_session_id,
+    });
+
+    let mut stream = match connect(&socket_path) {
+        Ok(s) => s,
+        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+
+    match send_request(&mut stream, request) {
+        Ok(response) => {
+            let session = response.get("session");
+            let status = session
+                .and_then(|s| s.get("status"))
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            let exit_code = session
+                .and_then(|s| s.get("exit_code"))
+                .and_then(|c| c.as_i64())
+                .map(|c| c as i32);
+            match status {
+                Some(s) => Ok(Some((s, exit_code))),
+                None => Ok(None),
+            }
+        }
+        Err(DaemonClientError::DaemonError { ref message })
+            if message.contains("not_found") || message.contains("unknown_session") =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Read the scrollback buffer from a daemon session.
+///
+/// Returns the raw scrollback bytes (decoded from base64), or `None` if the
+/// daemon is not running or the session is not found.
+pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, DaemonClientError> {
+    let socket_path = crate::daemon::socket_path();
+
+    let request = serde_json::json!({
+        "id": format!("scrollback-{}", daemon_session_id),
+        "type": "read_scrollback",
+        "session_id": daemon_session_id,
+    });
+
+    let mut stream = match connect(&socket_path) {
+        Ok(s) => s,
+        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+
+    match send_request(&mut stream, request) {
+        Ok(response) => {
+            let data = response.get("data").and_then(|d| d.as_str()).unwrap_or("");
+            use base64::Engine;
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap_or_default();
+            Ok(Some(decoded))
+        }
+        Err(DaemonClientError::DaemonError { ref message })
+            if message.contains("not_found") || message.contains("unknown_session") =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Request the daemon to shut down gracefully.
 pub fn request_shutdown() -> Result<(), DaemonClientError> {
     let socket_path = crate::daemon::socket_path();

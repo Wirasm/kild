@@ -341,6 +341,38 @@ pub fn create_session(
                     message: e.to_string(),
                 })?;
 
+            // Early exit detection: wait briefly, then verify PTY is still alive.
+            // Fast-failing processes (bad resume session, missing binary, env issues)
+            // typically exit within 200ms of spawn.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            if let Ok(Some((status, exit_code))) =
+                crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
+                && status == "stopped"
+            {
+                let scrollback_tail =
+                    crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
+                        .ok()
+                        .flatten()
+                        .map(|bytes| {
+                            let text = String::from_utf8_lossy(&bytes);
+                            let lines: Vec<&str> = text.lines().collect();
+                            let start = lines.len().saturating_sub(20);
+                            lines[start..].join("\n")
+                        })
+                        .unwrap_or_default();
+
+                let _ = crate::daemon::client::destroy_daemon_session(
+                    &daemon_result.daemon_session_id,
+                    true,
+                );
+
+                return Err(SessionError::DaemonPtyExitedEarly {
+                    exit_code,
+                    scrollback_tail,
+                });
+            }
+
             // Initialize tmux shim state directory
             let shim_init_result = (|| -> Result<(), String> {
                 let shim_dir = dirs::home_dir()
@@ -862,6 +894,38 @@ pub fn open_session(
                     message: e.to_string(),
                 }
             })?;
+
+        // Early exit detection: wait briefly, then verify PTY is still alive.
+        // Fast-failing processes (bad resume session, missing binary, env issues)
+        // typically exit within 200ms of spawn.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        if let Ok(Some((status, exit_code))) =
+            crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
+            && status == "stopped"
+        {
+            let scrollback_tail =
+                crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
+                    .ok()
+                    .flatten()
+                    .map(|bytes| {
+                        let text = String::from_utf8_lossy(&bytes);
+                        let lines: Vec<&str> = text.lines().collect();
+                        let start = lines.len().saturating_sub(20);
+                        lines[start..].join("\n")
+                    })
+                    .unwrap_or_default();
+
+            let _ = crate::daemon::client::destroy_daemon_session(
+                &daemon_result.daemon_session_id,
+                true,
+            );
+
+            return Err(SessionError::DaemonPtyExitedEarly {
+                exit_code,
+                scrollback_tail,
+            });
+        }
 
         AgentProcess::new(
             agent.clone(),
