@@ -262,21 +262,6 @@ impl TableFormatter {
     }
 }
 
-/// Truncate a string to a maximum display width, adding "..." if truncated.
-///
-/// Uses character count (not byte count) to safely handle UTF-8 strings
-/// including emoji and multi-byte characters.
-pub fn truncate(s: &str, max_len: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_len {
-        format!("{:<width$}", s, width = max_len)
-    } else {
-        // Safely truncate at character boundaries, not byte boundaries
-        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{:<width$}", format!("{}...", truncated), width = max_len)
-    }
-}
-
 /// Compute the terminal display width of a string.
 ///
 /// Wide characters (CJK, emoji) count as 2 columns.

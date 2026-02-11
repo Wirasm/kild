@@ -4,9 +4,18 @@ use tracing::{error, info};
 use kild_core::events;
 use kild_core::health;
 
-use crate::table::truncate;
-
 use super::helpers::{is_valid_branch_name, load_config_with_warning};
+
+/// Truncate a string to a maximum display width, adding "..." if truncated.
+fn truncate(s: &str, max_len: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
+        format!("{:<width$}", s, width = max_len)
+    } else {
+        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{:<width$}", format!("{}...", truncated), width = max_len)
+    }
+}
 
 pub(crate) fn handle_health_command(
     matches: &ArgMatches,
