@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::agents;
 use crate::process::errors::ProcessError;
@@ -133,7 +133,12 @@ pub fn get_process_metrics(pid: u32) -> Result<ProcessMetrics, ProcessError> {
     let pid_obj = SysinfoPid::from_u32(pid);
 
     // Use shared system instance to prevent memory leaks
-    let mut system = SYSTEM.lock().unwrap();
+    let mut system = SYSTEM.lock().map_err(|e| {
+        error!(event = "core.process.metrics_lock_failed", pid = pid, error = %e);
+        ProcessError::SystemError {
+            message: format!("Failed to acquire process metrics lock: {e}"),
+        }
+    })?;
     system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
 
     match system.process(pid_obj) {
