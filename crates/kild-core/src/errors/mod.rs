@@ -1,7 +1,5 @@
 use std::error::Error;
 
-use crate::agents::supported_agents_string;
-
 /// Base trait for all application errors
 pub trait KildError: Error + Send + Sync + 'static {
     /// Error code for programmatic handling
@@ -18,11 +16,22 @@ pub type KildResult<T> = Result<T, Box<dyn KildError>>;
 
 #[derive(Debug)]
 pub enum ConfigError {
-    ConfigNotFound { path: String },
-    ConfigParseError { message: String },
-    InvalidAgent { agent: String },
-    InvalidConfiguration { message: String },
-    IoError { source: std::io::Error },
+    ConfigNotFound {
+        path: String,
+    },
+    ConfigParseError {
+        message: String,
+    },
+    InvalidAgent {
+        agent: String,
+        supported_agents: String,
+    },
+    InvalidConfiguration {
+        message: String,
+    },
+    IoError {
+        source: std::io::Error,
+    },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -34,12 +43,14 @@ impl std::fmt::Display for ConfigError {
             ConfigError::ConfigParseError { message } => {
                 write!(f, "Failed to parse config file: {}", message)
             }
-            ConfigError::InvalidAgent { agent } => {
+            ConfigError::InvalidAgent {
+                agent,
+                supported_agents,
+            } => {
                 write!(
                     f,
                     "Invalid agent '{}'. Supported agents: {}",
-                    agent,
-                    supported_agents_string()
+                    agent, supported_agents
                 )
             }
             ConfigError::InvalidConfiguration { message } => {
@@ -99,8 +110,10 @@ mod tests {
 
     #[test]
     fn test_config_error_display() {
+        use crate::agents::supported_agents_string;
         let error = ConfigError::InvalidAgent {
             agent: "unknown".to_string(),
+            supported_agents: supported_agents_string(),
         };
         let msg = error.to_string();
         // Verify message format

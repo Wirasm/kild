@@ -27,6 +27,7 @@ pub fn validate_config(config: &KildConfig) -> Result<(), ConfigError> {
     if !agents::is_valid_agent(&config.agent.default) {
         return Err(ConfigError::InvalidAgent {
             agent: config.agent.default.clone(),
+            supported_agents: agents::supported_agents_string(),
         });
     }
 

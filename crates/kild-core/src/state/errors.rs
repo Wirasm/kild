@@ -76,6 +76,7 @@ mod tests {
     fn test_dispatch_error_config_delegates_error_code() {
         let err = DispatchError::Config(crate::errors::ConfigError::InvalidAgent {
             agent: "bad".to_string(),
+            supported_agents: String::new(),
         });
         assert_eq!(err.error_code(), "INVALID_AGENT");
     }
