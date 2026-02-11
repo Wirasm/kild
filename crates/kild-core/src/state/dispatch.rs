@@ -80,7 +80,7 @@ impl Store for CoreStore {
             Command::RefreshPrStatus { branch } => {
                 // Look up session, fetch PR info, write sidecar
                 let session = session_ops::get_session(&branch)?;
-                let kild_branch = crate::git::operations::kild_branch_name(&branch);
+                let kild_branch = crate::git::kild_branch_name(&branch);
                 if session_ops::has_remote_configured(&session.worktree_path)
                     && let Some(pr_info) =
                         session_ops::fetch_pr_info(&session.worktree_path, &kild_branch)

@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_path_canonicalization_consistency() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let temp_dir = tempfile::TempDir::new().unwrap();
         let path = temp_dir.path();
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_generate_project_id_different_for_non_canonical() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let path1 = PathBuf::from("/users/test/project");
         let path2 = PathBuf::from("/Users/test/project");
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_generate_project_id_consistency() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let path = PathBuf::from("/Users/test/Projects/my-project");
         let id1 = generate_project_id(&path);
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_generate_project_id_different_paths() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let path1 = PathBuf::from("/Users/test/Projects/project-a");
         let path2 = PathBuf::from("/Users/test/Projects/project-b");
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_generate_project_id_is_hex() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let path = PathBuf::from("/Users/test/Projects/my-project");
         let id = generate_project_id(&path);
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_filtering_works_after_path_canonicalization() {
-        use crate::git::operations::generate_project_id;
+        use crate::git::naming::generate_project_id;
 
         let temp_dir = tempfile::TempDir::new().unwrap();
         let canonical_path = temp_dir.path().canonicalize().unwrap();

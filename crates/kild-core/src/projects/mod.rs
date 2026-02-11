@@ -10,4 +10,4 @@ pub use persistence::{load_projects, migrate_projects_to_canonical, save_project
 pub use types::{Project, ProjectsData};
 
 // Re-export project ID generation from git module to eliminate duplication
-pub use crate::git::operations::generate_project_id;
+pub use crate::git::naming::generate_project_id;

@@ -2,7 +2,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::git;
-use crate::git::operations::get_worktree_status;
+use crate::git::get_worktree_status;
 use crate::process::{delete_pid_file, get_pid_file_path};
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
@@ -475,7 +475,7 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
             }
         })?;
 
-    let kild_branch = git::operations::kild_branch_name(name);
+    let kild_branch = git::kild_branch_name(name);
 
     // 2. Get git worktree status (conservative fallback on failure)
     let git_status = if session.worktree_path.exists() {

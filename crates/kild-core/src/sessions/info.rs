@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::git::operations::get_diff_stats;
+use crate::git::get_diff_stats;
 use crate::git::types::DiffStats;
 use crate::process::is_process_running;
 use crate::sessions::types::{GitStatus, ProcessStatus, Session};

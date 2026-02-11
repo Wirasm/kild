@@ -69,7 +69,7 @@ fn handle_single_stats(
         }
     };
 
-    let health = kild_core::git::operations::collect_branch_health(
+    let health = kild_core::git::collect_branch_health(
         &session.worktree_path,
         branch,
         base_branch,
@@ -79,8 +79,7 @@ fn handle_single_stats(
     match health {
         Ok(h) => {
             // Compose: git health + worktree status + PR info → readiness
-            let worktree_status =
-                kild_core::git::operations::get_worktree_status(&session.worktree_path).ok();
+            let worktree_status = kild_core::git::get_worktree_status(&session.worktree_path).ok();
             let pr_info = session_ops::read_pr_info(&session.id);
             let readiness = MergeReadiness::compute(&h, &worktree_status, pr_info.as_ref());
 
@@ -137,7 +136,7 @@ fn handle_all_stats(
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
-        match kild_core::git::operations::collect_branch_health(
+        match kild_core::git::collect_branch_health(
             &session.worktree_path,
             &session.branch,
             base_branch,
@@ -145,7 +144,7 @@ fn handle_all_stats(
         ) {
             Ok(h) => {
                 let worktree_status =
-                    kild_core::git::operations::get_worktree_status(&session.worktree_path).ok();
+                    kild_core::git::get_worktree_status(&session.worktree_path).ok();
                 let pr_info = session_ops::read_pr_info(&session.id);
                 let readiness = MergeReadiness::compute(&h, &worktree_status, pr_info.as_ref());
                 results.push((h, readiness));
@@ -186,7 +185,7 @@ fn handle_all_stats(
 }
 
 fn print_single_health(branch: &str, h: &BranchHealth, readiness: &MergeReadiness) {
-    let kild_branch = kild_core::git::operations::kild_branch_name(branch);
+    let kild_branch = kild_core::git::kild_branch_name(branch);
 
     println!("Branch:       {} ({})", branch, kild_branch);
     println!("Created:      {}", h.created_at);

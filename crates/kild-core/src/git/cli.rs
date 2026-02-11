@@ -11,7 +11,7 @@ use std::path::Path;
 use tracing::{debug, error, info, warn};
 
 use super::errors::GitError;
-use super::operations::validate_git_arg;
+use super::validation::validate_git_arg;
 
 /// Fetch a specific branch from a remote.
 ///

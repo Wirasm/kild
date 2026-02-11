@@ -42,7 +42,7 @@ pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
             }
         })?;
 
-    let kild_branch = git::operations::kild_branch_name(name);
+    let kild_branch = git::kild_branch_name(name);
 
     // 2. Check if PR was merged (determines if we need to delete remote)
     // Skip PR check entirely for repos without a remote configured

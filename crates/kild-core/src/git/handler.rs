@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::KildConfig;
 use crate::config::types::GitConfig;
 use crate::files;
-use crate::git::{errors::GitError, operations, types::*};
+use crate::git::{errors::GitError, naming, types::*, validation};
 
 // Helper function to reduce boilerplate
 fn io_error(e: std::io::Error) -> GitError {
@@ -33,12 +33,12 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
         .and_then(|remote| remote.url().map(|s| s.to_string()));
 
     let project_name = if let Some(ref url) = remote_url {
-        operations::derive_project_name_from_remote(url)
+        naming::derive_project_name_from_remote(url)
     } else {
-        operations::derive_project_name_from_path(repo_path)
+        naming::derive_project_name_from_path(repo_path)
     };
 
-    let project_id = operations::generate_project_id(repo_path);
+    let project_id = naming::generate_project_id(repo_path);
 
     let project = ProjectInfo::new(
         project_id.clone(),
@@ -92,12 +92,12 @@ pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
         .and_then(|remote| remote.url().map(|s| s.to_string()));
 
     let project_name = if let Some(ref url) = remote_url {
-        operations::derive_project_name_from_remote(url)
+        naming::derive_project_name_from_remote(url)
     } else {
-        operations::derive_project_name_from_path(repo_path)
+        naming::derive_project_name_from_path(repo_path)
     };
 
-    let project_id = operations::generate_project_id(repo_path);
+    let project_id = naming::generate_project_id(repo_path);
 
     let project = ProjectInfo::new(
         project_id.clone(),
@@ -124,7 +124,7 @@ pub fn create_worktree(
     config: Option<&KildConfig>,
     git_config: &GitConfig,
 ) -> Result<WorktreeInfo, GitError> {
-    let validated_branch = operations::validate_branch_name(branch)?;
+    let validated_branch = validation::validate_branch_name(branch)?;
 
     info!(
         event = "core.git.worktree.create_started",
@@ -135,8 +135,7 @@ pub fn create_worktree(
 
     let repo = Repository::open(&project.path).map_err(git2_error)?;
 
-    let worktree_path =
-        operations::calculate_worktree_path(base_dir, &project.name, &validated_branch);
+    let worktree_path = naming::calculate_worktree_path(base_dir, &project.name, &validated_branch);
 
     // Check if worktree already exists
     if worktree_path.exists() {
@@ -162,7 +161,7 @@ pub fn create_worktree(
     // The previous use_current optimization is no longer needed.
 
     // Branch name: kild/<user_branch> (git-native namespace)
-    let kild_branch = operations::kild_branch_name(&validated_branch);
+    let kild_branch = naming::kild_branch_name(&validated_branch);
 
     // Check if kild branch already exists (e.g. recreating a destroyed kild)
     let branch_exists = repo.find_branch(&kild_branch, BranchType::Local).is_ok();
@@ -219,7 +218,7 @@ pub fn create_worktree(
 
     // Worktree admin name: kild-<sanitized_branch> (filesystem-safe, flat)
     // Decoupled from branch name via WorktreeAddOptions::reference()
-    let worktree_name = operations::kild_worktree_admin_name(&validated_branch);
+    let worktree_name = naming::kild_worktree_admin_name(&validated_branch);
     let branch_ref = repo
         .find_branch(&kild_branch, BranchType::Local)
         .map_err(git2_error)?;

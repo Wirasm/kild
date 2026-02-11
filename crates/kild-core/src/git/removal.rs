@@ -2,7 +2,7 @@ use git2::{BranchType, Repository};
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
-use crate::git::{errors::GitError, operations};
+use crate::git::{errors::GitError, naming};
 
 pub fn remove_worktree(
     project: &crate::git::types::ProjectInfo,
@@ -120,7 +120,7 @@ fn find_repository_for_force_removal(worktree_path: &Path) -> Option<Repository>
 ///
 /// Accepts both current (kild/) and legacy (kild_) prefixes.
 fn is_kild_managed_branch(branch_name: &str) -> bool {
-    branch_name.starts_with(operations::KILD_BRANCH_PREFIX) || branch_name.starts_with("kild_")
+    branch_name.starts_with(naming::KILD_BRANCH_PREFIX) || branch_name.starts_with("kild_")
 }
 
 /// Find a worktree by its path in the repository.

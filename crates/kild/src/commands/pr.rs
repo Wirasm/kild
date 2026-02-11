@@ -48,7 +48,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
         return Ok(());
     }
 
-    let kild_branch = kild_core::git::operations::kild_branch_name(branch);
+    let kild_branch = kild_core::git::kild_branch_name(branch);
 
     // 3. Get PR info: refresh or read from cache
     let pr_info = if refresh || session_ops::read_pr_info(&session.id).is_none() {
