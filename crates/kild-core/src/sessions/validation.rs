@@ -65,7 +65,7 @@ pub(crate) fn validate_session_structure(session: &Session) -> Result<(), Sessio
     // Worktree existence is a runtime state, not a structural property.
     // Sessions with missing worktrees are still valid session files - they
     // just can't be operated on until the worktree issue is resolved.
-    // Operation-level validation (open_session, restart_session, etc.) handles this.
+    // Operation-level validation (open_session, etc.) handles this.
 
     Ok(())
 }

@@ -163,14 +163,18 @@ kild code <branch> --editor vim
 kild focus <branch>
 ```
 
+**Note:** For daemon-managed sessions, use `kild attach <branch>` to connect.
+
 ### Hide a kild
 ```bash
 # Minimize/hide terminal window
 kild hide <branch>
 
-# Hide all active kild windows
+# Hide all active kild windows (skips daemon-managed sessions)
 kild hide --all
 ```
+
+**Note:** Daemon-managed sessions have no window to hide. Use `kild attach <branch>` to connect to daemon sessions.
 
 ### View git changes in a kild
 ```bash
@@ -291,16 +295,6 @@ kild destroy --all
 kild destroy --all --force
 ```
 
-### Note on deprecated commands
-
-The `restart` command is deprecated. Use `open` instead:
-```bash
-# Old (deprecated, still works with warning)
-kild restart <branch>
-
-# New (preferred)
-kild open <branch>
-```
 
 ### Clean up orphaned kilds
 ```bash

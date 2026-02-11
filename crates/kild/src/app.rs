@@ -309,23 +309,6 @@ pub fn build_cli() -> Command {
                 )
         )
         .subcommand(
-            Command::new("restart")
-                .about("Restart agent in existing kild without destroying worktree")
-                .arg(
-                    Arg::new("branch")
-                        .help("Branch name of the kild to restart")
-                        .required(true)
-                        .index(1)
-                )
-                .arg(
-                    Arg::new("agent")
-                        .long("agent")
-                        .short('a')
-                        .help("AI agent to use (overrides current agent)")
-                        .value_parser(["amp", "claude", "kiro", "gemini", "codex", "opencode"])
-                )
-        )
-        .subcommand(
             Command::new("pr")
                 .about("Show PR status for a kild")
                 .arg(

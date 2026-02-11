@@ -425,7 +425,7 @@ impl Session {
     ///
     /// Sessions with missing worktrees are still valid session files
     /// (they can be loaded and listed), but cannot be operated on
-    /// (open, restart, etc.) until the worktree issue is resolved.
+    /// (open, etc.) until the worktree issue is resolved.
     ///
     /// Use this to check worktree validity before operations or to
     /// display orphaned status indicators in the UI.
