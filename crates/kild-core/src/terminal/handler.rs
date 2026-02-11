@@ -1,9 +1,10 @@
 use std::path::Path;
 use tracing::{debug, info, warn};
 
+use crate::agents;
 use crate::config::KildConfig;
 use crate::process::{
-    ensure_pid_dir, get_pid_file_path, get_process_info, is_process_running,
+    ensure_pid_dir, find_process_by_name, get_pid_file_path, get_process_info, is_process_running,
     read_pid_file_with_retry, wrap_command_with_pid_capture,
 };
 use crate::terminal::{errors::TerminalError, operations, types::*};
@@ -20,6 +21,14 @@ fn find_agent_process_with_retry(
     let max_attempts = config.terminal.max_retry_attempts;
     let mut delay_ms = config.terminal.spawn_delay_ms;
 
+    // Resolve agent-specific process patterns once, before the retry loop
+    let agent_patterns = agents::get_all_process_patterns(agent_name);
+    let patterns_ref = if agent_patterns.is_empty() {
+        None
+    } else {
+        Some(agent_patterns.as_slice())
+    };
+
     for attempt in 1..=max_attempts {
         info!(
             event = "core.terminal.searching_for_agent_process",
@@ -28,7 +37,7 @@ fn find_agent_process_with_retry(
 
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 
-        match crate::process::find_process_by_name(agent_name, Some(command)) {
+        match find_process_by_name(agent_name, Some(command), patterns_ref) {
             Ok(Some(info)) => {
                 let total_delay_ms = config.terminal.spawn_delay_ms * (2_u64.pow(attempt) - 1);
                 info!(

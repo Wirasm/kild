@@ -97,6 +97,36 @@ pub fn supported_agents_string() -> String {
     valid_agent_names().join(", ")
 }
 
+/// Get all process patterns for an agent, including bidirectional resolution.
+///
+/// Given a name, this:
+/// 1. Looks up patterns if `name` is a known agent name
+/// 2. Looks up which agent owns `name` if it's a known process pattern
+///
+/// Returns deduplicated combined patterns, or empty vec if no match.
+pub fn get_all_process_patterns(name: &str) -> Vec<String> {
+    let mut patterns = Vec::new();
+
+    // Forward: name is an agent name → get its patterns
+    if let Some(agent_patterns) = get_process_patterns(name) {
+        patterns.extend(agent_patterns);
+    }
+
+    // Reverse: name is a process pattern → find owning agent's patterns
+    for agent_name in valid_agent_names() {
+        if let Some(agent_patterns) = get_process_patterns(agent_name)
+            && agent_patterns.iter().any(|p| p == name)
+        {
+            patterns.extend(agent_patterns);
+        }
+    }
+
+    // Deduplicate
+    patterns.sort();
+    patterns.dedup();
+    patterns
+}
+
 /// Check if an agent's CLI is available in PATH (case-insensitive).
 pub fn is_agent_available(name: &str) -> Option<bool> {
     get_agent(name).map(|backend| backend.is_available())
@@ -256,6 +286,23 @@ mod tests {
             "Registry should have exactly as many agents ({}) as AgentType variants ({})",
             agent_count, type_count
         );
+    }
+
+    #[test]
+    fn test_get_all_process_patterns() {
+        // Forward lookup: agent name → patterns
+        let patterns = get_all_process_patterns("claude");
+        assert!(patterns.contains(&"claude".to_string()));
+        assert!(patterns.contains(&"claude-code".to_string()));
+
+        // Reverse lookup: process pattern → all agent patterns
+        let patterns = get_all_process_patterns("claude-code");
+        assert!(patterns.contains(&"claude".to_string()));
+        assert!(patterns.contains(&"claude-code".to_string()));
+
+        // Unknown name: empty
+        let patterns = get_all_process_patterns("unknown");
+        assert!(patterns.is_empty());
     }
 
     #[test]
