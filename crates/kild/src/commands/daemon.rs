@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub(crate) fn handle_daemon_command(
     matches: &ArgMatches,
@@ -68,9 +68,17 @@ fn handle_daemon_start(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        let pid = read_daemon_pid().unwrap_or(0);
-        println!("Daemon started (PID: {})", pid);
-        info!(event = "cli.daemon.start_completed", pid = pid);
+        match read_daemon_pid() {
+            Ok(pid) => {
+                println!("Daemon started (PID: {})", pid);
+                info!(event = "cli.daemon.start_completed", pid = pid);
+            }
+            Err(e) => {
+                warn!(event = "cli.daemon.pid_read_failed", error = %e);
+                println!("Daemon started (PID unknown)");
+                info!(event = "cli.daemon.start_completed");
+            }
+        }
     }
 
     Ok(())
@@ -118,7 +126,12 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
 
     if json {
         let status = if running {
-            let pid = read_daemon_pid().unwrap_or(0);
+            let pid = read_daemon_pid()
+                .map_err(|e| {
+                    warn!(event = "cli.daemon.pid_read_failed", error = %e);
+                    e
+                })
+                .ok();
             serde_json::json!({
                 "running": true,
                 "pid": pid,
@@ -131,8 +144,13 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
         };
         println!("{}", serde_json::to_string_pretty(&status)?);
     } else if running {
-        let pid = read_daemon_pid().unwrap_or(0);
-        println!("Daemon: running (PID: {})", pid);
+        match read_daemon_pid() {
+            Ok(pid) => println!("Daemon: running (PID: {})", pid),
+            Err(e) => {
+                warn!(event = "cli.daemon.pid_read_failed", error = %e);
+                println!("Daemon: running (PID unknown)");
+            }
+        }
         println!("Socket: {}", kild_core::daemon::socket_path().display());
     } else {
         println!("Daemon: stopped");
