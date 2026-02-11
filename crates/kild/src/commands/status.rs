@@ -113,20 +113,7 @@ pub(crate) fn handle_status_command(
 
                 // Show remote status (push state)
                 if let Some(ref ws) = stats.worktree_status {
-                    let remote_status = if !ws.has_remote_branch {
-                        "Never pushed"
-                    } else if ws.unpushed_commit_count == 0
-                        && ws.behind_commit_count == 0
-                        && !ws.behind_count_failed
-                    {
-                        "Up to date"
-                    } else if ws.unpushed_commit_count == 0 {
-                        "Behind remote"
-                    } else if ws.behind_commit_count == 0 && !ws.behind_count_failed {
-                        "Unpushed changes"
-                    } else {
-                        "Diverged"
-                    };
+                    let remote_status = determine_remote_status(ws);
                     rows.push(("Remote:", remote_status.to_string()));
                 }
             }
@@ -234,4 +221,25 @@ pub(crate) fn handle_status_command(
             Err(e.into())
         }
     }
+}
+
+/// Determine human-readable remote status from worktree status.
+fn determine_remote_status(ws: &kild_core::git::types::WorktreeStatus) -> &'static str {
+    if !ws.has_remote_branch {
+        return "Never pushed";
+    }
+
+    if ws.unpushed_commit_count == 0 && ws.behind_commit_count == 0 && !ws.behind_count_failed {
+        return "Up to date";
+    }
+
+    if ws.unpushed_commit_count == 0 {
+        return "Behind remote";
+    }
+
+    if ws.behind_commit_count == 0 && !ws.behind_count_failed {
+        return "Unpushed changes";
+    }
+
+    "Diverged"
 }

@@ -63,10 +63,9 @@ pub fn get_worktree_status(worktree_path: &Path) -> Result<WorktreeStatus, GitEr
 
     // Determine if there are uncommitted changes
     // Conservative fallback: assume dirty if check failed
-    let has_uncommitted = if let Some(details) = &uncommitted_result {
-        !details.is_empty()
-    } else {
-        true
+    let has_uncommitted = match &uncommitted_result {
+        Some(details) => !details.is_empty(),
+        None => true, // Conservative: assume dirty if check failed
     };
 
     Ok(WorktreeStatus {
@@ -432,9 +431,12 @@ fn compute_base_metrics(
         base_oid,
         base_branch,
     ));
+
     let merge_base = super::health::find_merge_base(&repo, branch_oid, base_oid);
-    let diff_vs_base =
-        merge_base.and_then(|mb| super::health::diff_against_base(&repo, branch_oid, mb));
+    let diff_vs_base = match merge_base {
+        Some(mb) => super::health::diff_against_base(&repo, branch_oid, mb),
+        None => None,
+    };
 
     (drift, diff_vs_base)
 }

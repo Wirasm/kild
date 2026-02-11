@@ -80,11 +80,51 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
     let mut any_unknown = false;
 
     for agent_proc in session.agents() {
-        let status = check_agent_process_status(agent_proc, &session.branch);
-        match status {
-            AgentStatus::Running => any_running = true,
-            AgentStatus::Unknown => any_unknown = true,
-            AgentStatus::Stopped => {}
+        // Try PID-based detection first
+        if let Some(pid) = agent_proc.process_id() {
+            match is_process_running(pid) {
+                Ok(true) => {
+                    any_running = true;
+                    continue;
+                }
+                Ok(false) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        event = "core.session.process_check_failed",
+                        pid = pid,
+                        agent = agent_proc.agent(),
+                        branch = &session.branch,
+                        error = %e
+                    );
+                    any_unknown = true;
+                    continue;
+                }
+            }
+        }
+
+        // Fallback to window-based detection
+        if let (Some(terminal_type), Some(window_id)) =
+            (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+        {
+            match is_terminal_window_open(terminal_type, window_id) {
+                Ok(Some(true)) => {
+                    any_running = true;
+                    continue;
+                }
+                Ok(Some(false) | None) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        event = "core.session.window_check_failed",
+                        terminal_type = ?terminal_type,
+                        window_id = window_id,
+                        agent = agent_proc.agent(),
+                        branch = &session.branch,
+                        error = %e
+                    );
+                    any_unknown = true;
+                    continue;
+                }
+            }
         }
     }
 
@@ -95,75 +135,6 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
         return ProcessStatus::Unknown;
     }
     ProcessStatus::Stopped
-}
-
-/// Status of a single agent process check.
-enum AgentStatus {
-    Running,
-    Stopped,
-    Unknown,
-}
-
-/// Check status of a single agent process.
-///
-/// Tries PID-based detection first, falls back to window-based detection.
-fn check_agent_process_status(
-    agent_proc: &crate::sessions::types::AgentProcess,
-    branch: &str,
-) -> AgentStatus {
-    if let Some(pid) = agent_proc.process_id() {
-        return check_pid_status(pid, agent_proc.agent(), branch);
-    }
-
-    if let (Some(terminal_type), Some(window_id)) =
-        (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-    {
-        return check_window_status(terminal_type, window_id, agent_proc.agent(), branch);
-    }
-
-    AgentStatus::Stopped
-}
-
-/// Check process status via PID.
-fn check_pid_status(pid: u32, agent: &str, branch: &str) -> AgentStatus {
-    match is_process_running(pid) {
-        Ok(true) => AgentStatus::Running,
-        Ok(false) => AgentStatus::Stopped,
-        Err(e) => {
-            tracing::warn!(
-                event = "core.session.process_check_failed",
-                pid = pid,
-                agent = agent,
-                branch = branch,
-                error = %e
-            );
-            AgentStatus::Unknown
-        }
-    }
-}
-
-/// Check process status via terminal window ID.
-fn check_window_status(
-    terminal_type: &crate::terminal::types::TerminalType,
-    window_id: &str,
-    agent: &str,
-    branch: &str,
-) -> AgentStatus {
-    match is_terminal_window_open(terminal_type, window_id) {
-        Ok(Some(true)) => AgentStatus::Running,
-        Ok(Some(false) | None) => AgentStatus::Stopped,
-        Err(e) => {
-            tracing::warn!(
-                event = "core.session.window_check_failed",
-                terminal_type = ?terminal_type,
-                window_id = window_id,
-                agent = agent,
-                branch = branch,
-                error = %e
-            );
-            AgentStatus::Unknown
-        }
-    }
 }
 
 /// Check if a worktree has uncommitted changes using git2.

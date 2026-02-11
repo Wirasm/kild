@@ -294,11 +294,17 @@ pub fn collect_branch_health(
     let merge_base = find_merge_base(&repo, branch_oid, base_oid);
 
     // Commit activity
-    let commits_since_base = merge_base.map_or(0, |mb| count_commits_since(&repo, branch_oid, mb));
+    let commits_since_base = match merge_base {
+        Some(mb) => count_commits_since(&repo, branch_oid, mb),
+        None => 0,
+    };
     let last_commit_time = get_last_commit_time(&repo);
 
     // Diff vs base
-    let diff_vs_base = merge_base.and_then(|mb| diff_against_base(&repo, branch_oid, mb));
+    let diff_vs_base = match merge_base {
+        Some(mb) => diff_against_base(&repo, branch_oid, mb),
+        None => None,
+    };
 
     // Conflict detection (against base tip, not merge base)
     let conflict_status = check_conflicts(&repo, branch_oid, base_oid);
