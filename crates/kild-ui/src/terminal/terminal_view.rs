@@ -1,7 +1,11 @@
+use std::time::Duration;
+
 use gpui::{
     ClipboardItem, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render, Task,
     Window, div, prelude::*, px,
 };
+
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
 use super::input;
 use super::state::Terminal;
@@ -19,6 +23,13 @@ pub struct TerminalView {
     focus_handle: FocusHandle,
     /// Event batching task. Stored to prevent cancellation.
     _event_task: Task<()>,
+    /// Whether the cursor is currently visible in the blink cycle.
+    cursor_visible: bool,
+    /// Monotonic epoch incremented on each blink reset. Stale timers detect
+    /// mismatched epochs and exit, preventing old timers from toggling state.
+    blink_epoch: usize,
+    /// Blink timer task. Stored to prevent cancellation.
+    _blink_task: Task<()>,
 }
 
 impl TerminalView {
@@ -61,16 +72,64 @@ impl TerminalView {
             .await;
         });
 
+        let blink_epoch: usize = 0;
+        let blink_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            loop {
+                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
+                let should_continue = this.update(cx, |view, cx| {
+                    if view.blink_epoch != blink_epoch {
+                        return false;
+                    }
+                    view.cursor_visible = !view.cursor_visible;
+                    cx.notify();
+                    true
+                });
+                match should_continue {
+                    Ok(true) => continue,
+                    _ => break,
+                }
+            }
+        });
+
         Self {
             terminal,
             focus_handle,
             _event_task: event_task,
+            cursor_visible: true,
+            blink_epoch,
+            _blink_task: blink_task,
         }
     }
 
     /// Access the underlying terminal state (e.g. to check `has_exited()`).
     pub fn terminal(&self) -> &Terminal {
         &self.terminal
+    }
+
+    /// Reset blink cycle: make cursor visible immediately and start a fresh
+    /// timer. The old timer detects the incremented epoch and exits.
+    fn reset_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_visible = true;
+        self.blink_epoch = self.blink_epoch.wrapping_add(1);
+        let epoch = self.blink_epoch;
+        self._blink_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            loop {
+                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
+                let should_continue = this.update(cx, |view, cx| {
+                    if view.blink_epoch != epoch {
+                        return false;
+                    }
+                    view.cursor_visible = !view.cursor_visible;
+                    cx.notify();
+                    true
+                });
+                match should_continue {
+                    Ok(true) => continue,
+                    _ => break,
+                }
+            }
+        });
+        cx.notify();
     }
 
     fn set_error(&self, msg: String) {
@@ -80,6 +139,8 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_blink(cx);
+
         let key = event.keystroke.key.as_str();
         let cmd = event.keystroke.modifiers.platform;
 
@@ -167,6 +228,14 @@ impl Render for TerminalView {
             );
         }
 
-        container.child(TerminalElement::new(term, has_focus, resize_handle))
+        // Unfocused cursors don't blink — always show the thin bar.
+        let cursor_visible = if has_focus { self.cursor_visible } else { true };
+
+        container.child(TerminalElement::new(
+            term,
+            has_focus,
+            resize_handle,
+            cursor_visible,
+        ))
     }
 }

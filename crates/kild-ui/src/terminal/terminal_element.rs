@@ -51,6 +51,7 @@ pub struct TerminalElement {
     term: Arc<FairMutex<Term<KildListener>>>,
     has_focus: bool,
     resize_handle: ResizeHandle,
+    cursor_visible: bool,
 }
 
 impl TerminalElement {
@@ -58,11 +59,13 @@ impl TerminalElement {
         term: Arc<FairMutex<Term<KildListener>>>,
         has_focus: bool,
         resize_handle: ResizeHandle,
+        cursor_visible: bool,
     ) -> Self {
         Self {
             term,
             has_focus,
             resize_handle,
+            cursor_visible,
         }
     }
 
@@ -484,30 +487,32 @@ impl Element for TerminalElement {
             }
         }
 
-        // Cursor
-        let cursor_point = content.cursor.point;
-        let cursor_line = cursor_point.line.0;
-        let cursor_col = cursor_point.column.0;
-        if cursor_line >= 0 && (cursor_line as usize) < rows && cursor_col < cols {
-            let cx_pos = bounds.origin.x + cursor_col as f32 * cell_width;
-            let cy_pos = bounds.origin.y + cursor_line as f32 * cell_height;
-            let cursor_color = Hsla::from(theme::terminal_cursor());
+        // Cursor (only when visible — blink state from TerminalView)
+        if self.cursor_visible {
+            let cursor_point = content.cursor.point;
+            let cursor_line = cursor_point.line.0;
+            let cursor_col = cursor_point.column.0;
+            if cursor_line >= 0 && (cursor_line as usize) < rows && cursor_col < cols {
+                let cx_pos = bounds.origin.x + cursor_col as f32 * cell_width;
+                let cy_pos = bounds.origin.y + cursor_line as f32 * cell_height;
+                let cursor_color = Hsla::from(theme::terminal_cursor());
 
-            cursor = Some(PreparedCursor {
-                bounds: if self.has_focus {
-                    Bounds::new(point(cx_pos, cy_pos), size(cell_width, cell_height))
-                } else {
-                    Bounds::new(point(cx_pos, cy_pos), size(px(2.0), cell_height))
-                },
-                color: if self.has_focus {
-                    cursor_color
-                } else {
-                    Hsla {
-                        a: 0.5,
-                        ..cursor_color
-                    }
-                },
-            });
+                cursor = Some(PreparedCursor {
+                    bounds: if self.has_focus {
+                        Bounds::new(point(cx_pos, cy_pos), size(cell_width, cell_height))
+                    } else {
+                        Bounds::new(point(cx_pos, cy_pos), size(px(2.0), cell_height))
+                    },
+                    color: if self.has_focus {
+                        cursor_color
+                    } else {
+                        Hsla {
+                            a: 0.5,
+                            ..cursor_color
+                        }
+                    },
+                });
+            }
         }
 
         PrepaintState {
