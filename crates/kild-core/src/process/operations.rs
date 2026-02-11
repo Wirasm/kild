@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 use tracing::{debug, error};
 
-use crate::agents;
 use crate::process::errors::ProcessError;
 use crate::process::types::{Pid, ProcessInfo, ProcessMetrics, ProcessStatus};
 
@@ -154,21 +153,15 @@ pub fn get_process_metrics(pid: u32) -> Result<ProcessMetrics, ProcessError> {
     }
 }
 
-/// Generate multiple search patterns for better process matching
+/// Generate multiple search patterns for better process matching.
 ///
 /// Creates a deduplicated list of search patterns to improve process detection reliability.
-/// Includes the original pattern, partial matches (before first dash), and known agent variations.
-///
-/// # Examples
-///
-/// ```ignore
-/// let patterns = generate_search_patterns("kiro-cli");
-/// // Returns: ["kiro-cli", "kiro"] (deduplicated)
-///
-/// let patterns = generate_search_patterns("simple");
-/// // Returns: ["simple"]
-/// ```
-fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
+/// Includes the original pattern, partial matches (before first dash), and any
+/// caller-provided additional patterns.
+fn generate_search_patterns(
+    name_pattern: &str,
+    additional_patterns: Option<&[String]>,
+) -> Vec<String> {
     let mut patterns = std::collections::HashSet::new();
     patterns.insert(name_pattern.to_string());
 
@@ -183,35 +176,10 @@ fn generate_search_patterns(name_pattern: &str) -> Vec<String> {
         );
     }
 
-    // Add agent-specific patterns if this is a known agent name or pattern
-    if let Some(agent_patterns) = agents::get_process_patterns(name_pattern) {
-        debug!(
-            event = "core.process.agent_patterns_found",
-            name_pattern = name_pattern,
-            pattern_count = agent_patterns.len(),
-            "Found agent-specific process patterns"
-        );
-        for pattern in agent_patterns {
-            patterns.insert(pattern);
-        }
-    } else {
-        debug!(
-            event = "core.process.agent_patterns_not_found",
-            name_pattern = name_pattern,
-            "No agent-specific patterns found, using generic matching"
-        );
-    }
-
-    // Also check if this pattern matches known agent process patterns and add the agent name
-    for agent_name in agents::valid_agent_names() {
-        if let Some(agent_patterns) = agents::get_process_patterns(agent_name)
-            && agent_patterns.iter().any(|p| p == name_pattern)
-        {
-            // The name_pattern is a known process pattern for this agent,
-            // so add all patterns for this agent
-            for pattern in agent_patterns {
-                patterns.insert(pattern);
-            }
+    // Add caller-provided patterns (e.g., agent-specific process names)
+    if let Some(extra) = additional_patterns {
+        for pattern in extra {
+            patterns.insert(pattern.clone());
         }
     }
 
@@ -253,16 +221,20 @@ fn command_matches(cmd_line: &str, cmd_pattern: &str) -> bool {
     })
 }
 
-/// Find a process by name, optionally filtering by command line pattern
+/// Find a process by name, optionally filtering by command line pattern.
+///
+/// `additional_patterns` allows callers to provide domain-specific search patterns
+/// (e.g., agent process names) without the process module needing domain awareness.
 pub fn find_process_by_name(
     name_pattern: &str,
     command_pattern: Option<&str>,
+    additional_patterns: Option<&[String]>,
 ) -> Result<Option<ProcessInfo>, ProcessError> {
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::All, true);
 
     // Try multiple search strategies
-    let search_patterns = generate_search_patterns(name_pattern);
+    let search_patterns = generate_search_patterns(name_pattern, additional_patterns);
 
     for (pid, process) in system.processes() {
         let process_name = process.name().to_string_lossy();
@@ -380,7 +352,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         // Should find it by name
-        let result = find_process_by_name("sleep", None);
+        let result = find_process_by_name("sleep", None, None);
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
 
@@ -391,47 +363,39 @@ mod tests {
 
     #[test]
     fn test_find_process_by_name_not_found() {
-        let result = find_process_by_name("nonexistent-process-xyz", None);
+        let result = find_process_by_name("nonexistent-process-xyz", None, None);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn test_generate_search_patterns() {
-        // kiro-cli is a known agent process pattern, so it should include kiro patterns
-        let patterns = generate_search_patterns("kiro-cli");
+        // With additional patterns provided by caller
+        let extra = vec!["kiro-cli".to_string(), "kiro".to_string()];
+        let patterns = generate_search_patterns("kiro-cli", Some(&extra));
         assert!(patterns.contains(&"kiro-cli".to_string()));
         assert!(patterns.contains(&"kiro".to_string()));
 
-        // claude-code is a known agent process pattern
-        let patterns = generate_search_patterns("claude-code");
-        assert!(patterns.contains(&"claude-code".to_string()));
-        assert!(patterns.contains(&"claude".to_string()));
-
-        // "claude" is a known agent, so it should include all claude patterns
-        let patterns = generate_search_patterns("claude");
-        assert!(patterns.contains(&"claude".to_string()));
-        assert!(patterns.contains(&"claude-code".to_string()));
-
-        // "kiro" is a known agent
-        let patterns = generate_search_patterns("kiro");
-        assert!(patterns.contains(&"kiro".to_string()));
-        assert!(patterns.contains(&"kiro-cli".to_string()));
-
-        let patterns = generate_search_patterns("simple");
+        // With no additional patterns, only generic matching
+        let patterns = generate_search_patterns("claude", None);
         assert_eq!(patterns.len(), 1);
-        assert!(patterns.contains(&"simple".to_string()));
+        assert!(patterns.contains(&"claude".to_string()));
 
-        // Edge cases
-        let patterns = generate_search_patterns("");
-        assert!(patterns.contains(&"".to_string()));
-
-        let patterns = generate_search_patterns("no-match-agent");
+        // Dash splitting still works generically
+        let patterns = generate_search_patterns("no-match-agent", None);
         assert!(patterns.contains(&"no-match-agent".to_string()));
         assert!(patterns.contains(&"no".to_string()));
         assert_eq!(patterns.len(), 2);
 
-        let patterns = generate_search_patterns("very-long-agent-name-with-many-dashes");
+        let patterns = generate_search_patterns("simple", None);
+        assert_eq!(patterns.len(), 1);
+        assert!(patterns.contains(&"simple".to_string()));
+
+        // Edge cases
+        let patterns = generate_search_patterns("", None);
+        assert!(patterns.contains(&"".to_string()));
+
+        let patterns = generate_search_patterns("very-long-agent-name-with-many-dashes", None);
         assert!(patterns.contains(&"very-long-agent-name-with-many-dashes".to_string()));
         assert!(patterns.contains(&"very".to_string()));
         assert_eq!(patterns.len(), 2);
@@ -439,9 +403,7 @@ mod tests {
 
     #[test]
     fn test_find_process_by_name_with_partial_match() {
-        // This would need a running process to test properly
-        // For now, just ensure the function doesn't panic
-        let result = find_process_by_name("nonexistent", None);
+        let result = find_process_by_name("nonexistent", None, None);
         assert!(result.is_ok());
     }
 
