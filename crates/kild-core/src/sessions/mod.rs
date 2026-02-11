@@ -1,11 +1,16 @@
 pub mod agent_status;
 pub mod complete;
+pub mod create;
+pub mod daemon_helpers;
 pub mod destroy;
 pub mod errors;
 pub mod handler;
 pub mod info;
+pub mod list;
+pub mod open;
 pub mod persistence;
 pub mod ports;
+pub mod stop;
 pub mod store;
 pub mod types;
 pub mod validation;
