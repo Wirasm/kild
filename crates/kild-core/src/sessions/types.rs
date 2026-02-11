@@ -493,9 +493,13 @@ impl Session {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
+    #[serde(alias = "Active")]
     Active,
+    #[serde(alias = "Stopped")]
     Stopped,
+    #[serde(alias = "Destroyed")]
     Destroyed,
 }
 
@@ -634,7 +638,8 @@ impl CreateSessionRequest {
 ///
 /// Represents whether the agent process is currently running, stopped,
 /// or in an unknown state (detection failed).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessStatus {
     /// Process is confirmed running
     Running,
@@ -1692,5 +1697,103 @@ mod tests {
         // runtime_mode should survive clear_agents()
         assert_eq!(session.runtime_mode, Some(RuntimeMode::Daemon));
         assert!(!session.has_agents());
+    }
+
+    // --- Enum serialization normalization tests ---
+
+    #[test]
+    fn test_session_status_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SessionStatus::Active).unwrap(),
+            r#""active""#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionStatus::Stopped).unwrap(),
+            r#""stopped""#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionStatus::Destroyed).unwrap(),
+            r#""destroyed""#
+        );
+    }
+
+    #[test]
+    fn test_session_status_deserializes_old_pascal_case() {
+        assert_eq!(
+            serde_json::from_str::<SessionStatus>(r#""Active""#).unwrap(),
+            SessionStatus::Active
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionStatus>(r#""Stopped""#).unwrap(),
+            SessionStatus::Stopped
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionStatus>(r#""Destroyed""#).unwrap(),
+            SessionStatus::Destroyed
+        );
+    }
+
+    #[test]
+    fn test_session_status_roundtrip_new_format() {
+        for status in [
+            SessionStatus::Active,
+            SessionStatus::Stopped,
+            SessionStatus::Destroyed,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let parsed: SessionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn test_process_status_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ProcessStatus::Running).unwrap(),
+            r#""running""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ProcessStatus::Stopped).unwrap(),
+            r#""stopped""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ProcessStatus::Unknown).unwrap(),
+            r#""unknown""#
+        );
+    }
+
+    #[test]
+    fn test_process_status_roundtrip() {
+        for status in [
+            ProcessStatus::Running,
+            ProcessStatus::Stopped,
+            ProcessStatus::Unknown,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let parsed: ProcessStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn test_session_with_old_pascal_case_status_deserializes() {
+        let json = r#"{
+            "id": "test/branch",
+            "project_id": "test",
+            "branch": "branch",
+            "worktree_path": "/tmp/test",
+            "agent": "claude",
+            "status": "Active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "port_range_start": 3000,
+            "port_range_end": 3009,
+            "port_count": 10
+        }"#;
+        let session: Session = serde_json::from_str(json).unwrap();
+        assert_eq!(session.status, SessionStatus::Active);
+
+        // Verify re-serialization outputs snake_case
+        let reserialized = serde_json::to_string(&session).unwrap();
+        assert!(reserialized.contains(r#""status":"active""#));
     }
 }

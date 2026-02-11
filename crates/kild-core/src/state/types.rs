@@ -6,9 +6,12 @@ use crate::sessions::types::AgentStatus;
 
 /// How the agent process should be hosted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeMode {
+    #[serde(alias = "Terminal")]
     /// Launch in an external terminal window (Ghostty, iTerm, etc.)
     Terminal,
+    #[serde(alias = "Daemon")]
     /// Launch in a daemon-owned PTY
     Daemon,
 }
@@ -267,5 +270,38 @@ mod tests {
 
         // Verify the resume field is actually in the JSON
         assert!(json.contains("\"resume\":true"));
+    }
+
+    #[test]
+    fn test_runtime_mode_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&RuntimeMode::Terminal).unwrap(),
+            r#""terminal""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimeMode::Daemon).unwrap(),
+            r#""daemon""#
+        );
+    }
+
+    #[test]
+    fn test_runtime_mode_deserializes_old_pascal_case() {
+        assert_eq!(
+            serde_json::from_str::<RuntimeMode>(r#""Terminal""#).unwrap(),
+            RuntimeMode::Terminal
+        );
+        assert_eq!(
+            serde_json::from_str::<RuntimeMode>(r#""Daemon""#).unwrap(),
+            RuntimeMode::Daemon
+        );
+    }
+
+    #[test]
+    fn test_runtime_mode_roundtrip_new_format() {
+        for mode in [RuntimeMode::Terminal, RuntimeMode::Daemon] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let parsed: RuntimeMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, mode);
+        }
     }
 }

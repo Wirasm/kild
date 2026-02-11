@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use kild_core::events;
 use kild_core::session_ops;
@@ -23,6 +23,18 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             if json_output {
                 let config = super::helpers::load_config_with_warning();
                 let base_branch = config.git.base_branch();
+
+                // Compute overlaps once for all sessions
+                let (overlap_report, overlap_errors) =
+                    kild_core::git::collect_file_overlaps(&sessions, base_branch);
+                for (branch, err_msg) in &overlap_errors {
+                    warn!(
+                        event = "cli.list.overlap_detection_failed",
+                        branch = branch,
+                        error = err_msg
+                    );
+                }
+
                 let enriched: Vec<EnrichedSession> = sessions
                     .into_iter()
                     .map(|session| {
@@ -31,18 +43,55 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                             &session.branch,
                             base_branch,
                         );
+                        let process_status =
+                            kild_core::sessions::info::determine_process_status(&session);
+                        let branch_health = kild_core::git::collect_branch_health(
+                            &session.worktree_path,
+                            &session.branch,
+                            base_branch,
+                            &session.created_at,
+                        )
+                        .ok();
                         let status_info = session_ops::read_agent_status(&session.id);
-                        let terminal_window_title = session
-                            .latest_agent()
-                            .and_then(|a| a.terminal_window_id().map(|s| s.to_string()));
                         let pr_info = session_ops::read_pr_info(&session.id);
+
+                        let latest_agent = session.latest_agent();
+                        let terminal_window_title =
+                            latest_agent.and_then(|a| a.terminal_window_id().map(str::to_string));
+                        let terminal_type =
+                            latest_agent.and_then(|a| a.terminal_type().map(|t| t.to_string()));
+
+                        let worktree_status_ref =
+                            &git_stats.as_ref().and_then(|g| g.worktree_status.clone());
+                        let merge_readiness = branch_health.as_ref().map(|h| {
+                            kild_core::MergeReadiness::compute(
+                                h,
+                                worktree_status_ref,
+                                pr_info.as_ref(),
+                            )
+                        });
+
+                        let overlapping_files = Some(
+                            overlap_report
+                                .overlapping_files
+                                .iter()
+                                .filter(|fo| fo.branches.contains(&session.branch))
+                                .map(|fo| fo.file.display().to_string())
+                                .collect(),
+                        );
+
                         EnrichedSession {
                             session,
+                            process_status,
                             git_stats,
+                            branch_health,
+                            merge_readiness,
                             agent_status: status_info.as_ref().map(|i| i.status.to_string()),
                             agent_status_updated_at: status_info.map(|i| i.updated_at),
                             terminal_window_title,
+                            terminal_type,
                             pr_info,
+                            overlapping_files,
                         }
                     })
                     .collect();
