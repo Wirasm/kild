@@ -1028,19 +1028,7 @@ fn ensure_shim_binary() -> Result<(), String> {
         return Ok(());
     }
 
-    let our_binary =
-        std::env::current_exe().map_err(|e| format!("could not determine binary path: {}", e))?;
-    let bin_dir = our_binary
-        .parent()
-        .ok_or_else(|| format!("binary has no parent directory: {}", our_binary.display()))?;
-    let shim_binary = bin_dir.join("kild-tmux-shim");
-
-    if !shim_binary.exists() {
-        return Err(format!(
-            "kild-tmux-shim binary not found at {}",
-            shim_binary.display()
-        ));
-    }
+    let shim_binary = crate::daemon::find_sibling_binary("kild-tmux-shim")?;
 
     std::fs::create_dir_all(&shim_bin_dir)
         .map_err(|e| format!("failed to create {}: {}", shim_bin_dir.display(), e))?;

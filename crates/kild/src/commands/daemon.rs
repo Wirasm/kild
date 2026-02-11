@@ -1,22 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info, warn};
-
-fn find_daemon_binary() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let our_binary =
-        std::env::current_exe().map_err(|e| format!("could not determine binary path: {}", e))?;
-    let bin_dir = our_binary
-        .parent()
-        .ok_or_else(|| format!("binary has no parent directory: {}", our_binary.display()))?;
-    let daemon_binary = bin_dir.join("kild-daemon");
-    if !daemon_binary.exists() {
-        return Err(format!(
-            "kild-daemon binary not found at {}. Run 'cargo build --all' to build it.",
-            daemon_binary.display()
-        )
-        .into());
-    }
-    Ok(daemon_binary)
-}
+use tracing::{debug, error, info, warn};
 
 pub(crate) fn handle_daemon_command(
     matches: &ArgMatches,
@@ -41,7 +24,8 @@ fn handle_daemon_start(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         return Ok(());
     }
 
-    let daemon_binary = find_daemon_binary()?;
+    let daemon_binary = kild_core::daemon::find_sibling_binary("kild-daemon")
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     if foreground {
         // Spawn kild-daemon with inherited stdio (blocks until child exits)
@@ -59,20 +43,50 @@ fn handle_daemon_start(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         info!(event = "cli.daemon.start_completed");
     } else {
         // Spawn daemon as a detached background process
-        std::process::Command::new(&daemon_binary)
+        let mut child = std::process::Command::new(&daemon_binary)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
-        // Wait for socket to become available
+        debug!(event = "cli.daemon.spawn_completed", pid = child.id());
+
+        // Wait for socket to become available (with crash detection)
         let socket_path = kild_core::daemon::socket_path();
         let timeout = std::time::Duration::from_secs(5);
         let start = std::time::Instant::now();
 
         loop {
-            if socket_path.exists() && kild_core::daemon::client::ping_daemon().unwrap_or(false) {
+            // Check if daemon crashed before socket was ready
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    error!(event = "cli.daemon.start_failed", reason = "child_exited", status = %status);
+                    return Err(format!(
+                        "Daemon exited with {} before becoming ready.\n\
+                         Try: kild daemon start --foreground  (to see startup errors)",
+                        status
+                    )
+                    .into());
+                }
+                Ok(None) => {} // Still running
+                Err(e) => {
+                    debug!(event = "cli.daemon.child_status_check_failed", error = %e);
+                }
+            }
+
+            let socket_exists = socket_path.exists();
+            let ping_ok =
+                socket_exists && kild_core::daemon::client::ping_daemon().unwrap_or(false);
+
+            debug!(
+                event = "cli.daemon.socket_check",
+                socket_exists = socket_exists,
+                ping_ok = ping_ok,
+                elapsed_ms = start.elapsed().as_millis() as u64,
+            );
+
+            if ping_ok {
                 break;
             }
             if start.elapsed() > timeout {

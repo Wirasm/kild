@@ -28,23 +28,8 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), DaemonAutoStartE
     info!(event = "core.daemon.auto_start_started");
     eprintln!("Starting daemon...");
 
-    let our_binary = std::env::current_exe().map_err(|e| DaemonAutoStartError::BinaryNotFound {
-        message: e.to_string(),
-    })?;
-    let bin_dir = our_binary
-        .parent()
-        .ok_or_else(|| DaemonAutoStartError::BinaryNotFound {
-            message: format!("binary has no parent directory: {}", our_binary.display()),
-        })?;
-    let daemon_binary = bin_dir.join("kild-daemon");
-    if !daemon_binary.exists() {
-        return Err(DaemonAutoStartError::BinaryNotFound {
-            message: format!(
-                "kild-daemon binary not found at {}. Run 'cargo build --all' to build it.",
-                daemon_binary.display()
-            ),
-        });
-    }
+    let daemon_binary = super::find_sibling_binary("kild-daemon")
+        .map_err(|message| DaemonAutoStartError::BinaryNotFound { message })?;
 
     let mut child = std::process::Command::new(&daemon_binary)
         .stdout(std::process::Stdio::null())
