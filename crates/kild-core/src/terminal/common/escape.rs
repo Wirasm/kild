@@ -7,14 +7,6 @@ pub fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\"'\"'"))
 }
 
-/// Escape a string for use in AppleScript.
-pub fn applescript_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-}
-
 /// Escape special regex characters for use in pkill -f pattern.
 pub fn escape_regex(s: &str) -> String {
     let mut result = String::with_capacity(s.len() * 2);
@@ -58,14 +50,6 @@ mod tests {
         assert_eq!(shell_escape("dir;rm -rf /"), "'dir;rm -rf /'");
         assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
         assert_eq!(shell_escape("`id`"), "'`id`'");
-    }
-
-    #[test]
-    fn test_applescript_escape() {
-        assert_eq!(applescript_escape("hello"), "hello");
-        assert_eq!(applescript_escape("hello\"world"), "hello\\\"world");
-        assert_eq!(applescript_escape("hello\\world"), "hello\\\\world");
-        assert_eq!(applescript_escape("hello\nworld"), "hello\\nworld");
     }
 
     #[test]

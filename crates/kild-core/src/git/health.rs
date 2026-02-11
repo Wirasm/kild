@@ -4,11 +4,7 @@ use git2::{Oid, Repository};
 use tracing::{debug, warn};
 
 use crate::git::naming::kild_branch_name;
-use crate::forge::types::{CiStatus, PrInfo};
-    use crate::git::types::{
-        BaseBranchDrift, BranchHealth, CommitActivity, ConflictStatus, DiffStats,
-        MergeReadiness, WorktreeStatus,
-    };
+use crate::git::types::{BaseBranchDrift, BranchHealth, CommitActivity, ConflictStatus, DiffStats};
 
 /// Find the merge base between two commits.
 ///
@@ -323,6 +319,8 @@ pub fn collect_branch_health(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::forge::types::{CiStatus, PrInfo};
+    use crate::git::types::{MergeReadiness, WorktreeStatus};
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;

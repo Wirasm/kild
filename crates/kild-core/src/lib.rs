@@ -17,6 +17,7 @@ pub mod config;
 pub mod daemon;
 pub mod editor;
 pub mod errors;
+pub mod escape;
 pub mod events;
 pub mod files;
 pub mod forge;

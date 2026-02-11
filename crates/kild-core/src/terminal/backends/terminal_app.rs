@@ -6,9 +6,10 @@ use crate::terminal::{common::detection::app_exists_macos, traits::TerminalBacke
 use crate::terminal::{errors::TerminalError, types::SpawnConfig};
 
 #[cfg(target_os = "macos")]
+use crate::escape::applescript_escape;
 use crate::terminal::common::{
     applescript::{close_applescript_window, execute_spawn_script, hide_applescript_window},
-    escape::{applescript_escape, build_cd_command},
+    escape::build_cd_command,
 };
 
 /// AppleScript template for Terminal.app window launching (with window ID capture).

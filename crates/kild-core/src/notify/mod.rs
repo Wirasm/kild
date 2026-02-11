@@ -41,7 +41,7 @@ pub fn send_notification(title: &str, message: &str) {
 
 #[cfg(target_os = "macos")]
 fn send_platform_notification(title: &str, message: &str) {
-    use crate::terminal::common::escape::applescript_escape;
+    use crate::escape::applescript_escape;
 
     let escaped_title = applescript_escape(title);
     let escaped_message = applescript_escape(message);

@@ -9,9 +9,8 @@ use tracing::debug;
 use tracing::warn;
 
 // Re-export common utilities for external use
-pub use crate::terminal::common::escape::{
-    applescript_escape, build_cd_command, escape_regex, shell_escape,
-};
+pub use crate::escape::applescript_escape;
+pub use crate::terminal::common::escape::{build_cd_command, escape_regex, shell_escape};
 
 /// Detect the available terminal.
 ///
@@ -272,14 +271,6 @@ mod tests {
         assert_eq!(shell_escape("hello"), "'hello'");
         assert_eq!(shell_escape("hello world"), "'hello world'");
         assert_eq!(shell_escape("hello'world"), "'hello'\"'\"'world'");
-    }
-
-    #[test]
-    fn test_applescript_escape() {
-        assert_eq!(applescript_escape("hello"), "hello");
-        assert_eq!(applescript_escape("hello\"world"), "hello\\\"world");
-        assert_eq!(applescript_escape("hello\\world"), "hello\\\\world");
-        assert_eq!(applescript_escape("hello\nworld"), "hello\\nworld");
     }
 
     #[test]
