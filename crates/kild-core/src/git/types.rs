@@ -235,6 +235,46 @@ pub struct BranchHealth {
     pub has_remote: bool,
 }
 
+/// Computed merge readiness status for a branch.
+///
+/// Combines git health metrics with forge/PR data to determine
+/// whether a branch is ready to merge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeReadiness {
+    /// Clean, pushed, PR open, CI passing
+    Ready,
+    /// Has unpushed commits
+    NeedsPush,
+    /// Behind base branch significantly
+    NeedsRebase,
+    /// Cannot merge cleanly into base
+    HasConflicts,
+    /// Conflict detection failed — status unknown, treat as blocked
+    ConflictCheckFailed,
+    /// Pushed but no PR exists
+    NeedsPr,
+    /// PR exists but CI is failing
+    CiFailing,
+    /// Ready to merge locally (no remote configured)
+    ReadyLocal,
+}
+
+impl std::fmt::Display for MergeReadiness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MergeReadiness::Ready => write!(f, "Ready"),
+            MergeReadiness::NeedsPush => write!(f, "Needs push"),
+            MergeReadiness::NeedsRebase => write!(f, "Needs rebase"),
+            MergeReadiness::HasConflicts => write!(f, "Has conflicts"),
+            MergeReadiness::ConflictCheckFailed => write!(f, "Conflict check failed"),
+            MergeReadiness::NeedsPr => write!(f, "Needs PR"),
+            MergeReadiness::CiFailing => write!(f, "CI failing"),
+            MergeReadiness::ReadyLocal => write!(f, "Ready (local)"),
+        }
+    }
+}
+
 /// A single file that is modified by multiple kilds.
 ///
 /// Invariants (enforced at construction in `collect_file_overlaps`):

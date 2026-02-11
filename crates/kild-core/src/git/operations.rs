@@ -1,7 +1,9 @@
+use crate::forge::types::{CiStatus, PrInfo};
 use crate::git::errors::GitError;
 use crate::git::types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, CommitCounts, ConflictStatus,
-    DiffStats, FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
+    DiffStats, FileOverlap, GitStats, MergeReadiness, OverlapReport, UncommittedDetails,
+    WorktreeStatus,
 };
 use git2::{Oid, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
@@ -1050,6 +1052,54 @@ pub fn collect_file_overlaps(
     );
 
     (report, errors)
+}
+
+/// Compute merge readiness from git health metrics, worktree status, and optional PR info.
+///
+/// Priority order (highest severity first):
+/// 1. HasConflicts / ConflictCheckFailed — blocks merge entirely
+/// 2. NeedsRebase — behind base, conflicts likely if not rebased
+/// 3. NeedsPush — local-only commits, PR can't be created/updated
+/// 4. NeedsPr — pushed but no tracking PR exists
+/// 5. CiFailing — PR exists but not passing checks
+/// 6. Ready / ReadyLocal — all checks passed
+pub fn compute_merge_readiness(
+    health: &BranchHealth,
+    worktree_status: &Option<WorktreeStatus>,
+    pr_info: Option<&PrInfo>,
+) -> MergeReadiness {
+    match health.conflict_status {
+        ConflictStatus::Conflicts => return MergeReadiness::HasConflicts,
+        ConflictStatus::Unknown => return MergeReadiness::ConflictCheckFailed,
+        ConflictStatus::Clean => {}
+    }
+
+    if health.drift.behind > 0 {
+        return MergeReadiness::NeedsRebase;
+    }
+
+    if !health.has_remote {
+        return MergeReadiness::ReadyLocal;
+    }
+
+    // Check if there are unpushed commits
+    let has_unpushed = worktree_status
+        .as_ref()
+        .is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
+
+    if has_unpushed {
+        return MergeReadiness::NeedsPush;
+    }
+
+    let Some(pr) = pr_info else {
+        return MergeReadiness::NeedsPr;
+    };
+
+    if pr.ci_status == CiStatus::Failing {
+        return MergeReadiness::CiFailing;
+    }
+
+    MergeReadiness::Ready
 }
 
 #[cfg(test)]
@@ -2275,5 +2325,192 @@ mod tests {
             "All kilds have overlaps: {:?}",
             report.clean_kilds
         );
+    }
+
+    // --- Merge readiness tests ---
+
+    fn make_health(
+        conflict_status: ConflictStatus,
+        behind: usize,
+        has_remote: bool,
+    ) -> BranchHealth {
+        BranchHealth {
+            branch: "test".to_string(),
+            created_at: "2026-02-09T10:00:00Z".to_string(),
+            commit_activity: CommitActivity {
+                commits_since_base: 3,
+                last_commit_time: None,
+            },
+            drift: BaseBranchDrift {
+                ahead: 3,
+                behind,
+                base_branch: "main".to_string(),
+            },
+            diff_vs_base: Some(DiffStats {
+                insertions: 10,
+                deletions: 2,
+                files_changed: 1,
+            }),
+            conflict_status,
+            has_remote,
+        }
+    }
+
+    #[test]
+    fn test_readiness_has_conflicts() {
+        let h = make_health(ConflictStatus::Conflicts, 0, true);
+        assert_eq!(
+            compute_merge_readiness(&h, &None, None),
+            MergeReadiness::HasConflicts
+        );
+    }
+
+    #[test]
+    fn test_readiness_conflict_check_failed() {
+        let h = make_health(ConflictStatus::Unknown, 0, true);
+        assert_eq!(
+            compute_merge_readiness(&h, &None, None),
+            MergeReadiness::ConflictCheckFailed
+        );
+    }
+
+    #[test]
+    fn test_readiness_needs_rebase() {
+        let h = make_health(ConflictStatus::Clean, 5, true);
+        assert_eq!(
+            compute_merge_readiness(&h, &None, None),
+            MergeReadiness::NeedsRebase
+        );
+    }
+
+    #[test]
+    fn test_readiness_ready_local() {
+        let h = make_health(ConflictStatus::Clean, 0, false);
+        assert_eq!(
+            compute_merge_readiness(&h, &None, None),
+            MergeReadiness::ReadyLocal
+        );
+    }
+
+    #[test]
+    fn test_readiness_needs_push() {
+        let h = make_health(ConflictStatus::Clean, 0, true);
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 3,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            compute_merge_readiness(&h, &Some(ws), None),
+            MergeReadiness::NeedsPush
+        );
+    }
+
+    #[test]
+    fn test_readiness_needs_push_never_pushed() {
+        let h = make_health(ConflictStatus::Clean, 0, true);
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            compute_merge_readiness(&h, &Some(ws), None),
+            MergeReadiness::NeedsPush
+        );
+    }
+
+    #[test]
+    fn test_readiness_needs_pr() {
+        let h = make_health(ConflictStatus::Clean, 0, true);
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            compute_merge_readiness(&h, &Some(ws), None),
+            MergeReadiness::NeedsPr
+        );
+    }
+
+    #[test]
+    fn test_readiness_ci_failing() {
+        use crate::forge::types::{PrState, ReviewStatus};
+        let h = make_health(ConflictStatus::Clean, 0, true);
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let pr = PrInfo {
+            number: 1,
+            url: "https://example.com/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Failing,
+            ci_summary: None,
+            review_status: ReviewStatus::Unknown,
+            review_summary: None,
+            updated_at: "2026-02-09T12:00:00Z".to_string(),
+        };
+        assert_eq!(
+            compute_merge_readiness(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::CiFailing
+        );
+    }
+
+    #[test]
+    fn test_readiness_ready() {
+        use crate::forge::types::{PrState, ReviewStatus};
+        let h = make_health(ConflictStatus::Clean, 0, true);
+        let ws = WorktreeStatus {
+            unpushed_commit_count: 0,
+            has_remote_branch: true,
+            ..Default::default()
+        };
+        let pr = PrInfo {
+            number: 1,
+            url: "https://example.com/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status: CiStatus::Passing,
+            ci_summary: None,
+            review_status: ReviewStatus::Approved,
+            review_summary: None,
+            updated_at: "2026-02-09T12:00:00Z".to_string(),
+        };
+        assert_eq!(
+            compute_merge_readiness(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn test_readiness_display() {
+        assert_eq!(MergeReadiness::Ready.to_string(), "Ready");
+        assert_eq!(MergeReadiness::NeedsPush.to_string(), "Needs push");
+        assert_eq!(MergeReadiness::NeedsRebase.to_string(), "Needs rebase");
+        assert_eq!(MergeReadiness::HasConflicts.to_string(), "Has conflicts");
+        assert_eq!(
+            MergeReadiness::ConflictCheckFailed.to_string(),
+            "Conflict check failed"
+        );
+        assert_eq!(MergeReadiness::NeedsPr.to_string(), "Needs PR");
+        assert_eq!(MergeReadiness::CiFailing.to_string(), "CI failing");
+        assert_eq!(MergeReadiness::ReadyLocal.to_string(), "Ready (local)");
+    }
+
+    #[test]
+    fn test_readiness_serde() {
+        let json = serde_json::to_string(&MergeReadiness::NeedsRebase).unwrap();
+        assert_eq!(json, "\"needs_rebase\"");
+
+        let json = serde_json::to_string(&MergeReadiness::HasConflicts).unwrap();
+        assert_eq!(json, "\"has_conflicts\"");
+
+        let json = serde_json::to_string(&MergeReadiness::ConflictCheckFailed).unwrap();
+        assert_eq!(json, "\"conflict_check_failed\"");
+
+        let json = serde_json::to_string(&MergeReadiness::ReadyLocal).unwrap();
+        assert_eq!(json, "\"ready_local\"");
     }
 }
