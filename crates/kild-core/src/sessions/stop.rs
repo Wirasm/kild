@@ -159,12 +159,15 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         );
     }
 
-    // 5. Clear process info and set status to Stopped
+    // 5. Remove agent status sidecar (best-effort, mirrors destroy.rs)
+    persistence::remove_agent_status_file(&config.sessions_dir(), &session.id);
+
+    // 6. Clear process info and set status to Stopped
     session.clear_agents();
     session.status = SessionStatus::Stopped;
     session.last_activity = Some(chrono::Utc::now().to_rfc3339());
 
-    // 6. Save updated session (keep worktree, keep session file)
+    // 7. Save updated session (keep worktree, keep session file)
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
     info!(
@@ -535,6 +538,83 @@ mod tests {
         assert!(worktree_dir.exists(), "Worktree should be preserved");
 
         // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_stop_removes_agent_status_sidecar() {
+        use crate::sessions::types::{AgentStatus, AgentStatusInfo};
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir = std::env::temp_dir().join(format!("kild_test_stop_sidecar_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let sessions_dir = temp_dir.join("sessions");
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        // Create a session
+        let session = Session::new(
+            "test-project_sidecar-test".to_string(),
+            "test-project".to_string(),
+            "sidecar-test".to_string(),
+            worktree_dir.clone(),
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            vec![],
+            None,
+            None,
+            None,
+        );
+        persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save");
+
+        // Write agent status sidecar file
+        let status_info = AgentStatusInfo {
+            status: AgentStatus::Working,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        persistence::write_agent_status(&sessions_dir, &session.id, &status_info)
+            .expect("Failed to write status");
+
+        // Verify sidecar exists
+        let sidecar_file = sessions_dir.join("test-project_sidecar-test.status");
+        assert!(sidecar_file.exists(), "Sidecar should exist before stop");
+        assert!(
+            persistence::read_agent_status(&sessions_dir, &session.id).is_some(),
+            "Should read agent status before stop"
+        );
+
+        // Simulate stop: remove sidecar + clear agents + set stopped
+        persistence::remove_agent_status_file(&sessions_dir, &session.id);
+        let mut stopped = session;
+        stopped.clear_agents();
+        stopped.status = SessionStatus::Stopped;
+        persistence::save_session_to_file(&stopped, &sessions_dir).expect("Failed to save");
+
+        // Verify sidecar is gone
+        assert!(
+            !sidecar_file.exists(),
+            "Sidecar should be removed after stop"
+        );
+        assert!(
+            persistence::read_agent_status(&sessions_dir, &stopped.id).is_none(),
+            "Should return None for agent status after stop"
+        );
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
