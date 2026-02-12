@@ -89,6 +89,13 @@ impl ListOutput {
     }
 }
 
+/// JSON error response for --json commands.
+#[derive(Serialize)]
+pub struct JsonError {
+    pub error: String,
+    pub code: String,
+}
+
 /// Enriched session data for JSON output (used by list and status commands).
 #[derive(Serialize)]
 pub struct EnrichedSession {

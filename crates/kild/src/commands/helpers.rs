@@ -4,6 +4,20 @@ use kild_core::Session;
 use kild_core::config::KildConfig;
 use kild_core::terminal::types::TerminalType;
 
+use super::json_types::JsonError;
+
+/// Print a JSON error object to stdout for --json mode.
+/// Returns the error wrapped in Box for chaining with `return Err(...)`.
+pub fn print_json_error(error: &dyn std::fmt::Display, code: &str) -> Box<dyn std::error::Error> {
+    let json_err = JsonError {
+        error: error.to_string(),
+        code: code.to_string(),
+    };
+    // Unwrap is safe: JsonError has only String fields, serialization cannot fail
+    println!("{}", serde_json::to_string_pretty(&json_err).unwrap());
+    error.to_string().into()
+}
+
 /// Branch name, agent name, and runtime mode for a successfully opened kild
 pub type OpenedKild = (String, String, Option<kild_core::RuntimeMode>);
 

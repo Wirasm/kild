@@ -776,6 +776,130 @@ fn test_fleet_summary_consistency_with_sessions() {
     );
 }
 
+// =============================================================================
+// JSON error output tests (issue #397)
+// =============================================================================
+
+/// Verify that 'kild status nonexistent --json' returns a JSON error object
+#[test]
+fn test_status_json_nonexistent_returns_json_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["status", "nonexistent-branch-xyz-12345", "--json"])
+        .output()
+        .expect("Failed to execute 'kild status --json'");
+
+    // Command should fail (non-zero exit code)
+    assert!(
+        !output.status.success(),
+        "kild status nonexistent --json should fail"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // stdout should contain valid JSON error object
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(
+        error_obj.is_object(),
+        "JSON error should be an object, got: {}",
+        stdout
+    );
+
+    // Must have "error" and "code" fields
+    assert!(
+        error_obj.get("error").and_then(|v| v.as_str()).is_some(),
+        "JSON error should have 'error' string field"
+    );
+    assert!(
+        error_obj.get("code").and_then(|v| v.as_str()).is_some(),
+        "JSON error should have 'code' string field"
+    );
+
+    // Error code should be SESSION_NOT_FOUND
+    assert_eq!(
+        error_obj.get("code").and_then(|v| v.as_str()),
+        Some("SESSION_NOT_FOUND"),
+        "Error code should be SESSION_NOT_FOUND"
+    );
+}
+
+/// Verify that 'kild pr nonexistent --json' returns a JSON error object
+#[test]
+fn test_pr_json_nonexistent_returns_json_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["pr", "nonexistent-branch-xyz-12345", "--json"])
+        .output()
+        .expect("Failed to execute 'kild pr --json'");
+
+    assert!(
+        !output.status.success(),
+        "kild pr nonexistent --json should fail"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(
+        error_obj.get("error").is_some(),
+        "Should have 'error' field"
+    );
+    assert!(error_obj.get("code").is_some(), "Should have 'code' field");
+}
+
+/// Verify that 'kild stats nonexistent --json' returns a JSON error object
+#[test]
+fn test_stats_json_nonexistent_returns_json_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["stats", "nonexistent-branch-xyz-12345", "--json"])
+        .output()
+        .expect("Failed to execute 'kild stats --json'");
+
+    assert!(
+        !output.status.success(),
+        "kild stats nonexistent --json should fail"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(
+        error_obj.get("error").is_some(),
+        "Should have 'error' field"
+    );
+    assert!(error_obj.get("code").is_some(), "Should have 'code' field");
+}
+
+/// Verify that non-JSON error mode still works (plain text to stderr)
+#[test]
+fn test_status_nonexistent_without_json_uses_stderr() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["status", "nonexistent-branch-xyz-12345"])
+        .output()
+        .expect("Failed to execute 'kild status'");
+
+    assert!(!output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // stdout should be empty (no JSON)
+    assert!(
+        stdout.trim().is_empty(),
+        "Without --json, stdout should be empty on error. Got: {}",
+        stdout
+    );
+
+    // stderr should contain the error message
+    assert!(
+        stderr.contains("Failed to get status"),
+        "Without --json, error should go to stderr. Got: {}",
+        stderr
+    );
+}
+
 /// Verify text output includes fleet summary line when sessions exist
 #[test]
 fn test_list_text_output_includes_fleet_summary() {

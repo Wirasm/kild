@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use clap::ArgMatches;
 use tracing::{error, info, warn};
 
+use kild_core::errors::KildError;
 use kild_core::events;
 use kild_core::session_ops;
 
@@ -154,6 +155,13 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
+            if json_output {
+                let boxed = super::helpers::print_json_error(&e, e.error_code());
+                error!(event = "cli.list_failed", error = %e);
+                events::log_app_error(&e);
+                return Err(boxed);
+            }
+
             eprintln!("❌ Failed to list kilds: {}", e);
 
             error!(

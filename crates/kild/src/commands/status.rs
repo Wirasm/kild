@@ -1,6 +1,7 @@
 use clap::ArgMatches;
 use tracing::{error, info, warn};
 
+use kild_core::errors::KildError;
 use kild_core::events;
 use kild_core::process;
 use kild_core::session_ops;
@@ -234,6 +235,13 @@ pub(crate) fn handle_status_command(
             Ok(())
         }
         Err(e) => {
+            if json_output {
+                let boxed = super::helpers::print_json_error(&e, e.error_code());
+                error!(event = "cli.status_failed", branch = branch, error = %e);
+                events::log_app_error(&e);
+                return Err(boxed);
+            }
+
             eprintln!("❌ Failed to get status for kild '{}': {}", branch, e);
 
             error!(

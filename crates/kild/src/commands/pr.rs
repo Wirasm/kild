@@ -1,6 +1,7 @@
 use clap::ArgMatches;
 use tracing::{error, info, warn};
 
+use kild_core::errors::KildError;
 use kild_core::events;
 use kild_core::session_ops;
 
@@ -14,6 +15,12 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     let refresh = matches.get_flag("refresh");
 
     if !is_valid_branch_name(branch) {
+        if json_output {
+            let err_msg = format!("Invalid branch name: {}", branch);
+            let boxed = super::helpers::print_json_error(&err_msg, "INVALID_BRANCH_NAME");
+            error!(event = "cli.pr_invalid_branch", branch = branch);
+            return Err(boxed);
+        }
         eprintln!("Invalid branch name: {}", branch);
         error!(event = "cli.pr_invalid_branch", branch = branch);
         return Err("Invalid branch name".into());
@@ -30,6 +37,12 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
+            if json_output {
+                let boxed = super::helpers::print_json_error(&e, e.error_code());
+                error!(event = "cli.pr_failed", branch = branch, error = %e);
+                events::log_app_error(&e);
+                return Err(boxed);
+            }
             eprintln!("❌ Failed to find kild '{}': {}", branch, e);
             error!(event = "cli.pr_failed", branch = branch, error = %e);
             events::log_app_error(&e);
