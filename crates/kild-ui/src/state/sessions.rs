@@ -1,3 +1,6 @@
+// Allow dead_code — session query methods are consumed as sidebar views are wired up.
+#![allow(dead_code)]
+
 use kild_core::{ProcessStatus, SessionInfo};
 
 /// Encapsulates session display data with refresh tracking.
@@ -120,19 +123,16 @@ impl SessionStore {
     }
 
     /// Get the load error from the last refresh attempt, if any.
-    #[allow(dead_code)]
     pub fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
     }
 
     /// Get the timestamp of the last successful refresh.
-    #[allow(dead_code)]
     pub fn last_refresh(&self) -> std::time::Instant {
         self.last_refresh
     }
 
     /// Count kilds with Stopped status.
-    #[allow(dead_code)]
     pub fn stopped_count(&self) -> usize {
         self.displays
             .iter()
@@ -141,7 +141,6 @@ impl SessionStore {
     }
 
     /// Count kilds with Running status.
-    #[allow(dead_code)]
     pub fn running_count(&self) -> usize {
         self.displays
             .iter()
@@ -158,13 +157,11 @@ impl SessionStore {
     }
 
     /// Count total kilds across all projects.
-    #[allow(dead_code)]
     pub fn total_count(&self) -> usize {
         self.displays.len()
     }
 
     /// Check if there are no displays.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.displays.is_empty()
     }

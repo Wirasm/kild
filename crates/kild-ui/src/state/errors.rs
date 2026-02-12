@@ -1,3 +1,6 @@
+// Allow dead_code — error types are consumed as operation flows are wired up.
+#![allow(dead_code)]
+
 /// Error from a kild operation, with the branch name for context.
 #[derive(Clone, Debug)]
 pub struct OperationError {
@@ -10,7 +13,7 @@ pub struct OperationError {
 /// Consolidates per-branch errors (open, stop, editor, focus) and bulk operation
 /// errors into a single struct with a consistent API.
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
+
 pub struct OperationErrors {
     /// Per-branch errors (keyed by branch name).
     by_branch: std::collections::HashMap<String, OperationError>,
@@ -18,7 +21,6 @@ pub struct OperationErrors {
     bulk: Vec<OperationError>,
 }
 
-#[allow(dead_code)]
 impl OperationErrors {
     /// Create a new empty error collection.
     pub fn new() -> Self {

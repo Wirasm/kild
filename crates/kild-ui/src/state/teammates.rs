@@ -1,21 +1,60 @@
+// Allow dead_code — teammate query methods are consumed as multi-pane views are wired up.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use serde::Deserialize;
 
 /// Per-pane teammate info discovered from the shim registry.
+///
+/// Leader status is derived from `pane_id == "%0"` and cannot be set independently.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 pub struct TeammatePane {
-    pub pane_id: String,
-    pub daemon_session_id: String,
-    pub title: String,
-    pub is_leader: bool,
+    pane_id: String,
+    daemon_session_id: String,
+    title: String,
+    is_leader: bool,
+}
+
+impl TeammatePane {
+    /// Create a new teammate pane. Leader status is derived from `pane_id == "%0"`.
+    pub fn new(pane_id: String, daemon_session_id: String, title: String) -> Self {
+        let is_leader = pane_id == "%0";
+        Self {
+            pane_id,
+            daemon_session_id,
+            title,
+            is_leader,
+        }
+    }
+
+    pub fn pane_id(&self) -> &str {
+        &self.pane_id
+    }
+
+    pub fn daemon_session_id(&self) -> &str {
+        &self.daemon_session_id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn is_leader(&self) -> bool {
+        self.is_leader
+    }
 }
 
 /// Manages teammate panes per kild session.
-#[allow(dead_code)]
 pub struct TeammateStore {
     teammates: HashMap<String, Vec<TeammatePane>>,
+}
+
+impl Default for TeammateStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Local deserialization types matching the shim pane registry format.
@@ -33,7 +72,6 @@ struct PaneEntry {
     title: String,
 }
 
-#[allow(dead_code)]
 impl TeammateStore {
     pub fn new() -> Self {
         Self {
@@ -57,22 +95,36 @@ impl TeammateStore {
 
         let contents = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(_) => return Vec::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.teammates.registry_read_failed",
+                    session_id = %kild_session_id,
+                    path = %path.display(),
+                    error = %e,
+                );
+                return Vec::new();
+            }
         };
 
         let registry: PaneRegistry = match serde_json::from_str(&contents) {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.teammates.registry_parse_failed",
+                    session_id = %kild_session_id,
+                    path = %path.display(),
+                    error = %e,
+                );
+                return Vec::new();
+            }
         };
 
         let mut panes: Vec<TeammatePane> = registry
             .panes
             .into_iter()
-            .map(|(pane_id, entry)| TeammatePane {
-                is_leader: pane_id == "%0",
-                pane_id,
-                daemon_session_id: entry.daemon_session_id,
-                title: entry.title,
+            .map(|(pane_id, entry)| {
+                TeammatePane::new(pane_id, entry.daemon_session_id, entry.title)
             })
             .collect();
 
@@ -131,12 +183,11 @@ mod tests {
         let mut store = TeammateStore::new();
         store.teammates.insert(
             "k1".to_string(),
-            vec![TeammatePane {
-                pane_id: "%0".to_string(),
-                daemon_session_id: "d-1".to_string(),
-                title: "leader".to_string(),
-                is_leader: true,
-            }],
+            vec![TeammatePane::new(
+                "%0".to_string(),
+                "d-1".to_string(),
+                "leader".to_string(),
+            )],
         );
         assert!(store.has_teammates("k1"));
     }
@@ -147,26 +198,16 @@ mod tests {
         store.teammates.insert(
             "k1".to_string(),
             vec![
-                TeammatePane {
-                    pane_id: "%0".to_string(),
-                    daemon_session_id: "d-1".to_string(),
-                    title: "".to_string(),
-                    is_leader: true,
-                },
-                TeammatePane {
-                    pane_id: "%1".to_string(),
-                    daemon_session_id: "d-2".to_string(),
-                    title: "worker".to_string(),
-                    is_leader: false,
-                },
+                TeammatePane::new("%0".to_string(), "d-1".to_string(), "".to_string()),
+                TeammatePane::new("%1".to_string(), "d-2".to_string(), "worker".to_string()),
             ],
         );
 
         let teammates = store.get_teammates("k1");
         assert_eq!(teammates.len(), 2);
-        assert!(teammates[0].is_leader);
-        assert!(!teammates[1].is_leader);
-        assert_eq!(teammates[1].title, "worker");
+        assert!(teammates[0].is_leader());
+        assert!(!teammates[1].is_leader());
+        assert_eq!(teammates[1].title(), "worker");
     }
 
     #[test]
@@ -183,12 +224,11 @@ mod tests {
         // Pre-populate with some data
         store.teammates.insert(
             "k1".to_string(),
-            vec![TeammatePane {
-                pane_id: "%0".to_string(),
-                daemon_session_id: "d-old".to_string(),
-                title: "old".to_string(),
-                is_leader: true,
-            }],
+            vec![TeammatePane::new(
+                "%0".to_string(),
+                "d-old".to_string(),
+                "old".to_string(),
+            )],
         );
 
         // Refresh with nonexistent session replaces with empty
@@ -228,19 +268,16 @@ mod tests {
         let mut panes: Vec<TeammatePane> = registry
             .panes
             .into_iter()
-            .map(|(pane_id, entry)| TeammatePane {
-                is_leader: pane_id == "%0",
-                pane_id,
-                daemon_session_id: entry.daemon_session_id,
-                title: entry.title,
+            .map(|(pane_id, entry)| {
+                TeammatePane::new(pane_id, entry.daemon_session_id, entry.title)
             })
             .collect();
         panes.sort_by(|a, b| a.pane_id.cmp(&b.pane_id));
 
         assert_eq!(panes.len(), 2);
-        assert!(panes[0].is_leader);
-        assert_eq!(panes[0].pane_id, "%0");
-        assert!(!panes[1].is_leader);
-        assert_eq!(panes[1].pane_id, "%1");
+        assert!(panes[0].is_leader());
+        assert_eq!(panes[0].pane_id(), "%0");
+        assert!(!panes[1].is_leader());
+        assert_eq!(panes[1].pane_id(), "%1");
     }
 }

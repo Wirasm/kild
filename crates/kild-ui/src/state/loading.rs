@@ -1,3 +1,6 @@
+// Allow dead_code — loading state is consumed as async operations are wired up.
+#![allow(dead_code)]
+
 /// Tracks in-progress async operations to prevent double-dispatch.
 ///
 /// Three independent dimensions:
@@ -5,14 +8,13 @@
 /// - Bulk: tracks whether a bulk operation (open-all/stop-all) is in flight
 /// - Dialog: tracks whether a dialog submit (create/destroy) is in flight
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
+
 pub struct LoadingState {
     loading_branches: std::collections::HashSet<String>,
     bulk: bool,
     dialog: bool,
 }
 
-#[allow(dead_code)]
 impl LoadingState {
     pub fn new() -> Self {
         Self::default()

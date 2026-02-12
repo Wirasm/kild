@@ -1,10 +1,13 @@
+// Allow dead_code — layout state is consumed as split-pane and sidebar modes are wired up.
+#![allow(dead_code)]
+
 use std::collections::HashSet;
 
 use crate::views::split_pane::SplitDirection;
 
 /// Sidebar display mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum SidebarMode {
     List,
     Detail { kild_id: String },
@@ -12,13 +15,40 @@ pub enum SidebarMode {
 
 /// Split pane configuration — stores IDs, not entities.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct SplitConfig {
-    pub direction: SplitDirection,
+    direction: SplitDirection,
     /// The terminal ID for the second pane (first pane is always the focused kild).
-    pub second_id: String,
-    /// Split ratio (0.0 to 1.0, default 0.5).
-    pub ratio: f32,
+    second_id: String,
+    /// Split ratio (0.1 to 0.9, default 0.5).
+    ratio: f32,
+}
+
+impl SplitConfig {
+    /// Create a new split config with ratio clamped to [0.1, 0.9].
+    pub fn new(direction: SplitDirection, second_id: String, ratio: f32) -> Self {
+        Self {
+            direction,
+            second_id,
+            ratio: ratio.clamp(0.1, 0.9),
+        }
+    }
+
+    pub fn direction(&self) -> SplitDirection {
+        self.direction
+    }
+
+    pub fn second_id(&self) -> &str {
+        &self.second_id
+    }
+
+    pub fn ratio(&self) -> f32 {
+        self.ratio
+    }
+
+    /// Update the ratio, clamping to [0.1, 0.9].
+    pub(crate) fn set_ratio(&mut self, ratio: f32) {
+        self.ratio = ratio.clamp(0.1, 0.9);
+    }
 }
 
 /// Layout state for the multiplexer view.
@@ -33,6 +63,12 @@ pub struct LayoutState {
     split: Option<SplitConfig>,
     /// Saved layout before maximize (for restore).
     saved_split: Option<SplitConfig>,
+}
+
+impl Default for LayoutState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LayoutState {
@@ -53,7 +89,6 @@ impl LayoutState {
     }
 
     /// Minimize a kild, clearing focus if it was the focused one.
-    #[allow(dead_code)]
     pub fn minimize_kild(&mut self, id: &str) {
         self.minimized.insert(id.to_string());
         if self.focused_kild.as_deref() == Some(id) {
@@ -62,7 +97,6 @@ impl LayoutState {
     }
 
     /// Toggle sidebar between List and Detail for the given kild.
-    #[allow(dead_code)]
     pub fn toggle_sidebar_detail(&mut self, kild_id: &str) {
         if self.sidebar_mode
             == (SidebarMode::Detail {
@@ -81,17 +115,14 @@ impl LayoutState {
         self.focused_kild.as_deref()
     }
 
-    #[allow(dead_code)]
     pub fn is_minimized(&self, kild_id: &str) -> bool {
         self.minimized.contains(kild_id)
     }
 
-    #[allow(dead_code)]
     pub fn minimized_ids(&self) -> &HashSet<String> {
         &self.minimized
     }
 
-    #[allow(dead_code)]
     pub fn sidebar_mode(&self) -> &SidebarMode {
         &self.sidebar_mode
     }
@@ -107,11 +138,7 @@ impl LayoutState {
 
     /// Split the main area with a second pane.
     pub fn split_with(&mut self, direction: SplitDirection, second_id: String) {
-        self.split = Some(SplitConfig {
-            direction,
-            second_id,
-            ratio: 0.5,
-        });
+        self.split = Some(SplitConfig::new(direction, second_id, 0.5));
     }
 
     /// Close the split, returning to single pane.
@@ -120,13 +147,11 @@ impl LayoutState {
     }
 
     /// Maximize the focused pane (save and clear split).
-    #[allow(dead_code)]
     pub fn maximize(&mut self) {
         self.saved_split = self.split.take();
     }
 
     /// Restore from maximized (bring back saved split).
-    #[allow(dead_code)]
     pub fn restore(&mut self) {
         if let Some(saved) = self.saved_split.take() {
             self.split = Some(saved);
@@ -139,10 +164,9 @@ impl LayoutState {
     }
 
     /// Update the split ratio (for resize handle drag).
-    #[allow(dead_code)]
     pub fn set_split_ratio(&mut self, ratio: f32) {
         if let Some(ref mut split) = self.split {
-            split.ratio = ratio.clamp(0.1, 0.9);
+            split.set_ratio(ratio);
         }
     }
 }
@@ -241,9 +265,9 @@ mod tests {
         state.split_with(SplitDirection::Vertical, "pane-2".to_string());
         assert!(state.is_split());
         let split = state.split().unwrap();
-        assert_eq!(split.direction, SplitDirection::Vertical);
-        assert_eq!(split.second_id, "pane-2");
-        assert!((split.ratio - 0.5).abs() < f32::EPSILON);
+        assert_eq!(split.direction(), SplitDirection::Vertical);
+        assert_eq!(split.second_id(), "pane-2");
+        assert!((split.ratio() - 0.5).abs() < f32::EPSILON);
 
         state.unsplit();
         assert!(!state.is_split());
@@ -259,7 +283,7 @@ mod tests {
 
         state.restore();
         assert!(state.is_split());
-        assert_eq!(state.split().unwrap().second_id, "pane-2");
+        assert_eq!(state.split().unwrap().second_id(), "pane-2");
     }
 
     #[test]
@@ -268,12 +292,12 @@ mod tests {
         state.split_with(SplitDirection::Vertical, "pane-2".to_string());
 
         state.set_split_ratio(0.0);
-        assert!((state.split().unwrap().ratio - 0.1).abs() < f32::EPSILON);
+        assert!((state.split().unwrap().ratio() - 0.1).abs() < f32::EPSILON);
 
         state.set_split_ratio(1.0);
-        assert!((state.split().unwrap().ratio - 0.9).abs() < f32::EPSILON);
+        assert!((state.split().unwrap().ratio() - 0.9).abs() < f32::EPSILON);
 
         state.set_split_ratio(0.3);
-        assert!((state.split().unwrap().ratio - 0.3).abs() < f32::EPSILON);
+        assert!((state.split().unwrap().ratio() - 0.3).abs() < f32::EPSILON);
     }
 }

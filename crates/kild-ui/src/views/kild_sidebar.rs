@@ -2,6 +2,7 @@
 //!
 //! 220px wide sidebar with status-grouped kild list.
 
+// Allow dead_code — scaffolding for the multiplexer sidebar, wired up in later tasks.
 #![allow(dead_code)]
 
 use gpui::{

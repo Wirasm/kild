@@ -3,6 +3,9 @@
 //! Shows the pane name and truncated path, with a visual focus indicator
 //! via border color.
 
+// Allow dead_code — pane header is rendered when split-pane views are wired up.
+#![allow(dead_code)]
+
 use gpui::{Context, IntoElement, div, prelude::*, px};
 
 use crate::theme;
@@ -23,7 +26,6 @@ fn truncate_path(path: &str) -> String {
 ///
 /// Displays the pane name (left) and a truncated path (right).
 /// The bottom border color indicates whether this pane is focused.
-#[allow(dead_code)]
 pub fn render_pane_header(
     name: &str,
     path: &str,

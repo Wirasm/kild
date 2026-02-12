@@ -4,6 +4,9 @@
 //! that shows session details when a kild is selected. Includes a
 //! "Back to list" button at the top for navigation.
 
+// Allow dead_code — detail view helpers are wired up when sidebar detail mode is connected.
+#![allow(dead_code)]
+
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use gpui_component::button::{Button, ButtonVariants};
@@ -19,7 +22,6 @@ use kild_core::state::types::RuntimeMode;
 /// session info, git stats, and worktree path with a "Back to list" button.
 ///
 /// Returns an empty element if no kild is selected.
-#[allow(dead_code)]
 pub fn render_detail_view(state: &AppState, cx: &mut Context<MainView>) -> AnyElement {
     let Some(kild) = state.selected_kild() else {
         return div().into_any_element();

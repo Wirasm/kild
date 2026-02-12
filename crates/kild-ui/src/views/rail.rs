@@ -2,6 +2,7 @@
 //!
 //! 48px wide vertical strip on the far left with project icons.
 
+// Allow dead_code — scaffolding for the project icon rail, wired up in later tasks.
 #![allow(dead_code)]
 
 use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};

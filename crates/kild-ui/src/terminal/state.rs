@@ -1,3 +1,6 @@
+// Allow dead_code — terminal state methods are consumed as PTY lifecycle is wired up.
+#![allow(dead_code)]
+
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -95,7 +98,6 @@ impl Write for DaemonPtyWriter {
 /// Encodes mode-specific resources as enum variants, making illegal states
 /// unrepresentable. A Local terminal cannot have a daemon writer task,
 /// and a Daemon terminal cannot have a child process.
-#[allow(dead_code)]
 enum TerminalMode {
     /// Local PTY with shell child process.
     Local {
@@ -145,7 +147,6 @@ impl Terminal {
     ///
     /// Spawns the user's default shell, starts a background reader task
     /// for PTY output, and sets up 4ms event batching.
-    #[allow(dead_code)]
     pub fn new(cx: &mut gpui::App) -> Result<Self, TerminalError> {
         let rows = DEFAULT_ROWS;
         let cols = DEFAULT_COLS;
@@ -661,7 +662,6 @@ impl Terminal {
     }
 
     /// Returns true if the shell has exited and the terminal is no longer active.
-    #[allow(dead_code)]
     pub fn has_exited(&self) -> bool {
         self.exited.load(Ordering::Acquire)
     }

@@ -8,6 +8,9 @@
 //! - `connect_for_attach()` — two-connection attach for streaming PTY output
 //! - `send_write_stdin()` / `send_resize()` / `send_detach()` — write operations
 
+// Allow dead_code — IPC operations are consumed as sidebar actions are wired up.
+#![allow(dead_code)]
+
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,14 +26,11 @@ use tracing::{debug, error, info, warn};
 /// Tracked per terminal connection to surface disconnection gracefully
 /// instead of panicking when the daemon stops.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum DaemonConnectionState {
     /// Connected and streaming PTY output.
     Connected,
     /// Connection lost — daemon may have stopped or socket closed.
     Disconnected { reason: String },
-    /// Connection attempt in progress.
-    Connecting,
 }
 
 /// Monotonic counter for generating unique request IDs within this process.
@@ -70,7 +70,6 @@ pub enum DaemonClientError {
     #[error("daemon error ({code}): {message}")]
     DaemonError { code: String, message: String },
 
-    #[allow(dead_code)]
     #[error("no running daemon session found")]
     SessionNotFound,
 
@@ -205,7 +204,6 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
 }
 
 /// List all daemon sessions.
-#[allow(dead_code)]
 pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError> {
     debug!(event = "ui.daemon.list_sessions_started");
 
@@ -239,7 +237,6 @@ pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError
 ///
 /// Temporary convenience for the Ctrl+D toggle flow. Phase 3 (layout shell)
 /// replaces this with explicit sidebar-driven session selection.
-#[allow(dead_code)]
 pub async fn find_first_running_session() -> Result<SessionInfo, DaemonClientError> {
     let sessions = list_sessions_async().await?;
     sessions
@@ -252,7 +249,6 @@ pub async fn find_first_running_session() -> Result<SessionInfo, DaemonClientErr
 ///
 /// Returns `Ok(Some(session))` if found, `Ok(None)` if the session doesn't
 /// exist in the daemon. Mirrors the sync client pattern from kild-core.
-#[allow(dead_code)]
 pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, DaemonClientError> {
     debug!(
         event = "ui.daemon.get_session_started",
@@ -301,7 +297,6 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
 ///
 /// Sends a stop command to the daemon, which kills the PTY process.
 /// Returns `Ok(())` on success, `Err` on failure.
-#[allow(dead_code)]
 pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientError> {
     debug!(
         event = "ui.daemon.stop_session_started",

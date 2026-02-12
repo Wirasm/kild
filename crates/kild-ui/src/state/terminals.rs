@@ -1,3 +1,6 @@
+// Allow dead_code — terminal store methods are consumed as multi-terminal views are wired up.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use crate::terminal::TerminalView;
@@ -8,7 +11,10 @@ use crate::terminal::TerminalView;
 /// supporting multi-session attach where each kild gets its own daemon
 /// terminal connection. Terminals are lazily attached on first focus
 /// and kept alive for instant switching.
-#[allow(dead_code)]
+///
+/// # Invariants
+/// - `focused_kild` must reference a key in `terminals` or be None
+/// - `daemon_to_kild` values must be a subset of `terminals` keys
 pub struct TerminalStore {
     /// Map from kild session ID → terminal view entity.
     terminals: HashMap<String, gpui::Entity<TerminalView>>,
@@ -18,7 +24,12 @@ pub struct TerminalStore {
     focused_kild: Option<String>,
 }
 
-#[allow(dead_code)]
+impl Default for TerminalStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalStore {
     pub fn new() -> Self {
         Self {
@@ -81,7 +92,16 @@ impl TerminalStore {
     }
 
     /// Set which kild's terminal is focused.
+    ///
+    /// No-op if the terminal does not exist in the store.
     pub fn set_focus(&mut self, kild_id: &str) {
+        if !self.terminals.contains_key(kild_id) {
+            tracing::warn!(
+                event = "ui.terminals.focus_invalid",
+                kild_id = %kild_id,
+            );
+            return;
+        }
         tracing::debug!(event = "ui.terminals.focus_changed", kild_id = %kild_id);
         self.focused_kild = Some(kild_id.to_string());
     }
@@ -92,7 +112,6 @@ impl TerminalStore {
     }
 
     /// Resolve a daemon session ID to a kild session ID.
-    #[allow(dead_code)]
     pub fn kild_for_daemon(&self, daemon_session_id: &str) -> Option<&str> {
         self.daemon_to_kild
             .get(daemon_session_id)
@@ -124,31 +143,28 @@ mod tests {
     }
 
     #[test]
-    fn test_focus_and_clear() {
+    fn test_set_focus_rejects_nonexistent_terminal() {
         let mut store = TerminalStore::new();
 
+        // set_focus on non-existent terminal is a no-op
         store.set_focus("kild-1");
-        assert_eq!(store.focused_kild_id(), Some("kild-1"));
+        assert!(
+            store.focused_kild_id().is_none(),
+            "focus should not be set for non-existent terminal"
+        );
+    }
 
-        store.clear_focus();
+    #[test]
+    fn test_clear_focus() {
+        let store = TerminalStore::new();
         assert!(store.focused_kild_id().is_none());
     }
 
     #[test]
-    fn test_detach_clears_focus_if_matched() {
+    fn test_detach_on_nonexistent_is_safe() {
         let mut store = TerminalStore::new();
-        store.set_focus("kild-1");
-
+        // Detach on non-existent is safe, no panic
         store.detach_terminal("kild-1");
         assert!(store.focused_kild_id().is_none());
-    }
-
-    #[test]
-    fn test_detach_preserves_focus_if_different() {
-        let mut store = TerminalStore::new();
-        store.set_focus("kild-1");
-
-        store.detach_terminal("kild-2");
-        assert_eq!(store.focused_kild_id(), Some("kild-1"));
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! Shows one tab per teammate (or a single agent-named tab if no teammates).
 //! Active tab has an ice-colored 2px bottom border.
-//! Tab click switches which daemon session's terminal is rendered.
+//! (TODO: Tab click will switch which daemon session's terminal is rendered)
 
 use gpui::{Context, IntoElement, div, prelude::*, px};
 
@@ -80,26 +80,25 @@ pub fn render_teammate_tabs(state: &AppState, cx: &mut Context<MainView>) -> imp
             vec![render_tab(agent_name, true, None, cx).into_any_element()]
         } else {
             // Multi-teammate — one tab per pane
-            let focused_terminal_dsid = state.focused_terminal().and({
-                // The focused terminal's daemon_session_id is the one we're currently viewing
-                // For now, the focused_kild_id implies the lead terminal
-                None::<String>
-            });
+            // TODO: Track which teammate's terminal is focused.
+            // For now, always mark the leader as active when teammates exist.
 
             teammates
                 .iter()
                 .map(|tm| {
-                    let name = if tm.title.is_empty() {
-                        if tm.is_leader { "lead" } else { &tm.pane_id }
+                    let name = if tm.title().is_empty() {
+                        if tm.is_leader() { "lead" } else { tm.pane_id() }
                     } else {
-                        &tm.title
+                        tm.title()
                     };
-                    let is_active = focused_terminal_dsid
-                        .as_deref()
-                        .map(|fid| fid == tm.daemon_session_id)
-                        .unwrap_or(tm.is_leader);
-                    render_tab(name, is_active, Some(tm.daemon_session_id.clone()), cx)
-                        .into_any_element()
+                    let is_active = tm.is_leader();
+                    render_tab(
+                        name,
+                        is_active,
+                        Some(tm.daemon_session_id().to_string()),
+                        cx,
+                    )
+                    .into_any_element()
                 })
                 .collect()
         }

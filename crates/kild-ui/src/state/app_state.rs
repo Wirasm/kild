@@ -1,3 +1,6 @@
+// Allow dead_code — AppState facade methods are consumed as views are wired up.
+#![allow(dead_code)]
+
 use kild_core::SessionInfo;
 use kild_core::projects::{Project, ProjectManager};
 
@@ -192,7 +195,6 @@ impl AppState {
     }
 
     /// Open the create dialog.
-    #[allow(dead_code)]
     pub fn open_create_dialog(&mut self) {
         self.dialog = DialogState::open_create();
     }
@@ -201,7 +203,6 @@ impl AppState {
     ///
     /// Fetches safety information (uncommitted changes, unpushed commits, etc.)
     /// to display warnings in the dialog.
-    #[allow(dead_code)]
     pub fn open_confirm_dialog(&mut self, branch: String) {
         // Fetch safety info (best-effort, don't block on failure)
         let safety_info = match kild_core::session_ops::get_destroy_safety_info(&branch) {
@@ -250,7 +251,6 @@ impl AppState {
     }
 
     /// Clear the error for a specific branch.
-    #[allow(dead_code)]
     pub fn clear_error(&mut self, branch: &str) {
         self.errors.clear(branch);
     }
@@ -278,13 +278,11 @@ impl AppState {
     }
 
     /// Count kilds with Stopped status.
-    #[allow(dead_code)]
     pub fn stopped_count(&self) -> usize {
         self.sessions.stopped_count()
     }
 
     /// Count kilds with Running status.
-    #[allow(dead_code)]
     pub fn running_count(&self) -> usize {
         self.sessions.running_count()
     }
@@ -296,7 +294,6 @@ impl AppState {
     }
 
     /// Count total kilds across all projects.
-    #[allow(dead_code)]
     pub fn total_kild_count(&self) -> usize {
         self.sessions.total_count()
     }
@@ -349,7 +346,6 @@ impl AppState {
     // =========================================================================
 
     /// Set an error for a specific branch.
-    #[allow(dead_code)]
     pub fn set_error(&mut self, branch: &str, error: OperationError) {
         self.errors.set(branch, error);
     }
@@ -361,7 +357,6 @@ impl AppState {
     }
 
     /// Set bulk errors (replaces existing).
-    #[allow(dead_code)]
     pub fn set_bulk_errors(&mut self, errors: Vec<OperationError>) {
         self.errors.set_bulk(errors);
     }
@@ -377,7 +372,6 @@ impl AppState {
     }
 
     /// Clone the operation errors (for capturing in closures).
-    #[allow(dead_code)]
     pub fn errors_clone(&self) -> OperationErrors {
         self.errors.clone()
     }
@@ -411,37 +405,31 @@ impl AppState {
     // =========================================================================
 
     /// Mark a branch as having an in-flight operation.
-    #[allow(dead_code)]
     pub fn set_loading(&mut self, branch: &str) {
         self.loading.set_branch(branch);
     }
 
     /// Clear the in-flight operation for a branch.
-    #[allow(dead_code)]
     pub fn clear_loading(&mut self, branch: &str) {
         self.loading.clear_branch(branch);
     }
 
     /// Check if a branch has an in-flight operation.
-    #[allow(dead_code)]
     pub fn is_loading(&self, branch: &str) -> bool {
         self.loading.is_branch_loading(branch)
     }
 
     /// Mark a bulk operation as in-flight.
-    #[allow(dead_code)]
     pub fn set_bulk_loading(&mut self) {
         self.loading.set_bulk();
     }
 
     /// Clear the bulk operation flag.
-    #[allow(dead_code)]
     pub fn clear_bulk_loading(&mut self) {
         self.loading.clear_bulk();
     }
 
     /// Check if a bulk operation is in-flight.
-    #[allow(dead_code)]
     pub fn is_bulk_loading(&self) -> bool {
         self.loading.is_bulk()
     }
@@ -476,7 +464,6 @@ impl AppState {
     }
 
     /// Check if a kild is selected.
-    #[allow(dead_code)]
     pub fn has_selection(&self) -> bool {
         self.selection.has_selection()
     }
@@ -498,7 +485,6 @@ impl AppState {
     }
 
     /// Get the active project, if any.
-    #[allow(dead_code)]
     pub fn active_project(&self) -> Option<&Project> {
         self.projects.active()
     }
@@ -514,7 +500,6 @@ impl AppState {
     }
 
     /// Check if the project list is empty.
-    #[allow(dead_code)]
     pub fn projects_is_empty(&self) -> bool {
         self.projects.is_empty()
     }
@@ -529,13 +514,11 @@ impl AppState {
     }
 
     /// Get the load error from the last refresh attempt, if any.
-    #[allow(dead_code)]
     pub fn load_error(&self) -> Option<&str> {
         self.sessions.load_error()
     }
 
     /// Check if there are no session displays.
-    #[allow(dead_code)]
     pub fn sessions_is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
@@ -556,7 +539,6 @@ impl AppState {
     }
 
     /// Remove and drop the terminal entity for a kild session.
-    #[allow(dead_code)]
     pub fn detach_terminal(&mut self, kild_id: &str) {
         self.terminals.detach_terminal(kild_id);
     }
@@ -582,7 +564,6 @@ impl AppState {
     }
 
     /// Get the terminal entity for a specific kild.
-    #[allow(dead_code)]
     pub fn get_terminal(
         &self,
         kild_id: &str,
@@ -595,37 +576,31 @@ impl AppState {
     // =========================================================================
 
     /// Set the focused kild in the multiplexer layout.
-    #[allow(dead_code)]
     pub fn layout_focus_kild(&mut self, id: &str) {
         self.layout.focus_kild(id);
     }
 
     /// Minimize a kild in the multiplexer layout.
-    #[allow(dead_code)]
     pub fn layout_minimize_kild(&mut self, id: &str) {
         self.layout.minimize_kild(id);
     }
 
     /// Toggle sidebar between list and detail for a kild.
-    #[allow(dead_code)]
     pub fn layout_toggle_sidebar_detail(&mut self, kild_id: &str) {
         self.layout.toggle_sidebar_detail(kild_id);
     }
 
     /// Get the focused kild ID in the layout.
-    #[allow(dead_code)]
     pub fn layout_focused_kild(&self) -> Option<&str> {
         self.layout.focused_kild()
     }
 
     /// Check if a kild is minimized.
-    #[allow(dead_code)]
     pub fn layout_is_minimized(&self, kild_id: &str) -> bool {
         self.layout.is_minimized(kild_id)
     }
 
     /// Get the current sidebar mode.
-    #[allow(dead_code)]
     pub fn layout_sidebar_mode(&self) -> &super::layout::SidebarMode {
         self.layout.sidebar_mode()
     }
@@ -669,7 +644,6 @@ impl AppState {
     }
 
     /// Check if a kild session has teammates.
-    #[allow(dead_code)]
     pub fn has_teammates(&self, kild_id: &str) -> bool {
         self.teammates.has_teammates(kild_id)
     }

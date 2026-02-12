@@ -3,6 +3,9 @@
 //! Root view that composes header, kild list, create dialog, and confirm dialog.
 //! Handles keyboard input and dialog state management.
 
+// Allow dead_code — view methods are wired up incrementally as UI features are connected.
+#![allow(dead_code)]
+
 use gpui::{
     Context, FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent, Render, Task, Window,
     div, prelude::*, px,
@@ -318,7 +321,6 @@ impl MainView {
     }
 
     /// Handle click on the Create button in header.
-    #[allow(dead_code)]
     fn on_create_button_click(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.create_dialog.opened");
         self.state.open_create_dialog();
@@ -451,14 +453,12 @@ impl MainView {
     }
 
     /// Handle click on the Refresh button in header.
-    #[allow(dead_code)]
     fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.refresh_clicked");
         self.mutate_state(cx, |s| s.refresh_sessions());
     }
 
     /// Handle click on the destroy button [×] in a kild row.
-    #[allow(dead_code)]
     pub fn on_destroy_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.destroy_dialog.opened", branch = branch);
         let branch = branch.to_string();
@@ -528,7 +528,6 @@ impl MainView {
     }
 
     /// Handle kild row click - select for detail panel.
-    #[allow(dead_code)]
     pub fn on_kild_select(&mut self, session_id: &str, cx: &mut Context<Self>) {
         tracing::debug!(event = "ui.kild.selected", session_id = session_id);
         let id = session_id.to_string();
@@ -544,7 +543,6 @@ impl MainView {
     /// Handle click on the Open button [▶] in a kild row.
     ///
     /// Spawns the blocking open_kild operation on the background executor.
-    #[allow(dead_code)]
     pub fn on_open_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         if self.state.is_loading(branch) {
             return;
@@ -593,7 +591,6 @@ impl MainView {
     /// Handle click on the Stop button [⏹] in a kild row.
     ///
     /// Spawns the blocking stop_kild operation on the background executor.
-    #[allow(dead_code)]
     pub fn on_stop_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         if self.state.is_loading(branch) {
             return;
@@ -643,7 +640,6 @@ impl MainView {
     ///
     /// Shared pattern for open-all and stop-all. Clears existing errors,
     /// runs the operation in the background, then updates state with results.
-    #[allow(dead_code)]
     fn execute_bulk_operation_async<F>(
         &mut self,
         cx: &mut Context<Self>,
@@ -694,7 +690,6 @@ impl MainView {
     }
 
     /// Handle click on the Open All button.
-    #[allow(dead_code)]
     fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.open_all_clicked");
         self.execute_bulk_operation_async(
@@ -705,7 +700,6 @@ impl MainView {
     }
 
     /// Handle click on the Stop All button.
-    #[allow(dead_code)]
     fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.stop_all_clicked");
         self.execute_bulk_operation_async(
@@ -718,7 +712,6 @@ impl MainView {
     /// Handle click on the Copy Path button in a kild row.
     ///
     /// Copies the worktree path to the system clipboard.
-    #[allow(dead_code)]
     pub fn on_copy_path_click(&mut self, worktree_path: &std::path::Path, cx: &mut Context<Self>) {
         tracing::info!(
             event = "ui.copy_path_clicked",
@@ -732,7 +725,6 @@ impl MainView {
     ///
     /// Opens the worktree in the user's preferred editor ($EDITOR or zed).
     /// Surfaces any errors inline in the kild row.
-    #[allow(dead_code)]
     pub fn on_open_editor_click(
         &mut self,
         worktree_path: &std::path::Path,
@@ -769,7 +761,6 @@ impl MainView {
     /// surfaces an error to the user explaining the limitation.
     ///
     /// Also surfaces any errors from the underlying `focus_terminal` operation.
-    #[allow(dead_code)]
     pub fn on_focus_terminal_click(
         &mut self,
         terminal_type: Option<&kild_core::terminal::types::TerminalType>,
@@ -804,7 +795,6 @@ impl MainView {
     }
 
     /// Record an operation error for a branch and notify the UI.
-    #[allow(dead_code)]
     fn record_error(&mut self, branch: &str, message: &str, cx: &mut Context<Self>) {
         tracing::warn!(
             event = "ui.operation.error_displayed",
@@ -938,7 +928,6 @@ impl MainView {
     }
 
     /// Handle "All Projects" selection from sidebar.
-    #[allow(dead_code)]
     pub fn on_project_select_all(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.project_selected_all");
 
@@ -954,7 +943,6 @@ impl MainView {
     }
 
     /// Handle remove project from list.
-    #[allow(dead_code)]
     pub fn on_remove_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         tracing::info!(
             event = "ui.remove_project.started",
@@ -1447,15 +1435,15 @@ impl MainView {
                 .unwrap_or(PaneContent::Empty);
             let second = self
                 .state
-                .get_terminal(&split_config.second_id)
+                .get_terminal(split_config.second_id())
                 .map(|e| PaneContent::Terminal(e.clone()))
                 .unwrap_or(PaneContent::Empty);
 
             let split = SplitPane {
-                direction: split_config.direction,
+                direction: split_config.direction(),
                 first,
                 second,
-                ratio: split_config.ratio,
+                ratio: split_config.ratio(),
             };
 
             div()

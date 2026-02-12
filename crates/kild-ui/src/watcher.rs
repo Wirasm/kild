@@ -209,7 +209,13 @@ impl ShimWatcher {
                         }
                     }
                 }
-                Ok(Err(_)) => continue,
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        event = "ui.shim_watcher.event_error",
+                        error = %e,
+                    );
+                    continue;
+                }
                 Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
             }
         }

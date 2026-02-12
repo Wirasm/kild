@@ -1,3 +1,6 @@
+// Allow dead_code — selection methods are consumed as sidebar interactions are wired up.
+#![allow(dead_code)]
+
 /// Encapsulates kild selection state.
 ///
 /// Provides a clean API for selecting/deselecting kilds and checking
@@ -25,7 +28,6 @@ impl SelectionState {
     }
 
     /// Check if a kild is selected.
-    #[allow(dead_code)]
     pub fn has_selection(&self) -> bool {
         self.selected_id.is_some()
     }

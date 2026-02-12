@@ -1,3 +1,6 @@
+// Allow dead_code — terminal view accessors are consumed as multi-terminal views are wired up.
+#![allow(dead_code)]
+
 use std::time::Duration;
 
 use gpui::{
@@ -94,7 +97,6 @@ impl TerminalView {
     }
 
     /// Access the underlying terminal state (e.g. to check `has_exited()`).
-    #[allow(dead_code)]
     pub fn terminal(&self) -> &Terminal {
         &self.terminal
     }

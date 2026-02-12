@@ -10,21 +10,18 @@ use crate::theme;
 use crate::views::main_view::MainView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SplitDirection {
     Horizontal,
     Vertical,
 }
 
 /// Content of a pane -- either a terminal or an empty placeholder.
-#[allow(dead_code)]
 pub enum PaneContent {
     Terminal(gpui::Entity<TerminalView>),
     Empty,
 }
 
 /// Split pane state for rendering.
-#[allow(dead_code)]
 pub struct SplitPane {
     pub direction: SplitDirection,
     pub first: PaneContent,
@@ -34,7 +31,6 @@ pub struct SplitPane {
 }
 
 /// Render the content of a single pane.
-#[allow(dead_code)]
 pub fn render_pane_content(content: &PaneContent, _cx: &mut Context<MainView>) -> impl IntoElement {
     match content {
         PaneContent::Terminal(entity) => div().size_full().child(entity.clone()),
@@ -53,7 +49,6 @@ pub fn render_pane_content(content: &PaneContent, _cx: &mut Context<MainView>) -
 }
 
 /// Render a split pane with two children and a resize handle between them.
-#[allow(dead_code)]
 pub fn render_split(split: &SplitPane, cx: &mut Context<MainView>) -> impl IntoElement {
     match split.direction {
         SplitDirection::Vertical => div()

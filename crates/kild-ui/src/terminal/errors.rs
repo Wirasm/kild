@@ -1,7 +1,10 @@
+// Allow dead_code — error variants are consumed as PTY error handling is wired up.
+#![allow(dead_code)]
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-#[allow(dead_code)]
+
 pub enum TerminalError {
     #[error("Failed to open PTY: {message}")]
     PtyOpen { message: String },
