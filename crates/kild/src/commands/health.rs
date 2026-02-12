@@ -1,26 +1,11 @@
 use clap::ArgMatches;
 use tracing::{error, info, warn};
-use unicode_width::UnicodeWidthStr;
 
 use kild_core::events;
 use kild_core::health;
 
 use super::helpers::{is_valid_branch_name, load_config_with_warning};
-
-/// Compute the terminal display width of a string.
-fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
-}
-
-/// Pad a string to a minimum display width without truncating.
-fn pad(s: &str, min_width: usize) -> String {
-    let width = display_width(s);
-    if width >= min_width {
-        s.to_string()
-    } else {
-        format!("{}{}", s, " ".repeat(min_width - width))
-    }
-}
+use crate::table::{display_width, pad};
 
 pub(crate) fn handle_health_command(
     matches: &ArgMatches,
@@ -145,7 +130,7 @@ fn print_health_table(output: &health::HealthOutput) {
     }
 
     // Minimum widths = header label lengths
-    let st_w = 2; // Status icons are ~2 display width
+    let mut st_w = "St".len();
     let mut branch_w = "Branch".len();
     let mut agent_w = "Agent".len();
     let mut activity_w = "Activity".len();
@@ -191,6 +176,7 @@ fn print_health_table(output: &health::HealthOutput) {
                 .unwrap_or("Never")
                 .to_string();
 
+            st_w = st_w.max(display_width(status_icon));
             branch_w = branch_w.max(display_width(&kild.branch));
             agent_w = agent_w.max(display_width(&kild.agent));
             activity_w = activity_w.max(display_width(&agent_activity));

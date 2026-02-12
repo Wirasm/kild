@@ -265,14 +265,14 @@ impl TableFormatter {
 /// Compute the terminal display width of a string.
 ///
 /// Wide characters (CJK, emoji) count as 2 columns.
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
 /// Pad a string to a minimum display width without truncating.
 ///
 /// Uses Unicode display width to handle wide characters (CJK, emoji).
-fn pad(s: &str, min_width: usize) -> String {
+pub(crate) fn pad(s: &str, min_width: usize) -> String {
     let width = display_width(s);
     if width >= min_width {
         s.to_string()
