@@ -155,21 +155,14 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
+            error!(event = "cli.list_failed", error = %e);
+            events::log_app_error(&e);
+
             if json_output {
-                let boxed = super::helpers::print_json_error(&e, e.error_code());
-                error!(event = "cli.list_failed", error = %e);
-                events::log_app_error(&e);
-                return Err(boxed);
+                return Err(super::helpers::print_json_error(&e, e.error_code()));
             }
 
             eprintln!("❌ Failed to list kilds: {}", e);
-
-            error!(
-                event = "cli.list_failed",
-                error = %e
-            );
-
-            events::log_app_error(&e);
             Err(e.into())
         }
     }

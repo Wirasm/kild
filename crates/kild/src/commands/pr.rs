@@ -37,15 +37,13 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            if json_output {
-                let boxed = super::helpers::print_json_error(&e, e.error_code());
-                error!(event = "cli.pr_failed", branch = branch, error = %e);
-                events::log_app_error(&e);
-                return Err(boxed);
-            }
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
             error!(event = "cli.pr_failed", branch = branch, error = %e);
             events::log_app_error(&e);
+
+            if json_output {
+                return Err(super::helpers::print_json_error(&e, e.error_code()));
+            }
+            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
             return Err(e.into());
         }
     };

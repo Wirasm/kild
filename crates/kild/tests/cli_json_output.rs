@@ -872,6 +872,30 @@ fn test_stats_json_nonexistent_returns_json_error() {
     assert!(error_obj.get("code").is_some(), "Should have 'code' field");
 }
 
+/// Verify that 'kild health nonexistent --json' returns a JSON error object
+#[test]
+fn test_health_json_nonexistent_returns_json_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["health", "nonexistent-branch-xyz-12345", "--json"])
+        .output()
+        .expect("Failed to execute 'kild health --json'");
+
+    assert!(
+        !output.status.success(),
+        "kild health nonexistent --json should fail"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(
+        error_obj.get("error").is_some(),
+        "Should have 'error' field"
+    );
+    assert!(error_obj.get("code").is_some(), "Should have 'code' field");
+}
+
 /// Verify that non-JSON error mode still works (plain text to stderr)
 #[test]
 fn test_status_nonexistent_without_json_uses_stderr() {

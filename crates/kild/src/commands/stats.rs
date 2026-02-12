@@ -69,15 +69,13 @@ fn handle_single_stats(
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            if json_output {
-                let boxed = super::helpers::print_json_error(&e, e.error_code());
-                error!(event = "cli.stats_failed", branch = branch, error = %e);
-                events::log_app_error(&e);
-                return Err(boxed);
-            }
-            eprintln!("Failed to find kild '{}': {}", branch, e);
             error!(event = "cli.stats_failed", branch = branch, error = %e);
             events::log_app_error(&e);
+
+            if json_output {
+                return Err(super::helpers::print_json_error(&e, e.error_code()));
+            }
+            eprintln!("Failed to find kild '{}': {}", branch, e);
             return Err(e.into());
         }
     };
@@ -114,22 +112,20 @@ fn handle_single_stats(
             Ok(())
         }
         Err(msg) => {
-            if json_output {
-                let err_msg = format!("Could not compute branch health for '{}': {}", branch, msg);
-                let boxed = super::helpers::print_json_error(&err_msg, "HEALTH_UNAVAILABLE");
-                error!(
-                    event = "cli.stats_failed",
-                    branch = branch,
-                    reason = "health_unavailable"
-                );
-                return Err(boxed);
-            }
-            eprintln!("Could not compute branch health for '{}': {}", branch, msg);
             error!(
                 event = "cli.stats_failed",
                 branch = branch,
                 reason = "health_unavailable"
             );
+
+            if json_output {
+                let err_msg = format!("Could not compute branch health for '{}': {}", branch, msg);
+                return Err(super::helpers::print_json_error(
+                    &err_msg,
+                    "HEALTH_UNAVAILABLE",
+                ));
+            }
+            eprintln!("Could not compute branch health for '{}': {}", branch, msg);
             Err(format!("Branch health unavailable for '{}'", branch).into())
         }
     }

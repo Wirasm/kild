@@ -107,15 +107,13 @@ fn run_health_once(
                 Ok(None) // Single branch doesn't return HealthOutput
             }
             Err(e) => {
-                if json_output {
-                    let boxed = super::helpers::print_json_error(&e, e.error_code());
-                    error!(event = "cli.health_failed", branch = branch_name, error = %e);
-                    events::log_app_error(&e);
-                    return Err(boxed);
-                }
-                eprintln!("❌ Failed to get health for kild '{}': {}", branch_name, e);
                 error!(event = "cli.health_failed", branch = branch_name, error = %e);
                 events::log_app_error(&e);
+
+                if json_output {
+                    return Err(super::helpers::print_json_error(&e, e.error_code()));
+                }
+                eprintln!("❌ Failed to get health for kild '{}': {}", branch_name, e);
                 Err(e.into())
             }
         }
@@ -137,15 +135,13 @@ fn run_health_once(
                 Ok(Some(health_output)) // Return for potential snapshot
             }
             Err(e) => {
-                if json_output {
-                    let boxed = super::helpers::print_json_error(&e, e.error_code());
-                    error!(event = "cli.health_failed", error = %e);
-                    events::log_app_error(&e);
-                    return Err(boxed);
-                }
-                eprintln!("❌ Failed to get health status: {}", e);
                 error!(event = "cli.health_failed", error = %e);
                 events::log_app_error(&e);
+
+                if json_output {
+                    return Err(super::helpers::print_json_error(&e, e.error_code()));
+                }
+                eprintln!("❌ Failed to get health status: {}", e);
                 Err(e.into())
             }
         }
