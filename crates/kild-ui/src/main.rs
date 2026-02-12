@@ -10,6 +10,7 @@ use gpui_component::Root;
 
 mod actions;
 mod components;
+mod daemon_client;
 mod refresh;
 mod state;
 mod terminal;

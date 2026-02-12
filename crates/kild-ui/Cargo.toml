@@ -28,6 +28,8 @@ portable-pty.workspace = true
 alacritty_terminal.workspace = true
 vte.workspace = true
 futures.workspace = true
+smol.workspace = true
+kild-protocol.workspace = true
 
 # core-text is macOS-only; pinned to fix gpui font-kit conflict
 [target.'cfg(target_os = "macos")'.dependencies]
