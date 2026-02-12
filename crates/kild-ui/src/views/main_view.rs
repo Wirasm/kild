@@ -252,19 +252,19 @@ impl MainView {
             match result {
                 Ok(true) => {
                     tracing::info!(
-                        event = "ui.spike1.success",
+                        event = "ui.daemon.spike_success",
                         "smol async IO works on GPUI executor"
                     );
                 }
                 Ok(false) => {
                     tracing::warn!(
-                        event = "ui.spike1.daemon_not_running",
+                        event = "ui.daemon.spike_daemon_not_running",
                         "Daemon not running - spike inconclusive. Start daemon and retry."
                     );
                 }
                 Err(e) => {
                     tracing::error!(
-                        event = "ui.spike1.failed",
+                        event = "ui.daemon.spike_failed",
                         error = %e,
                         "smol async IO FAILED on GPUI executor - need fallback to dedicated thread"
                     );

@@ -9,21 +9,49 @@ use std::os::unix::net::UnixStream;
 use kild_protocol::{ClientMessage, DaemonMessage};
 use smol::Async;
 use smol::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use thiserror::Error;
 use tracing::{debug, error, info, warn};
+
+#[derive(Debug, Error)]
+pub enum DaemonClientError {
+    #[error("failed to connect to daemon: {0}")]
+    Connect(std::io::Error),
+
+    #[error("failed to serialize request: {0}")]
+    Serialize(#[from] serde_json::Error),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("daemon closed connection (EOF)")]
+    ConnectionClosed,
+
+    #[error("daemon sent empty response")]
+    EmptyResponse,
+
+    #[error("invalid JSON from daemon: {source}: {json}")]
+    InvalidJson {
+        source: serde_json::Error,
+        json: String,
+    },
+
+    #[error("unexpected response from daemon: {0:?}")]
+    UnexpectedResponse(DaemonMessage),
+}
 
 /// Async ping to the kild daemon via smol.
 ///
 /// Returns `Ok(true)` if daemon responded with Ack, `Ok(false)` if daemon
 /// is not running (socket missing or connection refused), `Err` for
 /// unexpected failures.
-pub async fn ping_daemon_async() -> Result<bool, String> {
+pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
     let socket_path = kild_core::daemon::socket_path();
 
-    debug!(event = "ui.daemon.ping_async_started");
+    debug!(event = "ui.daemon.ping_started");
 
     if !socket_path.exists() {
         info!(
-            event = "ui.daemon.ping_async_completed",
+            event = "ui.daemon.ping_completed",
             result = "socket_missing"
         );
         return Ok(false);
@@ -34,16 +62,16 @@ pub async fn ping_daemon_async() -> Result<bool, String> {
         Err(e) => {
             if e.kind() == std::io::ErrorKind::ConnectionRefused {
                 info!(
-                    event = "ui.daemon.ping_async_completed",
+                    event = "ui.daemon.ping_completed",
                     result = "connection_refused"
                 );
                 return Ok(false);
             }
             error!(
-                event = "ui.daemon.ping_async_failed",
+                event = "ui.daemon.ping_failed",
                 error = %e,
             );
-            return Err(format!("connect failed: {}", e));
+            return Err(DaemonClientError::Connect(e));
         }
     };
 
@@ -52,49 +80,40 @@ pub async fn ping_daemon_async() -> Result<bool, String> {
     };
 
     // Write Ping as JSONL
-    let json = serde_json::to_string(&request).map_err(|e| format!("serialize failed: {}", e))?;
-    stream
-        .write_all(json.as_bytes())
-        .await
-        .map_err(|e| format!("write failed: {}", e))?;
-    stream
-        .write_all(b"\n")
-        .await
-        .map_err(|e| format!("write newline failed: {}", e))?;
-    stream
-        .flush()
-        .await
-        .map_err(|e| format!("flush failed: {}", e))?;
+    let json = serde_json::to_string(&request)?;
+    stream.write_all(json.as_bytes()).await?;
+    stream.write_all(b"\n").await?;
+    stream.flush().await?;
 
     // Read Ack response (hand ownership to BufReader — done writing)
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    let bytes_read = reader
-        .read_line(&mut line)
-        .await
-        .map_err(|e| format!("read failed: {}", e))?;
+    let bytes_read = reader.read_line(&mut line).await?;
     if bytes_read == 0 {
-        return Err("daemon closed connection (EOF)".to_string());
+        return Err(DaemonClientError::ConnectionClosed);
     }
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return Err("daemon sent empty line".to_string());
+        return Err(DaemonClientError::EmptyResponse);
     }
-    let response: DaemonMessage = serde_json::from_str(trimmed)
-        .map_err(|e| format!("invalid JSON from daemon: {}: {}", e, trimmed))?;
+    let response: DaemonMessage =
+        serde_json::from_str(trimmed).map_err(|e| DaemonClientError::InvalidJson {
+            source: e,
+            json: trimmed.to_string(),
+        })?;
 
     match response {
         DaemonMessage::Ack { .. } => {
-            info!(event = "ui.daemon.ping_async_completed", result = "ack");
+            info!(event = "ui.daemon.ping_completed", result = "ack");
             Ok(true)
         }
         other => {
             warn!(
-                event = "ui.daemon.ping_async_completed",
+                event = "ui.daemon.ping_completed",
                 result = "unexpected_response",
                 response = ?other,
             );
-            Err(format!("unexpected response: {:?}", other))
+            Err(DaemonClientError::UnexpectedResponse(other))
         }
     }
 }
