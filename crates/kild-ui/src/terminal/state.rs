@@ -78,6 +78,7 @@ impl EventListener for KildListener {
 }
 
 /// Commands sent from the sync DaemonPtyWriter to the async writer task.
+#[allow(dead_code)]
 pub(crate) enum DaemonWriteCommand {
     Stdin(Vec<u8>),
     Resize(u16, u16),
@@ -89,6 +90,7 @@ pub(crate) enum DaemonWriteCommand {
 /// Keyboard input and AlacEvent::PtyWrite both call write_to_pty(),
 /// which uses this writer. Bytes are buffered and sent as WriteStdin
 /// IPC messages by the background writer task.
+#[allow(dead_code)]
 struct DaemonPtyWriter {
     tx: futures::channel::mpsc::UnboundedSender<DaemonWriteCommand>,
 }
@@ -125,7 +127,8 @@ enum TerminalMode {
         child: Box<dyn Child + Send + Sync>,
         pty_master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     },
-    /// Daemon-backed PTY via IPC.
+    /// Daemon-backed PTY via IPC (Phase 4).
+    #[allow(dead_code)]
     Daemon {
         /// Stored to prevent cancellation (dropping the Task cancels it).
         _writer_task: Task<()>,
@@ -316,6 +319,7 @@ impl Terminal {
     /// Spawns IPC reader/writer tasks for streaming PTY output and sending
     /// keystrokes. The rendering pipeline (batch loop, alacritty_terminal,
     /// TerminalElement) is completely unchanged — only the byte source differs.
+    #[allow(dead_code)]
     pub fn from_daemon(
         session_id: String,
         conn: DaemonConnection,

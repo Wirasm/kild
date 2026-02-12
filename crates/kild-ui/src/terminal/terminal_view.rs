@@ -147,8 +147,9 @@ impl TerminalView {
     }
 
     fn set_error(&self, msg: String) {
-        if let Ok(mut err) = self.terminal.error_state().lock() {
-            *err = Some(msg);
+        match self.terminal.error_state().lock() {
+            Ok(mut err) => *err = Some(msg),
+            Err(e) => tracing::error!(event = "ui.terminal.set_error_lock_poisoned", error = %e),
         }
     }
 
@@ -276,7 +277,7 @@ impl Render for TerminalView {
                     .bg(theme::ember())
                     .text_color(theme::text_white())
                     .text_size(px(theme::TEXT_SM))
-                    .child(format!("Terminal error: {msg}. Press Ctrl+T to close.")),
+                    .child(format!("Terminal error: {msg}. Ctrl+Esc to return.")),
             );
         }
 

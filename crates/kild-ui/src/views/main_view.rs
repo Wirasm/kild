@@ -139,16 +139,10 @@ pub struct MainView {
     path_input: Option<gpui::Entity<InputState>>,
     /// Input state for add project dialog name field.
     name_input: Option<gpui::Entity<InputState>>,
-    /// Terminal view entity (lazily created on first Ctrl+T).
-    terminal_view: Option<gpui::Entity<crate::terminal::TerminalView>>,
-    /// Whether the terminal pane is currently shown (full-area, replacing 3-column layout).
-    show_terminal: bool,
-    /// Daemon terminal view entity (lazily created on first Ctrl+D).
-    daemon_terminal_view: Option<gpui::Entity<crate::terminal::TerminalView>>,
-    /// Whether the daemon terminal pane is currently shown.
-    show_daemon_terminal: bool,
-    /// Guard against concurrent daemon terminal creation from rapid Ctrl+D presses.
-    daemon_terminal_creating: bool,
+    /// Cached terminal views keyed by session ID. Terminals persist across kild switching.
+    terminal_views: std::collections::HashMap<String, gpui::Entity<crate::terminal::TerminalView>>,
+    /// Session ID of the currently visible terminal, or None for dashboard view.
+    active_terminal_id: Option<String>,
 }
 
 impl MainView {
@@ -193,6 +187,7 @@ impl MainView {
                 if let Err(e) = this.update(cx, |view, cx| {
                     tracing::debug!(event = "ui.auto_refresh.tick");
                     view.state.update_statuses_only();
+                    view.prune_terminal_cache();
                     cx.notify();
                 }) {
                     tracing::debug!(
@@ -233,7 +228,7 @@ impl MainView {
                     if pending_refresh && last_refresh.elapsed() > crate::refresh::DEBOUNCE_INTERVAL
                     {
                         tracing::info!(event = "ui.watcher.refresh_triggered");
-                        view.state.refresh_sessions();
+                        view.refresh_and_prune();
                         last_refresh = std::time::Instant::now();
                         pending_refresh = false;
                         cx.notify();
@@ -288,11 +283,8 @@ impl MainView {
             note_input: None,
             path_input: None,
             name_input: None,
-            terminal_view: None,
-            show_terminal: false,
-            daemon_terminal_view: None,
-            show_daemon_terminal: false,
-            daemon_terminal_creating: false,
+            terminal_views: std::collections::HashMap::new(),
+            active_terminal_id: None,
         }
     }
 
@@ -312,6 +304,37 @@ impl MainView {
         self.note_input = None;
         self.path_input = None;
         self.name_input = None;
+    }
+
+    fn active_terminal_view(&self) -> Option<&gpui::Entity<crate::terminal::TerminalView>> {
+        self.active_terminal_id
+            .as_ref()
+            .and_then(|id| self.terminal_views.get(id))
+    }
+
+    fn prune_terminal_cache(&mut self) {
+        let live_ids: std::collections::HashSet<&str> = self
+            .state
+            .displays()
+            .iter()
+            .map(|d| d.session.id.as_str())
+            .collect();
+
+        self.terminal_views
+            .retain(|id, _| live_ids.contains(id.as_str()));
+
+        if self
+            .active_terminal_id
+            .as_deref()
+            .is_some_and(|id| !live_ids.contains(id))
+        {
+            self.active_terminal_id = None;
+        }
+    }
+
+    fn refresh_and_prune(&mut self) {
+        self.state.refresh_sessions();
+        self.prune_terminal_cache();
     }
 
     /// Handle click on the Create button in header.
@@ -405,7 +428,10 @@ impl MainView {
             if let Err(e) = this.update(cx, |view, cx| {
                 view.state.clear_dialog_loading();
                 match result {
-                    Ok(events) => view.state.apply_events(&events),
+                    Ok(events) => {
+                        view.state.apply_events(&events);
+                        view.prune_terminal_cache();
+                    }
                     Err(e) => {
                         tracing::warn!(event = "ui.dialog_submit.error_displayed", error = %e);
                         view.state.set_dialog_error(e);
@@ -449,7 +475,8 @@ impl MainView {
     /// Handle click on the Refresh button in header.
     fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.refresh_clicked");
-        self.mutate_state(cx, |s| s.refresh_sessions());
+        self.refresh_and_prune();
+        cx.notify();
     }
 
     /// Handle click on the destroy button [×] in a kild row.
@@ -498,7 +525,10 @@ impl MainView {
             if let Err(e) = this.update(cx, |view, cx| {
                 view.state.clear_dialog_loading();
                 match result {
-                    Ok(events) => view.state.apply_events(&events),
+                    Ok(events) => {
+                        view.state.apply_events(&events);
+                        view.prune_terminal_cache();
+                    }
                     Err(e) => {
                         tracing::warn!(event = "ui.confirm_destroy.error_displayed", error = %e);
                         view.state.set_dialog_error(e);
@@ -521,7 +551,7 @@ impl MainView {
         self.mutate_state(cx, |s| s.close_dialog());
     }
 
-    /// Handle kild row click - select for detail panel.
+    /// Handle kild row click - select for detail panel and open its terminal.
     pub fn on_kild_select(
         &mut self,
         session_id: &str,
@@ -530,38 +560,51 @@ impl MainView {
     ) {
         tracing::debug!(event = "ui.kild.selected", session_id = session_id);
         let id = session_id.to_string();
-        self.state.select_kild(id);
+        self.state.select_kild(id.clone());
 
-        if let Some(display) = self.state.selected_kild() {
-            let worktree = display.session.worktree_path.clone();
+        let Some(display) = self.state.selected_kild() else {
+            cx.notify();
+            return;
+        };
+        let worktree = display.session.worktree_path.clone();
 
-            // Recycle exited terminal
-            if let Some(view) = &self.terminal_view
-                && view.read(cx).terminal().has_exited()
-            {
-                self.terminal_view = None;
-            }
+        // Recycle exited terminal
+        if self
+            .terminal_views
+            .get(&id)
+            .is_some_and(|v| v.read(cx).terminal().has_exited())
+        {
+            self.terminal_views.remove(&id);
+        }
 
+        // Create only if not cached
+        if !self.terminal_views.contains_key(&id) {
             match crate::terminal::state::Terminal::new(Some(worktree), cx) {
                 Ok(terminal) => {
                     let view = cx.new(|cx| {
                         crate::terminal::TerminalView::from_terminal(terminal, window, cx)
                     });
-                    self.terminal_view = Some(view);
-                    self.show_terminal = true;
-                    self.show_daemon_terminal = false;
-                    if let Some(v) = &self.terminal_view {
-                        let h = v.read(cx).focus_handle(cx).clone();
-                        window.focus(&h);
-                    }
+                    self.terminal_views.insert(id.clone(), view);
                 }
                 Err(e) => {
                     tracing::error!(event = "ui.terminal.create_failed", error = %e);
                     self.state
                         .push_error(format!("Terminal creation failed: {}", e));
+                    cx.notify();
+                    return;
                 }
             }
         }
+
+        // Show this terminal
+        self.active_terminal_id = Some(id.clone());
+
+        // Focus it
+        if let Some(v) = self.terminal_views.get(&id) {
+            let h = v.read(cx).focus_handle(cx).clone();
+            window.focus(&h);
+        }
+
         cx.notify();
     }
 
@@ -590,6 +633,7 @@ impl MainView {
                 match result {
                     Ok(events) => {
                         view.state.apply_events(&events);
+                        view.prune_terminal_cache();
                     }
                     Err(e) => {
                         tracing::warn!(event = "ui.open_click.error_displayed", branch = %branch, error = %e);
@@ -638,6 +682,7 @@ impl MainView {
                 match result {
                     Ok(events) => {
                         view.state.apply_events(&events);
+                        view.prune_terminal_cache();
                     }
                     Err(e) => {
                         tracing::warn!(event = "ui.stop_click.error_displayed", branch = %branch, error = %e);
@@ -701,7 +746,7 @@ impl MainView {
                 }
                 view.state.set_bulk_errors(errors);
                 if count > 0 || view.state.has_bulk_errors() {
-                    view.state.refresh_sessions();
+                    view.refresh_and_prune();
                 }
                 cx.notify();
             }) {
@@ -921,6 +966,7 @@ impl MainView {
         match actions::dispatch_add_project(path.clone(), name) {
             Ok(events) => {
                 self.state.apply_events(&events);
+                self.prune_terminal_cache();
             }
             Err(e) => {
                 tracing::warn!(
@@ -942,7 +988,10 @@ impl MainView {
         );
 
         match actions::dispatch_set_active_project(Some(path)) {
-            Ok(events) => self.state.apply_events(&events),
+            Ok(events) => {
+                self.state.apply_events(&events);
+                self.prune_terminal_cache();
+            }
             Err(e) => {
                 tracing::error!(event = "ui.project_select.failed", error = %e);
                 self.state
@@ -957,7 +1006,10 @@ impl MainView {
         tracing::info!(event = "ui.project_selected_all");
 
         match actions::dispatch_set_active_project(None) {
-            Ok(events) => self.state.apply_events(&events),
+            Ok(events) => {
+                self.state.apply_events(&events);
+                self.prune_terminal_cache();
+            }
             Err(e) => {
                 tracing::error!(event = "ui.project_select_all.failed", error = %e);
                 self.state
@@ -975,7 +1027,10 @@ impl MainView {
         );
 
         match actions::dispatch_remove_project(path) {
-            Ok(events) => self.state.apply_events(&events),
+            Ok(events) => {
+                self.state.apply_events(&events);
+                self.prune_terminal_cache();
+            }
             Err(e) => {
                 tracing::error!(event = "ui.remove_project.failed", error = %e);
                 self.state
@@ -998,211 +1053,34 @@ impl MainView {
 
         let key_str = event.keystroke.key.to_string();
 
-        // Ctrl+T: toggle terminal view
-        if key_str == "t" && event.keystroke.modifiers.control {
-            if self.show_terminal {
-                self.show_terminal = false;
-                tracing::info!(event = "ui.terminal.toggle_off");
-                // Return focus to main view
-                window.focus(&self.focus_handle);
-            } else {
-                // Drop dead terminal so a fresh one gets created
-                if let Some(view) = &self.terminal_view
-                    && view.read(cx).terminal().has_exited()
-                {
-                    tracing::info!(event = "ui.terminal.recycled");
-                    self.terminal_view = None;
-                }
-                // Lazy-create terminal on first toggle (or after shell exit)
-                if self.terminal_view.is_none() {
-                    tracing::info!(event = "ui.terminal.create_started");
-                    match crate::terminal::state::Terminal::new(None, cx) {
-                        Ok(terminal) => {
-                            let view = cx.new(|cx| {
-                                crate::terminal::TerminalView::from_terminal(terminal, window, cx)
-                            });
-                            self.terminal_view = Some(view);
-                        }
-                        Err(e) => {
-                            tracing::error!(event = "ui.terminal.create_failed", error = %e);
-                            self.show_terminal = false;
-                            self.state
-                                .push_error(format!("Terminal creation failed: {}", e));
-                            cx.notify();
-                            return;
-                        }
-                    }
-                }
-                self.show_terminal = true;
-                self.show_daemon_terminal = false;
-                tracing::info!(event = "ui.terminal.toggle_on");
-                // Focus the terminal view
-                if let Some(view) = &self.terminal_view {
-                    let handle = view.read(cx).focus_handle(cx).clone();
-                    window.focus(&handle);
-                }
-            }
-            cx.notify();
-            return;
-        }
-
-        // Ctrl+D: toggle daemon terminal view
-        if key_str == "d" && event.keystroke.modifiers.control {
-            if self.show_daemon_terminal {
-                self.show_daemon_terminal = false;
-                tracing::info!(event = "ui.terminal.daemon_toggle_off");
-                window.focus(&self.focus_handle);
-            } else {
-                // Drop dead daemon terminal so a fresh one gets created
-                if let Some(view) = &self.daemon_terminal_view
-                    && view.read(cx).terminal().has_exited()
-                {
-                    tracing::info!(event = "ui.terminal.daemon_recycled");
-                    self.daemon_terminal_view = None;
-                }
-                // Lazy-create daemon terminal on first toggle (or after session end)
-                if self.daemon_terminal_view.is_none() {
-                    // Guard against concurrent creation from rapid Ctrl+D presses
-                    if self.daemon_terminal_creating {
-                        cx.notify();
-                        return;
-                    }
-                    self.daemon_terminal_creating = true;
-                    tracing::info!(event = "ui.terminal.daemon_create_started");
-                    // spawn_in gives AsyncWindowContext (Window + App access)
-                    cx.spawn_in(
-                        window,
-                        async move |this, cx: &mut gpui::AsyncWindowContext| {
-                            // 1. Find first running daemon session
-                            let session = cx
-                                .background_executor()
-                                .spawn(async {
-                                    crate::daemon_client::find_first_running_session().await
-                                })
-                                .await;
-                            let session = match session {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    let Some(this) = this.upgrade() else { return };
-                                    if let Err(update_err) =
-                                        cx.update_entity(&this, |view: &mut MainView, cx| {
-                                            view.daemon_terminal_creating = false;
-                                            view.state
-                                                .push_error(format!("No daemon session: {e}"));
-                                            cx.notify();
-                                        })
-                                    {
-                                        tracing::error!(
-                                            event = "ui.terminal.error_display_failed",
-                                            error = %update_err,
-                                        );
-                                    }
-                                    return;
-                                }
-                            };
-                            // 2. Connect and attach
-                            let session_id = session.id.clone();
-                            let conn = cx
-                                .background_executor()
-                                .spawn(async move {
-                                    crate::daemon_client::connect_for_attach(&session_id, 24, 80)
-                                        .await
-                                })
-                                .await;
-                            let conn = match conn {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    let Some(this) = this.upgrade() else { return };
-                                    if let Err(update_err) =
-                                        cx.update_entity(&this, |view: &mut MainView, cx| {
-                                            view.daemon_terminal_creating = false;
-                                            view.state
-                                                .push_error(format!("Daemon attach failed: {e}"));
-                                            cx.notify();
-                                        })
-                                    {
-                                        tracing::error!(
-                                            event = "ui.terminal.error_display_failed",
-                                            error = %update_err,
-                                        );
-                                    }
-                                    return;
-                                }
-                            };
-                            // 3. Create terminal — update_window_entity gives
-                            //    (&mut MainView, &mut Window, &mut Context<MainView>)
-                            let Some(this) = this.upgrade() else { return };
-                            if let Err(update_err) =
-                                cx.update_window_entity(&this, |view: &mut MainView, window, cx| {
-                                    view.daemon_terminal_creating = false;
-                                    let sid = conn.session_id().to_string();
-                                    match crate::terminal::state::Terminal::from_daemon(
-                                        sid, conn, cx,
-                                    ) {
-                                        Ok(terminal) => {
-                                            let term_view = cx.new(|cx| {
-                                                crate::terminal::TerminalView::from_terminal(
-                                                    terminal, window, cx,
-                                                )
-                                            });
-                                            view.daemon_terminal_view = Some(term_view);
-                                            view.show_daemon_terminal = true;
-                                            view.show_terminal = false;
-                                            // Focus the daemon terminal
-                                            if let Some(v) = &view.daemon_terminal_view {
-                                                let h = v.read(cx).focus_handle(cx).clone();
-                                                window.focus(&h);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            view.state
-                                                .push_error(format!("Daemon terminal failed: {e}"));
-                                        }
-                                    }
-                                    cx.notify();
-                                })
-                            {
-                                tracing::error!(
-                                    event = "ui.terminal.error_display_failed",
-                                    error = %update_err,
-                                );
-                            }
-                        },
-                    )
-                    .detach();
-                    cx.notify();
-                    return;
-                }
-                // Already created, just show
-                self.show_daemon_terminal = true;
-                self.show_terminal = false;
-                tracing::info!(event = "ui.terminal.daemon_toggle_on");
-                if let Some(view) = &self.daemon_terminal_view {
-                    let handle = view.read(cx).focus_handle(cx).clone();
-                    window.focus(&handle);
-                }
-            }
-            cx.notify();
-            return;
-        }
-
         // Ctrl+Escape from terminal → back to dashboard
-        // Plain Escape is not used because it breaks vim, less, fzf, etc.
         if key_str == "escape"
             && event.keystroke.modifiers.control
-            && (self.show_terminal || self.show_daemon_terminal)
+            && self.active_terminal_view().is_some()
         {
-            self.show_terminal = false;
-            self.show_daemon_terminal = false;
+            self.active_terminal_id = None;
             window.focus(&self.focus_handle);
             cx.notify();
             return;
         }
 
-        // When a terminal pane is visible, propagate all non-reserved keys to the
-        // child TerminalView so it can send them to the PTY. Without this, keys
-        // would be silently consumed by the DialogState::None branch below.
-        if self.show_terminal || self.show_daemon_terminal {
+        // Ctrl+T: toggle between dashboard and selected kild's terminal
+        if key_str == "t" && event.keystroke.modifiers.control {
+            if self.active_terminal_view().is_some() {
+                self.active_terminal_id = None;
+                window.focus(&self.focus_handle);
+            } else if let Some(id) = self.state.selected_id().map(|s| s.to_string()) {
+                self.on_kild_select(&id, window, cx);
+                return;
+            }
+            cx.notify();
+            return;
+        }
+
+        // When a terminal pane is actually visible, propagate all non-reserved keys
+        // to the child TerminalView. Use active_terminal_view() to guard against
+        // stale active_terminal_id pointing to a pruned cache entry.
+        if self.active_terminal_view().is_some() {
             cx.propagate();
             return;
         }
@@ -1401,42 +1279,25 @@ impl Render for MainView {
                         })),
                 )
             })
-            // Main content: terminal (full-area) or daemon terminal or 3-column layout
-            .when(self.show_terminal, |this| {
-                if let Some(terminal_view) = &self.terminal_view {
-                    this.child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(terminal_view.clone()),
-                    )
-                } else {
-                    this
+            // Main content: terminal (full-area) or 3-column dashboard
+            .map(|this| {
+                if let Some(id) = &self.active_terminal_id
+                    && let Some(term_view) = self.terminal_views.get(id)
+                {
+                    return this.child(div().flex_1().overflow_hidden().child(term_view.clone()));
                 }
-            })
-            .when(self.show_daemon_terminal && !self.show_terminal, |this| {
-                if let Some(daemon_view) = &self.daemon_terminal_view {
-                    this.child(div().flex_1().overflow_hidden().child(daemon_view.clone()))
-                } else {
-                    this
-                }
-            })
-            .when(!self.show_terminal && !self.show_daemon_terminal, |this| {
                 this.child(
                     div()
                         .flex_1()
                         .flex()
                         .overflow_hidden()
-                        // Sidebar (200px fixed)
                         .child(sidebar::render_sidebar(&self.state, cx))
-                        // Kild list (flex:1)
                         .child(
                             div()
                                 .flex_1()
                                 .overflow_hidden()
                                 .child(kild_list::render_kild_list(&self.state, cx)),
                         )
-                        // Detail panel (320px, conditional)
                         .when(self.state.has_selection(), |this| {
                             this.child(detail_panel::render_detail_panel(&self.state, cx))
                         }),

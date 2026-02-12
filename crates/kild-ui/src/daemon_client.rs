@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Async daemon client using smol on GPUI's BackgroundExecutor.
 //!
 //! Provides IPC operations for communicating with the kild daemon:
