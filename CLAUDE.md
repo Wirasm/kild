@@ -364,6 +364,13 @@ warn!(event = "core.daemon.ping_check_failed", error = %e);
 info!(event = "cli.daemon.start_started", foreground = foreground);
 info!(event = "cli.attach_started", branch = branch);
 
+// Codex notify hook integration
+info!(event = "core.session.codex_notify_hook_installed", path = %hook_path.display());
+warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
+info!(event = "core.session.codex_config_patched", path = %config_path.display());
+info!(event = "core.session.codex_config_already_configured");
+warn!(event = "core.session.codex_config_patch_failed", error = %msg);
+
 // Structured fields - use Display (%e) for errors, Debug (?val) for complex types
 error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
 warn!(event = "core.files.walk.error", error = %e, path = %path.display());
@@ -478,12 +485,41 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `$TMUX_PANE` - Current pane ID (e.g., `%0` for leader, `%1`, `%2` for teammates)
 - `$KILD_SHIM_SESSION` - Session ID for shim state lookup
 - `$KILD_SHIM_LOG` - Enable shim logging (file path or `1` for `~/.kild/shim/<session>/shim.log`)
+- `$KILD_SESSION_BRANCH` - Branch name for Codex notify hook status reporting (fallback when `--self` PWD detection unavailable)
 
 **Integration points in kild-core:**
 - `daemon_helpers.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
-- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim env vars into daemon PTY requests
-- `create.rs:create_session()` - Initializes shim state directory and `panes.json` after daemon session creation
+- `daemon_helpers.rs:ensure_codex_notify_hook()` - Installs `~/.kild/hooks/codex-notify` for Codex CLI integration (idempotent, best-effort)
+- `daemon_helpers.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
+- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim and Codex env vars into daemon PTY requests
+- `create.rs:create_session()` - Initializes shim state directory, `panes.json`, and Codex notify hook for daemon sessions
+- `open.rs:open_session()` - Ensures Codex notify hook when opening Codex sessions
 - `destroy.rs:destroy_session()` - Destroys child shim PTYs via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
+
+## Codex Notify Hook Integration
+
+**Purpose:** Auto-configures Codex CLI to report agent activity states (idle/waiting) back to KILD via `agent-status` command.
+
+**How it works:**
+
+1. `kild create/open --agent codex` installs `~/.kild/hooks/codex-notify` shell script
+2. Script is patched into `~/.codex/config.toml` as `notify = ["<path>"]`
+3. Codex CLI calls the hook with JSON events on stdin (`agent-turn-complete`, `approval-requested`)
+4. Hook maps events to KILD statuses: `agent-turn-complete` → idle, `approval-requested` → waiting
+5. Hook calls `kild agent-status --self <status> --notify` to update session state and send desktop notifications
+
+**Hook script:** `~/.kild/hooks/codex-notify` (shell script, auto-generated, do not edit)
+
+**Config patching behavior:**
+- Idempotent: runs on every `create/open --agent codex` but only patches if needed
+- Respects existing user config: if `notify = [...]` is already set with a non-empty array, no changes are made
+- Creates `~/.codex/config.toml` if missing
+- Appends notify line if config exists but has missing or empty notify field
+
+**Environment variables:**
+- `$KILD_SESSION_BRANCH` - Injected into Codex sessions as fallback for `--self` PWD-based detection
+
+**Best-effort pattern:** All operations warn on failure but never block session creation. If hook install or config patch fails, user sees warnings with manual remediation steps.
 
 ## Forge Backend Pattern
 
