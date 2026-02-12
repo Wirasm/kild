@@ -237,15 +237,31 @@ Completely removes a kild - closes terminal, kills process, removes worktree and
 **Flags**
 - `--force` / `-f` - Bypass all git safety checks
 
+**CRITICAL: Never force-destroy without inspecting first.**
+When `kild destroy` or `kild complete` blocks on uncommitted changes, the warning exists for a reason — there is work in that worktree that was NOT part of any PR. Before using `--force`:
+
+1. **Check what's there**: Run `git -C $(kild cd <branch>) status` and `git -C $(kild cd <branch>) diff` to see what the uncommitted changes are.
+2. **Ask the user** whether those changes should be committed, stashed, or discarded.
+3. **Only then** use `--force` if the user confirms the changes can be lost.
+
+Never silently bypass the safety check. Uncommitted changes may be in-progress work, follow-up fixes, or investigation artifacts that the user wants to keep.
+
 **Examples**
 ```bash
 # Normal destroy (shows warnings, blocks on uncommitted changes)
 kild destroy feature-auth
 # Result: Blocks if uncommitted changes exist, warns about unpushed commits
 
-# Force destroy (bypasses all git safety checks)
+# WRONG - never do this without checking first
 kild destroy feature-auth --force
-# Result: Removes kild immediately, no safety checks
+# Result: Removes kild immediately, UNCOMMITTED WORK IS LOST
+
+# CORRECT flow when blocked on uncommitted changes
+git -C $(kild cd feature-auth) status   # See what's uncommitted
+git -C $(kild cd feature-auth) diff     # Inspect the actual changes
+# Ask user: "There are uncommitted changes in feature-auth: [summary]. Discard them?"
+# Only after user confirms:
+kild destroy feature-auth --force
 ```
 
 ### Complete a Kild (PR Cleanup)

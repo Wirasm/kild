@@ -68,7 +68,7 @@ pub enum SessionError {
     ConfigError { message: String },
 
     #[error(
-        "Cannot complete '{name}' with uncommitted changes. Use 'kild destroy --force' to remove."
+        "Cannot complete '{name}' with uncommitted changes.\n   Inspect first: git -C $(kild cd {name}) diff\n   If you are an agent, do NOT force-destroy without checking the kild first.\n   Use 'kild destroy --force {name}' to remove anyway (changes will be lost)."
     )]
     UncommittedChanges { name: String },
 
@@ -202,9 +202,15 @@ mod tests {
         let error = SessionError::UncommittedChanges {
             name: "my-branch".to_string(),
         };
-        assert_eq!(
-            error.to_string(),
-            "Cannot complete 'my-branch' with uncommitted changes. Use 'kild destroy --force' to remove."
+        assert!(
+            error
+                .to_string()
+                .contains("Cannot complete 'my-branch' with uncommitted changes")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("do NOT force-destroy without checking")
         );
         assert_eq!(error.error_code(), "SESSION_UNCOMMITTED_CHANGES");
         assert!(error.is_user_error());

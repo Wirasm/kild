@@ -44,6 +44,10 @@ pub(crate) fn handle_destroy_command(
         if safety_info.should_block() {
             eprintln!();
             eprintln!("❌ Cannot destroy '{}' with uncommitted changes.", branch);
+            eprintln!("   Inspect first: git -C $(kild cd {}) diff", branch);
+            eprintln!(
+                "   If you are an agent, do NOT force-destroy without checking the kild first."
+            );
             eprintln!("   Use --force to destroy anyway (changes will be lost).");
 
             error!(
