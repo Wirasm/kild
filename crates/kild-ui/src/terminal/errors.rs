@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum TerminalError {
     #[error("Failed to open PTY: {message}")]
     PtyOpen { message: String },
@@ -22,4 +23,16 @@ pub enum TerminalError {
 
     #[error("PTY resize failed: {message}")]
     PtyResize { message: String },
+
+    #[error("Daemon connection failed: {message}")]
+    DaemonConnect { message: String },
+
+    #[error("Daemon attach failed: {message}")]
+    DaemonAttach { message: String },
+
+    #[error("Daemon protocol error: {message}")]
+    DaemonProtocol { message: String },
+
+    #[error("Base64 decode failed")]
+    Base64Decode(#[from] base64::DecodeError),
 }

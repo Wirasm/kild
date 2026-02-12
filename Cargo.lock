@@ -3494,6 +3494,7 @@ name = "kild-ui"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64",
  "chrono",
  "core-text",
  "dirs 5.0.1",

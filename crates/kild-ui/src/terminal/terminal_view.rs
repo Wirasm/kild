@@ -186,6 +186,14 @@ impl TerminalView {
         let key = event.keystroke.key.as_str();
         let cmd = event.keystroke.modifiers.platform;
 
+        tracing::debug!(
+            event = "ui.terminal.key_down_started",
+            key = key,
+            ctrl = event.keystroke.modifiers.control,
+            alt = event.keystroke.modifiers.alt,
+            cmd = cmd,
+        );
+
         // Cmd+C: copy selection to clipboard and clear it, or send Ctrl+C (SIGINT) if no selection
         if cmd && key == "c" {
             let text = self.terminal.term().lock().selection_to_string();

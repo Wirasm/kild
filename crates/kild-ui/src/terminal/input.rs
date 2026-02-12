@@ -13,8 +13,8 @@ pub fn keystroke_to_escape(keystroke: &Keystroke, app_cursor_mode: bool) -> Opti
     let ctrl = keystroke.modifiers.control;
     let alt = keystroke.modifiers.alt;
 
-    // Ctrl+T is reserved for terminal toggle — propagate to parent
-    if ctrl && key == "t" {
+    // Ctrl+T / Ctrl+D are reserved for terminal toggle — propagate to parent
+    if ctrl && (key == "t" || key == "d") {
         return None;
     }
 
@@ -224,8 +224,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ctrl_d() {
-        assert_eq!(keystroke_to_escape(&ctrl_key("d"), false), Some(vec![0x04]));
+    fn test_ctrl_d_returns_none() {
+        // Ctrl+D is reserved for daemon terminal toggle
+        assert_eq!(keystroke_to_escape(&ctrl_key("d"), false), None);
     }
 
     #[test]
