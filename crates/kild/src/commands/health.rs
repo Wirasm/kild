@@ -1,19 +1,24 @@
 use clap::ArgMatches;
 use tracing::{error, info, warn};
+use unicode_width::UnicodeWidthStr;
 
 use kild_core::events;
 use kild_core::health;
 
 use super::helpers::{is_valid_branch_name, load_config_with_warning};
 
-/// Truncate a string to a maximum display width, adding "..." if truncated.
-fn truncate(s: &str, max_len: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_len {
-        format!("{:<width$}", s, width = max_len)
+/// Compute the terminal display width of a string.
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Pad a string to a minimum display width without truncating.
+fn pad(s: &str, min_width: usize) -> String {
+    let width = display_width(s);
+    if width >= min_width {
+        s.to_string()
     } else {
-        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{:<width$}", format!("{}...", truncated), width = max_len)
+        format!("{}{}", s, " ".repeat(min_width - width))
     }
 }
 
@@ -139,61 +144,133 @@ fn print_health_table(output: &health::HealthOutput) {
         return;
     }
 
+    // Minimum widths = header label lengths
+    let st_w = 2; // Status icons are ~2 display width
+    let mut branch_w = "Branch".len();
+    let mut agent_w = "Agent".len();
+    let mut activity_w = "Activity".len();
+    let mut cpu_w = "CPU %".len();
+    let mut mem_w = "Memory".len();
+    let mut status_w = "Status".len();
+    let mut last_activity_w = "Last Activity".len();
+
+    // Pre-compute row data and dynamic widths in one pass
+    let rows: Vec<_> = output
+        .kilds
+        .iter()
+        .map(|kild| {
+            let status_icon = match kild.metrics.status {
+                health::HealthStatus::Working => "✅",
+                health::HealthStatus::Idle => "⏸️ ",
+                health::HealthStatus::Stuck => "⚠️ ",
+                health::HealthStatus::Crashed => "❌",
+                health::HealthStatus::Unknown => "❓",
+            };
+
+            let cpu_str = match kild.metrics.cpu_usage_percent {
+                Some(c) => format!("{:.1}%", c),
+                None => "N/A".to_string(),
+            };
+
+            let mem_str = match kild.metrics.memory_usage_mb {
+                Some(m) => format!("{}MB", m),
+                None => "N/A".to_string(),
+            };
+
+            let agent_activity = kild
+                .agent_status
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_string());
+
+            let status_str = format!("{:?}", kild.metrics.status);
+
+            let last_activity_str = kild
+                .metrics
+                .last_activity
+                .as_deref()
+                .unwrap_or("Never")
+                .to_string();
+
+            branch_w = branch_w.max(display_width(&kild.branch));
+            agent_w = agent_w.max(display_width(&kild.agent));
+            activity_w = activity_w.max(display_width(&agent_activity));
+            cpu_w = cpu_w.max(display_width(&cpu_str));
+            mem_w = mem_w.max(display_width(&mem_str));
+            status_w = status_w.max(display_width(&status_str));
+            last_activity_w = last_activity_w.max(display_width(&last_activity_str));
+
+            (
+                status_icon,
+                kild.branch.clone(),
+                kild.agent.clone(),
+                agent_activity,
+                cpu_str,
+                mem_str,
+                status_str,
+                last_activity_str,
+            )
+        })
+        .collect();
+
     println!("🏥 KILD Health Dashboard");
     println!(
-        "┌────┬──────────────────┬─────────┬──────────┬──────────┬──────────┬──────────┬─────────────────────┐"
+        "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
+        "─".repeat(st_w + 2),
+        "─".repeat(branch_w + 2),
+        "─".repeat(agent_w + 2),
+        "─".repeat(activity_w + 2),
+        "─".repeat(cpu_w + 2),
+        "─".repeat(mem_w + 2),
+        "─".repeat(status_w + 2),
+        "─".repeat(last_activity_w + 2),
     );
     println!(
-        "│ St │ Branch           │ Agent   │ Activity │ CPU %    │ Memory   │ Status   │ Last Activity       │"
+        "│ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │",
+        pad("St", st_w),
+        pad("Branch", branch_w),
+        pad("Agent", agent_w),
+        pad("Activity", activity_w),
+        pad("CPU %", cpu_w),
+        pad("Memory", mem_w),
+        pad("Status", status_w),
+        pad("Last Activity", last_activity_w),
     );
     println!(
-        "├────┼──────────────────┼─────────┼──────────┼──────────┼──────────┼──────────┼─────────────────────┤"
+        "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
+        "─".repeat(st_w + 2),
+        "─".repeat(branch_w + 2),
+        "─".repeat(agent_w + 2),
+        "─".repeat(activity_w + 2),
+        "─".repeat(cpu_w + 2),
+        "─".repeat(mem_w + 2),
+        "─".repeat(status_w + 2),
+        "─".repeat(last_activity_w + 2),
     );
 
-    for kild in &output.kilds {
-        let status_icon = match kild.metrics.status {
-            health::HealthStatus::Working => "✅",
-            health::HealthStatus::Idle => "⏸️ ",
-            health::HealthStatus::Stuck => "⚠️ ",
-            health::HealthStatus::Crashed => "❌",
-            health::HealthStatus::Unknown => "❓",
-        };
-
-        let cpu_str = match kild.metrics.cpu_usage_percent {
-            Some(c) => format!("{:.1}%", c),
-            None => "N/A".to_string(),
-        };
-
-        let mem_str = match kild.metrics.memory_usage_mb {
-            Some(m) => format!("{}MB", m),
-            None => "N/A".to_string(),
-        };
-
-        let agent_activity = kild
-            .agent_status
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "-".to_string());
-
-        let activity_str = match &kild.metrics.last_activity {
-            Some(a) => truncate(a, 19),
-            None => "Never".to_string(),
-        };
-
+    for (icon, branch, agent, activity, cpu, mem, status, last_activity) in &rows {
         println!(
-            "│ {} │ {:<16} │ {:<7} │ {:<8} │ {:<8} │ {:<8} │ {:<8} │ {:<19} │",
-            status_icon,
-            truncate(&kild.branch, 16),
-            truncate(&kild.agent, 7),
-            truncate(&agent_activity, 8),
-            truncate(&cpu_str, 8),
-            truncate(&mem_str, 8),
-            truncate(&format!("{:?}", kild.metrics.status), 8),
-            activity_str
+            "│ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │",
+            pad(icon, st_w),
+            pad(branch, branch_w),
+            pad(agent, agent_w),
+            pad(activity, activity_w),
+            pad(cpu, cpu_w),
+            pad(mem, mem_w),
+            pad(status, status_w),
+            pad(last_activity, last_activity_w),
         );
     }
 
     println!(
-        "└────┴──────────────────┴─────────┴──────────┴──────────┴──────────┴──────────┴─────────────────────┘"
+        "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
+        "─".repeat(st_w + 2),
+        "─".repeat(branch_w + 2),
+        "─".repeat(agent_w + 2),
+        "─".repeat(activity_w + 2),
+        "─".repeat(cpu_w + 2),
+        "─".repeat(mem_w + 2),
+        "─".repeat(status_w + 2),
+        "─".repeat(last_activity_w + 2),
     );
     println!();
     println!(
@@ -215,41 +292,66 @@ fn print_single_kild_health(kild: &health::KildHealth) {
         health::HealthStatus::Unknown => "❓",
     };
 
+    let activity = kild
+        .agent_status
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "-".to_string());
+
+    let status_value = format!("{} {:?}", status_icon, kild.metrics.status);
+
+    let cpu_str = match kild.metrics.cpu_usage_percent {
+        Some(c) => format!("{:.1}%", c),
+        None => "N/A".to_string(),
+    };
+
+    let mem_str = match kild.metrics.memory_usage_mb {
+        Some(m) => format!("{} MB", m),
+        None => "N/A".to_string(),
+    };
+
+    let last_active = kild
+        .metrics
+        .last_activity
+        .as_deref()
+        .unwrap_or("Never")
+        .to_string();
+
+    let rows: Vec<(&str, String)> = vec![
+        ("Branch:", kild.branch.clone()),
+        ("Agent:", kild.agent.clone()),
+        ("Activity:", activity),
+        ("Status:", status_value),
+        ("Created:", kild.created_at.clone()),
+        ("Worktree:", kild.worktree_path.clone()),
+        ("CPU Usage:", cpu_str),
+        ("Memory:", mem_str),
+        ("Last Active:", last_active),
+    ];
+
+    // "Last Active:" is the longest label at 12 chars + 1 space
+    let label_width = 13;
+
+    let value_width = rows
+        .iter()
+        .map(|(_, v)| display_width(v.as_str()))
+        .max()
+        .unwrap_or(0);
+
+    let inner_width = label_width + value_width;
+    let border = "─".repeat(inner_width + 2);
+
     println!("🏥 KILD Health: {}", kild.branch);
-    println!("┌─────────────────────────────────────────────────────────────┐");
-    println!("│ Branch:      {:<47} │", kild.branch);
-    println!("│ Agent:       {:<47} │", kild.agent);
-    println!(
-        "│ Activity:    {:<47} │",
-        kild.agent_status
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    );
-    println!(
-        "│ Status:      {} {:<44} │",
-        status_icon,
-        format!("{:?}", kild.metrics.status)
-    );
-    println!("│ Created:     {:<47} │", kild.created_at);
-    println!("│ Worktree:    {:<47} │", truncate(&kild.worktree_path, 47));
+    println!("┌{}┐", border);
 
-    if let Some(cpu) = kild.metrics.cpu_usage_percent {
-        println!("│ CPU Usage:   {:<47} │", format!("{:.1}%", cpu));
-    } else {
-        println!("│ CPU Usage:   {:<47} │", "N/A");
+    for (label, value) in &rows {
+        println!(
+            "│ {:<label_w$}{:<value_w$} │",
+            label,
+            value,
+            label_w = label_width,
+            value_w = value_width,
+        );
     }
 
-    if let Some(mem) = kild.metrics.memory_usage_mb {
-        println!("│ Memory:      {:<47} │", format!("{} MB", mem));
-    } else {
-        println!("│ Memory:      {:<47} │", "N/A");
-    }
-
-    if let Some(activity) = &kild.metrics.last_activity {
-        println!("│ Last Active: {:<47} │", truncate(activity, 47));
-    } else {
-        println!("│ Last Active: {:<47} │", "Never");
-    }
-
-    println!("└─────────────────────────────────────────────────────────────┘");
+    println!("└{}┘", border);
 }
