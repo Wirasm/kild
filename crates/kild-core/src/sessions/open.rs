@@ -7,7 +7,7 @@ use crate::terminal;
 use crate::terminal::types::SpawnResult;
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, ensure_codex_config, ensure_codex_notify_hook,
+    build_daemon_create_request, compute_spawn_id, setup_codex_integration,
 };
 
 /// Resolve the effective runtime mode for `open_session`.
@@ -256,24 +256,7 @@ pub fn open_session(
         // Auto-start daemon if not running (config.daemon.auto_start, default: true)
         crate::daemon::ensure_daemon_running(&kild_config)?;
 
-        // Codex: install notify hook and patch config
-        if agent == "codex" {
-            if let Err(msg) = ensure_codex_notify_hook() {
-                warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
-                eprintln!("Warning: {}", msg);
-                eprintln!("Codex status reporting may not work.");
-            }
-            if let Err(msg) = ensure_codex_config() {
-                warn!(event = "core.session.codex_config_patch_failed", error = %msg);
-                eprintln!("Warning: {}", msg);
-                eprintln!(
-                    "Add notify = [\"{}\"] to ~/.codex/config.toml manually.",
-                    dirs::home_dir()
-                        .map(|h| h.join(".kild/hooks/codex-notify").display().to_string())
-                        .unwrap_or_else(|| "~/.kild/hooks/codex-notify".to_string())
-                );
-            }
-        }
+        setup_codex_integration(&agent);
 
         // Daemon path: create new daemon PTY (uses shared helper with create_session)
         let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
@@ -369,24 +352,7 @@ pub fn open_session(
             Some(daemon_result.daemon_session_id),
         )?
     } else {
-        // Codex: install notify hook and patch config
-        if agent == "codex" {
-            if let Err(msg) = ensure_codex_notify_hook() {
-                warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
-                eprintln!("Warning: {}", msg);
-                eprintln!("Codex status reporting may not work.");
-            }
-            if let Err(msg) = ensure_codex_config() {
-                warn!(event = "core.session.codex_config_patch_failed", error = %msg);
-                eprintln!("Warning: {}", msg);
-                eprintln!(
-                    "Add notify = [\"{}\"] to ~/.codex/config.toml manually.",
-                    dirs::home_dir()
-                        .map(|h| h.join(".kild/hooks/codex-notify").display().to_string())
-                        .unwrap_or_else(|| "~/.kild/hooks/codex-notify".to_string())
-                );
-            }
-        }
+        setup_codex_integration(&agent);
 
         // Terminal path: spawn in external terminal
         // Prepend task list env vars via `env` command for agents that support it.

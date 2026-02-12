@@ -7,8 +7,7 @@ use crate::sessions::{errors::SessionError, persistence, ports, types::*, valida
 use crate::terminal;
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, ensure_codex_config, ensure_codex_notify_hook,
-    ensure_shim_binary,
+    build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_codex_integration,
 };
 
 pub fn create_session(
@@ -196,24 +195,7 @@ pub fn create_session(
 
     let initial_agent = match request.runtime_mode {
         crate::state::types::RuntimeMode::Terminal => {
-            // Codex: install notify hook and patch config
-            if validated.agent == "codex" {
-                if let Err(msg) = ensure_codex_notify_hook() {
-                    warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
-                    eprintln!("Warning: {}", msg);
-                    eprintln!("Codex status reporting may not work.");
-                }
-                if let Err(msg) = ensure_codex_config() {
-                    warn!(event = "core.session.codex_config_patch_failed", error = %msg);
-                    eprintln!("Warning: {}", msg);
-                    eprintln!(
-                        "Add notify = [\"{}\"] to ~/.codex/config.toml manually.",
-                        dirs::home_dir()
-                            .map(|h| h.join(".kild/hooks/codex-notify").display().to_string())
-                            .unwrap_or_else(|| "~/.kild/hooks/codex-notify".to_string())
-                    );
-                }
-            }
+            setup_codex_integration(&validated.agent);
 
             // Terminal path: spawn in external terminal
             // Prepend task list env vars via `env` command for agents that support it.
@@ -278,24 +260,7 @@ pub fn create_session(
                 eprintln!("Agent teams will not work in this session.");
             }
 
-            // Codex: install notify hook and patch config
-            if validated.agent == "codex" {
-                if let Err(msg) = ensure_codex_notify_hook() {
-                    warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
-                    eprintln!("Warning: {}", msg);
-                    eprintln!("Codex status reporting may not work.");
-                }
-                if let Err(msg) = ensure_codex_config() {
-                    warn!(event = "core.session.codex_config_patch_failed", error = %msg);
-                    eprintln!("Warning: {}", msg);
-                    eprintln!(
-                        "Add notify = [\"{}\"] to ~/.codex/config.toml manually.",
-                        dirs::home_dir()
-                            .map(|h| h.join(".kild/hooks/codex-notify").display().to_string())
-                            .unwrap_or_else(|| "~/.kild/hooks/codex-notify".to_string())
-                    );
-                }
-            }
+            setup_codex_integration(&validated.agent);
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).

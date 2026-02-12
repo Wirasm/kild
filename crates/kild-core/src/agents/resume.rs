@@ -54,7 +54,9 @@ pub fn task_list_env_vars(agent: &str, task_list_id: &str) -> Vec<(String, Strin
 /// Build env vars for Codex agent sessions.
 ///
 /// Returns `KILD_SESSION_BRANCH` so the Codex notify hook can identify
-/// which kild session to report status for (fallback if `--self` PWD detection fails).
+/// which kild session to report status for. This serves as a fallback when
+/// `--self` PWD detection is unavailable (e.g., the hook runs from outside
+/// the worktree directory).
 /// Returns an empty vec for non-Codex agents.
 pub fn codex_env_vars(agent: &str, branch: &str) -> Vec<(String, String)> {
     match agent {

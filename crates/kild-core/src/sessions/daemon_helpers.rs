@@ -1,4 +1,6 @@
-use tracing::{info, warn};
+use std::path::Path;
+
+use tracing::{debug, info, warn};
 
 use crate::agents;
 use crate::sessions::errors::SessionError;
@@ -50,19 +52,21 @@ pub(crate) fn ensure_shim_binary() -> Result<(), String> {
     Ok(())
 }
 
-/// Ensure the Codex notify hook script is installed at `~/.kild/hooks/codex-notify`.
+/// Ensure the Codex notify hook script is installed at `<home>/.kild/hooks/codex-notify`.
 ///
 /// This script is called by Codex CLI's `notify` config. It reads JSON from stdin,
 /// maps event types to KILD agent statuses, and calls `kild agent-status`.
+/// Event mappings: `agent-turn-complete` → `idle`, `approval-requested` → `waiting`.
 /// Idempotent: skips if script already exists.
-pub(crate) fn ensure_codex_notify_hook() -> Result<(), String> {
-    let hooks_dir = dirs::home_dir()
-        .ok_or("HOME not set — cannot install Codex notify hook")?
-        .join(".kild")
-        .join("hooks");
+fn ensure_codex_notify_hook_with_home(home: &Path) -> Result<(), String> {
+    let hooks_dir = home.join(".kild").join("hooks");
     let hook_path = hooks_dir.join("codex-notify");
 
     if hook_path.exists() {
+        debug!(
+            event = "core.session.codex_notify_hook_already_exists",
+            path = %hook_path.display()
+        );
         return Ok(());
     }
 
@@ -99,13 +103,18 @@ esac
     Ok(())
 }
 
+pub(crate) fn ensure_codex_notify_hook() -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("HOME not set — cannot install Codex notify hook")?;
+    ensure_codex_notify_hook_with_home(&home)
+}
+
 /// Ensure Codex CLI config has the KILD notify hook configured.
 ///
-/// Patches `~/.codex/config.toml` to add `notify = ["<path>"]` if the notify
+/// Patches `<home>/.codex/config.toml` to add `notify = ["<path>"]` if the notify
 /// field is missing or empty. Respects existing user configuration — if notify
-/// is already set to a non-empty array, it is not overwritten.
-pub(crate) fn ensure_codex_config() -> Result<(), String> {
-    let home = dirs::home_dir().ok_or("HOME not set — cannot patch Codex config")?;
+/// is already set to a non-empty array, it is left unchanged and this function
+/// returns Ok without modifying the file.
+fn ensure_codex_config_with_home(home: &Path) -> Result<(), String> {
     let codex_dir = home.join(".codex");
     let config_path = codex_dir.join("config.toml");
     let hook_path = home.join(".kild").join("hooks").join("codex-notify");
@@ -115,9 +124,17 @@ pub(crate) fn ensure_codex_config() -> Result<(), String> {
         let content = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("failed to read {}: {}", config_path.display(), e))?;
 
-        // Parse to check if notify is already configured with a non-empty array
-        if let Ok(parsed) = content.parse::<toml::Value>()
-            && let Some(toml::Value::Array(arr)) = parsed.get("notify")
+        // Parse to check if notify is already configured with a non-empty array.
+        // Propagate parse errors so we don't blindly append to a malformed file.
+        let parsed = content.parse::<toml::Value>().map_err(|e| {
+            format!(
+                "failed to parse {}: {} — fix TOML syntax or remove the file to reset",
+                config_path.display(),
+                e
+            )
+        })?;
+
+        if let Some(toml::Value::Array(arr)) = parsed.get("notify")
             && !arr.is_empty()
         {
             info!(event = "core.session.codex_config_already_configured");
@@ -125,7 +142,7 @@ pub(crate) fn ensure_codex_config() -> Result<(), String> {
         }
 
         // notify is missing or empty — append it, preserving existing content
-        let mut new_content = content.clone();
+        let mut new_content = content;
         if !new_content.ends_with('\n') && !new_content.is_empty() {
             new_content.push('\n');
         }
@@ -147,6 +164,39 @@ pub(crate) fn ensure_codex_config() -> Result<(), String> {
     );
 
     Ok(())
+}
+
+pub(crate) fn ensure_codex_config() -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("HOME not set — cannot patch Codex config")?;
+    ensure_codex_config_with_home(&home)
+}
+
+/// Install Codex notify hook and patch config if needed.
+///
+/// Best-effort: warns on failure but doesn't block session creation.
+/// No-op for non-Codex agents.
+pub(crate) fn setup_codex_integration(agent: &str) {
+    if agent != "codex" {
+        return;
+    }
+
+    if let Err(msg) = ensure_codex_notify_hook() {
+        warn!(event = "core.session.codex_notify_hook_failed", error = %msg);
+        eprintln!("Warning: {msg}");
+        eprintln!("Codex status reporting may not work.");
+    }
+
+    if let Err(msg) = ensure_codex_config() {
+        warn!(event = "core.session.codex_config_patch_failed", error = %msg);
+        eprintln!("Warning: {msg}");
+        let hook_path = dirs::home_dir()
+            .map(|h| h.join(".kild/hooks/codex-notify").display().to_string())
+            .unwrap_or_else(|| "<HOME>/.kild/hooks/codex-notify".to_string());
+        let config_path = dirs::home_dir()
+            .map(|h| h.join(".codex/config.toml").display().to_string())
+            .unwrap_or_else(|| "<HOME>/.codex/config.toml".to_string());
+        eprintln!("Add notify = [\"{hook_path}\"] to {config_path} manually.");
+    }
 }
 
 /// Build the command, args, env vars, and login shell flag for a daemon PTY create request.
@@ -630,14 +680,9 @@ mod tests {
         let temp_home =
             std::env::temp_dir().join(format!("kild_test_codex_hook_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_home);
-        let hooks_dir = temp_home.join(".kild").join("hooks");
-        let hook_path = hooks_dir.join("codex-notify");
+        let hook_path = temp_home.join(".kild").join("hooks").join("codex-notify");
 
-        // Temporarily override HOME for the test
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_notify_hook();
+        let result = ensure_codex_notify_hook_with_home(&temp_home);
         assert!(result.is_ok(), "Hook install should succeed: {:?}", result);
         assert!(hook_path.exists(), "Hook script should exist");
 
@@ -674,10 +719,6 @@ mod tests {
             );
         }
 
-        // Restore HOME
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -688,19 +729,15 @@ mod tests {
         let temp_home =
             std::env::temp_dir().join(format!("kild_test_codex_hook_idem_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_home);
-        let hooks_dir = temp_home.join(".kild").join("hooks");
-        let hook_path = hooks_dir.join("codex-notify");
-
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
+        let hook_path = temp_home.join(".kild").join("hooks").join("codex-notify");
 
         // First call creates the script
-        let result = ensure_codex_notify_hook();
+        let result = ensure_codex_notify_hook_with_home(&temp_home);
         assert!(result.is_ok());
         let content1 = fs::read_to_string(&hook_path).unwrap();
 
         // Second call should succeed without changing content
-        let result = ensure_codex_notify_hook();
+        let result = ensure_codex_notify_hook_with_home(&temp_home);
         assert!(result.is_ok());
         let content2 = fs::read_to_string(&hook_path).unwrap();
         assert_eq!(
@@ -708,9 +745,6 @@ mod tests {
             "Content should not change on second call"
         );
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -725,10 +759,7 @@ mod tests {
         fs::create_dir_all(&codex_dir).unwrap();
         fs::write(codex_dir.join("config.toml"), "").unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_config();
+        let result = ensure_codex_config_with_home(&temp_home);
         assert!(result.is_ok(), "Config patch should succeed: {:?}", result);
 
         let content = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
@@ -743,9 +774,6 @@ mod tests {
             content
         );
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -766,10 +794,7 @@ mod tests {
         )
         .unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_config();
+        let result = ensure_codex_config_with_home(&temp_home);
         assert!(result.is_ok());
 
         let content = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
@@ -782,9 +807,6 @@ mod tests {
             "Should NOT overwrite user's custom notify config"
         );
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -801,10 +823,7 @@ mod tests {
         fs::create_dir_all(&codex_dir).unwrap();
         fs::write(codex_dir.join("config.toml"), "notify = []\n").unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_config();
+        let result = ensure_codex_config_with_home(&temp_home);
         assert!(result.is_ok());
 
         let content = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
@@ -814,9 +833,6 @@ mod tests {
             content
         );
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -829,10 +845,7 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_home);
         // Don't create .codex dir — it shouldn't exist yet
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_config();
+        let result = ensure_codex_config_with_home(&temp_home);
         assert!(
             result.is_ok(),
             "Should create config from scratch: {:?}",
@@ -849,9 +862,6 @@ mod tests {
             content
         );
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
         let _ = fs::remove_dir_all(&temp_home);
     }
 
@@ -872,10 +882,7 @@ mod tests {
         )
         .unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", &temp_home) };
-
-        let result = ensure_codex_config();
+        let result = ensure_codex_config_with_home(&temp_home);
         assert!(result.is_ok());
 
         let content = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
@@ -889,9 +896,44 @@ mod tests {
         );
         assert!(content.contains("codex-notify"), "notify should be added");
 
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        }
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_ensure_codex_config_rejects_malformed_toml() {
+        use std::fs;
+
+        let temp_home = std::env::temp_dir().join(format!(
+            "kild_test_codex_cfg_malformed_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_home);
+        let codex_dir = temp_home.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::write(codex_dir.join("config.toml"), "[invalid toml syntax\n").unwrap();
+
+        let result = ensure_codex_config_with_home(&temp_home);
+        assert!(result.is_err(), "Should fail on malformed TOML");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("failed to parse"),
+            "Error should mention parse failure, got: {}",
+            err
+        );
+        assert!(
+            err.contains("fix TOML syntax"),
+            "Error should suggest fixing TOML syntax, got: {}",
+            err
+        );
+
+        // Verify the file was NOT modified
+        let content = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert_eq!(
+            content, "[invalid toml syntax\n",
+            "Malformed file should not be modified"
+        );
+
         let _ = fs::remove_dir_all(&temp_home);
     }
 }
