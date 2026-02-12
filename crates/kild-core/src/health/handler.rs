@@ -2,6 +2,7 @@ use crate::health::{errors::HealthError, operations, types::*};
 use crate::process;
 use crate::process::types::ProcessMetrics;
 use crate::sessions;
+use crate::sessions::agent_status::read_agent_status;
 use tracing::{info, warn};
 
 /// Get health status for all sessions in current project
@@ -75,7 +76,17 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
         (None, false)
     };
 
-    operations::enrich_session_with_health(session, process_metrics, process_running)
+    let status_info = read_agent_status(&session.id);
+    let agent_status = status_info.as_ref().map(|i| i.status.to_string());
+    let agent_status_updated_at = status_info.map(|i| i.updated_at);
+
+    operations::enrich_session_with_health(
+        session,
+        process_metrics,
+        process_running,
+        agent_status,
+        agent_status_updated_at,
+    )
 }
 
 fn get_metrics_for_pid(pid: u32, branch: &str) -> Option<ProcessMetrics> {

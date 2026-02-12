@@ -27,6 +27,8 @@ pub struct KildHealth {
     pub agent: String,
     pub worktree_path: String,
     pub created_at: String,
+    pub agent_status: Option<String>,
+    pub agent_status_updated_at: Option<String>,
     pub metrics: HealthMetrics,
 }
 

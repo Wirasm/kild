@@ -286,6 +286,8 @@ mod tests {
             agent: "claude".to_string(),
             worktree_path: "/tmp/wt".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
+            agent_status: None,
+            agent_status_updated_at: None,
             metrics,
         };
         HealthOutput {
@@ -345,6 +347,8 @@ mod tests {
             agent: "a".to_string(),
             worktree_path: "/tmp".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
+            agent_status: None,
+            agent_status_updated_at: None,
             metrics,
         };
         let output = HealthOutput {

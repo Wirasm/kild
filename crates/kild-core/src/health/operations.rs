@@ -53,6 +53,8 @@ pub fn enrich_session_with_health(
     session: &Session,
     process_metrics: Option<ProcessMetrics>,
     process_running: bool,
+    agent_status: Option<String>,
+    agent_status_updated_at: Option<String>,
 ) -> KildHealth {
     let status = calculate_health_status(
         process_running,
@@ -88,6 +90,8 @@ pub fn enrich_session_with_health(
         agent: session.agent.clone(),
         worktree_path: session.worktree_path.display().to_string(),
         created_at: session.created_at.clone(),
+        agent_status,
+        agent_status_updated_at,
         metrics,
     }
 }
@@ -214,7 +218,7 @@ mod tests {
             memory_usage_bytes: 100 * 1024 * 1024,
         };
 
-        let health = enrich_session_with_health(&session, Some(metrics), true);
+        let health = enrich_session_with_health(&session, Some(metrics), true, None, None);
 
         assert_eq!(health.branch, "test-branch");
         assert_eq!(health.metrics.process_status, "Running");
@@ -226,7 +230,7 @@ mod tests {
     fn test_enrich_session_stopped_no_metrics() {
         let session = Session::new_for_test("stopped".to_string(), PathBuf::from("/tmp/test"));
 
-        let health = enrich_session_with_health(&session, None, false);
+        let health = enrich_session_with_health(&session, None, false, None, None);
 
         assert_eq!(health.metrics.process_status, "Stopped");
         assert_eq!(health.metrics.status, HealthStatus::Crashed);
@@ -239,7 +243,7 @@ mod tests {
     fn test_enrich_session_copies_session_fields() {
         let session = Session::new_for_test("my-branch".to_string(), PathBuf::from("/tmp/wt"));
 
-        let health = enrich_session_with_health(&session, None, false);
+        let health = enrich_session_with_health(&session, None, false, None, None);
 
         assert_eq!(health.session_id, session.id);
         assert_eq!(health.project_id, session.project_id);
@@ -265,16 +269,16 @@ mod tests {
     fn test_aggregate_mixed_statuses() {
         let session = Session::new_for_test("b".to_string(), PathBuf::from("/tmp"));
 
-        let mut working = enrich_session_with_health(&session, None, true);
+        let mut working = enrich_session_with_health(&session, None, true, None, None);
         working.metrics.status = HealthStatus::Working;
 
-        let mut idle = enrich_session_with_health(&session, None, true);
+        let mut idle = enrich_session_with_health(&session, None, true, None, None);
         idle.metrics.status = HealthStatus::Idle;
 
-        let mut crashed = enrich_session_with_health(&session, None, false);
+        let mut crashed = enrich_session_with_health(&session, None, false, None, None);
         crashed.metrics.status = HealthStatus::Crashed;
 
-        let mut unknown = enrich_session_with_health(&session, None, true);
+        let mut unknown = enrich_session_with_health(&session, None, true, None, None);
         unknown.metrics.status = HealthStatus::Unknown;
 
         let output = aggregate_health_stats(&[working, idle, crashed, unknown]);
