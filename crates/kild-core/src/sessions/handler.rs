@@ -12,7 +12,7 @@ pub use super::stop::stop_session;
 
 // Re-export from previously extracted modules
 pub use super::agent_status::{
-    find_session_by_worktree_path, read_agent_status, update_agent_status,
+    AgentStatusResult, find_session_by_worktree_path, read_agent_status, update_agent_status,
 };
 pub use super::complete::{complete_session, fetch_pr_info, read_pr_info};
 pub use super::destroy::{destroy_session, get_destroy_safety_info, has_remote_configured};

@@ -41,6 +41,7 @@ pub use git::types::{
     FileOverlap, GitStats, MergeReadiness, OverlapReport, UncommittedDetails, WorktreeStatus,
 };
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
+pub use sessions::agent_status::AgentStatusResult;
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{
     AgentProcess, AgentStatus, AgentStatusInfo, CompleteResult, CreateSessionRequest,

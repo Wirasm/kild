@@ -368,6 +368,12 @@ pub fn build_cli() -> Command {
                         .help("Send desktop notification when status is 'waiting' or 'error'")
                         .action(ArgAction::SetTrue)
                 )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .help("Output in JSON format")
+                        .action(ArgAction::SetTrue)
+                )
         )
         .subcommand(
             Command::new("rebase")

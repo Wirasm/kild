@@ -3,6 +3,13 @@ use tracing::info;
 use crate::config::Config;
 use crate::sessions::{errors::SessionError, persistence, types::*};
 
+/// Result of a successful agent status update.
+pub struct AgentStatusResult {
+    pub branch: String,
+    pub status: super::types::AgentStatus,
+    pub updated_at: String,
+}
+
 /// Update agent status for a session via sidecar file.
 ///
 /// Also updates `last_activity` on the session JSON to feed the health monitoring system.
@@ -10,7 +17,7 @@ pub fn update_agent_status(
     name: &str,
     status: super::types::AgentStatus,
     notify: bool,
-) -> Result<(), SessionError> {
+) -> Result<AgentStatusResult, SessionError> {
     info!(
         event = "core.session.agent_status_update_started",
         name = name,
@@ -39,7 +46,7 @@ pub fn update_agent_status(
         &config.sessions_dir(),
         &session.id,
         "last_activity",
-        serde_json::Value::String(now),
+        serde_json::Value::String(now.clone()),
     )?;
 
     info!(
@@ -59,7 +66,11 @@ pub fn update_agent_status(
         crate::notify::send_notification("KILD", &message);
     }
 
-    Ok(())
+    Ok(AgentStatusResult {
+        branch: session.branch.clone(),
+        status,
+        updated_at: now,
+    })
 }
 
 /// Read agent status for a session from the sidecar file.

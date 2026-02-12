@@ -924,6 +924,51 @@ fn test_status_nonexistent_without_json_uses_stderr() {
     );
 }
 
+// =============================================================================
+// agent-status JSON output tests (issue #361)
+// =============================================================================
+
+/// Verify that 'kild agent-status nonexistent working --json' returns a JSON error object
+#[test]
+fn test_agent_status_json_nonexistent_returns_json_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["agent-status", "nonexistent-branch-xyz-12345", "working", "--json"])
+        .output()
+        .expect("Failed to execute 'kild agent-status --json'");
+
+    // Command should fail (non-zero exit code)
+    assert!(!output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(error_obj.is_object());
+    assert_eq!(
+        error_obj.get("code").and_then(|v| v.as_str()),
+        Some("SESSION_NOT_FOUND")
+    );
+}
+
+/// Verify that 'kild agent-status <branch> bogus --json' returns an error
+#[test]
+fn test_agent_status_json_invalid_status_returns_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kild"))
+        .args(["agent-status", "some-branch", "bogus", "--json"])
+        .output()
+        .expect("Failed to execute 'kild agent-status --json'");
+
+    assert!(!output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let error_obj: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should be valid JSON even on error");
+
+    assert!(error_obj.is_object());
+    assert!(error_obj.get("error").is_some());
+    assert!(error_obj.get("code").is_some());
+}
+
 /// Verify text output includes fleet summary line when sessions exist
 #[test]
 fn test_list_text_output_includes_fleet_summary() {

@@ -96,6 +96,14 @@ pub struct JsonError {
     pub code: String,
 }
 
+/// JSON response for agent-status command confirmation.
+#[derive(Serialize)]
+pub struct AgentStatusResponse {
+    pub branch: String,
+    pub status: String,
+    pub updated_at: String,
+}
+
 /// Enriched session data for JSON output (used by list and status commands).
 #[derive(Serialize)]
 pub struct EnrichedSession {
