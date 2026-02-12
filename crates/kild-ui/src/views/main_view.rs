@@ -1304,14 +1304,6 @@ impl MainView {
                         .border_color(theme::ice())
                         .text_size(px(theme::TEXT_SM))
                         .child(Input::new(&input_state).cleanable(false))
-                        .on_key_down(cx.listener(move |view, event: &KeyDownEvent, window, cx| {
-                            let key = event.keystroke.key.as_str();
-                            if key == "enter" {
-                                view.commit_rename(window, cx);
-                            } else if key == "escape" {
-                                view.cancel_rename(window, cx);
-                            }
-                        }))
                         .into_any_element();
                 }
 
@@ -1384,6 +1376,16 @@ impl MainView {
         use crate::state::DialogState;
 
         let key_str = event.keystroke.key.to_string();
+
+        // Tab rename mode: Enter commits, Escape cancels, all other keys go to Input
+        if self.renaming_tab.is_some() {
+            if key_str == "enter" {
+                self.commit_rename(window, cx);
+            } else if key_str == "escape" {
+                self.cancel_rename(window, cx);
+            }
+            return;
+        }
 
         // Ctrl+Escape from terminal → back to dashboard
         if key_str == "escape"
