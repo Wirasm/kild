@@ -5,7 +5,7 @@ use kild_core::CreateSessionRequest;
 use kild_core::events;
 use kild_core::session_ops;
 
-use super::helpers::{load_config_with_warning, resolve_runtime_mode};
+use super::helpers::{load_config_with_warning, resolve_runtime_mode, shorten_home_path};
 
 pub(crate) fn handle_create_command(
     matches: &ArgMatches,
@@ -61,19 +61,19 @@ pub(crate) fn handle_create_command(
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {
-            println!("✅ KILD created successfully!");
-            println!("   Branch: {}", session.branch);
+            println!("Kild created.");
+            println!("  Branch:   {}", session.branch);
             if session.agent == "shell" {
-                println!("   Agent: (none - bare shell)");
+                println!("  Agent:    (none)");
             } else {
-                println!("   Agent: {}", session.agent);
+                println!("  Agent:    {}", session.agent);
             }
-            println!("   Worktree: {}", session.worktree_path.display());
+            println!("  Worktree: {}", shorten_home_path(&session.worktree_path));
             println!(
-                "   Port Range: {}-{}",
+                "  Ports:    {}-{}",
                 session.port_range_start, session.port_range_end
             );
-            println!("   Status: {:?}", session.status);
+            println!("  Status:   {:?}", session.status);
 
             info!(
                 event = "cli.create_completed",
@@ -87,12 +87,12 @@ pub(crate) fn handle_create_command(
             // Surface actionable hint for fetch failures
             let err_str = e.to_string();
             if err_str.contains("Failed to fetch") {
-                eprintln!("❌ Failed to create kild: {}", e);
+                eprintln!("{}", e);
                 eprintln!(
-                    "   Hint: Use --no-fetch to skip fetching, or check your network/remote config."
+                    "  Hint: Use --no-fetch to skip fetching, or check your network/remote config."
                 );
             } else {
-                eprintln!("❌ Failed to create kild: {}", e);
+                eprintln!("{}", e);
             }
 
             error!(

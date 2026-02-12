@@ -6,8 +6,8 @@ use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, OpenedKild, format_partial_failure_error, resolve_explicit_runtime_mode,
-    resolve_open_mode,
+    FailedOperation, OpenedKild, format_count, format_partial_failure_error,
+    resolve_explicit_runtime_mode, resolve_open_mode,
 };
 
 pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -33,20 +33,20 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
-                    println!("✅ Opened bare terminal in kild '{}'", branch);
-                    println!("   Agent: (none - bare shell)");
+                    println!("Opened bare terminal for '{}'.", branch);
+                    println!("  Agent: (none)");
                 }
                 _ => {
                     if resume {
-                        println!("✅ Resumed agent in kild '{}'", branch);
+                        println!("Resumed agent for '{}'.", branch);
                     } else {
-                        println!("✅ Opened new agent in kild '{}'", branch);
+                        println!("Opened agent for '{}'.", branch);
                     }
-                    println!("   Agent: {}", session.agent);
+                    println!("  Agent: {}", session.agent);
                 }
             }
             if let Some(pid) = session.latest_agent().and_then(|a| a.process_id()) {
-                println!("   PID: {}", pid);
+                println!("  PID:   {}", pid);
             }
             info!(
                 event = "cli.open_completed",
@@ -56,7 +56,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to open kild '{}': {}", branch, e);
+            eprintln!("Could not open '{}': {}", branch, e);
             error!(event = "cli.open_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())
@@ -112,22 +112,22 @@ fn handle_open_all(
 
     // Report successes
     if !opened.is_empty() {
-        println!("Opened {} kild(s):", opened.len());
+        println!("Opened {}:", format_count(opened.len()));
         for (branch, agent, runtime_mode) in &opened {
             let mode_label = match runtime_mode {
                 Some(kild_core::RuntimeMode::Daemon) => " [daemon]",
                 Some(kild_core::RuntimeMode::Terminal) => " [terminal]",
                 None => "",
             };
-            println!("   {} ({}){}", branch, agent, mode_label);
+            println!("  {} ({}){}", branch, agent, mode_label);
         }
     }
 
     // Report failures
     if !errors.is_empty() {
-        eprintln!("Failed to open {} kild(s):", errors.len());
+        eprintln!("{} failed to open:", format_count(errors.len()));
         for (branch, err) in &errors {
-            eprintln!("   {}: {}", branch, err);
+            eprintln!("  {}: {}", branch, err);
         }
     }
 

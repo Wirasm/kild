@@ -20,8 +20,8 @@ pub(crate) fn handle_attach_command(
     let session = match kild_core::session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error: Session '{}' not found.", branch);
-            eprintln!("Tip: Use 'kild list' to see active sessions.");
+            eprintln!("No kild found: {}", branch);
+            eprintln!("  Use 'kild list' to see active sessions.");
             error!(event = "cli.attach_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -32,10 +32,10 @@ pub(crate) fn handle_attach_command(
         Some(id) => id.to_string(),
         None => {
             let msg = format!(
-                "Session '{}' is not daemon-managed. Use 'kild focus {}' for terminal sessions.",
+                "'{}' is not daemon-managed. Use 'kild focus {}' for terminal sessions.",
                 branch, branch
             );
-            eprintln!("Error: {}", msg);
+            eprintln!("{}", msg);
             error!(
                 event = "cli.attach_failed",
                 branch = branch,
@@ -52,8 +52,8 @@ pub(crate) fn handle_attach_command(
     );
 
     // 2. Connect to daemon and attach
-    if let Err(e) = attach_to_daemon_session(&daemon_session_id) {
-        eprintln!("Error: {}", e);
+    if let Err(e) = attach_to_daemon_session(&daemon_session_id, branch) {
+        eprintln!("{}", e);
         error!(event = "cli.attach_failed", branch = branch, error = %e);
         return Err(e);
     }
@@ -62,11 +62,14 @@ pub(crate) fn handle_attach_command(
     Ok(())
 }
 
-fn attach_to_daemon_session(daemon_session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn attach_to_daemon_session(
+    daemon_session_id: &str,
+    branch: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = kild_core::daemon::socket_path();
     let mut stream = UnixStream::connect(&socket_path).map_err(|e| {
         format!(
-            "Cannot connect to daemon at {}: {}\nTip: Start the daemon with 'kild daemon start'.",
+            "Cannot connect to daemon at {}: {}\nStart the daemon: kild daemon start",
             socket_path.display(),
             e
         )
@@ -119,7 +122,7 @@ fn attach_to_daemon_session(daemon_session_id: &str) -> Result<(), Box<dyn std::
 
     // Restore terminal
     drop(_raw_guard);
-    eprintln!("\r\nDetached from session. (Reconnect with: kild attach)");
+    eprintln!("\r\nDetached. Reconnect: kild attach {}", branch);
 
     if let Err(e) = stdin_handle.join() {
         error!(event = "cli.attach.stdin_thread_panicked", error = ?e);
@@ -183,7 +186,7 @@ fn forward_stdin_to_daemon(stream: &mut UnixStream, session_id: &str) {
             Ok(n) => n,
             Err(e) => {
                 error!(event = "cli.attach.stdin_read_failed", error = %e);
-                eprintln!("\r\nError: Failed to read from stdin. Detaching.");
+                eprintln!("\r\nStdin read failed. Detaching.");
                 break;
             }
         };
@@ -199,18 +202,18 @@ fn forward_stdin_to_daemon(stream: &mut UnixStream, session_id: &str) {
             Ok(s) => s,
             Err(e) => {
                 error!(event = "cli.attach.stdin_serialize_failed", error = %e, session_id = %session_id);
-                eprintln!("\r\nError: Failed to encode input. Detaching.");
+                eprintln!("\r\nInput encoding failed. Detaching.");
                 break;
             }
         };
         if let Err(e) = writeln!(stream, "{}", serialized) {
             error!(event = "cli.attach.stdin_write_failed", error = %e, session_id = %session_id);
-            eprintln!("\r\nError: Connection to daemon lost. Detaching.");
+            eprintln!("\r\nConnection to daemon lost. Detaching.");
             break;
         }
         if let Err(e) = stream.flush() {
             error!(event = "cli.attach.stdin_flush_failed", error = %e);
-            eprintln!("\r\nError: Connection to daemon lost. Detaching.");
+            eprintln!("\r\nConnection to daemon lost. Detaching.");
             break;
         }
     }
@@ -241,8 +244,7 @@ fn forward_daemon_to_stdout_buffered(
             Err(e) => {
                 error!(event = "cli.attach.parse_failed", error = %e);
                 eprintln!(
-                    "\r\nWarning: received malformed message from daemon. \
-                     If this persists, try: kild daemon stop && kild daemon start"
+                    "\r\nMalformed daemon message. Try: kild daemon stop && kild daemon start"
                 );
                 continue;
             }
@@ -278,7 +280,7 @@ fn forward_daemon_to_stdout_buffered(
                                     "Terminal resize failed. Display may be garbled.".to_string()
                                 }
                             };
-                            eprintln!("\r\nWarning: {}", detail);
+                            eprintln!("\r\n{}", detail);
                         }
                         _ => {}
                     }

@@ -5,6 +5,8 @@ use kild_core::events;
 use kild_core::git::get_diff_stats;
 use kild_core::session_ops;
 
+use super::helpers::shorten_home_path;
+
 pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
@@ -23,7 +25,7 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.diff_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -43,10 +45,10 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     // 2. Execute git diff via kild-core (output appears directly in terminal)
     if let Err(e) = kild_core::git::cli::show_diff(&session.worktree_path, staged) {
-        eprintln!("❌ Failed to show diff: {}", e);
+        eprintln!("Diff failed: {}", e);
         eprintln!(
-            "   Hint: Check that the worktree at {} is a valid git repository",
-            session.worktree_path.display()
+            "  Hint: Check that the worktree at {} is a valid git repository.",
+            shorten_home_path(&session.worktree_path)
         );
         error!(event = "cli.diff_failed", branch = branch, error = %e);
         events::log_app_error(&e);

@@ -23,7 +23,7 @@ pub(crate) fn handle_commits_command(
     let session = match session_ops::get_session(branch) {
         Ok(session) => session,
         Err(e) => {
-            eprintln!("Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(
                 event = "cli.commits_failed",
                 branch = branch,
@@ -38,7 +38,7 @@ pub(crate) fn handle_commits_command(
     let commits = match kild_core::git::cli::get_commits(&session.worktree_path, count) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("❌ Failed to get commits: {}", e);
+            eprintln!("{}", e);
             error!(event = "cli.commits_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -49,13 +49,13 @@ pub(crate) fn handle_commits_command(
     if let Err(e) = std::io::stdout().write_all(commits.as_bytes())
         && e.kind() != std::io::ErrorKind::BrokenPipe
     {
-        eprintln!("Failed to write output: {}", e);
+        eprintln!("Write failed: {}", e);
         error!(
             event = "cli.commits_write_failed",
             branch = branch,
             error = %e
         );
-        return Err(format!("Failed to write commits output: {}", e).into());
+        return Err(format!("Write failed: {}", e).into());
     }
 
     info!(

@@ -8,7 +8,7 @@ use kild_core::session_ops;
 
 use unicode_width::UnicodeWidthStr;
 
-use super::helpers::load_config_with_warning;
+use super::helpers::{load_config_with_warning, shorten_home_path};
 use super::json_types::EnrichedSession;
 
 pub(crate) fn handle_status_command(
@@ -98,7 +98,7 @@ pub(crate) fn handle_status_command(
             if let Some(ref note) = session.note {
                 rows.push(("Note:", note.clone()));
             }
-            rows.push(("Worktree:", session.worktree_path.display().to_string()));
+            rows.push(("Worktree:", shorten_home_path(&session.worktree_path)));
 
             // Git stats rows
             if let Some(ref stats) = git_stats {
@@ -158,7 +158,7 @@ pub(crate) fn handle_status_command(
             // Agent rows
             let mut agent_rows: Vec<String> = Vec::new();
             if session.has_agents() {
-                rows.push(("Agents:", format!("{} agent(s)", session.agent_count())));
+                rows.push(("Agents:", format!("{}", session.agent_count())));
                 for (i, agent_proc) in session.agents().iter().enumerate() {
                     let status = agent_proc.process_id().map_or("No PID".to_string(), |pid| {
                         match process::is_process_running(pid) {
@@ -198,7 +198,7 @@ pub(crate) fn handle_status_command(
             let inner_width = label_width + value_width;
             let border = "─".repeat(inner_width + 2);
 
-            println!("📊 KILD Status: {}", branch);
+            println!("Status: {}", branch);
             println!("┌{}┐", border);
 
             // Print main rows (up to but not including agent detail rows)
@@ -242,7 +242,7 @@ pub(crate) fn handle_status_command(
                 return Err(super::helpers::print_json_error(&e, e.error_code()));
             }
 
-            eprintln!("❌ Failed to get status for kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             Err(e.into())
         }
     }

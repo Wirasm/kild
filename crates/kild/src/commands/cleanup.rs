@@ -4,6 +4,8 @@ use tracing::{error, info};
 use kild_core::cleanup;
 use kild_core::events;
 
+use super::helpers::shorten_home_path;
+
 pub(crate) fn handle_cleanup_command(
     sub_matches: &ArgMatches,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -23,41 +25,35 @@ pub(crate) fn handle_cleanup_command(
 
     match cleanup::cleanup_all_with_strategy(strategy) {
         Ok(summary) => {
-            println!("✅ Cleanup completed successfully!");
+            println!("Cleanup complete.");
 
             if summary.total_cleaned > 0 {
-                println!("   Resources cleaned:");
+                println!("  Resources cleaned:");
 
                 if !summary.orphaned_branches.is_empty() {
-                    println!(
-                        "   📦 Branches removed: {}",
-                        summary.orphaned_branches.len()
-                    );
+                    println!("  Branches removed: {}", summary.orphaned_branches.len());
                     for branch in &summary.orphaned_branches {
-                        println!("      - {}", branch);
+                        println!("    - {}", branch);
                     }
                 }
 
                 if !summary.orphaned_worktrees.is_empty() {
-                    println!(
-                        "   📁 Worktrees removed: {}",
-                        summary.orphaned_worktrees.len()
-                    );
+                    println!("  Worktrees removed: {}", summary.orphaned_worktrees.len());
                     for worktree in &summary.orphaned_worktrees {
-                        println!("      - {}", worktree.display());
+                        println!("    - {}", shorten_home_path(worktree));
                     }
                 }
 
                 if !summary.stale_sessions.is_empty() {
-                    println!("   📄 Sessions removed: {}", summary.stale_sessions.len());
+                    println!("  Sessions removed: {}", summary.stale_sessions.len());
                     for session in &summary.stale_sessions {
-                        println!("      - {}", session);
+                        println!("    - {}", session);
                     }
                 }
 
-                println!("   Total: {} resources cleaned", summary.total_cleaned);
+                println!("  Total: {} resources cleaned", summary.total_cleaned);
             } else {
-                println!("   No orphaned resources found.");
+                println!("  No orphaned resources found.");
             }
 
             info!(
@@ -68,14 +64,14 @@ pub(crate) fn handle_cleanup_command(
             Ok(())
         }
         Err(cleanup::CleanupError::NoOrphanedResources) => {
-            println!("✅ No orphaned resources found - repository is clean!");
+            println!("No orphaned resources found.");
 
             info!(event = "cli.cleanup_completed_no_resources");
 
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to cleanup resources: {}", e);
+            eprintln!("{}", e);
 
             error!(
                 event = "cli.cleanup_failed",

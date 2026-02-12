@@ -41,7 +41,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.sync_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -57,10 +57,10 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             remote = remote,
             error = %e
         );
-        eprintln!("❌ Failed to fetch from remote '{}': {}", remote, e);
-        eprintln!("   Cannot sync without fetching. Check your network and remote config.");
+        eprintln!("Fetch failed from remote '{}': {}", remote, e);
+        eprintln!("  Cannot sync without fetching. Check your network and remote config.");
         eprintln!(
-            "   Tip: Use 'kild rebase {}' to rebase onto local state without fetching.",
+            "  Hint: Use 'kild rebase {}' to rebase onto local state without fetching.",
             branch
         );
         return Err(e.into());
@@ -69,7 +69,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {
             println!(
-                "✅ {}: synced (fetched + rebased onto {})",
+                "{}: synced (fetched + rebased onto {})",
                 branch, base_branch
             );
             info!(
@@ -80,7 +80,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
-            eprintln!("⚠️  {}: {}", branch, e);
+            eprintln!("{}: {}", branch, e);
             error!(
                 event = "cli.sync_failed",
                 branch = branch,
@@ -111,10 +111,10 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
             remote = remote,
             error = %e
         );
-        eprintln!("❌ Failed to fetch from remote '{}': {}", remote, e);
-        eprintln!("   Cannot sync kilds without fetching. Check your network and remote config.");
+        eprintln!("Fetch failed from remote '{}': {}", remote, e);
+        eprintln!("  Cannot sync kilds without fetching. Check your network and remote config.");
         eprintln!(
-            "   Tip: Use 'kild rebase --all' to rebase all kilds onto local state without fetching."
+            "  Hint: Use 'kild rebase --all' to rebase all kilds onto local state without fetching."
         );
         return Err(e.into());
     }
@@ -139,7 +139,7 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
     for session in &sessions {
         match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
-                println!("✅ {}: rebased onto {}", session.branch, base_branch);
+                println!("{}: rebased onto {}", session.branch, base_branch);
                 info!(
                     event = "cli.sync_completed",
                     branch = session.branch,
@@ -148,7 +148,7 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
                 synced.push(session.branch.clone());
             }
             Err(e) => {
-                eprintln!("⚠️  {}: {}", session.branch, e);
+                eprintln!("{}: {}", session.branch, e);
                 error!(
                     event = "cli.sync_failed",
                     branch = session.branch,

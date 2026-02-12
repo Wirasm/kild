@@ -35,7 +35,7 @@ pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
             Ok(())
         }
         Err(e) => {
-            eprintln!("Failed to get path for kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
 
             error!(
                 event = "cli.cd_failed",

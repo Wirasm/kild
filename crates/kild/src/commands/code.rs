@@ -5,7 +5,7 @@ use kild_core::editor::EditorError;
 use kild_core::events;
 use kild_core::session_ops;
 
-use super::helpers::load_config_with_warning;
+use super::helpers::{load_config_with_warning, shorten_home_path};
 
 pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -26,7 +26,7 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let session = match session_ops::get_session(branch) {
         Ok(session) => session,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.code_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -40,8 +40,8 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         &config,
     ) {
         Ok(()) => {
-            println!("✅ Opening '{}' in editor", branch);
-            println!("   Path: {}", session.worktree_path.display());
+            println!("Opening '{}' in editor.", branch);
+            println!("  Path: {}", shorten_home_path(&session.worktree_path));
             info!(
                 event = "cli.code_completed",
                 branch = branch,
@@ -51,20 +51,20 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         }
         Err(e) => {
             if let EditorError::EditorNotFound { editor } = &e {
-                eprintln!("❌ Editor '{}' not found", editor);
+                eprintln!("Editor '{}' not found.", editor);
                 eprintln!(
-                    "   Hint: Install '{}' or configure a different editor:",
+                    "  Hint: Install '{}' or configure a different editor:",
                     editor
                 );
-                eprintln!("         --editor <name>            (CLI override)");
-                eprintln!("         [editor] default = \"...\"   (config file)");
-                eprintln!("         export EDITOR=...          (environment)");
+                eprintln!("    --editor <name>            (CLI override)");
+                eprintln!("    [editor] default = \"...\"   (config file)");
+                eprintln!("    export EDITOR=...          (environment)");
             } else if matches!(e, EditorError::NoEditorFound) {
-                eprintln!("❌ No supported editor found");
-                eprintln!("   Hint: Install one of: zed, code (VS Code), vim/nvim");
-                eprintln!("   Or configure a custom editor in ~/.kild/config.toml");
+                eprintln!("No supported editor found.");
+                eprintln!("  Hint: Install one of: zed, code (VS Code), vim/nvim");
+                eprintln!("  Or configure a custom editor in ~/.kild/config.toml");
             } else {
-                eprintln!("❌ Failed to open editor: {}", e);
+                eprintln!("{}", e);
             }
 
             error!(event = "cli.code_failed", branch = branch, error = %e);

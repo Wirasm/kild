@@ -5,7 +5,9 @@ use kild_core::SessionStatus;
 use kild_core::events;
 use kild_core::session_ops;
 
-use super::helpers::{FailedOperation, format_partial_failure_error, get_terminal_info};
+use super::helpers::{
+    FailedOperation, format_count, format_partial_failure_error, get_terminal_info, plural,
+};
 
 pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("all") {
@@ -21,7 +23,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.hide_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -34,8 +36,8 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         .and_then(|a| a.daemon_session_id())
         .is_some()
     {
-        eprintln!("❌ Cannot hide daemon-managed kild '{}'", branch);
-        eprintln!("   Use 'kild attach {}' to connect to the session.", branch);
+        eprintln!("Cannot hide '{}': daemon-managed session.", branch);
+        eprintln!("  Use 'kild attach {}' to connect.", branch);
         error!(
             event = "cli.hide_failed",
             branch = branch,
@@ -47,7 +49,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let (terminal_type, window_id) = match get_terminal_info(&session) {
         Ok(info) => info,
         Err(msg) => {
-            eprintln!("❌ {}: {}", msg, branch);
+            eprintln!("{}: {}", msg, branch);
             error!(event = "cli.hide_failed", branch = branch, error = %msg);
             return Err(msg.into());
         }
@@ -55,12 +57,12 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     match kild_core::terminal_ops::hide_terminal(&terminal_type, &window_id) {
         Ok(()) => {
-            println!("✅ Hidden kild '{}' terminal window", branch);
+            println!("Hidden '{}'.", branch);
             info!(event = "cli.hide_completed", branch = branch);
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to hide terminal for '{}': {}", branch, e);
+            eprintln!("Could not hide '{}': {}", branch, e);
             error!(event = "cli.hide_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())
@@ -131,25 +133,26 @@ fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
 
     // Report successes
     if !hidden.is_empty() {
-        println!("Hidden {} kild(s):", hidden.len());
+        println!("Hidden {}:", format_count(hidden.len()));
         for branch in &hidden {
-            println!("   {}", branch);
+            println!("  {}", branch);
         }
     }
 
     // Report failures
     if !errors.is_empty() {
-        eprintln!("Failed to hide {} kild(s):", errors.len());
+        eprintln!("{} failed to hide:", format_count(errors.len()));
         for (branch, err) in &errors {
-            eprintln!("   {}: {}", branch, err);
+            eprintln!("  {}: {}", branch, err);
         }
     }
 
     // Report skipped daemon sessions (informational, not an error)
     if !skipped.is_empty() {
         println!(
-            "Skipped {} daemon-managed kild(s) (no terminal window)",
-            skipped.len()
+            "Skipped {} daemon-managed {}.",
+            skipped.len(),
+            plural(skipped.len())
         );
     }
 

@@ -79,7 +79,7 @@ fn run_health_once(
                 error!(event = "cli.health_invalid_branch", branch = branch_name);
                 return Err(boxed);
             }
-            eprintln!("❌ Invalid branch name: {}", branch_name);
+            eprintln!("Invalid branch name: {}", branch_name);
             error!(event = "cli.health_invalid_branch", branch = branch_name);
             return Err("Invalid branch name".into());
         }
@@ -103,7 +103,7 @@ fn run_health_once(
                 if json_output {
                     return Err(super::helpers::print_json_error(&e, e.error_code()));
                 }
-                eprintln!("❌ Failed to get health for kild '{}': {}", branch_name, e);
+                eprintln!("Health check failed for '{}': {}", branch_name, e);
                 Err(e.into())
             }
         }
@@ -131,7 +131,7 @@ fn run_health_once(
                 if json_output {
                     return Err(super::helpers::print_json_error(&e, e.error_code()));
                 }
-                eprintln!("❌ Failed to get health status: {}", e);
+                eprintln!("Health check failed: {}", e);
                 Err(e.into())
             }
         }
@@ -160,11 +160,11 @@ fn print_health_table(output: &health::HealthOutput) {
         .iter()
         .map(|kild| {
             let status_icon = match kild.metrics.status {
-                health::HealthStatus::Working => "✅",
-                health::HealthStatus::Idle => "⏸️ ",
-                health::HealthStatus::Stuck => "⚠️ ",
-                health::HealthStatus::Crashed => "❌",
-                health::HealthStatus::Unknown => "❓",
+                health::HealthStatus::Working => "[ok]",
+                health::HealthStatus::Idle => "[--]",
+                health::HealthStatus::Stuck => "[!!]",
+                health::HealthStatus::Crashed => "[xx]",
+                health::HealthStatus::Unknown => "[??]",
             };
 
             let cpu_str = match kild.metrics.cpu_usage_percent {
@@ -213,7 +213,7 @@ fn print_health_table(output: &health::HealthOutput) {
         })
         .collect();
 
-    println!("🏥 KILD Health Dashboard");
+    println!("Health Dashboard");
     println!(
         "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
         "─".repeat(st_w + 2),
@@ -286,11 +286,11 @@ fn print_health_table(output: &health::HealthOutput) {
 
 fn print_single_kild_health(kild: &health::KildHealth) {
     let status_icon = match kild.metrics.status {
-        health::HealthStatus::Working => "✅",
-        health::HealthStatus::Idle => "⏸️ ",
-        health::HealthStatus::Stuck => "⚠️ ",
-        health::HealthStatus::Crashed => "❌",
-        health::HealthStatus::Unknown => "❓",
+        health::HealthStatus::Working => "[ok]",
+        health::HealthStatus::Idle => "[--]",
+        health::HealthStatus::Stuck => "[!!]",
+        health::HealthStatus::Crashed => "[xx]",
+        health::HealthStatus::Unknown => "[??]",
     };
 
     let activity = kild
@@ -341,7 +341,7 @@ fn print_single_kild_health(kild: &health::KildHealth) {
     let inner_width = label_width + value_width;
     let border = "─".repeat(inner_width + 2);
 
-    println!("🏥 KILD Health: {}", kild.branch);
+    println!("Health: {}", kild.branch);
     println!("┌{}┐", border);
 
     for (label, value) in &rows {

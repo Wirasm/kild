@@ -95,7 +95,7 @@ fn test_hide_all_skips_daemon_sessions_exits_zero() {
     );
 
     assert!(
-        stdout.contains("Skipped 2 daemon-managed kild(s)"),
+        stdout.contains("Skipped 2 daemon-managed kilds"),
         "Should report 2 skipped daemon sessions, got stdout: {}",
         stdout
     );
@@ -164,7 +164,7 @@ fn test_hide_daemon_session_errors_with_attach_hint() {
     );
 
     assert!(
-        stderr.contains("Cannot hide daemon-managed kild"),
+        stderr.contains("Cannot hide"),
         "Should contain daemon error message, got stderr: {}",
         stderr
     );
@@ -204,7 +204,7 @@ fn test_focus_daemon_session_errors_with_attach_hint() {
     );
 
     assert!(
-        stderr.contains("Cannot focus daemon-managed kild"),
+        stderr.contains("Cannot focus"),
         "Should contain daemon error message, got stderr: {}",
         stderr
     );

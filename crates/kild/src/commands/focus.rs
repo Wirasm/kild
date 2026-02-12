@@ -15,7 +15,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.focus_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -28,8 +28,8 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
         .and_then(|a| a.daemon_session_id())
         .is_some()
     {
-        eprintln!("❌ Cannot focus daemon-managed kild '{}'", branch);
-        eprintln!("   Use 'kild attach {}' to connect to the session.", branch);
+        eprintln!("Cannot focus '{}': daemon-managed session.", branch);
+        eprintln!("  Use 'kild attach {}' to connect.", branch);
         error!(
             event = "cli.focus_failed",
             branch = branch,
@@ -50,7 +50,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
         .unwrap_or((None, None));
 
     let terminal_type = term_type.ok_or_else(|| {
-        eprintln!("❌ No terminal type recorded for kild '{}'", branch);
+        eprintln!("No terminal type recorded for '{}'.", branch);
         error!(
             event = "cli.focus_failed",
             branch = branch,
@@ -60,7 +60,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     })?;
 
     let window_id = window_id.ok_or_else(|| {
-        eprintln!("❌ No window ID recorded for kild '{}'", branch);
+        eprintln!("No window ID recorded for '{}'.", branch);
         error!(
             event = "cli.focus_failed",
             branch = branch,
@@ -72,12 +72,12 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     // 4. Focus the terminal window
     match kild_core::terminal_ops::focus_terminal(&terminal_type, &window_id) {
         Ok(()) => {
-            println!("✅ Focused kild '{}' terminal window", branch);
+            println!("Focused '{}'.", branch);
             info!(event = "cli.focus_completed", branch = branch);
             Ok(())
         }
         Err(e) => {
-            eprintln!("❌ Failed to focus terminal for '{}': {}", branch, e);
+            eprintln!("Could not focus '{}': {}", branch, e);
             error!(event = "cli.focus_failed", branch = branch, error = %e);
             Err(e.into())
         }

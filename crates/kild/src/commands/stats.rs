@@ -75,7 +75,7 @@ fn handle_single_stats(
             if json_output {
                 return Err(super::helpers::print_json_error(&e, e.error_code()));
             }
-            eprintln!("Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             return Err(e.into());
         }
     };

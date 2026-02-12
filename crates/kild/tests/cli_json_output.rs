@@ -918,7 +918,7 @@ fn test_status_nonexistent_without_json_uses_stderr() {
 
     // stderr should contain the error message
     assert!(
-        stderr.contains("Failed to get status"),
+        stderr.contains("No kild found"),
         "Without --json, error should go to stderr. Got: {}",
         stderr
     );

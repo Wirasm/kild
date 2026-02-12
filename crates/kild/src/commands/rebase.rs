@@ -41,7 +41,7 @@ pub(crate) fn handle_rebase_command(
     let session = match session_ops::get_session(branch) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to find kild '{}': {}", branch, e);
+            eprintln!("No kild found: {}", branch);
             error!(event = "cli.rebase_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             return Err(e.into());
@@ -50,7 +50,7 @@ pub(crate) fn handle_rebase_command(
 
     match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {
-            println!("✅ {}: rebased onto {}", branch, base_branch);
+            println!("{}: rebased onto {}", branch, base_branch);
             info!(
                 event = "cli.rebase_completed",
                 branch = branch,
@@ -59,7 +59,7 @@ pub(crate) fn handle_rebase_command(
             Ok(())
         }
         Err(e) => {
-            eprintln!("⚠️  {}: {}", branch, e);
+            eprintln!("{}: {}", branch, e);
             error!(
                 event = "cli.rebase_failed",
                 branch = branch,
@@ -95,7 +95,7 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
     for session in &sessions {
         match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
             Ok(()) => {
-                println!("✅ {}: rebased onto {}", session.branch, base_branch);
+                println!("{}: rebased onto {}", session.branch, base_branch);
                 info!(
                     event = "cli.rebase_completed",
                     branch = session.branch,
@@ -104,7 +104,7 @@ fn handle_rebase_all(base_override: Option<String>) -> Result<(), Box<dyn std::e
                 rebased.push(session.branch.clone());
             }
             Err(e) => {
-                eprintln!("⚠️  {}: {}", session.branch, e);
+                eprintln!("{}: {}", session.branch, e);
                 error!(
                     event = "cli.rebase_failed",
                     branch = session.branch,

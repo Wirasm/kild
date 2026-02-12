@@ -162,7 +162,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 return Err(super::helpers::print_json_error(&e, e.error_code()));
             }
 
-            eprintln!("❌ Failed to list kilds: {}", e);
+            eprintln!("{}", e);
             Err(e.into())
         }
     }

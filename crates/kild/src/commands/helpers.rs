@@ -90,11 +90,35 @@ pub fn is_confirmation_accepted(input: &str) -> bool {
     normalized == "y" || normalized == "yes"
 }
 
+/// Return "kild" or "kilds" based on count.
+pub fn plural(count: usize) -> &'static str {
+    if count == 1 { "kild" } else { "kilds" }
+}
+
+/// Format count with pluralized "kild"/"kilds", e.g. "3 kilds" or "1 kild".
+pub fn format_count(count: usize) -> String {
+    format!("{} {}", count, plural(count))
+}
+
+/// Replace home directory prefix with `~` for display.
+pub fn shorten_home_path(path: &std::path::Path) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = std::path::Path::new(&home);
+        if let Ok(relative) = path.strip_prefix(home_path) {
+            return format!("~/{}", relative.display());
+        }
+    }
+    path.display().to_string()
+}
+
 /// Format partial failure error message for bulk operations.
 pub fn format_partial_failure_error(operation: &str, failed: usize, total: usize) -> String {
     format!(
-        "Partial failure: {} of {} kild(s) failed to {}",
-        failed, total, operation
+        "{} of {} {} failed to {}",
+        failed,
+        total,
+        plural(total),
+        operation
     )
 }
 
@@ -265,31 +289,79 @@ mod tests {
     }
 
     #[test]
+    fn test_plural_zero() {
+        assert_eq!(plural(0), "kilds");
+    }
+
+    #[test]
+    fn test_plural_one() {
+        assert_eq!(plural(1), "kild");
+    }
+
+    #[test]
+    fn test_plural_many() {
+        assert_eq!(plural(2), "kilds");
+        assert_eq!(plural(10), "kilds");
+    }
+
+    #[test]
+    fn test_format_count() {
+        assert_eq!(format_count(0), "0 kilds");
+        assert_eq!(format_count(1), "1 kild");
+        assert_eq!(format_count(2), "2 kilds");
+        assert_eq!(format_count(10), "10 kilds");
+    }
+
+    #[test]
+    fn test_shorten_home_path_with_home_prefix() {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = std::path::PathBuf::from(&home).join(".kild/worktrees/kild/feature-auth");
+            let shortened = shorten_home_path(&path);
+            assert_eq!(shortened, "~/.kild/worktrees/kild/feature-auth");
+        }
+    }
+
+    #[test]
+    fn test_shorten_home_path_without_home_prefix() {
+        let path = std::path::Path::new("/tmp/some/other/path");
+        let shortened = shorten_home_path(path);
+        assert_eq!(shortened, "/tmp/some/other/path");
+    }
+
+    #[test]
+    fn test_shorten_home_path_at_home_root() {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = std::path::Path::new(&home);
+            let shortened = shorten_home_path(path);
+            assert_eq!(shortened, "~/");
+        }
+    }
+
+    #[test]
     fn test_format_partial_failure_error_destroy() {
         let error = format_partial_failure_error("destroy", 2, 5);
-        assert_eq!(error, "Partial failure: 2 of 5 kild(s) failed to destroy");
+        assert_eq!(error, "2 of 5 kilds failed to destroy");
     }
 
     #[test]
     fn test_format_partial_failure_error_all_failed() {
         let error = format_partial_failure_error("destroy", 3, 3);
-        assert_eq!(error, "Partial failure: 3 of 3 kild(s) failed to destroy");
+        assert_eq!(error, "3 of 3 kilds failed to destroy");
     }
 
     #[test]
     fn test_format_partial_failure_error_one_failed() {
         let error = format_partial_failure_error("destroy", 1, 10);
-        assert_eq!(error, "Partial failure: 1 of 10 kild(s) failed to destroy");
+        assert_eq!(error, "1 of 10 kilds failed to destroy");
     }
 
     #[test]
     fn test_format_partial_failure_error_other_operations() {
-        // Verify the helper works for other operations too
         let stop_error = format_partial_failure_error("stop", 1, 3);
-        assert_eq!(stop_error, "Partial failure: 1 of 3 kild(s) failed to stop");
+        assert_eq!(stop_error, "1 of 3 kilds failed to stop");
 
         let open_error = format_partial_failure_error("open", 2, 4);
-        assert_eq!(open_error, "Partial failure: 2 of 4 kild(s) failed to open");
+        assert_eq!(open_error, "2 of 4 kilds failed to open");
     }
 
     fn config_with_daemon_enabled() -> KildConfig {

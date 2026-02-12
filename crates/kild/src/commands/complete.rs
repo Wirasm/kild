@@ -25,21 +25,19 @@ pub(crate) fn handle_complete_command(
         Ok(result) => {
             use kild_core::CompleteResult;
 
-            println!("\u{2705} KILD '{}' completed!", branch);
+            println!("Completed '{}'. Session destroyed.", branch);
             match result {
                 CompleteResult::RemoteDeleted => {
-                    println!("   Remote branch deleted (PR was merged)");
+                    println!("  Remote branch deleted. PR was merged.");
                 }
                 CompleteResult::RemoteDeleteFailed => {
-                    println!("   Remote branch deletion failed (PR was merged, check logs)");
+                    println!("  Remote branch deletion failed. Check logs.");
                 }
                 CompleteResult::PrNotMerged => {
-                    println!("   Remote branch preserved (merge will delete it)");
+                    println!("  Remote branch preserved. Merge will clean up.");
                 }
                 CompleteResult::PrCheckUnavailable => {
-                    println!(
-                        "   Could not verify PR merge status \u{2014} remote branch preserved"
-                    );
+                    println!("  PR merge status unknown. Remote branch preserved.");
                 }
             }
 
@@ -52,7 +50,7 @@ pub(crate) fn handle_complete_command(
             Ok(())
         }
         Err(e) => {
-            eprintln!("\u{274c} {}", e);
+            eprintln!("{}", e);
 
             error!(
                 event = "cli.complete_failed",

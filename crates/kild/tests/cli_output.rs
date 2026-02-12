@@ -215,9 +215,9 @@ fn test_diff_nonexistent_branch_error() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should contain error indicator emoji and helpful message
+    // Should contain a clear error message
     assert!(
-        stderr.contains("❌") || stderr.contains("Failed to find kild"),
+        stderr.contains("No kild found"),
         "Error output should contain failure indicator, got stderr: {}",
         stderr
     );
@@ -290,7 +290,7 @@ fn test_error_output_is_clean_in_default_mode() {
 
     // Should contain the user-facing error message
     assert!(
-        stderr.contains("❌"),
+        stderr.contains("No kild found"),
         "Should contain user-facing error indicator, got: {}",
         stderr
     );
@@ -323,7 +323,11 @@ fn test_error_output_verbose_shows_json() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     // Should contain user-facing error
-    assert!(stderr.contains("❌"));
+    assert!(
+        stderr.contains("No kild found"),
+        "Should contain user-facing error, got: {}",
+        stderr
+    );
 
     // Should contain JSON error logs in verbose mode
     assert!(

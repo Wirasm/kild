@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use kild_core::session_ops;
 
-use super::helpers::{format_partial_failure_error, load_config_with_warning};
+use super::helpers::{format_partial_failure_error, load_config_with_warning, plural};
 
 pub(crate) fn handle_overlaps_command(
     matches: &ArgMatches,
@@ -72,12 +72,17 @@ pub(crate) fn handle_overlaps_command(
         let all_failed = errors.len() == total;
 
         if all_failed {
-            eprintln!("Error: All {} kild(s) failed to compute overlaps:", total);
+            eprintln!(
+                "All {} {} failed to compute overlaps:",
+                total,
+                plural(total)
+            );
         } else {
             eprintln!(
-                "Warning: {} of {} kild(s) failed (showing partial results):",
+                "{} of {} {} failed (partial results):",
                 errors.len(),
-                total
+                total,
+                plural(total)
             );
         }
 
@@ -91,7 +96,7 @@ pub(crate) fn handle_overlaps_command(
                 failed = errors.len(),
                 total = total
             );
-            return Err(format!("All {} kild(s) failed overlap detection", total).into());
+            return Err(format!("All {} {} failed overlap detection", total, plural(total)).into());
         }
 
         eprintln!();
