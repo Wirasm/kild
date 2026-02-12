@@ -73,7 +73,36 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
     let (process_metrics, process_running) = if let Some(pid) = running_pid {
         (get_metrics_for_pid(pid, &session.branch), true)
     } else {
-        (None, false)
+        // Check daemon-managed agents if no PID-based process is running
+        let mut daemon_running = false;
+        for agent in session.agents() {
+            if let Some(daemon_sid) = agent.daemon_session_id() {
+                match crate::daemon::client::get_session_status(daemon_sid) {
+                    Ok(Some(
+                        kild_protocol::SessionStatus::Running
+                        | kild_protocol::SessionStatus::Creating,
+                    )) => {
+                        daemon_running = true;
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(e) => {
+                        warn!(
+                            event = "core.health.daemon_status_check_failed",
+                            daemon_session_id = daemon_sid,
+                            agent = agent.agent(),
+                            branch = &session.branch,
+                            error = %e,
+                        );
+                        // Treat unexpected errors as running to avoid false Crashed
+                        // status — we can't confirm the session actually exited.
+                        daemon_running = true;
+                        break;
+                    }
+                }
+            }
+        }
+        (None, daemon_running)
     };
 
     let status_info = read_agent_status(&session.id);
