@@ -228,6 +228,8 @@ pub struct AgentProcess {
     command: String,
     opened_at: String,
     /// Daemon session ID when this agent runs in a daemon-owned PTY.
+    /// Contains the spawn_id (e.g., `"myproject_feature-auth_0"`) to uniquely
+    /// identify this agent's PTY session in the daemon.
     /// When `Some`, process_id/process_name/process_start_time are `None`
     /// and operations route through `daemon::client` instead of PID-based tracking.
     daemon_session_id: Option<String>,

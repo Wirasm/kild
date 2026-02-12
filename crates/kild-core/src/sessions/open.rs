@@ -264,7 +264,7 @@ pub fn open_session(
 
         let daemon_request = crate::daemon::client::DaemonCreateRequest {
             request_id: &spawn_id,
-            session_id: &session.id,
+            session_id: &spawn_id,
             working_directory: &session.worktree_path,
             command: &cmd,
             args: &cmd_args,

@@ -255,17 +255,17 @@ pub fn create_session(
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).
-            match crate::daemon::client::destroy_daemon_session(&session_id, true) {
+            match crate::daemon::client::destroy_daemon_session(&spawn_id, true) {
                 Ok(()) => {
                     debug!(
                         event = "core.session.preemptive_cleanup_completed",
-                        session_id = session_id,
+                        spawn_id = spawn_id,
                     );
                 }
                 Err(e) => {
                     debug!(
                         event = "core.session.preemptive_cleanup_skipped",
-                        session_id = session_id,
+                        spawn_id = spawn_id,
                         error = %e,
                     );
                 }
@@ -280,7 +280,7 @@ pub fn create_session(
 
             let daemon_request = crate::daemon::client::DaemonCreateRequest {
                 request_id: &spawn_id,
-                session_id: &session_id,
+                session_id: &spawn_id,
                 working_directory: &worktree.path,
                 command: &cmd,
                 args: &cmd_args,
@@ -315,10 +315,16 @@ pub fn create_session(
                         })
                         .unwrap_or_default();
 
-                let _ = crate::daemon::client::destroy_daemon_session(
+                if let Err(e) = crate::daemon::client::destroy_daemon_session(
                     &daemon_result.daemon_session_id,
                     true,
-                );
+                ) {
+                    warn!(
+                        event = "core.session.create_daemon_cleanup_failed",
+                        daemon_session_id = %daemon_result.daemon_session_id,
+                        error = %e,
+                    );
+                }
 
                 return Err(SessionError::DaemonPtyExitedEarly {
                     exit_code,

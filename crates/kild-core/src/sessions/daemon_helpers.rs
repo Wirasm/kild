@@ -446,6 +446,19 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_spawn_id_produces_unique_ids() {
+        let session_id = "myproject_feature-auth";
+        let id_0 = compute_spawn_id(session_id, 0);
+        let id_1 = compute_spawn_id(session_id, 1);
+        let id_2 = compute_spawn_id(session_id, 2);
+        assert_eq!(id_0, "myproject_feature-auth_0");
+        assert_eq!(id_1, "myproject_feature-auth_1");
+        assert_eq!(id_2, "myproject_feature-auth_2");
+        assert_ne!(id_0, id_1);
+        assert_ne!(id_1, id_2);
+    }
+
+    #[test]
     fn test_build_daemon_request_no_task_list_env_var_when_none() {
         let (_cmd, _args, env_vars, _) =
             build_daemon_create_request("claude", "claude", "test-session", None).unwrap();

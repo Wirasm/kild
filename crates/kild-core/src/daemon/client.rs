@@ -126,7 +126,8 @@ fn send_request(
 pub struct DaemonCreateRequest<'a> {
     /// Unique request ID for response correlation.
     pub request_id: &'a str,
-    /// Session identifier (e.g. "myapp_feature-auth").
+    /// Unique daemon session identifier (e.g. "myapp_feature-auth_0").
+    /// Each agent spawn gets its own daemon session via `compute_spawn_id()`.
     pub session_id: &'a str,
     /// Working directory for the PTY process.
     pub working_directory: &'a Path,
