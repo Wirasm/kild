@@ -124,6 +124,12 @@ impl TableFormatter {
                     Ok(false) => {}
                     Err(_) => errored += 1,
                 }
+            } else if let Some(daemon_sid) = agent_proc.daemon_session_id() {
+                match kild_core::daemon::client::get_session_status(daemon_sid) {
+                    Ok(Some(kild_protocol::SessionStatus::Running)) => running += 1,
+                    Ok(_) => {}
+                    Err(_) => errored += 1,
+                }
             }
         }
         let total = session.agent_count();

@@ -126,6 +126,28 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
                 }
             }
         }
+
+        // Fallback to daemon-based detection
+        if let Some(daemon_sid) = agent_proc.daemon_session_id() {
+            match crate::daemon::client::get_session_status(daemon_sid) {
+                Ok(Some(kild_protocol::SessionStatus::Running)) => {
+                    any_running = true;
+                    continue;
+                }
+                Ok(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        event = "core.session.daemon_check_failed",
+                        daemon_session_id = daemon_sid,
+                        agent = agent_proc.agent(),
+                        branch = &session.branch,
+                        error = %e
+                    );
+                    any_unknown = true;
+                    continue;
+                }
+            }
+        }
     }
 
     if any_running {
@@ -305,6 +327,25 @@ mod tests {
         assert_eq!(check_git_status(path), GitStatus::Unknown);
     }
 
+    fn make_daemon_agent(
+        agent: &str,
+        daemon_session_id: &str,
+    ) -> crate::sessions::types::AgentProcess {
+        crate::sessions::types::AgentProcess::new(
+            agent.to_string(),
+            String::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            String::new(),
+            "2024-01-01T00:00:00Z".to_string(),
+            Some(daemon_session_id.to_string()),
+        )
+        .unwrap()
+    }
+
     fn make_agent(agent: &str, pid: Option<u32>) -> crate::sessions::types::AgentProcess {
         crate::sessions::types::AgentProcess::new(
             agent.to_string(),
@@ -406,6 +447,20 @@ mod tests {
         assert!(!session.has_agents());
         assert_eq!(session.agent_count(), 0);
         assert!(session.latest_agent().is_none());
+    }
+
+    #[test]
+    fn test_determine_process_status_daemon_agent_no_pid() {
+        // Daemon agent with no PID should not crash - daemon IPC will fail gracefully
+        let mut session = make_session(PathBuf::from("/tmp/nonexistent"));
+        let agent = make_daemon_agent("claude", "test_daemon_0");
+        session.set_agents(vec![agent]);
+        // Without a running daemon, should return Stopped or Unknown (not crash)
+        let status = determine_process_status(&session);
+        assert!(matches!(
+            status,
+            ProcessStatus::Stopped | ProcessStatus::Unknown
+        ));
     }
 
     #[test]

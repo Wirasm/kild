@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 kild-core.workspace = true
+kild-protocol.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 serde.workspace = true

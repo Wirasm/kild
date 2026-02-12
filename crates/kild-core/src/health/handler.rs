@@ -73,7 +73,12 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
     let (process_metrics, process_running) = if let Some(pid) = running_pid {
         (get_metrics_for_pid(pid, &session.branch), true)
     } else {
-        (None, false)
+        // Check daemon-managed agents if no PID-based process is running
+        let daemon_running = session.agents().iter().any(|a| {
+            a.daemon_session_id()
+                .is_some_and(is_daemon_session_running)
+        });
+        (None, daemon_running)
     };
 
     let status_info = read_agent_status(&session.id);
@@ -87,6 +92,22 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
         agent_status,
         agent_status_updated_at,
     )
+}
+
+/// Check if a daemon-managed session is still running via IPC.
+fn is_daemon_session_running(daemon_session_id: &str) -> bool {
+    match crate::daemon::client::get_session_status(daemon_session_id) {
+        Ok(Some(kild_protocol::SessionStatus::Running)) => true,
+        Ok(_) => false,
+        Err(e) => {
+            warn!(
+                event = "core.health.daemon_status_check_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            false
+        }
+    }
 }
 
 fn get_metrics_for_pid(pid: u32, branch: &str) -> Option<ProcessMetrics> {
