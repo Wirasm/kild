@@ -144,7 +144,11 @@ impl Terminal {
     ///
     /// Spawns the user's default shell, starts a background reader task
     /// for PTY output, and sets up 4ms event batching.
-    pub fn new(cx: &mut gpui::App) -> Result<Self, TerminalError> {
+    ///
+    /// If `cwd` is `Some` and the path exists, the shell starts in that directory.
+    /// If the path doesn't exist, falls back to the user's home directory.
+    /// If `cwd` is `None`, uses the home directory (original behavior).
+    pub fn new(cwd: Option<std::path::PathBuf>, cx: &mut gpui::App) -> Result<Self, TerminalError> {
         let rows = DEFAULT_ROWS;
         let cols = DEFAULT_COLS;
 
@@ -178,9 +182,23 @@ impl Terminal {
         let mut cmd = CommandBuilder::new(&shell);
         // Set TERM for proper escape sequence support
         cmd.env("TERM", "xterm-256color");
-        // Set working directory to user's home
-        if let Some(home) = dirs::home_dir() {
-            cmd.cwd(home);
+        // Set working directory
+        let working_dir = cwd
+            .filter(|p| {
+                if p.exists() {
+                    true
+                } else {
+                    tracing::warn!(
+                        event = "ui.terminal.cwd_not_found",
+                        path = %p.display(),
+                        "Requested working directory does not exist, falling back to home"
+                    );
+                    false
+                }
+            })
+            .or_else(dirs::home_dir);
+        if let Some(dir) = &working_dir {
+            cmd.cwd(dir);
         }
 
         let child = pair
@@ -198,6 +216,7 @@ impl Terminal {
         tracing::info!(
             event = "ui.terminal.create_started",
             shell = shell,
+            cwd = ?working_dir,
             rows = rows,
             cols = cols,
         );

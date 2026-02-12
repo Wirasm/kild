@@ -522,10 +522,47 @@ impl MainView {
     }
 
     /// Handle kild row click - select for detail panel.
-    pub fn on_kild_select(&mut self, session_id: &str, cx: &mut Context<Self>) {
+    pub fn on_kild_select(
+        &mut self,
+        session_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         tracing::debug!(event = "ui.kild.selected", session_id = session_id);
         let id = session_id.to_string();
-        self.mutate_state(cx, |s| s.select_kild(id));
+        self.state.select_kild(id);
+
+        if let Some(display) = self.state.selected_kild() {
+            let worktree = display.session.worktree_path.clone();
+
+            // Recycle exited terminal
+            if let Some(view) = &self.terminal_view
+                && view.read(cx).terminal().has_exited()
+            {
+                self.terminal_view = None;
+            }
+
+            match crate::terminal::state::Terminal::new(Some(worktree), cx) {
+                Ok(terminal) => {
+                    let view = cx.new(|cx| {
+                        crate::terminal::TerminalView::from_terminal(terminal, window, cx)
+                    });
+                    self.terminal_view = Some(view);
+                    self.show_terminal = true;
+                    self.show_daemon_terminal = false;
+                    if let Some(v) = &self.terminal_view {
+                        let h = v.read(cx).focus_handle(cx).clone();
+                        window.focus(&h);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(event = "ui.terminal.create_failed", error = %e);
+                    self.state
+                        .push_error(format!("Terminal creation failed: {}", e));
+                }
+            }
+        }
+        cx.notify();
     }
 
     /// Handle click on the Open button [▶] in a kild row.
@@ -979,7 +1016,7 @@ impl MainView {
                 // Lazy-create terminal on first toggle (or after shell exit)
                 if self.terminal_view.is_none() {
                     tracing::info!(event = "ui.terminal.create_started");
-                    match crate::terminal::state::Terminal::new(cx) {
+                    match crate::terminal::state::Terminal::new(None, cx) {
                         Ok(terminal) => {
                             let view = cx.new(|cx| {
                                 crate::terminal::TerminalView::from_terminal(terminal, window, cx)
@@ -1145,6 +1182,15 @@ impl MainView {
                     window.focus(&handle);
                 }
             }
+            cx.notify();
+            return;
+        }
+
+        // Escape from terminal → back to dashboard
+        if key_str == "escape" && (self.show_terminal || self.show_daemon_terminal) {
+            self.show_terminal = false;
+            self.show_daemon_terminal = false;
+            window.focus(&self.focus_handle);
             cx.notify();
             return;
         }

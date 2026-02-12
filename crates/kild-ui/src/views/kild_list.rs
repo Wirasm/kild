@@ -196,8 +196,8 @@ pub fn render_kild_list(state: &AppState, cx: &mut Context<MainView>) -> impl In
                                     .flex()
                                     .flex_col()
                                     .cursor_pointer()
-                                    .on_click(cx.listener(move |view, _, _, cx| {
-                                        view.on_kild_select(&session_id_for_click, cx);
+                                    .on_click(cx.listener(move |view, _, window, cx| {
+                                        view.on_kild_select(&session_id_for_click, window, cx);
                                     }))
                                     // Selected state styling (ice left border)
                                     .when(is_selected, |row| {
