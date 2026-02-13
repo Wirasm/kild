@@ -22,25 +22,58 @@ pub enum TerminalBackend {
 
 /// A single terminal tab within a kild's tab bar.
 pub struct TabEntry {
-    pub view: gpui::Entity<TerminalView>,
-    pub label: String,
-    pub backend: TerminalBackend,
+    view: gpui::Entity<TerminalView>,
+    label: String,
+    backend: TerminalBackend,
+}
+
+impl TabEntry {
+    pub fn label(&self) -> &str {
+        &self.label
+    }
 }
 
 /// Per-kild collection of terminal tabs with cycling and close logic.
 pub struct TerminalTabs {
-    pub tabs: Vec<TabEntry>,
-    pub active: usize,
+    tabs: Vec<TabEntry>,
+    active: usize,
     next_id: usize,
 }
 
-impl TerminalTabs {
-    pub fn new() -> Self {
+impl Default for TerminalTabs {
+    fn default() -> Self {
         Self {
             tabs: Vec::new(),
             active: 0,
             next_id: 1,
         }
+    }
+}
+
+impl TerminalTabs {
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
+    /// Set the active tab index. No-op with warning if out of bounds.
+    pub fn set_active(&mut self, idx: usize) {
+        if idx < self.tabs.len() {
+            self.active = idx;
+        } else {
+            tracing::warn!(
+                event = "ui.terminal_tabs.set_active_oob",
+                idx = idx,
+                len = self.tabs.len()
+            );
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.tabs.len()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&TabEntry> {
+        self.tabs.get(idx)
     }
 
     pub fn active_view(&self) -> Option<&gpui::Entity<TerminalView>> {
@@ -106,7 +139,7 @@ impl TerminalTabs {
     }
 
     pub fn cycle_next(&mut self) {
-        debug_assert!(
+        assert!(
             self.tabs.is_empty() || self.active < self.tabs.len(),
             "invariant violated: active={}, len={}",
             self.active,
@@ -119,7 +152,7 @@ impl TerminalTabs {
     }
 
     pub fn cycle_prev(&mut self) {
-        debug_assert!(
+        assert!(
             self.tabs.is_empty() || self.active < self.tabs.len(),
             "invariant violated: active={}, len={}",
             self.active,
@@ -197,11 +230,21 @@ pub fn render_tab_bar(ctx: &TabBarContext, cx: &mut Context<MainView>) -> gpui::
                 .is_some_and(|(s, i, _)| *s == session_id && *i == idx);
 
             if is_renaming {
-                let input_state = ctx
-                    .renaming_tab
-                    .as_ref()
-                    .map(|(_, _, input)| (*input).clone())
-                    .unwrap();
+                let Some((_, _, input)) = ctx.renaming_tab.as_ref() else {
+                    // Invariant: is_renaming was true but renaming_tab is None — logic error.
+                    // Fall through to render as normal tab instead of panicking.
+                    tracing::error!(
+                        event = "ui.terminal_tabs.renaming_state_inconsistent",
+                        idx = idx,
+                        "is_renaming was true but renaming_tab is None"
+                    );
+                    let label = entry.label.clone();
+                    return div()
+                        .text_size(px(theme::TEXT_SM))
+                        .child(label)
+                        .into_any_element();
+                };
+                let input_state = (*input).clone();
                 return div()
                     .flex()
                     .items_center()
@@ -415,10 +458,45 @@ mod tests {
     // --- TerminalTabs unit tests (pure logic, no GPUI entities) ---
 
     #[test]
-    fn test_terminal_tabs_new_is_empty() {
-        let tabs = TerminalTabs::new();
+    fn test_terminal_tabs_default_is_empty() {
+        let tabs = TerminalTabs::default();
         assert!(tabs.is_empty());
-        assert_eq!(tabs.active, 0);
+        assert_eq!(tabs.active_index(), 0);
+        assert_eq!(tabs.len(), 0);
         assert!(tabs.active_view().is_none());
+    }
+
+    #[test]
+    fn test_set_active_oob_is_noop() {
+        let mut tabs = TerminalTabs::default();
+        tabs.set_active(5); // out of bounds on empty tabs
+        assert_eq!(tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn test_cycle_next_empty_is_noop() {
+        let mut tabs = TerminalTabs::default();
+        tabs.cycle_next(); // should not panic
+        assert_eq!(tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn test_cycle_prev_empty_is_noop() {
+        let mut tabs = TerminalTabs::default();
+        tabs.cycle_prev(); // should not panic
+        assert_eq!(tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn test_close_oob_returns_none() {
+        let mut tabs = TerminalTabs::default();
+        assert_eq!(tabs.close(99), None);
+    }
+
+    #[test]
+    fn test_get_oob_returns_none() {
+        let tabs = TerminalTabs::default();
+        assert!(tabs.get(0).is_none());
+        assert!(tabs.get(99).is_none());
     }
 }

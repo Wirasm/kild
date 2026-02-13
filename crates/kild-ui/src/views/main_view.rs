@@ -125,7 +125,8 @@ fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
 /// Tracks which region of the UI currently has logical focus.
 ///
 /// Used for keyboard routing — determines where key events are dispatched.
-/// Phase 2.6 will add `Sidebar` when the sidebar becomes interactive.
+/// Currently set on every focus transition to maintain correct state for
+/// Phase 2.6, which will read this to route ⌘D toggle and sidebar navigation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FocusRegion {
     Dashboard,
@@ -597,7 +598,7 @@ impl MainView {
                 let tabs = self
                     .terminal_tabs
                     .entry(session_id.to_string())
-                    .or_insert_with(TerminalTabs::new);
+                    .or_default();
                 tabs.push(view, TerminalBackend::Local);
                 true
             }
@@ -693,7 +694,7 @@ impl MainView {
                         let tabs = view
                             .terminal_tabs
                             .entry(kild_id.clone())
-                            .or_insert_with(TerminalTabs::new);
+                            .or_default();
                         tabs.push(
                             entity,
                             TerminalBackend::Daemon {
@@ -841,8 +842,17 @@ impl MainView {
             let result = cx
                 .background_executor()
                 .spawn(async {
-                    let config =
-                        kild_core::config::KildConfig::load_hierarchy().unwrap_or_default();
+                    let config = match kild_core::config::KildConfig::load_hierarchy() {
+                        Ok(cfg) => cfg,
+                        Err(e) => {
+                            tracing::warn!(
+                                event = "ui.daemon.config_load_failed",
+                                error = %e,
+                                "Using default config"
+                            );
+                            kild_core::config::KildConfig::default()
+                        }
+                    };
                     kild_core::daemon::autostart::ensure_daemon_running(&config)
                 })
                 .await;
@@ -940,7 +950,7 @@ impl MainView {
 
         if let Some(tabs) = self.terminal_tabs.get_mut(&id)
             && tabs.has_exited_active(cx)
-            && let Some(daemon_id) = tabs.close(tabs.active)
+            && let Some(daemon_id) = tabs.close(tabs.active_index())
         {
             Self::stop_daemon_session_async(daemon_id, cx);
         }
@@ -1412,17 +1422,15 @@ impl MainView {
         let is_already_active = self
             .terminal_tabs
             .get(session_id)
-            .is_some_and(|tabs| tabs.active == idx);
+            .is_some_and(|tabs| tabs.active_index() == idx);
 
         if is_already_active {
             self.start_rename(session_id, idx, window, cx);
             return;
         }
 
-        if let Some(tabs) = self.terminal_tabs.get_mut(session_id)
-            && idx < tabs.tabs.len()
-        {
-            tabs.active = idx;
+        if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
+            tabs.set_active(idx);
         }
         self.focus_active_terminal(window, cx);
         cx.notify();
@@ -1438,8 +1446,8 @@ impl MainView {
         let current_label = self
             .terminal_tabs
             .get(session_id)
-            .and_then(|tabs| tabs.tabs.get(idx))
-            .map(|e| e.label.clone())
+            .and_then(|tabs| tabs.get(idx))
+            .map(|e| e.label().to_string())
             .unwrap_or_default();
 
         let input = cx.new(|cx| InputState::new(window, cx).default_value(current_label));
@@ -1548,7 +1556,7 @@ impl MainView {
         if key_str == "tab" && event.keystroke.modifiers.control {
             let should_focus = if let Some(id) = &self.active_terminal_id {
                 if let Some(tabs) = self.terminal_tabs.get_mut(id) {
-                    if tabs.tabs.len() > 1 {
+                    if tabs.len() > 1 {
                         if event.keystroke.modifiers.shift {
                             tabs.cycle_prev();
                         } else {
