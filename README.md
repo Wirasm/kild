@@ -31,7 +31,8 @@ cargo run -p kild-ui
 ```
 
 The GUI currently supports:
-- Multi-project management: Add git repositories as projects, switch between them
+- Multi-project management: Project rail (48px) with icon-based switcher and badge counts
+- Sidebar navigation: Kilds grouped by Active/Stopped status with nested terminal tab names
 - KILD listing with status indicators (running, stopped, git dirty state)
 - Creating new kilds with agent selection
 - Opening new agents in existing kilds
@@ -39,8 +40,8 @@ The GUI currently supports:
 - Destroying kilds with confirmation dialog
 - Bulk operations: Open All stopped kilds, Stop All running kilds
 - Quick actions: Copy path to clipboard, open in editor, focus terminal window
-- Live terminal rendering: Press Ctrl+T to toggle between 3-column layout and full-screen terminal view
-- Keyboard navigation: Cmd+J (next kild), Cmd+K (prev kild)
+- Live terminal rendering with multiple tabs per kild
+- Keyboard navigation: Cmd+J (next kild), Cmd+K (prev kild), Cmd+D (toggle Control/Dashboard view), Ctrl+Escape (move focus from terminal to sidebar)
 
 See the [PRD](.claude/PRPs/prds/gpui-native-terminal-ui.prd.md) for the development roadmap.
 
