@@ -196,11 +196,18 @@ impl TerminalTabs {
     }
 }
 
+/// State for an in-progress tab rename operation.
+pub struct RenamingTab<'a> {
+    pub session_id: &'a str,
+    pub tab_index: usize,
+    pub input: &'a gpui::Entity<InputState>,
+}
+
 /// Data needed to render the tab bar, extracted from MainView fields.
 pub struct TabBarContext<'a> {
     pub tabs: &'a TerminalTabs,
     pub session_id: &'a str,
-    pub renaming_tab: Option<(&'a str, usize, &'a gpui::Entity<InputState>)>,
+    pub renaming_tab: Option<RenamingTab<'a>>,
     pub show_add_menu: bool,
     pub daemon_available: Option<bool>,
     pub daemon_starting: bool,
@@ -231,10 +238,10 @@ pub fn render_tab_bar(ctx: &TabBarContext, cx: &mut Context<MainView>) -> gpui::
             let is_renaming = ctx
                 .renaming_tab
                 .as_ref()
-                .is_some_and(|(s, i, _)| *s == session_id && *i == idx);
+                .is_some_and(|r| r.session_id == session_id && r.tab_index == idx);
 
             if is_renaming {
-                let Some((_, _, input)) = ctx.renaming_tab.as_ref() else {
+                let Some(renaming) = ctx.renaming_tab.as_ref() else {
                     // Invariant: is_renaming was true but renaming_tab is None — logic error.
                     // Fall through to render as normal tab instead of panicking.
                     tracing::error!(
@@ -248,7 +255,7 @@ pub fn render_tab_bar(ctx: &TabBarContext, cx: &mut Context<MainView>) -> gpui::
                         .child(label)
                         .into_any_element();
                 };
-                let input_state = (*input).clone();
+                let input_state = renaming.input.clone();
                 return div()
                     .flex()
                     .items_center()

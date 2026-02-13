@@ -2,7 +2,6 @@
 //!
 //! Renders fleet summary bar and responsive grid of kild cards.
 
-use chrono::{DateTime, Utc};
 use gpui::{
     AnyElement, Context, IntoElement, ParentElement, SharedString, Styled, div, prelude::*, px,
 };
@@ -10,33 +9,13 @@ use gpui::{
 use crate::components::{Status, StatusIndicator};
 use crate::state::AppState;
 use crate::theme;
+use crate::views::helpers::format_relative_time;
 use crate::views::main_view::MainView;
 use crate::views::terminal_tabs::TerminalTabs;
 use kild_core::ProcessStatus;
 
-/// Format RFC3339 timestamp as relative time (e.g., "5m ago", "2h ago").
-fn format_relative_time(timestamp: &str) -> String {
-    let Ok(created) = DateTime::parse_from_rfc3339(timestamp) else {
-        return timestamp.to_string();
-    };
-
-    let now = Utc::now();
-    let duration = now.signed_duration_since(created.with_timezone(&Utc));
-
-    let minutes = duration.num_minutes();
-    let hours = duration.num_hours();
-    let days = duration.num_days();
-
-    if days > 0 {
-        format!("{}d ago", days)
-    } else if hours > 0 {
-        format!("{}h ago", hours)
-    } else if minutes > 0 {
-        format!("{}m ago", minutes)
-    } else {
-        "just now".to_string()
-    }
-}
+/// Max note length before truncating on cards (prevents card width overflow).
+const MAX_NOTE_LENGTH: usize = 50;
 
 /// Render the dashboard view with fleet summary and kild card grid.
 pub fn render_dashboard(
@@ -210,10 +189,12 @@ fn render_card(
                         .child(agent),
                 ),
         )
-        // Row 2: note (truncated)
         .when_some(note, |card, note_text| {
-            let display_text = if note_text.chars().count() > 50 {
-                format!("{}...", note_text.chars().take(50).collect::<String>())
+            let display_text = if note_text.chars().count() > MAX_NOTE_LENGTH {
+                format!(
+                    "{}...",
+                    note_text.chars().take(MAX_NOTE_LENGTH).collect::<String>()
+                )
             } else {
                 note_text
             };
@@ -271,41 +252,4 @@ fn render_card(
                 }),
         )
         .into_any_element()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_relative_time_invalid_timestamp() {
-        assert_eq!(format_relative_time("not-a-timestamp"), "not-a-timestamp");
-    }
-
-    #[test]
-    fn test_format_relative_time_just_now() {
-        let now = Utc::now().to_rfc3339();
-        assert_eq!(format_relative_time(&now), "just now");
-    }
-
-    #[test]
-    fn test_format_relative_time_minutes_ago() {
-        use chrono::Duration;
-        let five_min_ago = (Utc::now() - Duration::minutes(5)).to_rfc3339();
-        assert_eq!(format_relative_time(&five_min_ago), "5m ago");
-    }
-
-    #[test]
-    fn test_format_relative_time_hours_ago() {
-        use chrono::Duration;
-        let two_hours_ago = (Utc::now() - Duration::hours(2)).to_rfc3339();
-        assert_eq!(format_relative_time(&two_hours_ago), "2h ago");
-    }
-
-    #[test]
-    fn test_format_relative_time_days_ago() {
-        use chrono::Duration;
-        let three_days_ago = (Utc::now() - Duration::days(3)).to_rfc3339();
-        assert_eq!(format_relative_time(&three_days_ago), "3d ago");
-    }
 }

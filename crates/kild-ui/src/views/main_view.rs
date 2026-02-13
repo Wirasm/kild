@@ -1585,16 +1585,17 @@ impl MainView {
     }
 
     fn render_tab_bar(&self, session_id: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
-        use super::terminal_tabs::{TabBarContext, render_tab_bar};
+        use super::terminal_tabs::{RenamingTab, TabBarContext, render_tab_bar};
 
         let Some(tabs) = self.terminal_tabs.get(session_id) else {
             return div().into_any_element();
         };
 
-        let renaming = self
-            .renaming_tab
-            .as_ref()
-            .map(|(s, i, input)| (s.as_str(), *i, input));
+        let renaming = self.renaming_tab.as_ref().map(|(s, i, input)| RenamingTab {
+            session_id: s.as_str(),
+            tab_index: *i,
+            input,
+        });
 
         let ctx = TabBarContext {
             tabs,

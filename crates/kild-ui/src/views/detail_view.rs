@@ -3,7 +3,6 @@
 //! Renders comprehensive kild information from a dashboard card click:
 //! hero section, note, session info, git stats, terminals, path, and actions.
 
-use chrono::{DateTime, Utc};
 use gpui::{
     AnyElement, Context, IntoElement, ParentElement, SharedString, Styled, div, prelude::*, px,
 };
@@ -13,33 +12,10 @@ use gpui_component::button::{Button, ButtonVariants};
 use crate::components::{Status, StatusIndicator};
 use crate::state::AppState;
 use crate::theme;
+use crate::views::helpers::format_relative_time;
 use crate::views::main_view::MainView;
 use crate::views::terminal_tabs::{TerminalBackend, TerminalTabs};
 use kild_core::{GitStatus, ProcessStatus};
-
-/// Format RFC3339 timestamp as relative time (e.g., "5m ago", "2h ago").
-fn format_relative_time(timestamp: &str) -> String {
-    let Ok(created) = DateTime::parse_from_rfc3339(timestamp) else {
-        return timestamp.to_string();
-    };
-
-    let now = Utc::now();
-    let duration = now.signed_duration_since(created.with_timezone(&Utc));
-
-    let minutes = duration.num_minutes();
-    let hours = duration.num_hours();
-    let days = duration.num_days();
-
-    if days > 0 {
-        format!("{}d ago", days)
-    } else if hours > 0 {
-        format!("{}h ago", hours)
-    } else if minutes > 0 {
-        format!("{}m ago", minutes)
-    } else {
-        "just now".to_string()
-    }
-}
 
 /// Render a section with a title and content.
 fn render_section(title: &str, content: impl IntoElement) -> impl IntoElement {
@@ -113,28 +89,24 @@ pub fn render_detail_view(
     let created_at = session.created_at.clone();
     let session_id = session.id.clone();
 
-    // Status
     let status = match kild.process_status {
         ProcessStatus::Running => Status::Active,
         ProcessStatus::Stopped => Status::Stopped,
         ProcessStatus::Unknown => Status::Crashed,
     };
 
-    // Git
     let (git_status_text, git_status_color) = match kild.git_status {
         GitStatus::Clean => ("Clean", theme::aurora()),
         GitStatus::Dirty => ("Uncommitted", theme::copper()),
         GitStatus::Unknown => ("Unknown", theme::text_muted()),
     };
 
-    // Runtime mode
     let runtime_text = session
         .runtime_mode
         .as_ref()
         .map(|m| format!("{:?}", m).to_lowercase())
         .unwrap_or_else(|| "terminal".to_string());
 
-    // Action handler clones
     let worktree_path_for_copy = session.worktree_path.clone();
     let worktree_path_for_editor = session.worktree_path.clone();
     let branch_for_editor = branch.clone();
@@ -399,7 +371,6 @@ fn render_terminal_list(
                         view.on_detail_terminal_click(&sid, tab_idx, window, cx);
                     }),
                 )
-                // Status dot (aurora for running terminal)
                 .child(div().size(px(5.0)).rounded_full().bg(theme::aurora()))
                 // Terminal name
                 .child(
@@ -416,7 +387,6 @@ fn render_terminal_list(
                         .text_color(theme::text_muted())
                         .child(mode.to_string()),
                 )
-                // "open →" link (visible on hover via parent)
                 .child(
                     div()
                         .text_size(px(9.0))
