@@ -390,10 +390,11 @@ and comprehensive error handling. Adding terminal rendering is additive — not 
 - `selection.rs` — Kild selection state for detail panel
 
 **Views** (`views/` — 2,969 lines):
-- `main_view.rs` — Root view with 3-column layout (sidebar, kild list, detail panel)
-- `kild_list.rs` — Scrollable list of kilds with status indicators
-- `detail_panel.rs` — 320px right panel with selected kild details
-- `sidebar.rs` — 200px left sidebar for project navigation
+- `main_view.rs` — Root view with Rail | Sidebar | Main | StatusBar layout
+- `sidebar.rs` — 200px kild navigation grouped by Active/Stopped
+- `dashboard_view.rs` — Fleet overview with kild cards
+- `detail_view.rs` — Kild drill-down from dashboard cards
+- `status_bar.rs` — Contextual alerts and view-aware keyboard hints
 - `create_dialog.rs`, `confirm_dialog.rs`, `add_project_dialog.rs` — Modal dialogs
 
 **Components** (`components/`):
@@ -470,8 +471,11 @@ and paints it through a GPUI Element.
 
 **Modify (evolve existing)**:
 - `actions.rs` — Instead of `Command::OpenKild` spawning Ghostty, create a PTY via daemon IPC
-- `views/kild_list.rs` — Evolve from static list to live session cards (expandable/collapsible)
-- `views/detail_panel.rs` — Replace "Focus Terminal" button with embedded terminal view
+- `views/sidebar.rs` — Navigation-only kild list with nested terminal tabs (Active/Stopped grouping)
+- `views/detail_view.rs` — Full kild drill-down with terminal list (click → opens in Control view)
+- `views/dashboard_view.rs` — Fleet cards with git stats, PR info, terminal counts
+- `views/pane_grid.rs` — 2x2 terminal grid for cross-kild terminal viewing
+- `views/status_bar.rs` — Contextual alerts and keyboard shortcut hints
 
 **New dependencies**:
 ```toml

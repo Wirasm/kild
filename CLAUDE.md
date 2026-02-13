@@ -232,7 +232,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `components/` - Custom UI components (StatusIndicator only; Button, TextInput, Modal from gpui-component library)
 - `state/` - Type-safe state modules with encapsulated AppState facade (app_state.rs, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
-- `views/` - GPUI components (permanent Rail | Sidebar | Main layout with project_rail.rs for 48px project switcher, sidebar.rs for kild navigation grouped by Active/Stopped, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support)
+- `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher, sidebar.rs for kild navigation grouped by Active/Stopped, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints)
 - `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle, terminal_element.rs for GPUI Element, terminal_view.rs for View, colors.rs for ANSI mapping, input.rs for keystroke translation)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback

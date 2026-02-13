@@ -96,6 +96,10 @@ fn render_alert_item(alert: &Alert) -> impl IntoElement {
 }
 
 /// Compute alerts from current session state.
+///
+/// Priority ordering (highest first):
+/// 1. Operation errors (ember dot) — from `state.get_error()`
+/// 2. Dirty stopped kilds (copper dot) — running kilds are expected to be dirty
 fn compute_alerts(state: &AppState) -> Vec<Alert> {
     let mut alerts = Vec::new();
     let displays = state.filtered_displays();
@@ -138,7 +142,9 @@ fn render_keyboard_hints(active_view: ActiveView, _cx: &mut Context<MainView>) -
                 .flex()
                 .items_center()
                 .gap(px(2.0))
-                .child(Kbd::new(Keystroke::parse(keystroke_str).unwrap()))
+                .child(Kbd::new(
+                    Keystroke::parse(keystroke_str).expect("hardcoded keystroke should parse"),
+                ))
                 .child(
                     div()
                         .text_size(px(10.0))
@@ -236,6 +242,54 @@ mod tests {
         assert_eq!(hints.len(), 2);
         assert_eq!(hints[0].0, "escape");
         assert_eq!(hints[0].1, "back");
+    }
+
+    #[test]
+    fn test_all_keystroke_hints_parse() {
+        let views = [
+            ActiveView::Control,
+            ActiveView::Dashboard,
+            ActiveView::Detail,
+        ];
+        for view in views {
+            for (keystroke_str, _label) in keyboard_hints_for_view(view) {
+                assert!(
+                    Keystroke::parse(keystroke_str).is_ok(),
+                    "Invalid keystroke '{}' in {:?}",
+                    keystroke_str,
+                    view,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_alerts_errors_before_dirty() {
+        let info = make_info("branch-1", ProcessStatus::Stopped, GitStatus::Dirty);
+        let mut errors = std::collections::HashMap::new();
+        errors.insert(
+            "branch-1".to_string(),
+            crate::state::errors::OperationError {
+                branch: "branch-1".to_string(),
+                message: "open failed".to_string(),
+            },
+        );
+
+        let alerts = compute_alerts_from_displays(&[&info], &errors);
+        assert_eq!(alerts.len(), 2);
+        assert!(alerts[0].is_error, "error alert should come first");
+        assert!(!alerts[1].is_error, "dirty alert should come second");
+    }
+
+    #[test]
+    fn test_compute_alerts_running_dirty_kild_no_alert() {
+        let info = make_info("active-work", ProcessStatus::Running, GitStatus::Dirty);
+
+        let alerts = compute_alerts_from_displays(&[&info], &std::collections::HashMap::new());
+        assert!(
+            alerts.is_empty(),
+            "running dirty kilds should not trigger alerts"
+        );
     }
 
     /// Testable alert computation without AppState dependency.
