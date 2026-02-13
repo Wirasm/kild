@@ -40,6 +40,7 @@ The GUI currently supports:
 - Bulk operations: Open All stopped kilds, Stop All running kilds
 - Quick actions: Copy path to clipboard, open in editor, focus terminal window
 - Live terminal rendering: Press Ctrl+T to toggle between 3-column layout and full-screen terminal view
+- Keyboard navigation: Cmd+J (next kild), Cmd+K (prev kild)
 
 See the [PRD](.claude/PRPs/prds/gpui-native-terminal-ui.prd.md) for the development roadmap.
 

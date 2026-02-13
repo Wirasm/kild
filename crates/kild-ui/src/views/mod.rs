@@ -16,5 +16,6 @@ pub mod detail_panel;
 pub mod kild_list;
 pub mod main_view;
 pub mod sidebar;
+pub mod terminal_tabs;
 
 pub use main_view::MainView;

@@ -18,6 +18,12 @@ pub fn keystroke_to_escape(keystroke: &Keystroke, app_cursor_mode: bool) -> Opti
         return None;
     }
 
+    // Cmd+J/K/D: reserved for kild navigation (handled by MainView)
+    let cmd = keystroke.modifiers.platform;
+    if cmd && matches!(key, "j" | "k" | "d") {
+        return None;
+    }
+
     // Ctrl+letter → ASCII control code (0x01-0x1A)
     if ctrl && key.len() == 1 {
         let ch = key.as_bytes()[0];
@@ -283,5 +289,31 @@ mod tests {
             keystroke_to_escape(&key("space"), false),
             Some(b" ".to_vec())
         );
+    }
+
+    fn cmd_key(name: &str) -> Keystroke {
+        Keystroke {
+            key: name.into(),
+            modifiers: Modifiers {
+                platform: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_cmd_j_returns_none() {
+        assert_eq!(keystroke_to_escape(&cmd_key("j"), false), None);
+    }
+
+    #[test]
+    fn test_cmd_k_returns_none() {
+        assert_eq!(keystroke_to_escape(&cmd_key("k"), false), None);
+    }
+
+    #[test]
+    fn test_cmd_d_returns_none() {
+        assert_eq!(keystroke_to_escape(&cmd_key("d"), false), None);
     }
 }

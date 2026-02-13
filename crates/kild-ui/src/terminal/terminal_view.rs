@@ -242,6 +242,12 @@ impl TerminalView {
             return;
         }
 
+        // Cmd+J/K/D: reserved for kild navigation — propagate to MainView
+        if cmd && matches!(key, "j" | "k" | "d") {
+            cx.propagate();
+            return;
+        }
+
         tracing::debug!(
             event = "ui.terminal.key_down_started",
             key = key,

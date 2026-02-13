@@ -11,7 +11,7 @@ use gpui::{
 use crate::theme;
 use gpui_component::Disableable;
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::InputState;
 use tracing::{debug, warn};
 
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ use crate::actions;
 use crate::state::AppState;
 use crate::views::{
     add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, sidebar,
+    terminal_tabs::{TerminalBackend, TerminalTabs},
 };
 use crate::watcher::SessionWatcher;
 
@@ -121,162 +122,15 @@ fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
     }
 }
 
-fn adjust_active_after_close(active: usize, closed: usize, new_len: usize) -> usize {
-    if new_len == 0 {
-        0
-    } else if active >= new_len {
-        new_len - 1
-    } else if active > closed {
-        active - 1
-    } else {
-        active
-    }
-}
-
-enum TerminalBackend {
-    Local,
-    Daemon { daemon_session_id: String },
-}
-
-struct TabEntry {
-    view: gpui::Entity<crate::terminal::TerminalView>,
-    label: String,
-    backend: TerminalBackend,
-}
-
-struct TerminalTabs {
-    tabs: Vec<TabEntry>,
-    active: usize,
-    next_id: usize,
-}
-
-impl TerminalTabs {
-    fn new() -> Self {
-        Self {
-            tabs: Vec::new(),
-            active: 0,
-            next_id: 1,
-        }
-    }
-
-    fn active_view(&self) -> Option<&gpui::Entity<crate::terminal::TerminalView>> {
-        self.tabs.get(self.active).map(|e| &e.view)
-    }
-
-    fn push(
-        &mut self,
-        view: gpui::Entity<crate::terminal::TerminalView>,
-        backend: TerminalBackend,
-    ) {
-        let base = format!("Shell {}", self.next_id);
-        let label = match &backend {
-            TerminalBackend::Local => base,
-            TerminalBackend::Daemon { .. } => format!("D • {}", base),
-        };
-        tracing::debug!(
-            event = "ui.terminal_tabs.push",
-            label = label,
-            new_len = self.tabs.len() + 1
-        );
-        self.tabs.push(TabEntry {
-            view,
-            label,
-            backend,
-        });
-        self.active = self.tabs.len() - 1;
-        self.next_id += 1;
-    }
-
-    /// Close a tab at `idx`. Returns the daemon session ID if the closed tab
-    /// was daemon-backed (so the caller can stop it asynchronously).
-    fn close(&mut self, idx: usize) -> Option<String> {
-        if idx >= self.tabs.len() {
-            tracing::warn!(
-                event = "ui.terminal_tabs.close_oob",
-                idx = idx,
-                len = self.tabs.len()
-            );
-            return None;
-        }
-        let entry = &self.tabs[idx];
-        let daemon_id = match &entry.backend {
-            TerminalBackend::Local => {
-                tracing::debug!(
-                    event = "ui.terminal_tabs.close",
-                    idx = idx,
-                    backend = "local",
-                    remaining = self.tabs.len() - 1
-                );
-                None
-            }
-            TerminalBackend::Daemon { daemon_session_id } => {
-                tracing::debug!(
-                    event = "ui.terminal_tabs.close",
-                    idx = idx,
-                    backend = "daemon",
-                    daemon_session_id = daemon_session_id,
-                    remaining = self.tabs.len() - 1
-                );
-                Some(daemon_session_id.clone())
-            }
-        };
-        self.tabs.remove(idx);
-        self.active = adjust_active_after_close(self.active, idx, self.tabs.len());
-        daemon_id
-    }
-
-    fn cycle_next(&mut self) {
-        debug_assert!(
-            self.tabs.is_empty() || self.active < self.tabs.len(),
-            "invariant violated: active={}, len={}",
-            self.active,
-            self.tabs.len()
-        );
-        if self.tabs.len() > 1 {
-            self.active = (self.active + 1) % self.tabs.len();
-            tracing::debug!(event = "ui.terminal_tabs.cycle_next", active = self.active);
-        }
-    }
-
-    fn cycle_prev(&mut self) {
-        debug_assert!(
-            self.tabs.is_empty() || self.active < self.tabs.len(),
-            "invariant violated: active={}, len={}",
-            self.active,
-            self.tabs.len()
-        );
-        if self.tabs.len() > 1 {
-            self.active = self.active.checked_sub(1).unwrap_or(self.tabs.len() - 1);
-            tracing::debug!(event = "ui.terminal_tabs.cycle_prev", active = self.active);
-        }
-    }
-
-    fn rename(&mut self, idx: usize, name: String) {
-        if let Some(entry) = self.tabs.get_mut(idx) {
-            tracing::debug!(
-                event = "ui.terminal_tabs.rename",
-                idx = idx,
-                old = entry.label,
-                new = name
-            );
-            entry.label = name;
-        } else {
-            tracing::warn!(
-                event = "ui.terminal_tabs.rename_oob",
-                idx = idx,
-                len = self.tabs.len()
-            );
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.tabs.is_empty()
-    }
-
-    fn has_exited_active(&self, cx: &gpui::App) -> bool {
-        self.active_view()
-            .is_some_and(|v| v.read(cx).terminal().has_exited())
-    }
+/// Tracks which region of the UI currently has logical focus.
+///
+/// Used for keyboard routing — determines where key events are dispatched.
+/// Currently set on every focus transition to maintain correct state for
+/// Phase 2.6, which will read this to route ⌘D toggle and sidebar navigation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FocusRegion {
+    Dashboard,
+    Terminal,
 }
 
 /// Main application view that composes the kild list, header, and create dialog.
@@ -285,6 +139,7 @@ impl TerminalTabs {
 pub struct MainView {
     state: AppState,
     focus_handle: FocusHandle,
+    focus_region: FocusRegion,
     /// Handle to the background refresh task. Must be stored to prevent cancellation.
     _refresh_task: Task<()>,
     /// Handle to the file watcher task. Must be stored to prevent cancellation.
@@ -306,7 +161,7 @@ pub struct MainView {
     /// Whether the daemon is available. None = unknown/not checked.
     daemon_available: Option<bool>,
     /// Whether the "+" terminal create menu is open.
-    show_add_menu: bool,
+    pub(crate) show_add_menu: bool,
     /// Whether a daemon start operation is in progress.
     daemon_starting: bool,
     /// Counter for generating unique daemon session IDs within this UI instance.
@@ -445,6 +300,7 @@ impl MainView {
         let mut view = Self {
             state: AppState::new(),
             focus_handle: cx.focus_handle(),
+            focus_region: FocusRegion::Dashboard,
             _refresh_task: refresh_task,
             _watcher_task: watcher_task,
             branch_input: None,
@@ -505,6 +361,7 @@ impl MainView {
             .is_some_and(|id| !live_ids.contains(id))
         {
             self.active_terminal_id = None;
+            self.focus_region = FocusRegion::Dashboard;
         }
     }
 
@@ -741,7 +598,7 @@ impl MainView {
                 let tabs = self
                     .terminal_tabs
                     .entry(session_id.to_string())
-                    .or_insert_with(TerminalTabs::new);
+                    .or_default();
                 tabs.push(view, TerminalBackend::Local);
                 true
             }
@@ -761,7 +618,7 @@ impl MainView {
         }
     }
 
-    fn refresh_daemon_available(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_daemon_available(&mut self, cx: &mut Context<Self>) {
         self.daemon_available = None;
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
             let available = match cx
@@ -837,7 +694,7 @@ impl MainView {
                         let tabs = view
                             .terminal_tabs
                             .entry(kild_id.clone())
-                            .or_insert_with(TerminalTabs::new);
+                            .or_default();
                         tabs.push(
                             entity,
                             TerminalBackend::Daemon {
@@ -845,6 +702,7 @@ impl MainView {
                             },
                         );
                         view.active_terminal_id = Some(kild_id);
+                        view.focus_region = FocusRegion::Terminal;
                     }
                     Err(e) => {
                         tracing::error!(
@@ -883,7 +741,12 @@ impl MainView {
         .detach();
     }
 
-    fn on_add_local_tab(&mut self, session_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn on_add_local_tab(
+        &mut self,
+        session_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(display) = self
             .state
             .displays()
@@ -899,7 +762,7 @@ impl MainView {
         cx.notify();
     }
 
-    fn on_add_daemon_tab(&mut self, session_id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn on_add_daemon_tab(&mut self, session_id: &str, cx: &mut Context<Self>) {
         let Some(display) = self
             .state
             .displays()
@@ -966,7 +829,7 @@ impl MainView {
         cx.notify();
     }
 
-    fn on_start_daemon(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn on_start_daemon(&mut self, cx: &mut Context<Self>) {
         if self.daemon_starting || self.daemon_available == Some(true) {
             return;
         }
@@ -979,8 +842,17 @@ impl MainView {
             let result = cx
                 .background_executor()
                 .spawn(async {
-                    let config =
-                        kild_core::config::KildConfig::load_hierarchy().unwrap_or_default();
+                    let config = match kild_core::config::KildConfig::load_hierarchy() {
+                        Ok(cfg) => cfg,
+                        Err(e) => {
+                            tracing::warn!(
+                                event = "ui.daemon.config_load_failed",
+                                error = %e,
+                                "Using default config"
+                            );
+                            kild_core::config::KildConfig::default()
+                        }
+                    };
                     kild_core::daemon::autostart::ensure_daemon_running(&config)
                 })
                 .await;
@@ -1005,6 +877,52 @@ impl MainView {
             }
         })
         .detach();
+    }
+
+    /// Navigate to the next kild in the filtered list (wrapping).
+    fn navigate_next_kild(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let displays = self.state.filtered_displays();
+        if displays.is_empty() {
+            return;
+        }
+        let current_idx = self
+            .state
+            .selected_id()
+            .and_then(|id| displays.iter().position(|d| d.session.id == id));
+        let next_idx = match current_idx {
+            Some(idx) => (idx + 1) % displays.len(),
+            None => 0,
+        };
+        tracing::debug!(
+            event = "ui.kild.navigate_next",
+            from = ?self.state.selected_id(),
+            to_idx = next_idx
+        );
+        let next_id = displays[next_idx].session.id.clone();
+        self.on_kild_select(&next_id, window, cx);
+    }
+
+    /// Navigate to the previous kild in the filtered list (wrapping).
+    fn navigate_prev_kild(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let displays = self.state.filtered_displays();
+        if displays.is_empty() {
+            return;
+        }
+        let current_idx = self
+            .state
+            .selected_id()
+            .and_then(|id| displays.iter().position(|d| d.session.id == id));
+        let prev_idx = match current_idx {
+            Some(0) | None => displays.len() - 1,
+            Some(idx) => idx - 1,
+        };
+        tracing::debug!(
+            event = "ui.kild.navigate_prev",
+            from = ?self.state.selected_id(),
+            to_idx = prev_idx
+        );
+        let prev_id = displays[prev_idx].session.id.clone();
+        self.on_kild_select(&prev_id, window, cx);
     }
 
     /// Handle kild row click - select for detail panel and open its terminal.
@@ -1032,7 +950,7 @@ impl MainView {
 
         if let Some(tabs) = self.terminal_tabs.get_mut(&id)
             && tabs.has_exited_active(cx)
-            && let Some(daemon_id) = tabs.close(tabs.active)
+            && let Some(daemon_id) = tabs.close(tabs.active_index())
         {
             Self::stop_daemon_session_async(daemon_id, cx);
         }
@@ -1044,6 +962,7 @@ impl MainView {
             ) && let Some(ref dsid) = daemon_session_id
             {
                 self.active_terminal_id = Some(id.clone());
+                self.focus_region = FocusRegion::Terminal;
                 self.add_daemon_terminal_tab(&id, dsid, cx);
                 cx.notify();
                 return;
@@ -1055,6 +974,7 @@ impl MainView {
         }
 
         self.active_terminal_id = Some(id);
+        self.focus_region = FocusRegion::Terminal;
         self.focus_active_terminal(window, cx);
         cx.notify();
     }
@@ -1491,7 +1411,7 @@ impl MainView {
         cx.notify();
     }
 
-    fn on_select_tab(
+    pub(crate) fn on_select_tab(
         &mut self,
         session_id: &str,
         idx: usize,
@@ -1502,17 +1422,15 @@ impl MainView {
         let is_already_active = self
             .terminal_tabs
             .get(session_id)
-            .is_some_and(|tabs| tabs.active == idx);
+            .is_some_and(|tabs| tabs.active_index() == idx);
 
         if is_already_active {
             self.start_rename(session_id, idx, window, cx);
             return;
         }
 
-        if let Some(tabs) = self.terminal_tabs.get_mut(session_id)
-            && idx < tabs.tabs.len()
-        {
-            tabs.active = idx;
+        if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
+            tabs.set_active(idx);
         }
         self.focus_active_terminal(window, cx);
         cx.notify();
@@ -1528,8 +1446,8 @@ impl MainView {
         let current_label = self
             .terminal_tabs
             .get(session_id)
-            .and_then(|tabs| tabs.tabs.get(idx))
-            .map(|e| e.label.clone())
+            .and_then(|tabs| tabs.get(idx))
+            .map(|e| e.label().to_string())
             .unwrap_or_default();
 
         let input = cx.new(|cx| InputState::new(window, cx).default_value(current_label));
@@ -1559,7 +1477,7 @@ impl MainView {
         cx.notify();
     }
 
-    fn on_close_tab(
+    pub(crate) fn on_close_tab(
         &mut self,
         session_id: &str,
         idx: usize,
@@ -1573,6 +1491,7 @@ impl MainView {
             }
             if tabs.is_empty() {
                 self.active_terminal_id = None;
+                self.focus_region = FocusRegion::Dashboard;
                 window.focus(&self.focus_handle);
                 cx.notify();
                 return;
@@ -1583,184 +1502,26 @@ impl MainView {
     }
 
     fn render_tab_bar(&self, session_id: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use super::terminal_tabs::{TabBarContext, render_tab_bar};
+
         let Some(tabs) = self.terminal_tabs.get(session_id) else {
             return div().into_any_element();
         };
 
-        let session_id_owned = session_id.to_string();
+        let renaming = self
+            .renaming_tab
+            .as_ref()
+            .map(|(s, i, input)| (s.as_str(), *i, input));
 
-        div()
-            .flex()
-            .items_center()
-            .px(px(theme::SPACE_2))
-            .py(px(theme::SPACE_1))
-            .bg(theme::surface())
-            .border_b_1()
-            .border_color(theme::border_subtle())
-            .gap(px(theme::SPACE_1))
-            .children(tabs.tabs.iter().enumerate().map(|(idx, entry)| {
-                let is_active = idx == tabs.active;
-                let close_sid = session_id_owned.clone();
-                let select_sid = session_id_owned.clone();
-
-                let is_renaming = self
-                    .renaming_tab
-                    .as_ref()
-                    .is_some_and(|(s, i, _)| s == session_id && *i == idx);
-
-                if is_renaming {
-                    let input_state = self
-                        .renaming_tab
-                        .as_ref()
-                        .map(|(_, _, input)| input.clone())
-                        .unwrap();
-                    return div()
-                        .flex()
-                        .items_center()
-                        .px(px(theme::SPACE_2))
-                        .py(px(2.0))
-                        .rounded(px(theme::RADIUS_SM))
-                        .bg(theme::elevated())
-                        .border_b_2()
-                        .border_color(theme::ice())
-                        .text_size(px(theme::TEXT_SM))
-                        .child(Input::new(&input_state).cleanable(false))
-                        .into_any_element();
-                }
-
-                let label = entry.label.clone();
-
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(theme::SPACE_1))
-                    .px(px(theme::SPACE_2))
-                    .py(px(2.0))
-                    .rounded(px(theme::RADIUS_SM))
-                    .cursor_pointer()
-                    .when(is_active, |d| {
-                        d.bg(theme::elevated())
-                            .text_color(theme::text_bright())
-                            .border_b_2()
-                            .border_color(theme::ice())
-                    })
-                    .when(!is_active, |d| {
-                        d.text_color(theme::text_muted())
-                            .hover(|d| d.text_color(theme::text()))
-                    })
-                    .text_size(px(theme::TEXT_SM))
-                    .child(label)
-                    .child(
-                        div()
-                            .text_size(px(theme::TEXT_XS))
-                            .text_color(theme::text_muted())
-                            .cursor_pointer()
-                            .hover(|d| d.text_color(theme::ember()))
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(move |view, _, window, cx| {
-                                    view.on_close_tab(&close_sid, idx, window, cx);
-                                }),
-                            )
-                            .child("×"),
-                    )
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(move |view, _, window, cx| {
-                            view.on_select_tab(&select_sid, idx, window, cx);
-                        }),
-                    )
-                    .into_any_element()
-            }))
-            .child({
-                let sid = session_id_owned.clone();
-                let sid2 = session_id_owned.clone();
-                let daemon_enabled = self.daemon_available.unwrap_or(false);
-
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(theme::SPACE_1))
-                    .child(
-                        div()
-                            .text_size(px(theme::TEXT_SM))
-                            .text_color(theme::text_muted())
-                            .cursor_pointer()
-                            .hover(|d| d.text_color(theme::ice()))
-                            .px(px(theme::SPACE_2))
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(move |view, _, _, cx| {
-                                    view.show_add_menu = !view.show_add_menu;
-                                    if view.show_add_menu {
-                                        view.refresh_daemon_available(cx);
-                                    }
-                                    cx.notify();
-                                }),
-                            )
-                            .child("+"),
-                    )
-                    .when(self.show_add_menu, |this| {
-                        this.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(theme::SPACE_1))
-                                .px(px(theme::SPACE_2))
-                                .py(px(2.0))
-                                .rounded(px(theme::RADIUS_SM))
-                                .bg(theme::elevated())
-                                .child(
-                                    Button::new("add-local-tab")
-                                        .label("Local")
-                                        .ghost()
-                                        .on_click(cx.listener(move |view, _, window, cx| {
-                                            view.on_add_local_tab(&sid, window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("add-daemon-tab")
-                                        .label("Daemon")
-                                        .ghost()
-                                        .disabled(!daemon_enabled)
-                                        .on_click(cx.listener(move |view, _, _, cx| {
-                                            view.on_add_daemon_tab(&sid2, cx);
-                                        })),
-                                )
-                                .when(!daemon_enabled, |this| {
-                                    this.child(
-                                        Button::new("start-daemon-menu")
-                                            .label(if self.daemon_starting {
-                                                "Starting…"
-                                            } else {
-                                                "Start Daemon"
-                                            })
-                                            .ghost()
-                                            .disabled(self.daemon_starting)
-                                            .on_click(cx.listener(move |view, _, _, cx| {
-                                                view.on_start_daemon(cx);
-                                            })),
-                                    )
-                                })
-                                .child(
-                                    div()
-                                        .text_size(px(theme::TEXT_XS))
-                                        .text_color(theme::text_muted())
-                                        .cursor_pointer()
-                                        .hover(|d| d.text_color(theme::ember()))
-                                        .on_mouse_down(
-                                            gpui::MouseButton::Left,
-                                            cx.listener(move |view, _, _, cx| {
-                                                view.show_add_menu = false;
-                                                cx.notify();
-                                            }),
-                                        )
-                                        .child("×"),
-                                ),
-                        )
-                    })
-            })
-            .into_any_element()
+        let ctx = TabBarContext {
+            tabs,
+            session_id,
+            renaming_tab: renaming,
+            show_add_menu: self.show_add_menu,
+            daemon_available: self.daemon_available,
+            daemon_starting: self.daemon_starting,
+        };
+        render_tab_bar(&ctx, cx)
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1784,6 +1545,7 @@ impl MainView {
             && self.active_terminal_view().is_some()
         {
             self.active_terminal_id = None;
+            self.focus_region = FocusRegion::Dashboard;
             self.show_add_menu = false;
             window.focus(&self.focus_handle);
             cx.notify();
@@ -1794,7 +1556,7 @@ impl MainView {
         if key_str == "tab" && event.keystroke.modifiers.control {
             let should_focus = if let Some(id) = &self.active_terminal_id {
                 if let Some(tabs) = self.terminal_tabs.get_mut(id) {
-                    if tabs.tabs.len() > 1 {
+                    if tabs.len() > 1 {
                         if event.keystroke.modifiers.shift {
                             tabs.cycle_prev();
                         } else {
@@ -1821,12 +1583,34 @@ impl MainView {
         if key_str == "t" && event.keystroke.modifiers.control {
             if self.active_terminal_view().is_some() {
                 self.active_terminal_id = None;
+                self.focus_region = FocusRegion::Dashboard;
                 window.focus(&self.focus_handle);
             } else if let Some(id) = self.state.selected_id().map(|s| s.to_string()) {
                 self.on_kild_select(&id, window, cx);
                 return;
             }
             cx.notify();
+            return;
+        }
+
+        // Cmd+J/K/D: kild navigation (works in both dashboard and terminal mode)
+        // Note: Cmd+1-9 index jumping deferred to #415 (configurable modifier)
+        let cmd = event.keystroke.modifiers.platform;
+
+        if cmd && key_str == "j" {
+            self.navigate_next_kild(window, cx);
+            cx.notify();
+            return;
+        }
+
+        if cmd && key_str == "k" {
+            self.navigate_prev_kild(window, cx);
+            cx.notify();
+            return;
+        }
+
+        // Cmd+D: reserved for dashboard toggle (Phase 2.6)
+        if cmd && key_str == "d" {
             return;
         }
 
@@ -2247,48 +2031,5 @@ mod tests {
             result, symlink_path,
             "Result should differ from symlink path"
         );
-    }
-
-    // --- TerminalTabs index adjustment tests ---
-
-    #[test]
-    fn test_adjust_active_close_only_tab() {
-        assert_eq!(adjust_active_after_close(0, 0, 0), 0);
-    }
-
-    #[test]
-    fn test_adjust_active_close_active_in_middle() {
-        // [A, B, C], active=1, close=1 → active stays 1 (now pointing to former C)
-        assert_eq!(adjust_active_after_close(1, 1, 2), 1);
-    }
-
-    #[test]
-    fn test_adjust_active_close_before_active() {
-        // [A, B, C], active=2, close=0 → active becomes 1
-        assert_eq!(adjust_active_after_close(2, 0, 2), 1);
-    }
-
-    #[test]
-    fn test_adjust_active_close_after_active() {
-        // [A, B, C], active=0, close=2 → active stays 0
-        assert_eq!(adjust_active_after_close(0, 2, 2), 0);
-    }
-
-    #[test]
-    fn test_adjust_active_close_last_when_active_is_last() {
-        // [A, B, C], active=2, close=2 → active becomes 1 (new last)
-        assert_eq!(adjust_active_after_close(2, 2, 2), 1);
-    }
-
-    #[test]
-    fn test_adjust_active_close_first_of_two() {
-        // [A, B], active=0, close=0 → active stays 0
-        assert_eq!(adjust_active_after_close(0, 0, 1), 0);
-    }
-
-    #[test]
-    fn test_adjust_active_close_second_of_two_when_active() {
-        // [A, B], active=1, close=1 → active becomes 0
-        assert_eq!(adjust_active_after_close(1, 1, 1), 0);
     }
 }
