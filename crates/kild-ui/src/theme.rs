@@ -197,6 +197,9 @@ pub const RADIUS_LG: f32 = 8.0;
 // COMPONENT SIZES
 // =============================================================================
 
+/// Width of the project rail (leftmost column).
+pub const RAIL_WIDTH: f32 = 48.0;
+
 /// Status indicator dot size (simple dot mode).
 pub const STATUS_DOT_SIZE: f32 = 8.0;
 

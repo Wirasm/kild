@@ -1,3 +1,5 @@
+// Phase 2.7 may reuse this for welcome/empty state rendering. Suppressing dead_code until then.
+#![allow(dead_code)]
 //! KILD list view component.
 //!
 //! Renders the list of kilds with status indicators, session info, and action buttons.

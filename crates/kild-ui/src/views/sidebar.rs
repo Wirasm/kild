@@ -1,77 +1,49 @@
-//! Project sidebar component.
+//! Kild navigation sidebar.
 //!
-//! Fixed left sidebar (200px) for project navigation.
+//! Fixed left sidebar (200px) showing kilds grouped by Active/Stopped status
+//! with nested terminal tab names.
 
 use gpui::{Context, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
-use std::path::PathBuf;
+use std::collections::HashMap;
 
+use crate::components::{Status, StatusIndicator};
 use crate::state::AppState;
 use crate::theme;
 use crate::views::main_view::MainView;
+use crate::views::terminal_tabs::TerminalTabs;
 use gpui_component::button::{Button, ButtonVariants};
+use kild_core::ProcessStatus;
 
 /// Width of the sidebar in pixels.
 pub const SIDEBAR_WIDTH: f32 = 200.0;
 
-/// Data for rendering a project item in the sidebar.
-struct ProjectItemData {
-    list_position: usize,
-    path: PathBuf,
-    name: String,
-    first_char: String,
-    is_selected: bool,
-    count: usize,
-}
+/// Padding adjustment when selected. Reduces left padding by 2px to account
+/// for the 2px left border, keeping text alignment consistent.
+const SELECTED_PADDING_ADJUSTMENT: f32 = 2.0;
 
-impl ProjectItemData {
-    fn from_project(
-        idx: usize,
-        project: &kild_core::projects::Project,
-        active_path: Option<&std::path::Path>,
-        state: &AppState,
-    ) -> Self {
-        let path = project.path().to_path_buf();
-        let is_selected = active_path == Some(project.path());
-        let count = state.kild_count_for_project(project.path());
-        let name = project.name().to_string();
-        let first_char = name
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_else(|| {
-                tracing::debug!(
-                    event = "ui.sidebar.empty_project_name",
-                    project_path = %path.display(),
-                    "Project has empty name - showing '?' icon"
-                );
-                "?".to_string()
-            });
+/// Render the navigation sidebar with kilds grouped by status.
+pub fn render_sidebar(
+    state: &AppState,
+    terminal_tabs: &HashMap<String, TerminalTabs>,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
+    let active_project_name = state
+        .active_project()
+        .map(|p| p.name().to_string())
+        .unwrap_or_else(|| "All Projects".to_string());
 
-        Self {
-            list_position: idx,
-            path,
-            name,
-            first_char,
-            is_selected,
-            count,
+    let filtered = state.filtered_displays();
+    let selected_id = state.selected_id().map(|s| s.to_string());
+
+    let mut active_kilds = Vec::new();
+    let mut stopped_kilds = Vec::new();
+
+    for display in &filtered {
+        match display.process_status {
+            ProcessStatus::Running => active_kilds.push(display),
+            ProcessStatus::Stopped | ProcessStatus::Unknown => stopped_kilds.push(display),
         }
     }
-}
-
-/// Render the project sidebar.
-pub fn render_sidebar(state: &AppState, cx: &mut Context<MainView>) -> impl IntoElement {
-    let active_path = state.active_project_path();
-    let total_count = state.total_kild_count();
-
-    // Prepare project data for rendering
-    let projects_for_list: Vec<ProjectItemData> = state
-        .projects_iter()
-        .enumerate()
-        .map(|(idx, project)| ProjectItemData::from_project(idx, project, active_path, state))
-        .collect();
-
-    let is_all_selected = active_path.is_none();
-    let active_for_footer = active_path.map(|p| p.to_path_buf());
 
     div()
         .w(px(SIDEBAR_WIDTH))
@@ -81,7 +53,7 @@ pub fn render_sidebar(state: &AppState, cx: &mut Context<MainView>) -> impl Into
         .border_color(theme::border_subtle())
         .flex()
         .flex_col()
-        // Header: "SCOPE"
+        // Header: active project name
         .child(
             div()
                 .px(px(theme::SPACE_4))
@@ -91,119 +63,156 @@ pub fn render_sidebar(state: &AppState, cx: &mut Context<MainView>) -> impl Into
                 .text_size(px(theme::TEXT_XS))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_muted())
-                .child("SCOPE"),
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(active_project_name.to_uppercase()),
         )
-        // Project list content
+        // Scrollable kild list
         .child(
             div()
+                .id("sidebar-scroll")
                 .flex_1()
-                .overflow_hidden()
-                // "All Projects" option
-                .child(
-                    div()
-                        .id("sidebar-all-projects")
-                        .flex()
-                        .items_center()
-                        .gap(px(theme::SPACE_2))
-                        .px(px(theme::SPACE_4))
-                        .py(px(theme::SPACE_2))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(theme::surface()))
-                        .when(is_all_selected, |this| {
-                            this.bg(theme::surface())
-                                .border_l_2()
-                                .border_color(theme::ice())
-                                .pl(px(theme::SPACE_4 - SELECTED_PADDING_ADJUSTMENT))
-                        })
-                        .on_mouse_up(
-                            gpui::MouseButton::Left,
-                            cx.listener(|view, _, _, cx| {
-                                view.on_project_select_all(cx);
-                            }),
-                        )
-                        // Radio indicator
-                        .child(render_radio_indicator(is_all_selected))
-                        // "All" text
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text())
-                                .child("All"),
-                        )
-                        // Count badge
-                        .child(render_count_badge(total_count)),
-                )
-                // Project list
-                .children(projects_for_list.into_iter().map(|data| {
-                    let ProjectItemData {
-                        list_position,
-                        path,
-                        name,
-                        first_char,
-                        is_selected,
-                        count,
-                    } = data;
+                .overflow_y_scroll()
+                // Active section
+                .when(!active_kilds.is_empty(), |this| {
+                    this.child(render_section_header("ACTIVE")).children(
+                        active_kilds.iter().enumerate().map(|(ix, display)| {
+                            let session_id = display.session.id.clone();
+                            let branch = display.session.branch.clone();
+                            let is_selected = selected_id.as_deref() == Some(&session_id);
+                            let worktree = display.session.worktree_path.clone();
+                            let branch_for_edit = branch.clone();
+                            let branch_for_stop = branch.clone();
+                            let session_id_for_click = session_id.clone();
 
-                    div()
-                        .id(("sidebar-project", list_position))
-                        .flex()
-                        .items_center()
-                        .gap(px(theme::SPACE_2))
-                        .px(px(theme::SPACE_4))
-                        .py(px(theme::SPACE_2))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(theme::surface()))
-                        .when(is_selected, |this| {
-                            this.bg(theme::surface())
-                                .border_l_2()
-                                .border_color(theme::ice())
-                                .pl(px(theme::SPACE_4 - SELECTED_PADDING_ADJUSTMENT))
-                        })
-                        .on_mouse_up(gpui::MouseButton::Left, {
-                            let path = path.clone();
-                            cx.listener(move |view, _, _, cx| {
-                                view.on_project_select(path.clone(), cx);
-                            })
-                        })
-                        // Project icon (first letter)
-                        .child(
+                            let tabs_for_session = terminal_tabs.get(&session_id);
+
                             div()
-                                .size(px(16.0))
-                                .bg(theme::border())
-                                .rounded(px(theme::RADIUS_SM))
                                 .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(10.0))
-                                .text_color(theme::text_muted())
-                                .child(first_char),
-                        )
-                        // Project name
-                        .child(
+                                .flex_col()
+                                // Kild row
+                                .child(render_kild_row(
+                                    ("active-kild", ix),
+                                    &branch,
+                                    Status::Active,
+                                    is_selected,
+                                    cx.listener(move |view, _, window, cx| {
+                                        view.on_kild_select(&session_id_for_click, window, cx);
+                                    }),
+                                ))
+                                // Inline actions (editor + stop) - shown when selected
+                                .when(is_selected, |this| {
+                                    this.child(render_actions_running(
+                                        ix,
+                                        worktree,
+                                        branch_for_edit,
+                                        branch_for_stop,
+                                        cx,
+                                    ))
+                                })
+                                // Nested terminal tabs
+                                .when_some(tabs_for_session, |this, tabs| {
+                                    let sid = session_id.clone();
+                                    this.children((0..tabs.len()).map(|tab_idx| {
+                                        let tab_label = tabs
+                                            .get(tab_idx)
+                                            .map(|e| e.label().to_string())
+                                            .unwrap_or_default();
+                                        let is_active_tab = tab_idx == tabs.active_index();
+                                        let sid = sid.clone();
+                                        div()
+                                            .id(("sidebar-tab", ix * 100 + tab_idx))
+                                            .pl(px(theme::SPACE_6 + theme::SPACE_2))
+                                            .pr(px(theme::SPACE_2))
+                                            .py(px(2.0))
+                                            .cursor_pointer()
+                                            .text_size(px(theme::TEXT_XS))
+                                            .text_color(if is_active_tab {
+                                                theme::text_bright()
+                                            } else {
+                                                theme::text_muted()
+                                            })
+                                            .hover(|s| s.text_color(theme::text()))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .on_mouse_up(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(move |view, _, window, cx| {
+                                                    view.on_sidebar_terminal_click(
+                                                        &sid, tab_idx, window, cx,
+                                                    );
+                                                }),
+                                            )
+                                            .child(format!("\u{2514} {}", tab_label))
+                                    }))
+                                })
+                        }),
+                    )
+                })
+                // Stopped section
+                .when(!stopped_kilds.is_empty(), |this| {
+                    this.child(render_section_header("STOPPED")).children(
+                        stopped_kilds.iter().enumerate().map(|(ix, display)| {
+                            let session_id = display.session.id.clone();
+                            let branch = display.session.branch.clone();
+                            let is_selected = selected_id.as_deref() == Some(&session_id);
+                            let worktree = display.session.worktree_path.clone();
+                            let branch_for_edit = branch.clone();
+                            let branch_for_open = branch.clone();
+                            let session_id_for_click = session_id.clone();
+
+                            let status = match display.process_status {
+                                ProcessStatus::Stopped => Status::Stopped,
+                                _ => Status::Crashed,
+                            };
+
                             div()
-                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .child(render_kild_row(
+                                    ("stopped-kild", ix),
+                                    &branch,
+                                    status,
+                                    is_selected,
+                                    cx.listener(move |view, _, window, cx| {
+                                        view.on_kild_select(&session_id_for_click, window, cx);
+                                    }),
+                                ))
+                                // Inline actions (editor + open) - shown when selected
+                                .when(is_selected, |this| {
+                                    this.child(render_actions_stopped(
+                                        ix,
+                                        worktree,
+                                        branch_for_edit,
+                                        branch_for_open,
+                                        cx,
+                                    ))
+                                })
+                        }),
+                    )
+                })
+                // Empty state
+                .when(
+                    active_kilds.is_empty() && stopped_kilds.is_empty(),
+                    |this| {
+                        this.child(
+                            div()
+                                .px(px(theme::SPACE_4))
+                                .py(px(theme::SPACE_6))
                                 .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::text())
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(name),
+                                .text_color(theme::text_subtle())
+                                .child("No kilds"),
                         )
-                        // Count badge
-                        .child(render_count_badge(count))
-                })),
+                    },
+                ),
         )
-        // Footer: Add Project button (and Remove if project selected)
+        // Footer: Add Project button
         .child(
             div()
                 .px(px(theme::SPACE_4))
                 .py(px(theme::SPACE_3))
                 .border_t_1()
                 .border_color(theme::border_subtle())
-                .flex()
-                .flex_col()
-                .gap(px(theme::SPACE_2))
-                // Add Project button
                 .child(
                     Button::new("sidebar-add-project")
                         .label("+ Add Project")
@@ -211,62 +220,118 @@ pub fn render_sidebar(state: &AppState, cx: &mut Context<MainView>) -> impl Into
                         .on_click(cx.listener(|view, _, window, cx| {
                             view.on_add_project_click(window, cx);
                         })),
-                )
-                // Remove current (only if project selected)
-                .when_some(active_for_footer, |this, path| {
-                    this.child(
-                        div()
-                            .id("sidebar-remove-project")
-                            .w_full()
-                            .px(px(theme::SPACE_3))
-                            .py(px(theme::SPACE_2))
-                            .rounded(px(theme::RADIUS_MD))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(theme::surface()))
-                            .on_mouse_up(gpui::MouseButton::Left, {
-                                cx.listener(move |view, _, _, cx| {
-                                    view.on_remove_project(path.clone(), cx);
-                                })
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(theme::SPACE_1))
-                                    .text_size(px(theme::TEXT_SM))
-                                    .text_color(theme::ember())
-                                    .child("−")
-                                    .child("Remove current"),
-                            ),
-                    )
-                }),
+                ),
         )
 }
 
-/// Render a radio button indicator (selected or unselected).
-fn render_radio_indicator(is_selected: bool) -> impl IntoElement {
-    let color = if is_selected {
-        theme::ice()
-    } else {
-        theme::border()
-    };
-    let symbol = if is_selected { "●" } else { "○" };
-
-    div().w(px(16.0)).text_color(color).child(symbol)
+fn render_section_header(title: &str) -> impl IntoElement {
+    div()
+        .px(px(theme::SPACE_4))
+        .py(px(theme::SPACE_2))
+        .text_size(px(theme::TEXT_XS))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text_muted())
+        .child(title.to_string())
 }
 
-/// Padding adjustment when selected. Reduces left padding by 2px to account
-/// for the 2px left border, keeping text alignment consistent.
-const SELECTED_PADDING_ADJUSTMENT: f32 = 2.0;
-
-fn render_count_badge(count: usize) -> impl IntoElement {
+fn render_kild_row(
+    id: impl Into<gpui::ElementId>,
+    branch: &str,
+    status: Status,
+    is_selected: bool,
+    on_click: impl Fn(&gpui::MouseUpEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
     div()
-        .text_size(px(theme::TEXT_XS))
-        .text_color(theme::text_muted())
-        .bg(theme::border_subtle())
-        .px(px(6.0))
-        .py(px(2.0))
-        .rounded(px(10.0))
-        .child(count.to_string())
+        .id(id.into())
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(theme::SPACE_2))
+        .px(px(theme::SPACE_4))
+        .py(px(theme::SPACE_2))
+        .cursor_pointer()
+        .hover(|style| style.bg(theme::surface()))
+        .when(is_selected, |row| {
+            row.border_l_2()
+                .border_color(theme::ice())
+                .bg(theme::surface())
+                .pl(px(theme::SPACE_4 - SELECTED_PADDING_ADJUSTMENT))
+        })
+        .on_mouse_up(gpui::MouseButton::Left, on_click)
+        .child(StatusIndicator::dot(status))
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(theme::TEXT_SM))
+                .text_color(theme::text())
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(branch.to_string()),
+        )
+}
+
+fn render_actions_running(
+    ix: usize,
+    worktree: std::path::PathBuf,
+    branch_for_edit: String,
+    branch_for_stop: String,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .gap(px(theme::SPACE_1))
+        .pl(px(theme::SPACE_6))
+        .pb(px(theme::SPACE_1))
+        .child({
+            let wt = worktree;
+            let br = branch_for_edit;
+            Button::new(("sidebar-edit-active", ix))
+                .label("Edit")
+                .ghost()
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.on_open_editor_click(&wt, &br, cx);
+                }))
+        })
+        .child({
+            let br = branch_for_stop;
+            Button::new(("sidebar-stop", ix))
+                .label("\u{23F9}")
+                .warning()
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.on_stop_click(&br, cx);
+                }))
+        })
+}
+
+fn render_actions_stopped(
+    ix: usize,
+    worktree: std::path::PathBuf,
+    branch_for_edit: String,
+    branch_for_open: String,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .gap(px(theme::SPACE_1))
+        .pl(px(theme::SPACE_6))
+        .pb(px(theme::SPACE_1))
+        .child({
+            let wt = worktree;
+            let br = branch_for_edit;
+            Button::new(("sidebar-edit-stopped", ix))
+                .label("Edit")
+                .ghost()
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.on_open_editor_click(&wt, &br, cx);
+                }))
+        })
+        .child({
+            let br = branch_for_open;
+            Button::new(("sidebar-open", ix))
+                .label("\u{25B6}")
+                .success()
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.on_open_click(&br, cx);
+                }))
+        })
 }

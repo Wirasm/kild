@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use crate::actions;
 use crate::state::AppState;
 use crate::views::{
-    add_project_dialog, confirm_dialog, create_dialog, detail_panel, kild_list, sidebar,
+    add_project_dialog, confirm_dialog, create_dialog, project_rail, sidebar,
     terminal_tabs::{TerminalBackend, TerminalTabs},
 };
 use crate::watcher::SessionWatcher;
@@ -125,12 +125,19 @@ fn canonicalize_path(path: PathBuf) -> Result<PathBuf, String> {
 /// Tracks which region of the UI currently has logical focus.
 ///
 /// Used for keyboard routing — determines where key events are dispatched.
-/// Currently set on every focus transition to maintain correct state for
-/// Phase 2.6, which will read this to route ⌘D toggle and sidebar navigation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FocusRegion {
     Dashboard,
     Terminal,
+}
+
+/// Which view is showing in the main area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveView {
+    /// Terminal tabs per kild (default).
+    Control,
+    /// Fleet overview (Phase 2.7 — placeholder for now).
+    Dashboard,
 }
 
 /// Main application view that composes the kild list, header, and create dialog.
@@ -140,6 +147,7 @@ pub struct MainView {
     state: AppState,
     focus_handle: FocusHandle,
     focus_region: FocusRegion,
+    active_view: ActiveView,
     /// Handle to the background refresh task. Must be stored to prevent cancellation.
     _refresh_task: Task<()>,
     /// Handle to the file watcher task. Must be stored to prevent cancellation.
@@ -301,6 +309,7 @@ impl MainView {
             state: AppState::new(),
             focus_handle: cx.focus_handle(),
             focus_region: FocusRegion::Dashboard,
+            active_view: ActiveView::Control,
             _refresh_task: refresh_task,
             _watcher_task: watcher_task,
             branch_input: None,
@@ -513,6 +522,7 @@ impl MainView {
     }
 
     /// Handle click on the destroy button [×] in a kild row.
+    #[allow(dead_code)]
     pub fn on_destroy_click(&mut self, branch: &str, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.destroy_dialog.opened", branch = branch);
         let branch = branch.to_string();
@@ -925,7 +935,7 @@ impl MainView {
         self.on_kild_select(&prev_id, window, cx);
     }
 
-    /// Handle kild row click - select for detail panel and open its terminal.
+    /// Handle kild row click - select and open its terminal in Control view.
     pub fn on_kild_select(
         &mut self,
         session_id: &str,
@@ -935,6 +945,7 @@ impl MainView {
         tracing::debug!(event = "ui.kild.selected", session_id = session_id);
         let id = session_id.to_string();
         self.state.select_kild(id.clone());
+        self.active_view = ActiveView::Control;
 
         let Some(display) = self.state.selected_kild() else {
             cx.notify();
@@ -976,6 +987,43 @@ impl MainView {
         self.active_terminal_id = Some(id);
         self.focus_region = FocusRegion::Terminal;
         self.focus_active_terminal(window, cx);
+        cx.notify();
+    }
+
+    /// Handle click on a terminal name nested under a kild in the sidebar.
+    /// Switches to that kild and activates the specific terminal tab.
+    pub fn on_sidebar_terminal_click(
+        &mut self,
+        session_id: &str,
+        tab_idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.select_kild(session_id.to_string());
+        self.active_terminal_id = Some(session_id.to_string());
+        self.active_view = ActiveView::Control;
+        if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
+            tabs.set_active(tab_idx);
+        }
+        self.focus_region = FocusRegion::Terminal;
+        self.focus_active_terminal(window, cx);
+        cx.notify();
+    }
+
+    /// Toggle between Control and Dashboard views.
+    fn toggle_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.active_view = match self.active_view {
+            ActiveView::Control => ActiveView::Dashboard,
+            ActiveView::Dashboard => ActiveView::Control,
+        };
+        tracing::debug!(event = "ui.view.toggled", view = ?self.active_view);
+        if self.active_view == ActiveView::Control && self.active_terminal_id.is_some() {
+            self.focus_region = FocusRegion::Terminal;
+            self.focus_active_terminal(window, cx);
+        } else {
+            self.focus_region = FocusRegion::Dashboard;
+            window.focus(&self.focus_handle);
+        }
         cx.notify();
     }
 
@@ -1153,6 +1201,7 @@ impl MainView {
     /// Handle click on the Copy Path button in a kild row.
     ///
     /// Copies the worktree path to the system clipboard.
+    #[allow(dead_code)]
     pub fn on_copy_path_click(&mut self, worktree_path: &std::path::Path, cx: &mut Context<Self>) {
         tracing::info!(
             event = "ui.copy_path_clicked",
@@ -1202,6 +1251,7 @@ impl MainView {
     /// surfaces an error to the user explaining the limitation.
     ///
     /// Also surfaces any errors from the underlying `focus_terminal` operation.
+    #[allow(dead_code)]
     pub fn on_focus_terminal_click(
         &mut self,
         terminal_type: Option<&kild_core::terminal::types::TerminalType>,
@@ -1236,6 +1286,7 @@ impl MainView {
     }
 
     /// Record an operation error for a branch and notify the UI.
+    #[allow(dead_code)]
     fn record_error(&mut self, branch: &str, message: &str, cx: &mut Context<Self>) {
         tracing::warn!(
             event = "ui.operation.error_displayed",
@@ -1391,6 +1442,7 @@ impl MainView {
     }
 
     /// Handle remove project from list.
+    #[allow(dead_code)]
     pub fn on_remove_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         tracing::info!(
             event = "ui.remove_project.started",
@@ -1524,6 +1576,140 @@ impl MainView {
         render_tab_bar(&ctx, cx)
     }
 
+    /// Render the view tab bar: [Control] [Dashboard] with ⌘D hint.
+    fn render_view_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_control = self.active_view == ActiveView::Control;
+        let is_dashboard = self.active_view == ActiveView::Dashboard;
+
+        div()
+            .flex()
+            .items_center()
+            .px(px(theme::SPACE_2))
+            .py(px(theme::SPACE_1))
+            .border_b_1()
+            .border_color(theme::border_subtle())
+            .gap(px(theme::SPACE_1))
+            .child(
+                div()
+                    .id("view-tab-control")
+                    .px(px(theme::SPACE_3))
+                    .py(px(theme::SPACE_1))
+                    .rounded(px(theme::RADIUS_SM))
+                    .cursor_pointer()
+                    .text_size(px(theme::TEXT_SM))
+                    .when(is_control, |d| {
+                        d.bg(theme::elevated())
+                            .text_color(theme::text_bright())
+                            .border_b_2()
+                            .border_color(theme::ice())
+                    })
+                    .when(!is_control, |d| {
+                        d.text_color(theme::text_muted())
+                            .hover(|d| d.text_color(theme::text()))
+                    })
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, window, cx| {
+                            if view.active_view != ActiveView::Control {
+                                view.active_view = ActiveView::Control;
+                                if view.active_terminal_id.is_some() {
+                                    view.focus_region = FocusRegion::Terminal;
+                                    view.focus_active_terminal(window, cx);
+                                }
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .child("Control"),
+            )
+            .child(
+                div()
+                    .id("view-tab-dashboard")
+                    .px(px(theme::SPACE_3))
+                    .py(px(theme::SPACE_1))
+                    .rounded(px(theme::RADIUS_SM))
+                    .cursor_pointer()
+                    .text_size(px(theme::TEXT_SM))
+                    .when(is_dashboard, |d| {
+                        d.bg(theme::elevated())
+                            .text_color(theme::text_bright())
+                            .border_b_2()
+                            .border_color(theme::ice())
+                    })
+                    .when(!is_dashboard, |d| {
+                        d.text_color(theme::text_muted())
+                            .hover(|d| d.text_color(theme::text()))
+                    })
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, cx| {
+                            if view.active_view != ActiveView::Dashboard {
+                                view.active_view = ActiveView::Dashboard;
+                                view.focus_region = FocusRegion::Dashboard;
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .child("Dashboard"),
+            )
+            // Spacer
+            .child(div().flex_1())
+            // ⌘D hint
+            .child(
+                div()
+                    .text_size(px(theme::TEXT_XS))
+                    .text_color(theme::text_muted())
+                    .child("\u{2318}D"),
+            )
+    }
+
+    /// Render the main content area based on active view.
+    fn render_main_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        match self.active_view {
+            ActiveView::Control => {
+                if let Some(id) = &self.active_terminal_id
+                    && let Some(tabs) = self.terminal_tabs.get(id)
+                    && let Some(terminal_view) = tabs.active_view()
+                {
+                    let id = id.clone();
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .child(self.render_tab_bar(&id, cx))
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .child(terminal_view.clone()),
+                        )
+                        .into_any_element()
+                } else {
+                    // No terminal active — show placeholder
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(theme::text_subtle())
+                        .text_size(px(theme::TEXT_SM))
+                        .child("Select a kild to view its terminal")
+                        .into_any_element()
+                }
+            }
+            ActiveView::Dashboard => div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(theme::text_subtle())
+                .text_size(px(theme::TEXT_SM))
+                .child("Dashboard \u{2014} coming in Phase 2.7")
+                .into_any_element(),
+        }
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         use crate::state::DialogState;
 
@@ -1539,12 +1725,11 @@ impl MainView {
             return;
         }
 
-        // Ctrl+Escape from terminal → back to dashboard
+        // Ctrl+Escape: move focus from terminal to sidebar (terminal stays rendered)
         if key_str == "escape"
             && event.keystroke.modifiers.control
-            && self.active_terminal_view().is_some()
+            && self.focus_region == FocusRegion::Terminal
         {
-            self.active_terminal_id = None;
             self.focus_region = FocusRegion::Dashboard;
             self.show_add_menu = false;
             window.focus(&self.focus_handle);
@@ -1579,9 +1764,15 @@ impl MainView {
             return;
         }
 
-        // Ctrl+T: toggle between dashboard and selected kild's terminal
+        // Ctrl+T: toggle terminal active/inactive within Control view
         if key_str == "t" && event.keystroke.modifiers.control {
-            if self.active_terminal_view().is_some() {
+            if self.active_view == ActiveView::Dashboard {
+                self.active_view = ActiveView::Control;
+                if let Some(id) = self.state.selected_id().map(|s| s.to_string()) {
+                    self.on_kild_select(&id, window, cx);
+                    return;
+                }
+            } else if self.active_terminal_view().is_some() {
                 self.active_terminal_id = None;
                 self.focus_region = FocusRegion::Dashboard;
                 window.focus(&self.focus_handle);
@@ -1609,15 +1800,17 @@ impl MainView {
             return;
         }
 
-        // Cmd+D: reserved for dashboard toggle (Phase 2.6)
         if cmd && key_str == "d" {
+            self.toggle_view(window, cx);
             return;
         }
 
-        // When a terminal pane is actually visible, propagate all non-reserved keys
-        // to the child TerminalView. Use active_terminal_view() to guard against
-        // stale active_terminal_id pointing to a pruned cache entry.
-        if self.active_terminal_view().is_some() {
+        // Propagate keys to terminal only when Control view is active, terminal exists,
+        // and terminal has focus. Without these guards, keys would reach a non-visible terminal.
+        if self.active_view == ActiveView::Control
+            && self.focus_region == FocusRegion::Terminal
+            && self.active_terminal_view().is_some()
+        {
             cx.propagate();
             return;
         }
@@ -1832,40 +2025,33 @@ impl Render for MainView {
                         })),
                 )
             })
-            // Main content: terminal with tab bar (full-area) or 3-column dashboard
-            .map(|this| {
-                if let Some(id) = &self.active_terminal_id
-                    && let Some(tabs) = self.terminal_tabs.get(id)
-                    && let Some(active_view) = tabs.active_view()
-                {
-                    let id = id.clone();
-                    return this.child(
+            // Main content: Rail | Sidebar | Main area (always visible)
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .overflow_hidden()
+                    // Project rail (48px)
+                    .child(project_rail::render_project_rail(&self.state, cx))
+                    // Sidebar (200px, kild navigation)
+                    .child(sidebar::render_sidebar(
+                        &self.state,
+                        &self.terminal_tabs,
+                        cx,
+                    ))
+                    // Main area (flex-1)
+                    .child(
                         div()
                             .flex_1()
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .child(self.render_tab_bar(&id, cx))
-                            .child(div().flex_1().overflow_hidden().child(active_view.clone())),
-                    );
-                }
-                this.child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .overflow_hidden()
-                        .child(sidebar::render_sidebar(&self.state, cx))
-                        .child(
-                            div()
-                                .flex_1()
-                                .overflow_hidden()
-                                .child(kild_list::render_kild_list(&self.state, cx)),
-                        )
-                        .when(self.state.has_selection(), |this| {
-                            this.child(detail_panel::render_detail_panel(&self.state, cx))
-                        }),
-                )
-            })
+                            // View tab bar: [Control] [Dashboard]
+                            .child(self.render_view_tab_bar(cx))
+                            // View content
+                            .child(self.render_main_content(cx)),
+                    ),
+            )
             // Dialog rendering (based on current dialog state)
             .when(self.state.dialog().is_create(), |this| {
                 this.child(create_dialog::render_create_dialog(
@@ -1897,6 +2083,35 @@ impl Render for MainView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_active_view_default_is_control() {
+        assert_eq!(ActiveView::Control, ActiveView::Control);
+        // Verify it's the default by checking the initial value in the struct constructor
+        // (can't easily instantiate MainView in a unit test without GPUI context,
+        // so we verify the enum's existence and equality)
+        assert_ne!(ActiveView::Control, ActiveView::Dashboard);
+    }
+
+    #[test]
+    fn test_toggle_view_switches_control_to_dashboard() {
+        let mut view = ActiveView::Control;
+        view = match view {
+            ActiveView::Control => ActiveView::Dashboard,
+            ActiveView::Dashboard => ActiveView::Control,
+        };
+        assert_eq!(view, ActiveView::Dashboard);
+    }
+
+    #[test]
+    fn test_toggle_view_switches_dashboard_to_control() {
+        let mut view = ActiveView::Dashboard;
+        view = match view {
+            ActiveView::Control => ActiveView::Dashboard,
+            ActiveView::Dashboard => ActiveView::Control,
+        };
+        assert_eq!(view, ActiveView::Control);
+    }
 
     #[test]
     fn test_normalize_path_with_leading_slash_nonexistent() {

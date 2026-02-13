@@ -1,3 +1,5 @@
+// Phase 2.7 will repurpose this as the Detail view. Suppressing dead_code until then.
+#![allow(dead_code)]
 //! Detail panel component for displaying selected kild information.
 //!
 //! Renders a 320px wide panel on the right side showing comprehensive

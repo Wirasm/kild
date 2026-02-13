@@ -435,6 +435,7 @@ impl AppState {
     }
 
     /// Check if a kild is selected.
+    #[allow(dead_code)]
     pub fn has_selection(&self) -> bool {
         self.selection.has_selection()
     }
