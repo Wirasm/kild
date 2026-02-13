@@ -52,7 +52,8 @@ impl PaneGrid {
         }
     }
 
-    /// Add a terminal to the first empty slot. Returns the slot index, or `None` if full.
+    /// Add a terminal to the first empty slot. Returns the slot index, or `None` if full
+    /// or if the (session_id, tab_idx) pair is already in the grid.
     pub fn add_terminal(
         &mut self,
         session_id: String,
@@ -60,6 +61,10 @@ impl PaneGrid {
         branch: String,
         status: Status,
     ) -> Option<usize> {
+        // Prevent duplicates
+        if self.find_slot(&session_id, tab_idx).is_some() {
+            return None;
+        }
         let empty = self.slots.iter().position(|s| matches!(s, PaneSlot::Empty));
         if let Some(idx) = empty {
             self.slots[idx] = PaneSlot::Occupied {
@@ -86,9 +91,9 @@ impl PaneGrid {
         }
     }
 
-    /// Set focus to the given slot index.
+    /// Set focus to the given slot index. Only focuses occupied slots.
     pub fn set_focus(&mut self, slot_idx: usize) {
-        if slot_idx < SLOT_COUNT {
+        if slot_idx < SLOT_COUNT && matches!(self.slots[slot_idx], PaneSlot::Occupied { .. }) {
             self.focused_slot = slot_idx;
             self.focus_order.retain(|&i| i != slot_idx);
             self.focus_order.push(slot_idx);
@@ -104,10 +109,12 @@ impl PaneGrid {
     }
 
     /// Toggle maximize for the given slot. If already maximized, restore.
+    /// Only allows maximizing occupied slots within bounds.
     pub fn toggle_maximize(&mut self, slot_idx: usize) {
         if self.maximized_slot == Some(slot_idx) {
             self.maximized_slot = None;
-        } else {
+        } else if slot_idx < SLOT_COUNT && matches!(self.slots[slot_idx], PaneSlot::Occupied { .. })
+        {
             self.maximized_slot = Some(slot_idx);
         }
     }
@@ -121,6 +128,7 @@ impl PaneGrid {
     }
 
     /// Return the least-recently-focused occupied slot for replacement.
+    /// Only call when at least one slot is occupied (i.e., grid is full).
     pub fn least_recently_focused(&self) -> usize {
         // Walk focus_order from oldest to newest, return first occupied.
         for &idx in &self.focus_order {
@@ -132,12 +140,14 @@ impl PaneGrid {
         self.slots
             .iter()
             .position(|s| matches!(s, PaneSlot::Occupied { .. }))
-            .unwrap_or(0)
+            .expect("least_recently_focused called with no occupied slots")
     }
 
-    /// Get a reference to a slot.
+    /// Get a reference to a slot. Panics if `idx >= SLOT_COUNT`.
     pub fn slot(&self, idx: usize) -> &PaneSlot {
-        &self.slots[idx]
+        self.slots
+            .get(idx)
+            .expect("slot index must be < SLOT_COUNT")
     }
 
     /// Get all slots as a slice (used in tests).
@@ -177,6 +187,7 @@ impl PaneGrid {
     }
 
     /// Remove any slots referencing sessions not in the live set.
+    /// Updates focused_slot if the focused slot was pruned.
     pub fn prune(&mut self, live_ids: &std::collections::HashSet<&str>) {
         for idx in 0..SLOT_COUNT {
             if let PaneSlot::Occupied { session_id, .. } = &self.slots[idx]
@@ -184,6 +195,12 @@ impl PaneGrid {
             {
                 self.remove(idx);
             }
+        }
+        // If focused slot was pruned (now empty), move to next occupied
+        if matches!(self.slots[self.focused_slot], PaneSlot::Empty)
+            && let Some(next) = self.next_occupied_slot()
+        {
+            self.focused_slot = next;
         }
     }
 
@@ -523,16 +540,24 @@ mod tests {
     }
 
     #[test]
-    fn test_focus_tracking() {
+    fn test_focus_tracking_and_lru_order() {
         let mut grid = PaneGrid::new();
         grid.add_terminal("s1".into(), 0, "a".into(), Status::Active);
         grid.add_terminal("s2".into(), 0, "b".into(), Status::Active);
         grid.add_terminal("s3".into(), 0, "c".into(), Status::Active);
 
-        // After adds, focus order should be [0, 1, 2] (each add sets focus)
+        // After adds, focus order is [0, 1, 2]. LRU = 0.
+        assert_eq!(grid.focused_slot(), 2);
+        assert_eq!(grid.least_recently_focused(), 0);
+
+        // Focus slot 0 → order becomes [1, 2, 0]. LRU = 1.
         grid.set_focus(0);
-        // Now focus order should be [1, 2, 0]
         assert_eq!(grid.focused_slot(), 0);
+        assert_eq!(grid.least_recently_focused(), 1);
+
+        // Focus slot 1 → order becomes [2, 0, 1]. LRU = 2.
+        grid.set_focus(1);
+        assert_eq!(grid.least_recently_focused(), 2);
     }
 
     #[test]
@@ -576,5 +601,105 @@ mod tests {
         grid.set_focus(0);
         let next = grid.next_occupied_slot();
         assert_eq!(next, Some(1));
+    }
+
+    #[test]
+    fn test_next_occupied_slot_wraps_around() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s0".into(), 0, "a".into(), Status::Active); // slot 0
+        grid.add_terminal("s1".into(), 0, "b".into(), Status::Active); // slot 1
+
+        grid.set_focus(1); // Focus last occupied
+        let next = grid.next_occupied_slot();
+        assert_eq!(next, Some(0)); // Wraps to slot 0
+    }
+
+    #[test]
+    fn test_next_occupied_slot_none_when_only_one() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s0".into(), 0, "a".into(), Status::Active);
+
+        grid.set_focus(0);
+        assert_eq!(grid.next_occupied_slot(), None);
+    }
+
+    #[test]
+    fn test_add_duplicate_session_tab_returns_none() {
+        let mut grid = PaneGrid::new();
+        let idx1 = grid.add_terminal("s1".into(), 0, "auth".into(), Status::Active);
+        assert_eq!(idx1, Some(0));
+
+        // Same session_id + tab_idx → rejected
+        let idx2 = grid.add_terminal("s1".into(), 0, "auth".into(), Status::Active);
+        assert_eq!(idx2, None);
+
+        // Same session_id, different tab_idx → allowed
+        let idx3 = grid.add_terminal("s1".into(), 1, "auth".into(), Status::Active);
+        assert_eq!(idx3, Some(1));
+    }
+
+    #[test]
+    fn test_toggle_maximize_empty_slot_is_noop() {
+        let mut grid = PaneGrid::new();
+        grid.toggle_maximize(0); // Slot 0 is empty
+        assert_eq!(grid.maximized_slot(), None); // Not maximized
+    }
+
+    #[test]
+    fn test_toggle_maximize_out_of_bounds_is_noop() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "a".into(), Status::Active);
+        grid.toggle_maximize(99); // Way out of bounds
+        assert_eq!(grid.maximized_slot(), None);
+    }
+
+    #[test]
+    fn test_set_focus_empty_slot_is_noop() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "a".into(), Status::Active); // slot 0, focused
+        grid.set_focus(1); // Slot 1 is empty — should not change focus
+        assert_eq!(grid.focused_slot(), 0);
+    }
+
+    #[test]
+    fn test_set_focus_out_of_bounds_is_noop() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "a".into(), Status::Active);
+        grid.set_focus(99);
+        assert_eq!(grid.focused_slot(), 0);
+    }
+
+    #[test]
+    fn test_prune_moves_focus_from_pruned_slot() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "auth".into(), Status::Active);
+        grid.add_terminal("s2".into(), 0, "api".into(), Status::Active);
+        grid.set_focus(1); // Focus s2
+
+        let live: std::collections::HashSet<&str> = ["s1"].into_iter().collect();
+        grid.prune(&live);
+
+        // s2 was pruned → focus should move to s1 (slot 0)
+        assert!(matches!(grid.slot(1), PaneSlot::Empty));
+        assert_eq!(grid.focused_slot(), 0);
+    }
+
+    #[test]
+    fn test_remove_out_of_bounds_is_noop() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "auth".into(), Status::Active);
+        grid.remove(99); // Should not panic or change state
+        assert!(matches!(grid.slot(0), PaneSlot::Occupied { .. }));
+    }
+
+    #[test]
+    fn test_remove_maximized_slot_clears_maximize() {
+        let mut grid = PaneGrid::new();
+        grid.add_terminal("s1".into(), 0, "auth".into(), Status::Active);
+        grid.toggle_maximize(0);
+        assert_eq!(grid.maximized_slot(), Some(0));
+
+        grid.remove(0);
+        assert_eq!(grid.maximized_slot(), None);
     }
 }
