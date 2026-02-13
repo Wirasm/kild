@@ -15,9 +15,6 @@ use gpui_component::input::{Input, InputState};
 use tracing::{debug, warn};
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static DAEMON_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 use crate::actions;
 use crate::state::AppState;
@@ -190,17 +187,19 @@ impl TerminalTabs {
         self.next_id += 1;
     }
 
-    fn close(&mut self, idx: usize) -> bool {
+    /// Close a tab at `idx`. Returns the daemon session ID if the closed tab
+    /// was daemon-backed (so the caller can stop it asynchronously).
+    fn close(&mut self, idx: usize) -> Option<String> {
         if idx >= self.tabs.len() {
             tracing::warn!(
                 event = "ui.terminal_tabs.close_oob",
                 idx = idx,
                 len = self.tabs.len()
             );
-            return false;
+            return None;
         }
         let entry = &self.tabs[idx];
-        match &entry.backend {
+        let daemon_id = match &entry.backend {
             TerminalBackend::Local => {
                 tracing::debug!(
                     event = "ui.terminal_tabs.close",
@@ -208,6 +207,7 @@ impl TerminalTabs {
                     backend = "local",
                     remaining = self.tabs.len() - 1
                 );
+                None
             }
             TerminalBackend::Daemon { daemon_session_id } => {
                 tracing::debug!(
@@ -217,14 +217,21 @@ impl TerminalTabs {
                     daemon_session_id = daemon_session_id,
                     remaining = self.tabs.len() - 1
                 );
+                Some(daemon_session_id.clone())
             }
-        }
+        };
         self.tabs.remove(idx);
         self.active = adjust_active_after_close(self.active, idx, self.tabs.len());
-        true
+        daemon_id
     }
 
     fn cycle_next(&mut self) {
+        debug_assert!(
+            self.tabs.is_empty() || self.active < self.tabs.len(),
+            "invariant violated: active={}, len={}",
+            self.active,
+            self.tabs.len()
+        );
         if self.tabs.len() > 1 {
             self.active = (self.active + 1) % self.tabs.len();
             tracing::debug!(event = "ui.terminal_tabs.cycle_next", active = self.active);
@@ -232,6 +239,12 @@ impl TerminalTabs {
     }
 
     fn cycle_prev(&mut self) {
+        debug_assert!(
+            self.tabs.is_empty() || self.active < self.tabs.len(),
+            "invariant violated: active={}, len={}",
+            self.active,
+            self.tabs.len()
+        );
         if self.tabs.len() > 1 {
             self.active = self.active.checked_sub(1).unwrap_or(self.tabs.len() - 1);
             tracing::debug!(event = "ui.terminal_tabs.cycle_prev", active = self.active);
@@ -247,6 +260,12 @@ impl TerminalTabs {
                 new = name
             );
             entry.label = name;
+        } else {
+            tracing::warn!(
+                event = "ui.terminal_tabs.rename_oob",
+                idx = idx,
+                len = self.tabs.len()
+            );
         }
     }
 
@@ -290,6 +309,8 @@ pub struct MainView {
     show_add_menu: bool,
     /// Whether a daemon start operation is in progress.
     daemon_starting: bool,
+    /// Counter for generating unique daemon session IDs within this UI instance.
+    daemon_session_counter: u64,
 }
 
 impl MainView {
@@ -436,6 +457,7 @@ impl MainView {
             daemon_available: None,
             show_add_menu: false,
             daemon_starting: false,
+            daemon_session_counter: 1,
         };
         view.refresh_daemon_available(cx);
         view
@@ -841,6 +863,26 @@ impl MainView {
         .detach();
     }
 
+    /// Stop a daemon session in the background (best-effort cleanup).
+    fn stop_daemon_session_async(daemon_session_id: String, cx: &mut Context<MainView>) {
+        cx.spawn(async move |_this, cx: &mut gpui::AsyncApp| {
+            let dsid = daemon_session_id.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::daemon_client::stop_session_async(&dsid).await })
+                .await;
+            if let Err(e) = result {
+                tracing::warn!(
+                    event = "ui.terminal.daemon_session_stop_failed",
+                    daemon_session_id = daemon_session_id,
+                    error = %e,
+                    "Best-effort daemon session cleanup failed"
+                );
+            }
+        })
+        .detach();
+    }
+
     fn on_add_local_tab(&mut self, session_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(display) = self
             .state
@@ -881,11 +923,9 @@ impl MainView {
         } else {
             // No existing daemon session — create one on the fly
             let worktree_str = worktree.display().to_string();
-            let daemon_session_id = format!(
-                "{}_ui_shell_{}",
-                kild_id,
-                DAEMON_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
-            );
+            let counter = self.daemon_session_counter;
+            self.daemon_session_counter += 1;
+            let daemon_session_id = format!("{}_ui_shell_{}", kild_id, counter);
             let kild_id_for_tab = kild_id.clone();
 
             cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
@@ -992,8 +1032,9 @@ impl MainView {
 
         if let Some(tabs) = self.terminal_tabs.get_mut(&id)
             && tabs.has_exited_active(cx)
+            && let Some(daemon_id) = tabs.close(tabs.active)
         {
-            tabs.close(tabs.active);
+            Self::stop_daemon_session_async(daemon_id, cx);
         }
 
         if self.terminal_tabs.get(&id).is_none_or(|t| t.is_empty()) {
@@ -1527,7 +1568,9 @@ impl MainView {
     ) {
         self.show_add_menu = false;
         if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
-            tabs.close(idx);
+            if let Some(daemon_id) = tabs.close(idx) {
+                Self::stop_daemon_session_async(daemon_id, cx);
+            }
             if tabs.is_empty() {
                 self.active_terminal_id = None;
                 window.focus(&self.focus_handle);

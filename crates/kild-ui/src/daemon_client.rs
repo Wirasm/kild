@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Async daemon client using smol on GPUI's BackgroundExecutor.
 //!
 //! Provides IPC operations for communicating with the kild daemon:
@@ -56,6 +55,7 @@ pub enum DaemonClientError {
     #[error("daemon error ({code}): {message}")]
     DaemonError { code: String, message: String },
 
+    #[allow(dead_code)]
     #[error("no running daemon session found")]
     SessionNotFound,
 
@@ -190,6 +190,7 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
 }
 
 /// List all daemon sessions.
+#[allow(dead_code)]
 pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError> {
     debug!(event = "ui.daemon.list_sessions_started");
 
@@ -223,6 +224,7 @@ pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError
 ///
 /// Temporary convenience for the Ctrl+D toggle flow. Phase 3 (layout shell)
 /// replaces this with explicit sidebar-driven session selection.
+#[allow(dead_code)]
 pub async fn find_first_running_session() -> Result<SessionInfo, DaemonClientError> {
     let sessions = list_sessions_async().await?;
     sessions
@@ -284,7 +286,6 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
 ///
 /// Sends a stop command to the daemon, which kills the PTY process.
 /// Returns `Ok(())` on success, `Err` on failure.
-#[allow(dead_code)]
 pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientError> {
     debug!(
         event = "ui.daemon.stop_session_started",
@@ -379,6 +380,7 @@ pub struct DaemonConnection {
 
 impl DaemonConnection {
     /// Get the session ID for this connection.
+    #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }

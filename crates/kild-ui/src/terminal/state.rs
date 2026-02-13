@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -14,20 +15,26 @@ use gpui::Task;
 use kild_protocol::DaemonMessage;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-use std::path::PathBuf;
-
 use super::errors::TerminalError;
 use crate::daemon_client::{self, DaemonConnection};
 
 /// Resolve the working directory for a new terminal.
 ///
-/// - `Some(path)` that exists → returns `Some(path)`
-/// - `Some(path)` that doesn't exist or is inaccessible → returns `Err(InvalidCwd)`
+/// - `Some(path)` that exists and is a directory → returns `Some(path)`
+/// - `Some(path)` that doesn't exist, is a file, or is inaccessible → returns `Err(InvalidCwd)`
 /// - `None` → returns home directory (or `None` if home is unavailable)
 fn resolve_working_dir(cwd: Option<PathBuf>) -> Result<Option<PathBuf>, TerminalError> {
     match cwd {
         Some(path) => match path.try_exists() {
-            Ok(true) => Ok(Some(path)),
+            Ok(true) => {
+                if !path.is_dir() {
+                    return Err(TerminalError::InvalidCwd {
+                        path: path.display().to_string(),
+                        message: "path is not a directory".to_string(),
+                    });
+                }
+                Ok(Some(path))
+            }
             Ok(false) => Err(TerminalError::InvalidCwd {
                 path: path.display().to_string(),
                 message: "directory does not exist".to_string(),
@@ -65,20 +72,32 @@ impl Dimensions for TermDimensions {
 }
 
 /// Event listener that forwards alacritty_terminal events via an mpsc channel.
+///
+/// Includes a circuit breaker (`channel_closed`) to stop processing events
+/// once the receiver is dropped. Without this, alacritty_terminal continues
+/// calling `send_event` and burning CPU on VT100 processing that goes nowhere.
 pub(crate) struct KildListener {
     sender: futures::channel::mpsc::UnboundedSender<AlacEvent>,
+    channel_closed: AtomicBool,
 }
 
 impl EventListener for KildListener {
     fn send_event(&self, event: AlacEvent) {
+        if self.channel_closed.load(Ordering::Relaxed) {
+            return;
+        }
         if let Err(e) = self.sender.unbounded_send(event) {
-            tracing::error!(event = "ui.terminal.event_send_failed", error = %e);
+            self.channel_closed.store(true, Ordering::Relaxed);
+            tracing::warn!(
+                event = "ui.terminal.event_channel_closed",
+                error = %e,
+                "Batch loop likely exited — stopping event forwarding"
+            );
         }
     }
 }
 
 /// Commands sent from the sync DaemonPtyWriter to the async writer task.
-#[allow(dead_code)]
 pub(crate) enum DaemonWriteCommand {
     Stdin(Vec<u8>),
     Resize(u16, u16),
@@ -90,7 +109,6 @@ pub(crate) enum DaemonWriteCommand {
 /// Keyboard input and AlacEvent::PtyWrite both call write_to_pty(),
 /// which uses this writer. Bytes are buffered and sent as WriteStdin
 /// IPC messages by the background writer task.
-#[allow(dead_code)]
 struct DaemonPtyWriter {
     tx: futures::channel::mpsc::UnboundedSender<DaemonWriteCommand>,
 }
@@ -127,13 +145,49 @@ enum TerminalMode {
         child: Box<dyn Child + Send + Sync>,
         pty_master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     },
-    /// Daemon-backed PTY via IPC (Phase 4).
-    #[allow(dead_code)]
+    /// Daemon-backed PTY via IPC.
     Daemon {
         /// Stored to prevent cancellation (dropping the Task cancels it).
         _writer_task: Task<()>,
         cmd_tx: futures::channel::mpsc::UnboundedSender<DaemonWriteCommand>,
     },
+}
+
+/// Set `error_state` to `msg`, logging a warning if the lock is poisoned.
+///
+/// Centralizes the nested-lock pattern to avoid silently losing errors when
+/// `error_state`'s Mutex is also poisoned.
+fn set_error_state(error_state: &Arc<Mutex<Option<String>>>, msg: String) {
+    match error_state.lock() {
+        Ok(mut err) => *err = Some(msg),
+        Err(e) => {
+            tracing::error!(
+                event = "ui.terminal.error_state_lock_poisoned",
+                error = %e,
+                lost_message = msg,
+                "Could not surface error to user — error_state lock poisoned"
+            );
+        }
+    }
+}
+
+/// Set `error_state` to `msg` only if currently `None` (first error wins).
+fn set_error_state_if_none(error_state: &Arc<Mutex<Option<String>>>, msg: String) {
+    match error_state.lock() {
+        Ok(mut err) => {
+            if err.is_none() {
+                *err = Some(msg);
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                event = "ui.terminal.error_state_lock_poisoned",
+                error = %e,
+                lost_message = msg,
+                "Could not surface error to user — error_state lock poisoned"
+            );
+        }
+    }
 }
 
 /// Core terminal state wrapping alacritty_terminal's Term with PTY lifecycle.
@@ -172,8 +226,8 @@ impl Terminal {
     /// Spawns the user's default shell, starts a background reader task
     /// for PTY output, and sets up 4ms event batching.
     ///
-    /// If `cwd` is `Some` and the path exists, the shell starts in that directory.
-    /// If the path doesn't exist, falls back to the user's home directory.
+    /// If `cwd` is `Some` and the path is a valid directory, the shell starts there.
+    /// If the path doesn't exist or is not a directory, returns `Err(InvalidCwd)`.
     /// If `cwd` is `None`, uses the home directory (original behavior).
     pub fn new(cwd: Option<std::path::PathBuf>, cx: &mut gpui::App) -> Result<Self, TerminalError> {
         let rows = DEFAULT_ROWS;
@@ -181,7 +235,10 @@ impl Terminal {
 
         // Create event channel for alacritty_terminal events
         let (event_tx, event_rx) = futures::channel::mpsc::unbounded();
-        let listener = KildListener { sender: event_tx };
+        let listener = KildListener {
+            sender: event_tx,
+            channel_closed: AtomicBool::new(false),
+        };
 
         // Create alacritty_terminal instance
         let config = TermConfig::default();
@@ -276,7 +333,11 @@ impl Terminal {
                         }
                         Ok(n) => {
                             if byte_tx.unbounded_send(buf[..n].to_vec()).is_err() {
-                                tracing::error!(event = "ui.terminal.byte_send_failed", bytes = n);
+                                tracing::warn!(
+                                    event = "ui.terminal.byte_channel_closed",
+                                    bytes = n,
+                                    "Batch loop likely exited — stopping PTY reader"
+                                );
                                 break;
                             }
                         }
@@ -329,7 +390,10 @@ impl Terminal {
 
         // Create event channel for alacritty_terminal events
         let (event_tx, event_rx) = futures::channel::mpsc::unbounded();
-        let listener = KildListener { sender: event_tx };
+        let listener = KildListener {
+            sender: event_tx,
+            channel_closed: AtomicBool::new(false),
+        };
 
         // Create alacritty_terminal instance (same as local mode)
         let config = TermConfig::default();
@@ -385,8 +449,10 @@ impl Terminal {
                                 match base64::engine::general_purpose::STANDARD.decode(&data) {
                                     Ok(decoded) => {
                                         if byte_tx.unbounded_send(decoded).is_err() {
-                                            tracing::error!(
-                                                event = "ui.terminal.daemon_byte_send_failed"
+                                            tracing::warn!(
+                                                event = "ui.terminal.daemon_byte_channel_closed",
+                                                session_id = reader_session_id,
+                                                "Batch loop likely exited — stopping daemon reader"
                                             );
                                             break;
                                         }
@@ -396,13 +462,10 @@ impl Terminal {
                                             event = "ui.terminal.daemon_base64_decode_failed",
                                             error = %e,
                                         );
-                                        if let Ok(mut err) = reader_error.lock()
-                                            && err.is_none()
-                                        {
-                                            *err = Some(format!(
-                                                "Terminal data corrupted (base64 decode): {e}"
-                                            ));
-                                        }
+                                        set_error_state_if_none(
+                                            &reader_error,
+                                            format!("Terminal data corrupted (base64 decode): {e}"),
+                                        );
                                         break;
                                     }
                                 }
@@ -434,11 +497,10 @@ impl Terminal {
                                     error = %e,
                                     line = trimmed
                                 );
-                                if let Ok(mut err) = reader_error.lock()
-                                    && err.is_none()
-                                {
-                                    *err = Some(format!("Daemon protocol error: {e}"));
-                                }
+                                set_error_state_if_none(
+                                    &reader_error,
+                                    format!("Daemon protocol error: {e}"),
+                                );
                                 break;
                             }
                         }
@@ -454,11 +516,7 @@ impl Terminal {
             }
             // Mark as exited
             reader_exited.store(true, Ordering::Release);
-            if let Ok(mut err) = reader_error.lock()
-                && err.is_none()
-            {
-                *err = Some("Daemon session ended".to_string());
-            }
+            set_error_state_if_none(&reader_error, "Daemon session ended".to_string());
         });
 
         // Spawn IPC writer task: reads DaemonWriteCommand, sends to daemon via IPC
@@ -483,11 +541,10 @@ impl Terminal {
                                 error = %e,
                                 bytes_lost = data.len(),
                             );
-                            if let Ok(mut err) = writer_error.lock()
-                                && err.is_none()
-                            {
-                                *err = Some(format!("Daemon write failed: {e}"));
-                            }
+                            set_error_state_if_none(
+                                &writer_error,
+                                format!("Daemon write failed: {e}"),
+                            );
                             break;
                         }
                     }
@@ -618,9 +675,7 @@ impl Terminal {
                                     event = "ui.terminal.pty_write_loop_failed",
                                     error = %e
                                 );
-                                if let Ok(mut err) = error_state.lock() {
-                                    *err = Some(format!("PTY write failed: {e}"));
-                                }
+                                set_error_state(&error_state, format!("PTY write failed: {e}"));
                             }
                             if let Err(e) = writer.flush() {
                                 tracing::error!(
@@ -634,9 +689,10 @@ impl Terminal {
                                 event = "ui.terminal.writer_lock_poisoned",
                                 error = %e
                             );
-                            if let Ok(mut err) = error_state.lock() {
-                                *err = Some("PTY writer lock poisoned".to_string());
-                            }
+                            set_error_state(
+                                &error_state,
+                                "PTY writer lock poisoned — terminal unresponsive".to_string(),
+                            );
                             break;
                         }
                     },
@@ -651,11 +707,7 @@ impl Terminal {
         // Batch loop ended — shell exited or PTY closed.
         tracing::info!(event = "ui.terminal.batch_loop_ended");
         exited.store(true, Ordering::Release);
-        if let Ok(mut err) = error_state.lock()
-            && err.is_none()
-        {
-            *err = Some("Shell exited".to_string());
-        }
+        set_error_state_if_none(&error_state, "Shell exited".to_string());
         // Final repaint to show the exit state to the user.
         notify();
     }
@@ -882,6 +934,18 @@ mod tests {
             "expected InvalidCwd, got: {err}"
         );
         assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn resolve_cwd_file_returns_error() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file_path = tmp.path().to_path_buf();
+        let err = resolve_working_dir(Some(file_path)).unwrap_err();
+        assert!(
+            matches!(err, TerminalError::InvalidCwd { .. }),
+            "expected InvalidCwd, got: {err}"
+        );
+        assert!(err.to_string().contains("not a directory"));
     }
 
     #[test]

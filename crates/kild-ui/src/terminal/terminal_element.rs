@@ -247,7 +247,7 @@ impl Element for TerminalElement {
             .resize_handle
             .resize_if_changed(rows as u16, cols as u16)
         {
-            tracing::error!(
+            tracing::warn!(
                 event = "ui.terminal.resize_failed",
                 rows = rows,
                 cols = cols,

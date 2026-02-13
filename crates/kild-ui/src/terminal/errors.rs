@@ -1,7 +1,6 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub enum TerminalError {
     #[error("Failed to open PTY: {message}")]
     PtyOpen { message: String },
@@ -27,12 +26,15 @@ pub enum TerminalError {
     #[error("Working directory not accessible '{path}': {message}")]
     InvalidCwd { path: String, message: String },
 
+    #[allow(dead_code)]
     #[error("Daemon connection failed: {message}")]
     DaemonConnect { message: String },
 
+    #[allow(dead_code)]
     #[error("Daemon attach failed: {message}")]
     DaemonAttach { message: String },
 
+    #[allow(dead_code)]
     #[error("Daemon protocol error: {message}")]
     DaemonProtocol { message: String },
 
