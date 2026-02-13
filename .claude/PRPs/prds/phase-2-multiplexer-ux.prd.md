@@ -348,7 +348,7 @@ Project (e.g., "kild", "shards")
 *Updated: 2026-02-13 — Aligned with mockup-v2.html. Three-view architecture (Control/Dashboard/Detail). Sidebar navigation-only. 2x2 pane grid replaces split panes. Monochrome button discipline. Subphases 2.5–2.9 restructured.*
 *Updated: 2026-02-13 — Phase 2.7 plan created: `.claude/PRPs/plans/phase-2.7-dashboard-detail-views.plan.md`*
 *Updated: 2026-02-13 — Phase 2.7 complete: Dashboard fleet cards + Detail drill-down views implemented*
-*Status: IN PROGRESS — Phases 2.5–2.8 complete, Phase 2.9 in-progress. Plan: `.claude/PRPs/plans/phase-2.9-status-bar-polish.plan.md`*
+*Status: COMPLETE — All subphases (2.1–2.9) delivered. Phase 2 is done.*
 
 ---
 
@@ -362,7 +362,7 @@ Phase 2.4 (daemon terminals) ✅
     → Phase 2.6 (rail + sidebar + view shell) ✅
       → Phase 2.7 (dashboard + detail views) ✅
       → Phase 2.8 (control view — pane grid) ✅
-    → Phase 2.9 (status bar + polish) ← NEXT
+    → Phase 2.9 (status bar + polish) ✅
 ```
 
 ### Phase 2.5: Extract + Keyboard Navigation
@@ -423,18 +423,19 @@ Phase 2.4 (daemon terminals) ✅
 - **Success signal**: 4 terminals from different kilds visible simultaneously. Focus, maximize, close all work.
 - **Key changes**: New `views/pane_grid.rs`, update `MainView` Control view rendering
 
-### Phase 2.9: Status Bar + Polish
+### Phase 2.9: Status Bar + Polish --- DONE
 - **Goal**: Thin footer with alerts and context-aware keyboard shortcut hints
-- **Scope**:
-  - New `views/status_bar.rs` — footer spanning full width below main content (across sidebar + main)
-  - Left side: contextual alerts (e.g., "fix-login-bug needs rebase")
-  - Right side: keyboard shortcut hints that change based on active view:
-    - Control: `⌘J/K nav`, `⌘D dashboard`, `⌘1-9 jump`
-    - Dashboard: `⌘J/K nav`, `⌘D control`, `Enter detail`
-    - Detail: `Esc back`, `⌘D control`
-  - Use `gpui_component::kbd::Kbd` widget for platform-aware shortcut rendering (⌘ on macOS, Ctrl on Windows)
-  - Wire into grid layout (`grid-template-rows: 1fr auto`)
-  - Optional: minimized session bars below pane grid for background active kilds (could-have). Deferred if 2x2 grid + Dashboard provide sufficient fleet awareness.
-- **Success signal**: Bar visible with contextual hints. Hints change when switching views.
-- **Key changes**: New `views/status_bar.rs`, update `MainView::render()`
-- **Note**: Minimized session bars are "Could have" in MoSCoW. The 2x2 pane grid (Phase 2.8) + Dashboard (Phase 2.7) may provide sufficient fleet awareness, making minimized bars unnecessary. Evaluate after 2.7 + 2.8 ship.
+- **What shipped**:
+  - New `views/status_bar.rs` — footer spanning sidebar + main (not rail)
+  - Left side: contextual alerts — operation errors (ember dot), dirty stopped kilds (copper dot), max 2 with "+N more" overflow
+  - Right side: view-aware keyboard hints using `gpui_component::kbd::Kbd` widget
+    - Control: `⌘J` next, `⌘K` prev, `⌘D` dashboard, `Ctrl+Tab` tabs
+    - Dashboard: `⌘J` next, `⌘K` prev, `⌘D` control
+    - Detail: `Esc` back, `⌘D` control
+  - Layout restructure: sidebar + main nested inside wrapper, status bar below (rail spans full height)
+  - `⌘D` hint removed from view tab bar (now in status bar)
+  - Dead code cleanup: deleted `detail_panel.rs` and `kild_list.rs` (replaced by `detail_view.rs` and `sidebar.rs`)
+  - 7 unit tests for alert computation and keyboard hint correctness
+- **Success signal**: Bar visible with contextual alerts and hints. Hints change per active view.
+- **Key changes**: New `views/status_bar.rs`, `MainView::render()` layout restructure, dead code removed
+- **Decision**: Minimized session bars deferred — Dashboard + pane grid provide sufficient fleet awareness.
