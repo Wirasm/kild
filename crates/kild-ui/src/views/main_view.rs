@@ -15,6 +15,9 @@ use gpui_component::input::{Input, InputState};
 use tracing::{debug, warn};
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static DAEMON_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 use crate::actions;
 use crate::state::AppState;
@@ -135,16 +138,12 @@ fn adjust_active_after_close(active: usize, closed: usize, new_len: usize) -> us
 
 enum TerminalBackend {
     Local,
-    Daemon {
-        #[allow(dead_code)]
-        daemon_session_id: String,
-    },
+    Daemon { daemon_session_id: String },
 }
 
 struct TabEntry {
     view: gpui::Entity<crate::terminal::TerminalView>,
     label: String,
-    #[allow(dead_code)]
     backend: TerminalBackend,
 }
 
@@ -200,11 +199,26 @@ impl TerminalTabs {
             );
             return false;
         }
-        tracing::debug!(
-            event = "ui.terminal_tabs.close",
-            idx = idx,
-            remaining = self.tabs.len() - 1
-        );
+        let entry = &self.tabs[idx];
+        match &entry.backend {
+            TerminalBackend::Local => {
+                tracing::debug!(
+                    event = "ui.terminal_tabs.close",
+                    idx = idx,
+                    backend = "local",
+                    remaining = self.tabs.len() - 1
+                );
+            }
+            TerminalBackend::Daemon { daemon_session_id } => {
+                tracing::debug!(
+                    event = "ui.terminal_tabs.close",
+                    idx = idx,
+                    backend = "daemon",
+                    daemon_session_id = daemon_session_id,
+                    remaining = self.tabs.len() - 1
+                );
+            }
+        }
         self.tabs.remove(idx);
         self.active = adjust_active_after_close(self.active, idx, self.tabs.len());
         true
@@ -728,19 +742,28 @@ impl MainView {
     fn refresh_daemon_available(&mut self, cx: &mut Context<Self>) {
         self.daemon_available = None;
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let available = cx
+            let available = match cx
                 .background_executor()
                 .spawn(async { crate::daemon_client::ping_daemon_async().await })
                 .await
-                .unwrap_or(false);
-            let _ = this.update(cx, |view, cx| {
+            {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    tracing::warn!(event = "ui.daemon.ping_failed", error = %e);
+                    false
+                }
+            };
+            if let Err(e) = this.update(cx, |view, cx| {
                 view.daemon_available = Some(available);
                 tracing::debug!(
                     event = "ui.daemon.availability_checked",
                     available = available
                 );
                 cx.notify();
-            });
+            }) {
+                tracing::debug!(event = "ui.refresh_daemon_available.view_dropped", error = ?e);
+            }
         })
         .detach();
     }
@@ -772,15 +795,17 @@ impl MainView {
                         daemon_session_id = daemon_id,
                         error = %e,
                     );
-                    let _ = this.update(cx, |view, cx| {
+                    if let Err(e) = this.update(cx, |view, cx| {
                         view.state.push_error(format!("Daemon attach failed: {e}"));
                         cx.notify();
-                    });
+                    }) {
+                        tracing::debug!(event = "ui.add_daemon_terminal_tab.error_view_dropped", error = ?e);
+                    }
                     return;
                 }
             };
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 let daemon_id_clone = daemon_id.clone();
                 match crate::terminal::state::Terminal::from_daemon(daemon_id.clone(), conn, cx) {
                     Ok(terminal) => {
@@ -809,7 +834,9 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::debug!(event = "ui.add_daemon_terminal_tab.view_dropped", error = ?e);
+            }
         })
         .detach();
     }
@@ -854,7 +881,11 @@ impl MainView {
         } else {
             // No existing daemon session — create one on the fly
             let worktree_str = worktree.display().to_string();
-            let daemon_session_id = format!("{}_ui_shell", kild_id);
+            let daemon_session_id = format!(
+                "{}_ui_shell_{}",
+                kild_id,
+                DAEMON_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
             let kild_id_for_tab = kild_id.clone();
 
             cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
@@ -869,20 +900,24 @@ impl MainView {
 
                 match result {
                     Ok(created_dsid) => {
-                        let _ = this.update(cx, |view, cx| {
+                        if let Err(e) = this.update(cx, |view, cx| {
                             view.add_daemon_terminal_tab(&kild_id_for_tab, &created_dsid, cx);
-                        });
+                        }) {
+                            tracing::debug!(event = "ui.on_add_daemon_tab.ok_view_dropped", error = ?e);
+                        }
                     }
                     Err(e) => {
                         tracing::error!(
                             event = "ui.terminal.daemon_create_session_failed",
                             error = %e,
                         );
-                        let _ = this.update(cx, |view, cx| {
+                        if let Err(e) = this.update(cx, |view, cx| {
                             view.state
                                 .push_error(format!("Failed to create daemon session: {e}"));
                             cx.notify();
-                        });
+                        }) {
+                            tracing::debug!(event = "ui.on_add_daemon_tab.err_view_dropped", error = ?e);
+                        }
                     }
                 }
             })
@@ -910,7 +945,7 @@ impl MainView {
                 })
                 .await;
 
-            let _ = this.update(cx, |view, cx| {
+            if let Err(e) = this.update(cx, |view, cx| {
                 view.daemon_starting = false;
                 match result {
                     Ok(()) => {
@@ -925,7 +960,9 @@ impl MainView {
                     }
                 }
                 cx.notify();
-            });
+            }) {
+                tracing::debug!(event = "ui.on_start_daemon.view_dropped", error = ?e);
+            }
         })
         .detach();
     }
