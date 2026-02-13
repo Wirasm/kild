@@ -107,9 +107,6 @@ pub fn render_sidebar(
                         let session_id = display.session.id.clone();
                         let branch = display.session.branch.clone();
                         let is_selected = selected_id.as_deref() == Some(&session_id);
-                        let worktree = display.session.worktree_path.clone();
-                        let branch_for_edit = branch.clone();
-                        let branch_for_stop = branch.clone();
                         let session_id_for_click = session_id.clone();
                         let time_meta = format_relative_time(&display.session.created_at);
 
@@ -118,8 +115,8 @@ pub fn render_sidebar(
                         div()
                             .flex()
                             .flex_col()
-                            // Kild row with hover actions
-                            .child(render_kild_row_with_actions(
+                            // Kild row (clean, no hover actions)
+                            .child(render_kild_row(
                                 ("active-kild", ix),
                                 &branch,
                                 Status::Active,
@@ -128,13 +125,6 @@ pub fn render_sidebar(
                                 cx.listener(move |view, _, window, cx| {
                                     view.on_kild_select(&session_id_for_click, window, cx);
                                 }),
-                                render_actions_running(
-                                    ix,
-                                    worktree,
-                                    branch_for_edit,
-                                    branch_for_stop,
-                                    cx,
-                                ),
                             ))
                             // Nested terminal tabs
                             .when_some(tabs_for_session, |this, tabs| {
@@ -243,13 +233,9 @@ pub fn render_sidebar(
                         theme::copper(),
                     ))
                     .children(stopped_kilds.iter().enumerate().map(|(ix, display)| {
-                        let session_id = display.session.id.clone();
                         let branch = display.session.branch.clone();
-                        let is_selected = selected_id.as_deref() == Some(&session_id);
-                        let worktree = display.session.worktree_path.clone();
-                        let branch_for_edit = branch.clone();
-                        let branch_for_open = branch.clone();
-                        let session_id_for_click = session_id.clone();
+                        let is_selected = selected_id.as_deref() == Some(&display.session.id);
+                        let session_id_for_click = display.session.id.clone();
                         let time_meta = format_relative_time(&display.session.created_at);
 
                         let status = match display.process_status {
@@ -257,7 +243,7 @@ pub fn render_sidebar(
                             _ => Status::Crashed,
                         };
 
-                        div().flex().flex_col().child(render_kild_row_with_actions(
+                        div().flex().flex_col().child(render_kild_row(
                             ("stopped-kild", ix),
                             &branch,
                             status,
@@ -266,13 +252,6 @@ pub fn render_sidebar(
                             cx.listener(move |view, _, window, cx| {
                                 view.on_kild_select(&session_id_for_click, window, cx);
                             }),
-                            render_actions_stopped(
-                                ix,
-                                worktree,
-                                branch_for_edit,
-                                branch_for_open,
-                                cx,
-                            ),
                         ))
                     }))
                 })
@@ -340,22 +319,17 @@ fn render_section_header(title: &str, count: usize, count_color: Rgba) -> impl I
         )
 }
 
-/// Render a kild row with time meta and hover-revealed action buttons.
-///
-/// Uses GPUI `group()` to show actions and hide meta text on hover.
-fn render_kild_row_with_actions(
+/// Render a clean kild row with status dot, branch name, and time meta.
+fn render_kild_row(
     id: impl Into<gpui::ElementId>,
     branch: &str,
     status: Status,
     is_selected: bool,
     time_meta: &str,
     on_click: impl Fn(&gpui::MouseUpEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-    actions: impl IntoElement,
 ) -> impl IntoElement {
     div()
         .id(id.into())
-        .group("kild-row")
-        .relative()
         .w_full()
         .flex()
         .items_center()
@@ -388,120 +362,12 @@ fn render_kild_row_with_actions(
                 .min_w(px(0.0))
                 .child(branch.to_string()),
         )
-        // Time meta — hidden on hover via opacity
+        // Time meta
         .child(
             div()
                 .flex_shrink_0()
                 .text_size(px(10.0))
                 .text_color(theme::text_muted())
-                .group_hover("kild-row", |s| s.opacity(0.0))
                 .child(time_meta.to_string()),
         )
-        // Hover actions — shown on hover via opacity
-        .child(
-            div()
-                .absolute()
-                .right(px(theme::SPACE_1))
-                .top_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                .pl(px(theme::SPACE_1))
-                .bg(theme::obsidian())
-                .opacity(0.0)
-                .group_hover("kild-row", |s| s.opacity(1.0))
-                .child(actions),
-        )
-}
-
-/// Tiny ghost action button matching mockup's `.kild-action-btn`.
-fn render_action_btn(
-    id: impl Into<gpui::ElementId>,
-    label: &str,
-    on_click: impl Fn(&gpui::MouseUpEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-) -> impl IntoElement {
-    div()
-        .id(id.into())
-        .px(px(4.0))
-        .py(px(2.0))
-        .cursor_pointer()
-        .text_size(px(9.0))
-        .text_color(theme::text_muted())
-        .border_1()
-        .border_color(theme::border())
-        .rounded(px(3.0))
-        .hover(|s| {
-            s.text_color(theme::text_subtle())
-                .border_color(theme::border_strong())
-                .bg(theme::elevated())
-        })
-        .on_mouse_up(gpui::MouseButton::Left, on_click)
-        .child(label.to_string())
-}
-
-fn render_actions_running(
-    ix: usize,
-    worktree: std::path::PathBuf,
-    branch_for_edit: String,
-    branch_for_stop: String,
-    cx: &mut Context<MainView>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(2.0))
-        .child({
-            let wt = worktree;
-            let br = branch_for_edit;
-            render_action_btn(
-                ("sidebar-edit-active", ix),
-                "editor",
-                cx.listener(move |view, _, _, cx| {
-                    view.on_open_editor_click(&wt, &br, cx);
-                }),
-            )
-        })
-        .child({
-            let br = branch_for_stop;
-            render_action_btn(
-                ("sidebar-stop", ix),
-                "stop",
-                cx.listener(move |view, _, _, cx| {
-                    view.on_stop_click(&br, cx);
-                }),
-            )
-        })
-}
-
-fn render_actions_stopped(
-    ix: usize,
-    worktree: std::path::PathBuf,
-    branch_for_edit: String,
-    branch_for_open: String,
-    cx: &mut Context<MainView>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(2.0))
-        .child({
-            let br = branch_for_open;
-            render_action_btn(
-                ("sidebar-open", ix),
-                "open",
-                cx.listener(move |view, _, _, cx| {
-                    view.on_open_click(&br, cx);
-                }),
-            )
-        })
-        .child({
-            let wt = worktree;
-            let br = branch_for_edit;
-            render_action_btn(
-                ("sidebar-edit-stopped", ix),
-                "editor",
-                cx.listener(move |view, _, _, cx| {
-                    view.on_open_editor_click(&wt, &br, cx);
-                }),
-            )
-        })
 }
