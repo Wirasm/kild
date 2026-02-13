@@ -6,7 +6,7 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 
 **Research:** [daemon-vision-research.md](../branding/daemon-vision-research.md) — full technical research, architecture decisions, competitive analysis, and open questions.
 
-**Brand/UX:** [mockup-embedded.html](../branding/mockup-embedded.html) — the target multiplexer UI. [brand-system.html](../branding/brand-system.html) — Tallinn Night design system.
+**Brand/UX:** [mockup-v2.html](../branding/mockup-v2.html) — the target multiplexer UI (three-view architecture). [brand-system.html](../branding/brand-system.html) — Tallinn Night design system.
 
 **Vision:** [VISION.md](../branding/VISION.md) — mission, market positioning, expansion path.
 
@@ -27,7 +27,7 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 
 **What's been delivered in Phase 2 (2.1–2.4):** Click kild → terminal in worktree, terminal persistence across switching, multiple terminals per kild (tab bar), daemon-backed terminals with on-the-fly session creation. Terminal resize and scrollback UI are implemented.
 
-**What's next (Phase 2.5–2.9):** Refactor + keyboard nav, project rail + sidebar restructure, status bar, split panes, minimized session bars. See [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed subphase plan.
+**What's next (Phase 2.5–2.9):** Refactor + keyboard nav, project rail + navigation-only sidebar + view shell, dashboard + detail views, 2x2 pane grid, status bar. See [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed subphase plan.
 
 ---
 
@@ -255,7 +255,7 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 
 ### Phase 2: Multiplexer UX — IN PROGRESS (Phases 2.1–2.4 complete)
 
-**Goal:** kild-ui becomes the full multiplexer from the mockup — project rail, kild sidebar, terminal pane grid, tabs, minimized sessions. The user's primary interface for managing parallel AI agent sessions.
+**Goal:** kild-ui becomes the full multiplexer from the mockup — project rail, navigation-only sidebar, three swappable views (Control pane grid, Dashboard fleet cards, Kild Detail drill-down), keyboard nav. The user's primary interface for managing parallel AI agent sessions.
 
 **Why:** This is what users see. The daemon (Phase 1b) gives us persistence and PTY ownership. This phase gives us the UX that makes it feel like a product, not a tech demo.
 
@@ -276,14 +276,14 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 **Remaining (Phases 2.5–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
 
 - [ ] **Phase 2.5: Extract + keyboard nav** — Refactor main_view.rs, ⌘J/K kild navigation, ⌘1–9 jump
-- [ ] **Phase 2.6: Project rail + sidebar restructure** — 48px rail, kild-focused sidebar with detail mode, always-visible layout
-- [ ] **Phase 2.7: Status bar + shortcut hints** — Footer with alerts and context-aware keyboard hints (uses `gpui_component::kbd::Kbd`)
-- [ ] **Phase 2.8: Split panes** — Side-by-side terminals with resize handles (uses `gpui_component::resizable::ResizablePanelGroup`)
-- [ ] **Phase 2.9: Minimized session bars** — Fleet awareness bars for background active kilds
+- [ ] **Phase 2.6: Project rail + sidebar + view shell** — 48px rail, navigation-only sidebar with hover actions, top tab bar (Control/Dashboard), ⌘D toggle, monochrome button discipline
+- [ ] **Phase 2.7: Dashboard + detail views** — Fleet summary + kild cards, click card → detail drill-down (session, git, PR, terminals, actions)
+- [ ] **Phase 2.8: Control view — pane grid** — 2x2 grid showing terminals from multiple kilds, focus routing, maximize/close
+- [ ] **Phase 2.9: Status bar + polish** — Footer with contextual alerts and view-aware keyboard hints
 
-**Key reference:** [mockup-embedded.html](../branding/mockup-embedded.html) is the definitive mockup. Every interaction pattern is documented there.
+**Key reference:** [mockup-v2.html](../branding/mockup-v2.html) is the definitive mockup. Three-view architecture (Control/Dashboard/Detail), navigation-only sidebar, monochrome buttons.
 
-**Signals of completion:** The mockup is real. You can switch projects, browse kilds, see terminal output in split panes, minimize sessions, inspect kild details. kild-ui replaces external terminal windows as the primary interface.
+**Signals of completion:** The mockup is real. You can switch projects, browse kilds, see terminals in a 2x2 pane grid, scan fleet status on the dashboard, drill into kild details. kild-ui replaces external terminal windows as the primary interface.
 
 **Scope:** High. Incremental delivery via subphases. Leverage gpui-component (Resizable, Sidebar, Kbd, Tabs) heavily.
 
@@ -419,8 +419,8 @@ The daemon is **additive**. External terminal backends (Ghostty, iTerm, Terminal
 - **Terminal resize:** Resolved in Phase 2.1. `ResizeHandle` + `resize_if_changed()` sends SIGWINCH on prepaint when element bounds change.
 - **Scrollback UI:** Resolved in Phase 2.1. Mouse scroll via `alacritty_terminal::grid::Scroll`, display offset tracking, "Scrollback" badge.
 - **Cmd key for shortcuts:** `event.keystroke.modifiers.platform` maps to ⌘ on macOS. Already used for Cmd+C/V in terminal_view.rs. All Phase 2.5+ keyboard shortcuts use ⌘.
-- **Split pane resize:** `gpui_component::resizable` (0.5.1) provides `h_resizable()` / `v_resizable()` with `ResizablePanelGroup` and built-in resize handles. No custom mouse tracking needed.
-- **Daemon terminal semantics:** Closing a daemon terminal view does NOT stop the daemon process. The terminal is a window into a running process. "Minimize" = close the view, daemon keeps running.
+- **Pane grid resize:** `gpui_component::resizable` (0.5.1) provides `h_resizable()` / `v_resizable()` with `ResizablePanelGroup` and built-in resize handles. 2x2 grid starts with equal sizing; resizable panels optional.
+- **Daemon terminal semantics:** Closing a daemon terminal view does NOT stop the daemon process. The terminal is a window into a running process. Removing from pane grid = close view, daemon keeps running.
 
 ---
 
