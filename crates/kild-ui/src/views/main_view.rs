@@ -9,7 +9,6 @@ use gpui::{
 };
 
 use crate::theme;
-use gpui_component::Disableable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::InputState;
 use tracing::{debug, warn};
@@ -390,7 +389,7 @@ impl MainView {
     }
 
     /// Handle click on the Create button in header.
-    fn on_create_button_click(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn on_create_button_click(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         tracing::info!(event = "ui.create_dialog.opened");
         self.state.open_create_dialog();
 
@@ -521,13 +520,6 @@ impl MainView {
                 agent = %form.selected_agent()
             );
         }
-        cx.notify();
-    }
-
-    /// Handle click on the Refresh button in header.
-    fn on_refresh_click(&mut self, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.refresh_clicked");
-        self.refresh_and_prune();
         cx.notify();
     }
 
@@ -1284,79 +1276,6 @@ impl MainView {
         .detach();
     }
 
-    /// Execute a bulk operation on the background executor.
-    ///
-    /// Shared pattern for open-all and stop-all. Clears existing errors,
-    /// runs the operation in the background, then updates state with results.
-    fn execute_bulk_operation_async<F>(
-        &mut self,
-        cx: &mut Context<Self>,
-        operation: F,
-        error_event: &'static str,
-    ) where
-        F: FnOnce(&[kild_core::SessionInfo]) -> (usize, Vec<crate::state::OperationError>)
-            + Send
-            + 'static,
-    {
-        if self.state.is_bulk_loading() {
-            return;
-        }
-        self.state.clear_bulk_errors();
-        self.state.set_bulk_loading();
-        cx.notify();
-        let displays = self.state.displays().to_vec();
-
-        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { operation(&displays) })
-                .await;
-
-            if let Err(e) = this.update(cx, |view, cx| {
-                view.state.clear_bulk_loading();
-                let (count, errors) = result;
-                for error in &errors {
-                    tracing::warn!(
-                        event = error_event,
-                        branch = error.branch,
-                        error = error.message
-                    );
-                }
-                view.state.set_bulk_errors(errors);
-                if count > 0 || view.state.has_bulk_errors() {
-                    view.refresh_and_prune();
-                }
-                cx.notify();
-            }) {
-                tracing::debug!(
-                    event = "ui.bulk_operation.view_dropped",
-                    error = ?e,
-                );
-            }
-        })
-        .detach();
-    }
-
-    /// Handle click on the Open All button.
-    fn on_open_all_click(&mut self, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.open_all_clicked");
-        self.execute_bulk_operation_async(
-            cx,
-            actions::open_all_stopped,
-            "ui.open_all.partial_failure",
-        );
-    }
-
-    /// Handle click on the Stop All button.
-    fn on_stop_all_click(&mut self, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.stop_all_clicked");
-        self.execute_bulk_operation_async(
-            cx,
-            actions::stop_all_running,
-            "ui.stop_all.partial_failure",
-        );
-    }
-
     /// Handle click on the Copy Path button in a kild row.
     ///
     /// Copies the worktree path to the system clipboard.
@@ -1460,12 +1379,6 @@ impl MainView {
             },
         );
         cx.notify();
-    }
-
-    /// Clear bulk operation errors (called when user dismisses the banner).
-    fn on_dismiss_bulk_errors(&mut self, cx: &mut Context<Self>) {
-        tracing::info!(event = "ui.bulk_errors.dismissed");
-        self.mutate_state(cx, |s| s.clear_bulk_errors());
     }
 
     /// Clear startup errors (called when user dismisses the banner).
@@ -1742,7 +1655,7 @@ impl MainView {
         render_tab_bar(&ctx, cx)
     }
 
-    /// Render the view tab bar: [Control] [Dashboard] with ⌘D hint.
+    /// Render the view tab bar: [Control] [Dashboard] ... [+ Create]
     fn render_view_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_control = self.active_view == ActiveView::Control;
         let is_dashboard = matches!(self.active_view, ActiveView::Dashboard | ActiveView::Detail);
@@ -1750,28 +1663,26 @@ impl MainView {
         div()
             .flex()
             .items_center()
-            .px(px(theme::SPACE_2))
-            .py(px(theme::SPACE_1))
+            .px(px(theme::SPACE_3))
+            .bg(theme::obsidian())
             .border_b_1()
             .border_color(theme::border_subtle())
-            .gap(px(theme::SPACE_1))
             .child(
                 div()
                     .id("view-tab-control")
                     .px(px(theme::SPACE_3))
-                    .py(px(theme::SPACE_1))
-                    .rounded(px(theme::RADIUS_SM))
+                    .py(px(theme::SPACE_2))
                     .cursor_pointer()
-                    .text_size(px(theme::TEXT_SM))
+                    .text_size(px(theme::TEXT_XS))
+                    .font_weight(FontWeight::MEDIUM)
+                    .border_b_2()
                     .when(is_control, |d| {
-                        d.bg(theme::elevated())
-                            .text_color(theme::text_bright())
-                            .border_b_2()
-                            .border_color(theme::ice())
+                        d.text_color(theme::text()).border_color(theme::ice())
                     })
                     .when(!is_control, |d| {
                         d.text_color(theme::text_muted())
-                            .hover(|d| d.text_color(theme::text()))
+                            .border_color(theme::transparent())
+                            .hover(|d| d.text_color(theme::text_subtle()))
                     })
                     .on_mouse_up(
                         gpui::MouseButton::Left,
@@ -1792,19 +1703,18 @@ impl MainView {
                 div()
                     .id("view-tab-dashboard")
                     .px(px(theme::SPACE_3))
-                    .py(px(theme::SPACE_1))
-                    .rounded(px(theme::RADIUS_SM))
+                    .py(px(theme::SPACE_2))
                     .cursor_pointer()
-                    .text_size(px(theme::TEXT_SM))
+                    .text_size(px(theme::TEXT_XS))
+                    .font_weight(FontWeight::MEDIUM)
+                    .border_b_2()
                     .when(is_dashboard, |d| {
-                        d.bg(theme::elevated())
-                            .text_color(theme::text_bright())
-                            .border_b_2()
-                            .border_color(theme::ice())
+                        d.text_color(theme::text()).border_color(theme::ice())
                     })
                     .when(!is_dashboard, |d| {
                         d.text_color(theme::text_muted())
-                            .hover(|d| d.text_color(theme::text()))
+                            .border_color(theme::transparent())
+                            .hover(|d| d.text_color(theme::text_subtle()))
                     })
                     .on_mouse_up(
                         gpui::MouseButton::Left,
@@ -1818,8 +1728,35 @@ impl MainView {
                     )
                     .child("Dashboard"),
             )
-            // Spacer (hints moved to status bar)
+            // Spacer
             .child(div().flex_1())
+            // + Create ghost button
+            .child(
+                div()
+                    .id("view-tab-create")
+                    .px(px(theme::SPACE_2))
+                    .py(px(theme::SPACE_1))
+                    .my(px(theme::SPACE_1))
+                    .cursor_pointer()
+                    .text_size(px(theme::TEXT_XS))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::text_muted())
+                    .border_1()
+                    .border_color(theme::border())
+                    .rounded(px(theme::RADIUS_SM))
+                    .hover(|d| {
+                        d.text_color(theme::text_subtle())
+                            .border_color(theme::border_strong())
+                            .bg(theme::surface())
+                    })
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, window, cx| {
+                            view.on_create_button_click(window, cx);
+                        }),
+                    )
+                    .child("+ Create"),
+            )
     }
 
     /// Render the main content area based on active view.
@@ -1982,9 +1919,6 @@ impl Focusable for MainView {
 
 impl Render for MainView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stopped_count = self.state.stopped_count();
-        let running_count = self.state.running_count();
-
         div()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
@@ -1992,82 +1926,6 @@ impl Render for MainView {
             .flex()
             .flex_col()
             .bg(theme::void())
-            // Header with title and action buttons
-            .child(
-                div()
-                    .px(px(theme::SPACE_4))
-                    .py(px(theme::SPACE_3))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(theme::TEXT_XL))
-                            .text_color(theme::text_white())
-                            .font_weight(FontWeight::BOLD)
-                            .child("KILD"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(theme::SPACE_2))
-                            // Open All button - Success variant
-                            .child(
-                                Button::new("open-all-btn")
-                                    .label(format!("Open All ({})", stopped_count))
-                                    .success()
-                                    .disabled(stopped_count == 0 || self.state.is_bulk_loading())
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.on_open_all_click(cx);
-                                    })),
-                            )
-                            // Stop All button - Warning variant
-                            .child(
-                                Button::new("stop-all-btn")
-                                    .label(format!("Stop All ({})", running_count))
-                                    .warning()
-                                    .disabled(running_count == 0 || self.state.is_bulk_loading())
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.on_stop_all_click(cx);
-                                    })),
-                            )
-                            // Start Daemon button - shown when daemon is not running
-                            .when(self.daemon_available != Some(true), |this| {
-                                this.child(
-                                    Button::new("start-daemon-btn")
-                                        .label(if self.daemon_starting {
-                                            "Starting…"
-                                        } else {
-                                            "Start Daemon"
-                                        })
-                                        .ghost()
-                                        .disabled(self.daemon_starting)
-                                        .on_click(cx.listener(|view, _, _, cx| {
-                                            view.on_start_daemon(cx);
-                                        })),
-                                )
-                            })
-                            // Refresh button - Ghost variant
-                            .child(
-                                Button::new("refresh-btn")
-                                    .label("Refresh")
-                                    .ghost()
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.on_refresh_click(cx);
-                                    })),
-                            )
-                            // Create button - Primary variant
-                            .child(
-                                Button::new("create-header-btn")
-                                    .label("+ Create")
-                                    .primary()
-                                    .on_click(cx.listener(|view, _, window, cx| {
-                                        view.on_create_button_click(window, cx);
-                                    })),
-                            ),
-                    ),
-            )
             // Error banner (shown for startup failures, project errors, state desync recovery)
             .when(self.state.has_banner_errors(), |this| {
                 let errors = self.state.banner_errors();
@@ -2110,55 +1968,6 @@ impl Render for MainView {
                                 .text_size(px(theme::TEXT_SM))
                                 .text_color(theme::with_alpha(theme::ember(), 0.8))
                                 .child(format!("• {}", e))
-                        })),
-                )
-            })
-            // Bulk operation errors banner (dismissible)
-            .when(self.state.has_bulk_errors(), |this| {
-                let bulk_errors = self.state.bulk_errors();
-                let error_count = bulk_errors.len();
-                this.child(
-                    div()
-                        .mx(px(theme::SPACE_4))
-                        .mt(px(theme::SPACE_2))
-                        .px(px(theme::SPACE_4))
-                        .py(px(theme::SPACE_2))
-                        .bg(theme::with_alpha(theme::ember(), 0.15))
-                        .rounded(px(theme::RADIUS_MD))
-                        .flex()
-                        .flex_col()
-                        .gap(px(theme::SPACE_1))
-                        // Header with dismiss button
-                        .child(
-                            div()
-                                .flex()
-                                .justify_between()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .text_color(theme::ember())
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(format!(
-                                            "{} operation{} failed:",
-                                            error_count,
-                                            if error_count == 1 { "" } else { "s" }
-                                        )),
-                                )
-                                .child(
-                                    Button::new("dismiss-bulk-errors")
-                                        .label("×")
-                                        .ghost()
-                                        .on_click(cx.listener(|view, _, _, cx| {
-                                            view.on_dismiss_bulk_errors(cx);
-                                        })),
-                                ),
-                        )
-                        // Error list
-                        .children(bulk_errors.iter().map(|e| {
-                            div()
-                                .text_size(px(theme::TEXT_SM))
-                                .text_color(theme::with_alpha(theme::ember(), 0.8))
-                                .child(format!("• {}: {}", e.branch, e.message))
                         })),
                 )
             })

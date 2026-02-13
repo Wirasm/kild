@@ -7,8 +7,7 @@ use std::path::PathBuf;
 
 use kild_core::{Command, CoreStore, Event, KildConfig, OpenMode, Store, session_ops};
 
-use crate::state::OperationError;
-use kild_core::{ProcessStatus, SessionInfo};
+use kild_core::SessionInfo;
 
 /// Load config and create a CoreStore instance.
 ///
@@ -155,112 +154,6 @@ pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.stop_kild.started", branch = %branch);
 
     dispatch_command(Command::StopKild { branch }, "ui.stop_kild")
-}
-
-/// Open agents in all stopped kilds.
-///
-/// Iterates stopped kilds and dispatches `Command::OpenKild` for each.
-/// Returns (opened_count, errors) where errors contains operation errors with branch names.
-///
-/// Events from individual dispatches are intentionally discarded. The caller
-/// does a single `refresh_sessions()` after all operations complete, which is
-/// more efficient than applying N individual events (each would trigger its own refresh).
-pub fn open_all_stopped(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
-    execute_bulk_operation(
-        displays,
-        ProcessStatus::Stopped,
-        |branch| {
-            dispatch_command(
-                Command::OpenKild {
-                    branch: branch.to_string(),
-                    mode: OpenMode::DefaultAgent,
-                    runtime_mode: None,
-                    resume: false,
-                },
-                "ui.open_all_stopped.dispatch",
-            )
-            .map(|_| ())
-        },
-        "ui.open_all_stopped",
-    )
-}
-
-/// Stop all running kilds.
-///
-/// Iterates running kilds and dispatches `Command::StopKild` for each.
-/// Returns (stopped_count, errors) where errors contains operation errors with branch names.
-///
-/// Events from individual dispatches are intentionally discarded. The caller
-/// does a single `refresh_sessions()` after all operations complete, which is
-/// more efficient than applying N individual events (each would trigger its own refresh).
-pub fn stop_all_running(displays: &[SessionInfo]) -> (usize, Vec<OperationError>) {
-    execute_bulk_operation(
-        displays,
-        ProcessStatus::Running,
-        |branch| {
-            dispatch_command(
-                Command::StopKild {
-                    branch: branch.to_string(),
-                },
-                "ui.stop_all_running.dispatch",
-            )
-            .map(|_| ())
-        },
-        "ui.stop_all_running",
-    )
-}
-
-/// Execute a bulk operation on kilds with a specific status.
-fn execute_bulk_operation(
-    displays: &[SessionInfo],
-    target_status: ProcessStatus,
-    operation: impl Fn(&str) -> Result<(), String>,
-    event_prefix: &str,
-) -> (usize, Vec<OperationError>) {
-    tracing::info!(event = event_prefix, state = "started");
-
-    let targets: Vec<_> = displays
-        .iter()
-        .filter(|d| d.process_status == target_status)
-        .collect();
-
-    let mut success_count = 0;
-    let mut errors = Vec::new();
-
-    for kild_display in targets {
-        let branch = &kild_display.session.branch;
-        match operation(branch) {
-            Ok(()) => {
-                tracing::info!(
-                    event = event_prefix,
-                    state = "kild_completed",
-                    branch = branch
-                );
-                success_count += 1;
-            }
-            Err(e) => {
-                tracing::error!(
-                    event = event_prefix,
-                    state = "kild_failed",
-                    branch = branch,
-                    error = %e
-                );
-                errors.push(OperationError {
-                    branch: branch.clone(),
-                    message: e,
-                });
-            }
-        }
-    }
-
-    tracing::info!(
-        event = event_prefix,
-        state = "completed",
-        succeeded = success_count,
-        failed = errors.len()
-    );
-
-    (success_count, errors)
 }
 
 // --- Project Management Actions (dispatch-based) ---

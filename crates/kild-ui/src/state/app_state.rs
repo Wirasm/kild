@@ -226,11 +226,6 @@ impl AppState {
         self.errors.clear(branch);
     }
 
-    /// Clear all bulk operation errors.
-    pub fn clear_bulk_errors(&mut self) {
-        self.errors.clear_bulk();
-    }
-
     /// Get the project ID for the active project.
     pub fn active_project_id(&self) -> Option<String> {
         self.projects
@@ -246,16 +241,6 @@ impl AppState {
     pub fn filtered_displays(&self) -> Vec<&SessionInfo> {
         self.sessions
             .filtered_by_project(self.active_project_id().as_deref())
-    }
-
-    /// Count kilds with Stopped status.
-    pub fn stopped_count(&self) -> usize {
-        self.sessions.stopped_count()
-    }
-
-    /// Count kilds with Running status.
-    pub fn running_count(&self) -> usize {
-        self.sessions.running_count()
     }
 
     /// Count kilds for a specific project (by project path).
@@ -326,27 +311,6 @@ impl AppState {
         self.errors.get(branch)
     }
 
-    /// Set bulk errors (replaces existing).
-    pub fn set_bulk_errors(&mut self, errors: Vec<OperationError>) {
-        self.errors.set_bulk(errors);
-    }
-
-    /// Get bulk operation errors.
-    pub fn bulk_errors(&self) -> &[OperationError] {
-        self.errors.bulk_errors()
-    }
-
-    /// Check if there are any bulk errors.
-    pub fn has_bulk_errors(&self) -> bool {
-        self.errors.has_bulk_errors()
-    }
-
-    /// Clone the operation errors (for capturing in closures).
-    #[allow(dead_code)]
-    pub fn errors_clone(&self) -> OperationErrors {
-        self.errors.clone()
-    }
-
     // =========================================================================
     // Error banner facade methods
     // =========================================================================
@@ -388,21 +352,6 @@ impl AppState {
     /// Check if a branch has an in-flight operation.
     pub fn is_loading(&self, branch: &str) -> bool {
         self.loading.is_branch_loading(branch)
-    }
-
-    /// Mark a bulk operation as in-flight.
-    pub fn set_bulk_loading(&mut self) {
-        self.loading.set_bulk();
-    }
-
-    /// Clear the bulk operation flag.
-    pub fn clear_bulk_loading(&mut self) {
-        self.loading.clear_bulk();
-    }
-
-    /// Check if a bulk operation is in-flight.
-    pub fn is_bulk_loading(&self) -> bool {
-        self.loading.is_bulk()
     }
 
     /// Mark a dialog operation as in-flight.
@@ -1329,17 +1278,6 @@ mod tests {
     }
 
     #[test]
-    fn test_loading_facade_bulk() {
-        let mut state = AppState::test_new();
-
-        assert!(!state.is_bulk_loading());
-        state.set_bulk_loading();
-        assert!(state.is_bulk_loading());
-        state.clear_bulk_loading();
-        assert!(!state.is_bulk_loading());
-    }
-
-    #[test]
     fn test_loading_facade_dialog() {
         let mut state = AppState::test_new();
 
@@ -1369,15 +1307,10 @@ mod tests {
     fn test_loading_dimensions_independent() {
         let mut state = AppState::test_new();
 
-        state.set_bulk_loading();
-        assert!(!state.is_loading("branch-1"));
-        assert!(!state.is_dialog_loading());
-
         state.set_loading("branch-1");
         assert!(!state.is_dialog_loading());
 
         state.set_dialog_loading();
-        state.clear_bulk_loading();
         assert!(state.is_loading("branch-1"));
         assert!(state.is_dialog_loading());
     }

@@ -34,7 +34,7 @@ pub fn render_project_rail(state: &AppState, cx: &mut Context<MainView>) -> impl
     div()
         .w(px(theme::RAIL_WIDTH))
         .h_full()
-        .bg(theme::void())
+        .bg(theme::obsidian())
         .border_r_1()
         .border_color(theme::border_subtle())
         .flex()

@@ -1,4 +1,4 @@
-use kild_core::{ProcessStatus, SessionInfo};
+use kild_core::SessionInfo;
 
 /// Encapsulates session display data with refresh tracking.
 ///
@@ -131,22 +131,6 @@ impl SessionStore {
         self.last_refresh
     }
 
-    /// Count kilds with Stopped status.
-    pub fn stopped_count(&self) -> usize {
-        self.displays
-            .iter()
-            .filter(|d| d.process_status == ProcessStatus::Stopped)
-            .count()
-    }
-
-    /// Count kilds with Running status.
-    pub fn running_count(&self) -> usize {
-        self.displays
-            .iter()
-            .filter(|d| d.process_status == ProcessStatus::Running)
-            .count()
-    }
-
     /// Count kilds for a specific project (by project ID).
     pub fn kild_count_for_project(&self, project_id: &str) -> usize {
         self.displays
@@ -177,7 +161,7 @@ impl Default for SessionStore {
 mod tests {
     use super::*;
     use kild_core::sessions::types::SessionStatus;
-    use kild_core::{GitStatus, Session};
+    use kild_core::{GitStatus, ProcessStatus, Session};
     use std::path::PathBuf;
 
     #[test]
@@ -482,74 +466,5 @@ mod tests {
             ProcessStatus::Stopped,
             "Session with no PID should remain Stopped"
         );
-    }
-
-    #[test]
-    fn test_stopped_count_empty() {
-        let store = SessionStore::from_data(Vec::new(), None);
-
-        assert_eq!(store.stopped_count(), 0);
-        assert_eq!(store.running_count(), 0);
-    }
-
-    #[test]
-    fn test_stopped_and_running_counts() {
-        let make_session = |id: &str, branch: &str| {
-            Session::new(
-                id.to_string(),
-                "test-project".to_string(),
-                branch.to_string(),
-                PathBuf::from("/tmp/test"),
-                "claude".to_string(),
-                SessionStatus::Active,
-                "2024-01-01T00:00:00Z".to_string(),
-                0,
-                0,
-                0,
-                None,
-                None,
-                vec![],
-                None,
-                None,
-                None,
-            )
-        };
-
-        let mut store = SessionStore::from_data(Vec::new(), None);
-        store.set_displays(vec![
-            SessionInfo {
-                session: make_session("1", "branch-1"),
-                process_status: ProcessStatus::Stopped,
-                git_status: GitStatus::Unknown,
-                uncommitted_diff: None,
-            },
-            SessionInfo {
-                session: make_session("2", "branch-2"),
-                process_status: ProcessStatus::Running,
-                git_status: GitStatus::Unknown,
-                uncommitted_diff: None,
-            },
-            SessionInfo {
-                session: make_session("3", "branch-3"),
-                process_status: ProcessStatus::Stopped,
-                git_status: GitStatus::Unknown,
-                uncommitted_diff: None,
-            },
-            SessionInfo {
-                session: make_session("4", "branch-4"),
-                process_status: ProcessStatus::Running,
-                git_status: GitStatus::Unknown,
-                uncommitted_diff: None,
-            },
-            SessionInfo {
-                session: make_session("5", "branch-5"),
-                process_status: ProcessStatus::Unknown,
-                git_status: GitStatus::Unknown,
-                uncommitted_diff: None,
-            },
-        ]);
-
-        assert_eq!(store.stopped_count(), 2, "Should count 2 stopped kilds");
-        assert_eq!(store.running_count(), 2, "Should count 2 running kilds");
     }
 }

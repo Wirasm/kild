@@ -1,13 +1,11 @@
 /// Tracks in-progress async operations to prevent double-dispatch.
 ///
-/// Three independent dimensions:
+/// Two independent dimensions:
 /// - Per-branch: tracks which branches have in-flight row operations (open/stop)
-/// - Bulk: tracks whether a bulk operation (open-all/stop-all) is in flight
 /// - Dialog: tracks whether a dialog submit (create/destroy) is in flight
 #[derive(Clone, Debug, Default)]
 pub struct LoadingState {
     loading_branches: std::collections::HashSet<String>,
-    bulk: bool,
     dialog: bool,
 }
 
@@ -29,21 +27,6 @@ impl LoadingState {
     /// Check if a branch has an in-flight operation.
     pub fn is_branch_loading(&self, branch: &str) -> bool {
         self.loading_branches.contains(branch)
-    }
-
-    /// Mark a bulk operation as in-flight.
-    pub fn set_bulk(&mut self) {
-        self.bulk = true;
-    }
-
-    /// Clear the bulk operation flag.
-    pub fn clear_bulk(&mut self) {
-        self.bulk = false;
-    }
-
-    /// Check if a bulk operation is in-flight.
-    pub fn is_bulk(&self) -> bool {
-        self.bulk
     }
 
     /// Mark a dialog operation as in-flight.
@@ -115,18 +98,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bulk_loading() {
-        let mut state = LoadingState::new();
-        assert!(!state.is_bulk());
-
-        state.set_bulk();
-        assert!(state.is_bulk());
-
-        state.clear_bulk();
-        assert!(!state.is_bulk());
-    }
-
-    #[test]
     fn test_dialog_loading() {
         let mut state = LoadingState::new();
         assert!(!state.is_dialog());
@@ -136,20 +107,6 @@ mod tests {
 
         state.clear_dialog();
         assert!(!state.is_dialog());
-    }
-
-    #[test]
-    fn test_bulk_and_branch_independent() {
-        let mut state = LoadingState::new();
-        state.set_bulk();
-        state.set_branch("branch-1");
-
-        assert!(state.is_bulk());
-        assert!(state.is_branch_loading("branch-1"));
-
-        state.clear_bulk();
-        assert!(!state.is_bulk());
-        assert!(state.is_branch_loading("branch-1"));
     }
 
     #[test]
