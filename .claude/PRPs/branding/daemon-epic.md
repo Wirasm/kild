@@ -281,8 +281,8 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 
 **Remaining (Phases 2.8–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
 
-- [ ] **Phase 2.8: Control view — pane grid** — 2x2 grid showing terminals from multiple kilds, focus routing, maximize/close
-- [ ] **Phase 2.9: Status bar + polish** — Footer with contextual alerts and view-aware keyboard hints
+- [x] **Phase 2.8: Control view — pane grid** — 2x2 grid showing terminals from multiple kilds, focus routing, maximize/close (PR #418)
+- [ ] **Phase 2.9: Status bar + polish** — Footer with contextual alerts and view-aware keyboard hints. Plan: `.claude/PRPs/plans/phase-2.9-status-bar-polish.plan.md`
 
 **Key reference:** [mockup-v2.html](../branding/mockup-v2.html) is the definitive mockup. Three-view architecture (Control/Dashboard/Detail), navigation-only sidebar, monochrome buttons.
 
