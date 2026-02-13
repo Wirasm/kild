@@ -20,12 +20,14 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 | kild (CLI) | 6k | Production. 20+ commands, thin delegation to kild-core. Daemon subcommands + attach. |
 | kild-daemon | 4k | Production. PTY ownership via portable-pty, JSONL IPC, session state machine, async tokio server, scrollback replay, PTY exit handling. 15 integration tests. |
 | kild-tmux-shim | 3k | Production. 16 tmux commands, hand-rolled parser, file-based pane registry, daemon IPC client. 90 unit tests. |
-| kild-ui | 9k | Working. GPUI 0.2.2 (crates.io), 3-column metadata dashboard, embedded terminal rendering via alacritty_terminal + portable-pty. |
+| kild-ui | ~12k | Working. GPUI 0.2.2 (crates.io), terminal multiplexer with per-kild terminals, tab bar, daemon-backed terminals via alacritty_terminal + portable-pty + daemon IPC. Phase 2.4 complete. |
 | kild-peek/core | 13k | Production. macOS window inspection, UI automation. |
 
 **What works:** Git worktree isolation, session lifecycle, multi-agent tracking, PR integration, fleet health, cross-kild overlap detection, config hierarchy, daemon PTY ownership, daemon IPC, daemon-mode session create/open/stop/destroy, terminal attach with scrollback replay, PTY exit notification with state transitions, background daemonization, tmux shim with 16 commands, agent teams in daemon sessions, session resume (`--resume`), desktop notifications (`--notify`), lazy daemon status sync, daemon auto-start on create, task list persistence across sessions (`CLAUDE_CODE_TASK_LIST_ID`).
 
-**What's missing for Phase 2:** Terminal resize in kild-ui, scrollback UI, multiplexer layout.
+**What's been delivered in Phase 2 (2.1–2.4):** Click kild → terminal in worktree, terminal persistence across switching, multiple terminals per kild (tab bar), daemon-backed terminals with on-the-fly session creation. Terminal resize and scrollback UI are implemented.
+
+**What's next (Phase 2.5–2.9):** Refactor + keyboard nav, project rail + sidebar restructure, status bar, split panes, minimized session bars. See [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed subphase plan.
 
 ---
 
@@ -91,13 +93,13 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 - **Batching:** 4ms window (250Hz) with 100-event cap — balances responsiveness vs. render overhead
 - **GPUI version:** Stayed on crates.io 0.2.2 — terminal rendering works with published API, no need for git-sourced GPUI
 
-**Remaining gaps (Phase 2 prerequisites):**
-- [ ] **Terminal resize** (SIGWINCH on PTY when element bounds change) — layout computes correct cols/rows but never sends them to the PTY. Fixed 80×24. **Required for Phase 2 multiplexer panes.**
-- [ ] **Scrollback UI** — alacritty_terminal supports scrollback but it's not configured and there's no scroll interaction. **Required for usable embedded terminals.**
-- [ ] Selection and copy/paste — no mouse selection or clipboard integration
+**Remaining gaps (Phase 2 prerequisites) — ALL RESOLVED:**
+- [x] ~~**Terminal resize**~~ — `ResizeHandle` tracks dimensions, `resize_if_changed()` sends SIGWINCH on prepaint. Dynamic cols/rows. Resolved in Phase 2.1.
+- [x] ~~**Scrollback UI**~~ — Mouse scroll via `alacritty_terminal::grid::Scroll`, display offset tracking, "Scrollback" badge when scrolled up. Resolved in Phase 2.1.
+- [x] ~~Selection and copy/paste~~ — Cmd+C copies selection, Cmd+V pastes from clipboard. Resolved in Phase 2.1.
 - [ ] Cursor blink animation — cursor renders as static block, no blink timer
 - [ ] Wide character rendering — spacer cells skipped correctly but no explicit width-2 glyph handling (partial)
-- [ ] URL detection / clickable links
+- [x] ~~URL detection / clickable links~~ — Cmd+Click opens URLs in browser. Resolved in Phase 2.1.
 
 **Key reference:** Zed's terminal implementation uses the same pattern — `TerminalElement` with text run batching and background region merging for performance. Studied but not copied; written for KILD's needs.
 
@@ -251,31 +253,39 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 
 ---
 
-### Phase 2: Multiplexer UX
+### Phase 2: Multiplexer UX — IN PROGRESS (Phases 2.1–2.4 complete)
 
-**Goal:** kild-ui becomes the full multiplexer from the mockup — project rail, kild sidebar, terminal pane grid, teammate tabs, minimized sessions.
+**Goal:** kild-ui becomes the full multiplexer from the mockup — project rail, kild sidebar, terminal pane grid, tabs, minimized sessions. The user's primary interface for managing parallel AI agent sessions.
 
 **Why:** This is what users see. The daemon (Phase 1b) gives us persistence and PTY ownership. This phase gives us the UX that makes it feel like a product, not a tech demo.
 
-**Prerequisites from Phase 1a (must be done first):**
-- [ ] **Terminal resize** — multiplexer panes need dynamic sizing, currently fixed 80×24
-- [ ] **Scrollback UI** — embedded terminals need scrollback to be usable
+**Prerequisites from Phase 1a — ALL RESOLVED:**
+- [x] ~~**Terminal resize**~~ — `ResizeHandle` + `resize_if_changed()` in terminal_element.rs
+- [x] ~~**Scrollback UI**~~ — Mouse scroll, display offset, "Scrollback" badge
 
-**Deliverables:**
-- [ ] Project rail (48px icon column) — project switching, add project, settings
-- [ ] Kild sidebar with dual mode — list view (grouped by status, agent trees) + detail view (click to inspect: note, session info, git stats, PR, path)
-- [ ] Terminal pane grid — split panes with resize handles, thin pane headers
-- [ ] Teammate tab bar — status dots per teammate, tab switching
-- [ ] Minimized kild bars — collapsed single-line at bottom, expand on click
-- [ ] Keyboard shortcut system — per-terminal focus routing, global shortcuts for navigation
-- [ ] Status bar — notifications, active shortcut hints
-- [ ] Hover-reveal micro-actions — copy path, open PR URL
+**Delivered (Phases 2.1–2.4):**
+
+- [x] **Spike 1: smol IO on GPUI executor** — `smol::Async<UnixStream>` works on `BackgroundExecutor`, <2ms roundtrip (PR #404)
+- [x] **Spike 2: Daemon-backed terminal rendering** — Daemon PtyOutput renders identically to local PTY through `alacritty_terminal::Term` → `TerminalElement` (PR #407)
+- [x] **Phase 2.1: Terminal in worktree** — Click kild → local PTY terminal in worktree directory, Ctrl+Escape back to dashboard (PR #411)
+- [x] **Phase 2.2: Terminal persistence** — `HashMap<session_id, TerminalTabs>` keeps terminals alive across kild switching
+- [x] **Phase 2.3: Multiple terminals per kild** — Tab bar with +/× for multiple terminals, Ctrl+Tab cycling, tab rename
+- [x] **Phase 2.4: Daemon-backed terminals** — "+" menu offers Local vs Daemon terminals, on-the-fly daemon session creation, daemon auto-start from UI
+- [x] **Session lifecycle in UI** — Create, Open, Stop, Destroy dialogs all work from within kild-ui. No external terminal needed for session management.
+
+**Remaining (Phases 2.5–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
+
+- [ ] **Phase 2.5: Extract + keyboard nav** — Refactor main_view.rs, ⌘J/K kild navigation, ⌘1–9 jump
+- [ ] **Phase 2.6: Project rail + sidebar restructure** — 48px rail, kild-focused sidebar with detail mode, always-visible layout
+- [ ] **Phase 2.7: Status bar + shortcut hints** — Footer with alerts and context-aware keyboard hints (uses `gpui_component::kbd::Kbd`)
+- [ ] **Phase 2.8: Split panes** — Side-by-side terminals with resize handles (uses `gpui_component::resizable::ResizablePanelGroup`)
+- [ ] **Phase 2.9: Minimized session bars** — Fleet awareness bars for background active kilds
 
 **Key reference:** [mockup-embedded.html](../branding/mockup-embedded.html) is the definitive mockup. Every interaction pattern is documented there.
 
-**Signals of completion:** The mockup is real. You can switch projects, browse kilds, see terminal output in split panes, minimize sessions, inspect kild details.
+**Signals of completion:** The mockup is real. You can switch projects, browse kilds, see terminal output in split panes, minimize sessions, inspect kild details. kild-ui replaces external terminal windows as the primary interface.
 
-**Scope:** High. Full view rewrite of kild-ui. Leverage gpui-component (Sidebar, Tabs, Dock, Resizable) heavily.
+**Scope:** High. Incremental delivery via subphases. Leverage gpui-component (Resizable, Sidebar, Kbd, Tabs) heavily.
 
 ---
 
@@ -340,7 +350,7 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 ## Dependencies Between Phases
 
 ```
-Phase 0 (DONE) ──→ Phase 1a (DONE) ──→ Phase 2
+Phase 0 (DONE) ──→ Phase 1a (DONE) ──→ Phase 2 (2.1-2.4 DONE, 2.5-2.9 IN PROGRESS)
                                            ↑
 Phase 1b (DONE) ──→ Phase 1c (DONE)  ─────┘
        ↓
@@ -352,7 +362,7 @@ Phase 1b (DONE) ──→ Phase 1c (DONE)  ─────┘
 - **Phase 1b** (DONE) — daemon crate with PTY ownership, IPC, session state machine, scrollback replay, exit notification, background mode
 - **Phase 1c** (DONE) — tmux shim with 16 commands, agent teams work in daemon sessions
 - **Phase 1 bonus** — session resume (`--resume`), desktop notifications (`--notify`), task list persistence, daemon auto-start, bug fixes (#309, #307, #257)
-- **Phase 2** (multiplexer UX) is the next critical path — blocked only by terminal resize + scrollback UI from Phase 1a gaps
+- **Phase 2** (multiplexer UX) — Phases 2.1–2.4 complete. Core terminal multiplexer works. Phase 2.5 (extract + keyboard nav) is next.
 - **Phase 3** (intelligence) needs Phase 1b (DONE) daemon for hooks and state tracking
 - **Phase 4** and **Phase 5** are sequential and build on everything before them
 
@@ -404,10 +414,15 @@ The daemon is **additive**. External terminal backends (Ghostty, iTerm, Terminal
 
 ### Resolved
 - **PTY library:** `portable-pty` — decided and shipped in Phase 1b (PR #294). Cross-platform, used by Wezterm, flexible for daemon ownership.
-- **GPUI version:** Staying on crates.io 0.2.2. Terminal rendering works with published API — no need for git-sourced GPUI. Revisit only if Phase 2 multiplexer layout needs APIs not in 0.2.2.
+- **GPUI version:** Staying on crates.io 0.2.2. Terminal rendering works with published API. Split pane resize confirmed available via `gpui_component::resizable` (0.5.1). No need to switch.
 - **tmux shim scope:** 16 commands discovered through real-world testing with Claude Code agent teams. Hand-rolled parser (not clap). File-based pane state with flock. 3,055 lines — 6x original estimate.
-- **Terminal resize:** Deferred from Phase 1a. Must be solved as Phase 2 prerequisite — multiplexer panes need dynamic resize.
+- **Terminal resize:** Resolved in Phase 2.1. `ResizeHandle` + `resize_if_changed()` sends SIGWINCH on prepaint when element bounds change.
+- **Scrollback UI:** Resolved in Phase 2.1. Mouse scroll via `alacritty_terminal::grid::Scroll`, display offset tracking, "Scrollback" badge.
+- **Cmd key for shortcuts:** `event.keystroke.modifiers.platform` maps to ⌘ on macOS. Already used for Cmd+C/V in terminal_view.rs. All Phase 2.5+ keyboard shortcuts use ⌘.
+- **Split pane resize:** `gpui_component::resizable` (0.5.1) provides `h_resizable()` / `v_resizable()` with `ResizablePanelGroup` and built-in resize handles. No custom mouse tracking needed.
+- **Daemon terminal semantics:** Closing a daemon terminal view does NOT stop the daemon process. The terminal is a window into a running process. "Minimize" = close the view, daemon keeps running.
 
 ---
 
 *This epic is a living document. Each phase gets its own detailed plan when we start it.*
+*Last updated: 2026-02-13 — Phase 2.4 complete, Phase 2.5 next. Terminal resize, scrollback, copy/paste, URL clicking all resolved.*
