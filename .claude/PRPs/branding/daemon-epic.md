@@ -273,11 +273,14 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 - [x] **Phase 2.4: Daemon-backed terminals** — "+" menu offers Local vs Daemon terminals, on-the-fly daemon session creation, daemon auto-start from UI
 - [x] **Session lifecycle in UI** — Create, Open, Stop, Destroy dialogs all work from within kild-ui. No external terminal needed for session management.
 
-**Remaining (Phases 2.5–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
+**Completed (Phases 2.5–2.7):**
 
-- [ ] **Phase 2.5: Extract + keyboard nav** — Refactor main_view.rs, ⌘J/K kild navigation, ⌘1–9 jump
-- [ ] **Phase 2.6: Project rail + sidebar + view shell** — 48px rail, navigation-only sidebar with hover actions, top tab bar (Control/Dashboard), ⌘D toggle, monochrome button discipline
-- [ ] **Phase 2.7: Dashboard + detail views** — Fleet summary + kild cards, click card → detail drill-down (session, git, PR, terminals, actions)
+- [x] **Phase 2.5: Extract + keyboard nav** — Refactor main_view.rs, ⌘J/K kild navigation, ⌘1–9 jump (PR #414)
+- [x] **Phase 2.6: Project rail + sidebar + view shell** — 48px rail, navigation-only sidebar with hover actions, top tab bar (Control/Dashboard), ⌘D toggle, monochrome button discipline (PR #416)
+- [x] **Phase 2.7: Dashboard + detail views** — Fleet summary + kild cards, click card → detail drill-down (session, git, PR, terminals, actions) (PR #417)
+
+**Remaining (Phases 2.8–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
+
 - [ ] **Phase 2.8: Control view — pane grid** — 2x2 grid showing terminals from multiple kilds, focus routing, maximize/close
 - [ ] **Phase 2.9: Status bar + polish** — Footer with contextual alerts and view-aware keyboard hints
 

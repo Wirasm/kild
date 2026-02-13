@@ -346,7 +346,9 @@ Project (e.g., "kild", "shards")
 *Updated: 2026-02-13 — Phases 2.1–2.4 complete. Subphases 2.5–2.9 planned for layout, keyboard nav, splits, and polish.*
 *Updated: 2026-02-13 — Research findings: gpui-component resizable panels, Cmd key support, Kbd widget. Conceptual hierarchy documented. Daemon terminal semantics clarified.*
 *Updated: 2026-02-13 — Aligned with mockup-v2.html. Three-view architecture (Control/Dashboard/Detail). Sidebar navigation-only. 2x2 pane grid replaces split panes. Monochrome button discipline. Subphases 2.5–2.9 restructured.*
-*Status: IN PROGRESS — Phases 2.5–2.6 complete, Phase 2.7 next*
+*Updated: 2026-02-13 — Phase 2.7 plan created: `.claude/PRPs/plans/phase-2.7-dashboard-detail-views.plan.md`*
+*Updated: 2026-02-13 — Phase 2.7 complete: Dashboard fleet cards + Detail drill-down views implemented*
+*Status: IN PROGRESS — Phases 2.5–2.7 complete, Phase 2.8 next*
 
 ---
 
@@ -357,8 +359,8 @@ Phases 2.1–2.4 delivered the core terminal multiplexer: click kild → termina
 ```
 Phase 2.4 (daemon terminals) ✅
   → Phase 2.5 (extract + keyboard nav) ✅
-    → Phase 2.6 (rail + sidebar + view shell) ← IN PROGRESS
-      → Phase 2.7 (dashboard + detail views)
+    → Phase 2.6 (rail + sidebar + view shell) ✅
+      → Phase 2.7 (dashboard + detail views) ✅
       → Phase 2.8 (control view — pane grid)
     → Phase 2.9 (status bar + polish) ← depends on 2.6
 ```

@@ -19,7 +19,8 @@ use std::path::PathBuf;
 use crate::actions;
 use crate::state::AppState;
 use crate::views::{
-    add_project_dialog, confirm_dialog, create_dialog, project_rail, sidebar,
+    add_project_dialog, confirm_dialog, create_dialog, dashboard_view, detail_view, project_rail,
+    sidebar,
     terminal_tabs::{TerminalBackend, TerminalTabs},
 };
 use crate::watcher::SessionWatcher;
@@ -136,8 +137,10 @@ enum FocusRegion {
 enum ActiveView {
     /// Terminal tabs per kild (default).
     Control,
-    /// Fleet overview (Phase 2.7 — placeholder for now).
+    /// Fleet overview with kild cards.
     Dashboard,
+    /// Kild detail drill-down (from dashboard card click).
+    Detail,
 }
 
 /// Main application view that composes the kild list, header, and create dialog.
@@ -1011,11 +1014,38 @@ impl MainView {
         cx.notify();
     }
 
+    /// Handle dashboard card click — select kild and switch to Detail view.
+    pub(crate) fn on_dashboard_card_click(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        tracing::debug!(event = "ui.dashboard.card_clicked", session_id = session_id);
+        self.state.select_kild(session_id.to_string());
+        self.active_view = ActiveView::Detail;
+        self.focus_region = FocusRegion::Dashboard;
+        cx.notify();
+    }
+
+    /// Handle Detail view back button — return to Dashboard.
+    pub(crate) fn on_detail_back(&mut self, cx: &mut Context<Self>) {
+        tracing::debug!(event = "ui.detail.back_clicked");
+        self.active_view = ActiveView::Dashboard;
+        cx.notify();
+    }
+
+    /// Handle terminal click in Detail view — switch to Control with terminal focused.
+    pub(crate) fn on_detail_terminal_click(
+        &mut self,
+        session_id: &str,
+        tab_idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_sidebar_terminal_click(session_id, tab_idx, window, cx);
+    }
+
     /// Toggle between Control and Dashboard views.
     fn toggle_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active_view = match self.active_view {
             ActiveView::Control => ActiveView::Dashboard,
-            ActiveView::Dashboard => ActiveView::Control,
+            ActiveView::Dashboard | ActiveView::Detail => ActiveView::Control,
         };
         tracing::debug!(event = "ui.view.toggled", view = ?self.active_view);
         if self.active_view == ActiveView::Control && self.active_terminal_id.is_some() {
@@ -1555,16 +1585,17 @@ impl MainView {
     }
 
     fn render_tab_bar(&self, session_id: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
-        use super::terminal_tabs::{TabBarContext, render_tab_bar};
+        use super::terminal_tabs::{RenamingTab, TabBarContext, render_tab_bar};
 
         let Some(tabs) = self.terminal_tabs.get(session_id) else {
             return div().into_any_element();
         };
 
-        let renaming = self
-            .renaming_tab
-            .as_ref()
-            .map(|(s, i, input)| (s.as_str(), *i, input));
+        let renaming = self.renaming_tab.as_ref().map(|(s, i, input)| RenamingTab {
+            session_id: s.as_str(),
+            tab_index: *i,
+            input,
+        });
 
         let ctx = TabBarContext {
             tabs,
@@ -1580,7 +1611,7 @@ impl MainView {
     /// Render the view tab bar: [Control] [Dashboard] with ⌘D hint.
     fn render_view_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_control = self.active_view == ActiveView::Control;
-        let is_dashboard = self.active_view == ActiveView::Dashboard;
+        let is_dashboard = matches!(self.active_view, ActiveView::Dashboard | ActiveView::Detail);
 
         div()
             .flex()
@@ -1699,15 +1730,12 @@ impl MainView {
                         .into_any_element()
                 }
             }
-            ActiveView::Dashboard => div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(theme::text_subtle())
-                .text_size(px(theme::TEXT_SM))
-                .child("Dashboard \u{2014} coming in Phase 2.7")
-                .into_any_element(),
+            ActiveView::Dashboard => {
+                dashboard_view::render_dashboard(&self.state, &self.terminal_tabs, cx)
+            }
+            ActiveView::Detail => {
+                detail_view::render_detail_view(&self.state, &self.terminal_tabs, cx)
+            }
         }
     }
 
@@ -1767,7 +1795,7 @@ impl MainView {
 
         // Ctrl+T: toggle terminal active/inactive within Control view
         if key_str == "t" && event.keystroke.modifiers.control {
-            if self.active_view == ActiveView::Dashboard {
+            if matches!(self.active_view, ActiveView::Dashboard | ActiveView::Detail) {
                 self.active_view = ActiveView::Control;
                 if let Some(id) = self.state.selected_id().map(|s| s.to_string()) {
                     self.on_kild_select(&id, window, cx);
@@ -1803,6 +1831,15 @@ impl MainView {
 
         if cmd && key_str == "d" {
             self.toggle_view(window, cx);
+            return;
+        }
+
+        // Escape in Detail view: back to Dashboard
+        if key_str == "escape" && self.active_view == ActiveView::Detail {
+            self.active_view = ActiveView::Dashboard;
+            self.focus_region = FocusRegion::Dashboard;
+            window.focus(&self.focus_handle);
+            cx.notify();
             return;
         }
 
@@ -2088,10 +2125,9 @@ mod tests {
     #[test]
     fn test_active_view_default_is_control() {
         assert_eq!(ActiveView::Control, ActiveView::Control);
-        // Verify it's the default by checking the initial value in the struct constructor
-        // (can't easily instantiate MainView in a unit test without GPUI context,
-        // so we verify the enum's existence and equality)
         assert_ne!(ActiveView::Control, ActiveView::Dashboard);
+        assert_ne!(ActiveView::Control, ActiveView::Detail);
+        assert_ne!(ActiveView::Dashboard, ActiveView::Detail);
     }
 
     #[test]
@@ -2099,7 +2135,7 @@ mod tests {
         let mut view = ActiveView::Control;
         view = match view {
             ActiveView::Control => ActiveView::Dashboard,
-            ActiveView::Dashboard => ActiveView::Control,
+            ActiveView::Dashboard | ActiveView::Detail => ActiveView::Control,
         };
         assert_eq!(view, ActiveView::Dashboard);
     }
@@ -2109,9 +2145,34 @@ mod tests {
         let mut view = ActiveView::Dashboard;
         view = match view {
             ActiveView::Control => ActiveView::Dashboard,
-            ActiveView::Dashboard => ActiveView::Control,
+            ActiveView::Dashboard | ActiveView::Detail => ActiveView::Control,
         };
         assert_eq!(view, ActiveView::Control);
+    }
+
+    #[test]
+    fn test_toggle_view_switches_detail_to_control() {
+        let mut view = ActiveView::Detail;
+        view = match view {
+            ActiveView::Control => ActiveView::Dashboard,
+            ActiveView::Dashboard | ActiveView::Detail => ActiveView::Control,
+        };
+        assert_eq!(view, ActiveView::Control);
+    }
+
+    #[test]
+    fn test_dashboard_tab_active_in_detail_view() {
+        let view = ActiveView::Detail;
+        let is_dashboard = matches!(view, ActiveView::Dashboard | ActiveView::Detail);
+        assert!(is_dashboard);
+
+        let view = ActiveView::Dashboard;
+        let is_dashboard = matches!(view, ActiveView::Dashboard | ActiveView::Detail);
+        assert!(is_dashboard);
+
+        let view = ActiveView::Control;
+        let is_dashboard = matches!(view, ActiveView::Dashboard | ActiveView::Detail);
+        assert!(!is_dashboard);
     }
 
     #[test]
