@@ -20,7 +20,7 @@ use crate::actions;
 use crate::state::AppState;
 use crate::views::{
     add_project_dialog, confirm_dialog, create_dialog, dashboard_view, detail_view, project_rail,
-    sidebar,
+    sidebar, status_bar,
     terminal_tabs::{TerminalBackend, TerminalTabs},
 };
 use crate::watcher::SessionWatcher;
@@ -134,7 +134,7 @@ enum FocusRegion {
 
 /// Which view is showing in the main area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActiveView {
+pub(crate) enum ActiveView {
     /// Terminal tabs per kild (default).
     Control,
     /// Fleet overview with kild cards.
@@ -1818,15 +1818,8 @@ impl MainView {
                     )
                     .child("Dashboard"),
             )
-            // Spacer
+            // Spacer (hints moved to status bar)
             .child(div().flex_1())
-            // ⌘D hint
-            .child(
-                div()
-                    .text_size(px(theme::TEXT_XS))
-                    .text_color(theme::text_muted())
-                    .child("\u{2318}D"),
-            )
     }
 
     /// Render the main content area based on active view.
@@ -2169,32 +2162,53 @@ impl Render for MainView {
                         })),
                 )
             })
-            // Main content: Rail | Sidebar | Main area (always visible)
+            // Main content: Rail | Right section (Sidebar + Main + Status Bar)
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .overflow_hidden()
-                    // Project rail (48px)
+                    // Project rail (48px, spans full height)
                     .child(project_rail::render_project_rail(&self.state, cx))
-                    // Sidebar (200px, kild navigation)
-                    .child(sidebar::render_sidebar(
-                        &self.state,
-                        &self.terminal_tabs,
-                        &self.pane_grid,
-                        cx,
-                    ))
-                    // Main area (flex-1)
+                    // Right section: sidebar + main + status bar
                     .child(
                         div()
                             .flex_1()
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            // View tab bar: [Control] [Dashboard]
-                            .child(self.render_view_tab_bar(cx))
-                            // View content
-                            .child(self.render_main_content(cx)),
+                            // Content row: sidebar + main
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .overflow_hidden()
+                                    // Sidebar (200px, kild navigation)
+                                    .child(sidebar::render_sidebar(
+                                        &self.state,
+                                        &self.terminal_tabs,
+                                        &self.pane_grid,
+                                        cx,
+                                    ))
+                                    // Main area (flex-1)
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .overflow_hidden()
+                                            // View tab bar: [Control] [Dashboard]
+                                            .child(self.render_view_tab_bar(cx))
+                                            // View content
+                                            .child(self.render_main_content(cx)),
+                                    ),
+                            )
+                            // Status bar (spans sidebar + main, NOT rail)
+                            .child(status_bar::render_status_bar(
+                                &self.state,
+                                self.active_view,
+                                cx,
+                            )),
                     ),
             )
             // Dialog rendering (based on current dialog state)

@@ -25,9 +25,9 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 
 **What works:** Git worktree isolation, session lifecycle, multi-agent tracking, PR integration, fleet health, cross-kild overlap detection, config hierarchy, daemon PTY ownership, daemon IPC, daemon-mode session create/open/stop/destroy, terminal attach with scrollback replay, PTY exit notification with state transitions, background daemonization, tmux shim with 16 commands, agent teams in daemon sessions, session resume (`--resume`), desktop notifications (`--notify`), lazy daemon status sync, daemon auto-start on create, task list persistence across sessions (`CLAUDE_CODE_TASK_LIST_ID`).
 
-**What's been delivered in Phase 2 (2.1–2.4):** Click kild → terminal in worktree, terminal persistence across switching, multiple terminals per kild (tab bar), daemon-backed terminals with on-the-fly session creation. Terminal resize and scrollback UI are implemented.
+**What's been delivered in Phase 2 (2.1–2.9):** Click kild → terminal in worktree, terminal persistence across switching, multiple terminals per kild (tab bar), daemon-backed terminals with on-the-fly session creation. Terminal resize and scrollback UI, project rail, sidebar restructure, dashboard fleet cards, detail drill-down, terminal tabs with keyboard navigation, 2x2 pane grid, status bar with contextual alerts and keyboard hints.
 
-**What's next (Phase 2.8–2.9):** 2x2 pane grid (Control view), status bar. See [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed subphase plan.
+**What's next:** Phase 2 complete. Phase 3 (Agent Intelligence) is next. See [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for Phase 2 retrospective.
 
 ---
 
@@ -282,7 +282,7 @@ Features and fixes shipped that weren't in the original Phase 1 plan but strengt
 **Remaining (Phases 2.8–2.9) — see [phase-2-multiplexer-ux.prd.md](../prds/phase-2-multiplexer-ux.prd.md) for detailed plan:**
 
 - [x] **Phase 2.8: Control view — pane grid** — 2x2 grid showing terminals from multiple kilds, focus routing, maximize/close (PR #418)
-- [ ] **Phase 2.9: Status bar + polish** — Footer with contextual alerts and view-aware keyboard hints. Plan: `.claude/PRPs/plans/phase-2.9-status-bar-polish.plan.md`
+- [x] **Phase 2.9: Status bar + polish** — Footer with contextual alerts (dirty worktrees, errors) and view-aware keyboard hints (Kbd widget). Dead code cleanup.
 
 **Key reference:** [mockup-v2.html](../branding/mockup-v2.html) is the definitive mockup. Three-view architecture (Control/Dashboard/Detail), navigation-only sidebar, monochrome buttons.
 
@@ -365,7 +365,7 @@ Phase 1b (DONE) ──→ Phase 1c (DONE)  ─────┘
 - **Phase 1b** (DONE) — daemon crate with PTY ownership, IPC, session state machine, scrollback replay, exit notification, background mode
 - **Phase 1c** (DONE) — tmux shim with 16 commands, agent teams work in daemon sessions
 - **Phase 1 bonus** — session resume (`--resume`), desktop notifications (`--notify`), task list persistence, daemon auto-start, bug fixes (#309, #307, #257)
-- **Phase 2** (multiplexer UX) — Phases 2.1–2.7 complete. Phase 2.8 (pane grid) is next.
+- **Phase 2** (multiplexer UX) — DONE. All subphases (2.1–2.9) complete.
 - **Phase 3** (intelligence) needs Phase 1b (DONE) daemon for hooks and state tracking
 - **Phase 4** and **Phase 5** are sequential and build on everything before them
 
@@ -428,4 +428,4 @@ The daemon is **additive**. External terminal backends (Ghostty, iTerm, Terminal
 ---
 
 *This epic is a living document. Each phase gets its own detailed plan when we start it.*
-*Last updated: 2026-02-13 — Phase 2.7 complete, Phase 2.8 next. Pane grid plan: `.claude/PRPs/plans/phase-2.8-control-pane-grid.plan.md`*
+*Last updated: 2026-02-13 — Phase 2 complete (all subphases 2.1–2.9). Phase 3 (Agent Intelligence) is next.*

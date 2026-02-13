@@ -282,8 +282,6 @@ pub fn dispatch_add_project(path: PathBuf, name: Option<String>) -> Result<Vec<E
 }
 
 /// Remove a project via Store dispatch.
-// Phase 2.7 will re-add remove project from the Detail view.
-#[allow(dead_code)]
 pub fn dispatch_remove_project(path: PathBuf) -> Result<Vec<Event>, String> {
     tracing::info!(
         event = "ui.dispatch_remove_project.started",

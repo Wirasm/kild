@@ -322,7 +322,6 @@ impl AppState {
     }
 
     /// Get the error for a specific branch, if any.
-    #[cfg(test)]
     pub fn get_error(&self, branch: &str) -> Option<&OperationError> {
         self.errors.get(branch)
     }
@@ -343,6 +342,7 @@ impl AppState {
     }
 
     /// Clone the operation errors (for capturing in closures).
+    #[allow(dead_code)]
     pub fn errors_clone(&self) -> OperationErrors {
         self.errors.clone()
     }
@@ -472,6 +472,7 @@ impl AppState {
     }
 
     /// Check if the project list is empty.
+    #[allow(dead_code)]
     pub fn projects_is_empty(&self) -> bool {
         self.projects.is_empty()
     }
@@ -486,11 +487,13 @@ impl AppState {
     }
 
     /// Get the load error from the last refresh attempt, if any.
+    #[allow(dead_code)]
     pub fn load_error(&self) -> Option<&str> {
         self.sessions.load_error()
     }
 
     /// Check if there are no session displays.
+    #[allow(dead_code)]
     pub fn sessions_is_empty(&self) -> bool {
         self.sessions.is_empty()
     }

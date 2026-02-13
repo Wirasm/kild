@@ -120,6 +120,7 @@ impl SessionStore {
     }
 
     /// Get the load error from the last refresh attempt, if any.
+    #[allow(dead_code)]
     pub fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
     }
@@ -160,6 +161,7 @@ impl SessionStore {
     }
 
     /// Check if there are no displays.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.displays.is_empty()
     }
