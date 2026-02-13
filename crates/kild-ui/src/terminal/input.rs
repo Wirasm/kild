@@ -81,8 +81,10 @@ pub fn keystroke_to_escape(keystroke: &Keystroke, app_cursor_mode: bool) -> Opti
         _ => {}
     }
 
-    // Printable characters
-    if !ctrl && !key.is_empty() && !key.starts_with("f") {
+    // Printable characters (skip function keys like f1–f12)
+    let is_function_key =
+        key.starts_with("f") && key.len() > 1 && key[1..].bytes().all(|b| b.is_ascii_digit());
+    if !ctrl && !key.is_empty() && !is_function_key {
         let mut bytes = key.as_bytes().to_vec();
         // Alt+key wraps with ESC prefix
         if alt {
@@ -143,8 +145,15 @@ mod tests {
     #[test]
     fn test_printable_characters() {
         assert_eq!(keystroke_to_escape(&key("a"), false), Some(b"a".to_vec()));
+        assert_eq!(keystroke_to_escape(&key("f"), false), Some(b"f".to_vec()));
         assert_eq!(keystroke_to_escape(&key("z"), false), Some(b"z".to_vec()));
         assert_eq!(keystroke_to_escape(&key("1"), false), Some(b"1".to_vec()));
+    }
+
+    #[test]
+    fn test_function_keys_return_none() {
+        assert_eq!(keystroke_to_escape(&key("f1"), false), None);
+        assert_eq!(keystroke_to_escape(&key("f12"), false), None);
     }
 
     #[test]

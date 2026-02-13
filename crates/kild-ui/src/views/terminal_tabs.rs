@@ -35,6 +35,10 @@ impl TabEntry {
     pub fn backend(&self) -> &TerminalBackend {
         &self.backend
     }
+
+    pub fn view(&self) -> &gpui::Entity<TerminalView> {
+        &self.view
+    }
 }
 
 /// Per-kild collection of terminal tabs with cycling and close logic.
@@ -204,6 +208,7 @@ pub struct RenamingTab<'a> {
 }
 
 /// Data needed to render the tab bar, extracted from MainView fields.
+#[allow(dead_code)]
 pub struct TabBarContext<'a> {
     pub tabs: &'a TerminalTabs,
     pub session_id: &'a str,
@@ -216,6 +221,7 @@ pub struct TabBarContext<'a> {
 /// Render the tab bar for a kild's terminal pane.
 ///
 /// Uses `cx.listener()` closures that dispatch back to `MainView` methods.
+#[allow(dead_code)]
 pub fn render_tab_bar(ctx: &TabBarContext, cx: &mut Context<MainView>) -> gpui::AnyElement {
     let tabs = ctx.tabs;
     let session_id = ctx.session_id;

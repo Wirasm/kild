@@ -348,7 +348,7 @@ Project (e.g., "kild", "shards")
 *Updated: 2026-02-13 — Aligned with mockup-v2.html. Three-view architecture (Control/Dashboard/Detail). Sidebar navigation-only. 2x2 pane grid replaces split panes. Monochrome button discipline. Subphases 2.5–2.9 restructured.*
 *Updated: 2026-02-13 — Phase 2.7 plan created: `.claude/PRPs/plans/phase-2.7-dashboard-detail-views.plan.md`*
 *Updated: 2026-02-13 — Phase 2.7 complete: Dashboard fleet cards + Detail drill-down views implemented*
-*Status: IN PROGRESS — Phases 2.5–2.7 complete, Phase 2.8 next*
+*Status: IN PROGRESS — Phases 2.5–2.8 complete, Phase 2.9 next*
 
 ---
 
@@ -361,8 +361,8 @@ Phase 2.4 (daemon terminals) ✅
   → Phase 2.5 (extract + keyboard nav) ✅
     → Phase 2.6 (rail + sidebar + view shell) ✅
       → Phase 2.7 (dashboard + detail views) ✅
-      → Phase 2.8 (control view — pane grid)
-    → Phase 2.9 (status bar + polish) ← depends on 2.6
+      → Phase 2.8 (control view — pane grid) ✅
+    → Phase 2.9 (status bar + polish) ← NEXT
 ```
 
 ### Phase 2.5: Extract + Keyboard Navigation

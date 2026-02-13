@@ -25,6 +25,7 @@ const SELECTED_PADDING_ADJUSTMENT: f32 = 2.0;
 pub fn render_sidebar(
     state: &AppState,
     terminal_tabs: &HashMap<String, TerminalTabs>,
+    pane_grid: &super::pane_grid::PaneGrid,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
     let active_project_name = state
@@ -118,7 +119,7 @@ pub fn render_sidebar(
                                             .get(tab_idx)
                                             .map(|e| e.label().to_string())
                                             .unwrap_or_default();
-                                        let is_active_tab = tab_idx == tabs.active_index();
+                                        let in_grid = pane_grid.find_slot(&sid, tab_idx).is_some();
                                         let sid = sid.clone();
                                         div()
                                             .id(gpui::SharedString::from(format!(
@@ -130,8 +131,8 @@ pub fn render_sidebar(
                                             .py(px(2.0))
                                             .cursor_pointer()
                                             .text_size(px(theme::TEXT_XS))
-                                            .text_color(if is_active_tab {
-                                                theme::text_bright()
+                                            .text_color(if in_grid {
+                                                theme::ice_dim()
                                             } else {
                                                 theme::text_muted()
                                             })

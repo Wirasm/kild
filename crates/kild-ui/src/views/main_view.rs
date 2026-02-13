@@ -177,7 +177,10 @@ pub struct MainView {
     /// Whether a daemon start operation is in progress.
     daemon_starting: bool,
     /// Counter for generating unique daemon session IDs within this UI instance.
+    #[allow(dead_code)]
     daemon_session_counter: u64,
+    /// 2x2 pane grid for Control view multi-terminal layout.
+    pane_grid: super::pane_grid::PaneGrid,
 }
 
 impl MainView {
@@ -327,6 +330,7 @@ impl MainView {
             show_add_menu: false,
             daemon_starting: false,
             daemon_session_counter: 1,
+            pane_grid: super::pane_grid::PaneGrid::new(),
         };
         view.refresh_daemon_available(cx);
         view
@@ -367,6 +371,8 @@ impl MainView {
 
         self.terminal_tabs
             .retain(|id, _| live_ids.contains(id.as_str()));
+
+        self.pane_grid.prune(&live_ids);
 
         if self
             .active_terminal_id
@@ -755,6 +761,7 @@ impl MainView {
         .detach();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn on_add_local_tab(
         &mut self,
         session_id: &str,
@@ -776,6 +783,7 @@ impl MainView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn on_add_daemon_tab(&mut self, session_id: &str, cx: &mut Context<Self>) {
         let Some(display) = self
             .state
@@ -957,6 +965,8 @@ impl MainView {
         };
         let worktree = display.session.worktree_path.clone();
         let runtime_mode = display.session.runtime_mode.clone();
+        let branch = display.session.branch.clone();
+        let status = super::pane_grid::process_status_to_status(display.process_status);
         let daemon_session_id = display
             .session
             .agents()
@@ -979,6 +989,8 @@ impl MainView {
                 self.active_terminal_id = Some(id.clone());
                 self.focus_region = FocusRegion::Terminal;
                 self.add_daemon_terminal_tab(&id, dsid, cx);
+                // Place in pane grid (will be available once daemon attach completes)
+                self.place_in_pane_grid(&id, 0, &branch, status);
                 cx.notify();
                 return;
             }
@@ -988,6 +1000,9 @@ impl MainView {
             }
         }
 
+        // Place terminal in pane grid
+        self.place_in_pane_grid(&id, 0, &branch, status);
+
         self.active_terminal_id = Some(id);
         self.focus_region = FocusRegion::Terminal;
         self.focus_active_terminal(window, cx);
@@ -995,7 +1010,7 @@ impl MainView {
     }
 
     /// Handle click on a terminal name nested under a kild in the sidebar.
-    /// Switches to that kild and activates the specific terminal tab.
+    /// Places the terminal in the pane grid and focuses it.
     pub fn on_sidebar_terminal_click(
         &mut self,
         session_id: &str,
@@ -1004,11 +1019,28 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         self.state.select_kild(session_id.to_string());
-        self.active_terminal_id = Some(session_id.to_string());
         self.active_view = ActiveView::Control;
         if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
             tabs.set_active(tab_idx);
         }
+
+        // Get branch and status for pane grid
+        let (branch, status) = self
+            .state
+            .displays()
+            .iter()
+            .find(|d| d.session.id == session_id)
+            .map(|d| {
+                (
+                    d.session.branch.clone(),
+                    super::pane_grid::process_status_to_status(d.process_status),
+                )
+            })
+            .unwrap_or_else(|| (String::new(), crate::components::Status::Stopped));
+
+        self.place_in_pane_grid(session_id, tab_idx, &branch, status);
+
+        self.active_terminal_id = Some(session_id.to_string());
         self.focus_region = FocusRegion::Terminal;
         self.focus_active_terminal(window, cx);
         cx.notify();
@@ -1039,6 +1071,102 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         self.on_sidebar_terminal_click(session_id, tab_idx, window, cx);
+    }
+
+    /// Reset the pane grid and auto-populate from current displays.
+    fn reset_pane_grid(&mut self) {
+        self.pane_grid = super::pane_grid::PaneGrid::new();
+        let displays = self.state.filtered_displays();
+        let displays_owned: Vec<kild_core::SessionInfo> = displays.into_iter().cloned().collect();
+        self.pane_grid
+            .auto_populate(&displays_owned, &self.terminal_tabs);
+    }
+
+    /// Place a terminal in the pane grid. If already present, just focus it.
+    /// If grid is full, replace the least-recently-focused pane.
+    fn place_in_pane_grid(
+        &mut self,
+        session_id: &str,
+        tab_idx: usize,
+        branch: &str,
+        status: crate::components::Status,
+    ) {
+        // Already in grid? Just focus it.
+        if let Some(slot_idx) = self.pane_grid.find_slot(session_id, tab_idx) {
+            self.pane_grid.set_focus(slot_idx);
+            return;
+        }
+
+        // Try to add to an empty slot.
+        if self
+            .pane_grid
+            .add_terminal(session_id.to_string(), tab_idx, branch.to_string(), status)
+            .is_some()
+        {
+            return;
+        }
+
+        // Grid full — replace LRU slot.
+        let lru = self.pane_grid.least_recently_focused();
+        self.pane_grid.remove(lru);
+        if self
+            .pane_grid
+            .add_terminal(session_id.to_string(), tab_idx, branch.to_string(), status)
+            .is_none()
+        {
+            tracing::error!(
+                event = "ui.pane_grid.add_after_lru_remove_failed",
+                session_id = session_id,
+                lru_slot = lru,
+            );
+        }
+    }
+
+    /// Handle click inside a pane to focus it.
+    pub fn on_pane_focus(&mut self, slot_idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.pane_grid.set_focus(slot_idx);
+
+        if let super::pane_grid::PaneSlot::Occupied {
+            session_id,
+            tab_idx,
+            ..
+        } = self.pane_grid.slot(slot_idx)
+        {
+            self.active_terminal_id = Some(session_id.clone());
+            if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
+                tabs.set_active(*tab_idx);
+            }
+            self.focus_region = FocusRegion::Terminal;
+            self.focus_active_terminal(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Handle maximize/restore toggle on a pane.
+    pub fn on_pane_maximize(&mut self, slot_idx: usize, cx: &mut Context<Self>) {
+        self.pane_grid.toggle_maximize(slot_idx);
+        cx.notify();
+    }
+
+    /// Handle close button on a pane.
+    pub fn on_pane_close(&mut self, slot_idx: usize, cx: &mut Context<Self>) {
+        self.pane_grid.remove(slot_idx);
+
+        // If the closed pane was focused, move to next occupied or unfocus
+        if self.pane_grid.focused_slot() == slot_idx {
+            if let Some(next) = self.pane_grid.next_occupied_slot() {
+                self.pane_grid.set_focus(next);
+                if let super::pane_grid::PaneSlot::Occupied { session_id, .. } =
+                    self.pane_grid.slot(next)
+                {
+                    self.active_terminal_id = Some(session_id.clone());
+                }
+            } else {
+                self.active_terminal_id = None;
+                self.focus_region = FocusRegion::Dashboard;
+            }
+        }
+        cx.notify();
     }
 
     /// Toggle between Control and Dashboard views.
@@ -1444,6 +1572,7 @@ impl MainView {
             Ok(events) => {
                 self.state.apply_events(&events);
                 self.prune_terminal_cache();
+                self.reset_pane_grid();
             }
             Err(e) => {
                 tracing::error!(event = "ui.project_select.failed", error = %e);
@@ -1462,6 +1591,7 @@ impl MainView {
             Ok(events) => {
                 self.state.apply_events(&events);
                 self.prune_terminal_cache();
+                self.reset_pane_grid();
             }
             Err(e) => {
                 tracing::error!(event = "ui.project_select_all.failed", error = %e);
@@ -1494,6 +1624,7 @@ impl MainView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn on_select_tab(
         &mut self,
         session_id: &str,
@@ -1519,6 +1650,7 @@ impl MainView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn start_rename(
         &mut self,
         session_id: &str,
@@ -1560,6 +1692,7 @@ impl MainView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn on_close_tab(
         &mut self,
         session_id: &str,
@@ -1584,6 +1717,7 @@ impl MainView {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn render_tab_bar(&self, session_id: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
         use super::terminal_tabs::{RenamingTab, TabBarContext, render_tab_bar};
 
@@ -1696,39 +1830,11 @@ impl MainView {
     }
 
     /// Render the main content area based on active view.
-    fn render_main_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_main_content(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         match self.active_view {
             ActiveView::Control => {
-                if let Some(id) = &self.active_terminal_id
-                    && let Some(tabs) = self.terminal_tabs.get(id)
-                    && let Some(terminal_view) = tabs.active_view()
-                {
-                    let id = id.clone();
-                    div()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .overflow_hidden()
-                        .child(self.render_tab_bar(&id, cx))
-                        .child(
-                            div()
-                                .flex_1()
-                                .overflow_hidden()
-                                .child(terminal_view.clone()),
-                        )
-                        .into_any_element()
-                } else {
-                    // No terminal active — show placeholder
-                    div()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(theme::text_subtle())
-                        .text_size(px(theme::TEXT_SM))
-                        .child("Select a kild to view its terminal")
-                        .into_any_element()
-                }
+                super::pane_grid::render_pane_grid(&self.pane_grid, &self.terminal_tabs, cx)
+                    .into_any_element()
             }
             ActiveView::Dashboard => {
                 dashboard_view::render_dashboard(&self.state, &self.terminal_tabs, cx)
@@ -2075,6 +2181,7 @@ impl Render for MainView {
                     .child(sidebar::render_sidebar(
                         &self.state,
                         &self.terminal_tabs,
+                        &self.pane_grid,
                         cx,
                     ))
                     // Main area (flex-1)

@@ -21,6 +21,7 @@ pub mod detail_view;
 pub mod helpers;
 pub mod kild_list;
 pub mod main_view;
+pub mod pane_grid;
 pub mod project_rail;
 pub mod sidebar;
 pub mod terminal_tabs;
