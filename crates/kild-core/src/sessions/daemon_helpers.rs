@@ -146,7 +146,8 @@ fn ensure_codex_config_with_home(home: &Path) -> Result<(), String> {
         if !new_content.ends_with('\n') && !new_content.is_empty() {
             new_content.push('\n');
         }
-        new_content.push_str(&format!("notify = [\"{}\"]\n", hook_path_str));
+        use std::fmt::Write;
+        writeln!(new_content, "notify = [\"{}\"]", hook_path_str).unwrap();
 
         std::fs::write(&config_path, new_content)
             .map_err(|e| format!("failed to write {}: {}", config_path.display(), e))?;

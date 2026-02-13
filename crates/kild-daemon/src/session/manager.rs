@@ -417,7 +417,7 @@ impl SessionManager {
             .map(|s| s.id().to_string())
             .collect();
 
-        let mut failed_stops: Vec<String> = Vec::new();
+        let mut failed_stops: Vec<String> = Vec::with_capacity(session_ids.len());
         for session_id in session_ids {
             if let Err(e) = self.stop_session(&session_id) {
                 warn!(

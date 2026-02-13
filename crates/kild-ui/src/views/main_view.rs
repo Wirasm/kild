@@ -63,7 +63,7 @@ fn normalize_project_path(path_str: &str) -> Result<PathBuf, String> {
     // Handle missing leading slash - only if path looks absolute without the /
     // e.g., "users/rasmus/project" -> "/users/rasmus/project" (if that directory exists)
     if !path_str.starts_with('/') && !path_str.starts_with('~') && !path_str.is_empty() {
-        let with_slash = PathBuf::from(format!("/{}", path_str));
+        let with_slash = std::path::Path::new("/").join(path_str);
 
         match std::fs::metadata(&with_slash) {
             Ok(meta) if meta.is_dir() => {

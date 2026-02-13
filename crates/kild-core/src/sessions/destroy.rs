@@ -160,7 +160,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         }
 
         // Kill/stop all tracked agents — branch on daemon vs terminal
-        let mut kill_errors: Vec<(u32, String)> = Vec::new();
+        let mut kill_errors: Vec<(u32, String)> = Vec::with_capacity(session.agent_count());
         for agent_proc in session.agents() {
             if let Some(daemon_sid) = agent_proc.daemon_session_id() {
                 // Daemon-managed: destroy via IPC
@@ -238,19 +238,26 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 );
             }
 
-            let pids: Vec<String> = kill_errors.iter().map(|(p, _)| p.to_string()).collect();
-            let (first_pid, first_msg) = kill_errors.into_iter().next().unwrap();
+            let error_count = kill_errors.len();
+            let (first_pid, first_msg) = {
+                let (p, m) = kill_errors.first().unwrap();
+                (*p, m.clone())
+            };
 
-            let message = if pids.len() == 1 {
+            let message = if error_count == 1 {
                 format!(
                     "Process still running. Kill it manually or use --force flag: {}",
                     first_msg
                 )
             } else {
+                let pids: String = kill_errors
+                    .iter()
+                    .map(|(p, _)| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
                     "{} processes still running (PIDs: {}). Kill them manually or use --force flag.",
-                    pids.len(),
-                    pids.join(", ")
+                    error_count, pids
                 )
             };
 

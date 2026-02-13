@@ -323,7 +323,7 @@ fn is_last_sibling(elements: &[ElementInfo], index: usize, depth: usize) -> bool
 /// For each ancestor level (1..depth), we check whether that ancestor still
 /// has siblings coming. If yes, draw "│   "; if no, draw "    ".
 fn build_tree_indent(elements: &[ElementInfo], index: usize, depth: usize) -> String {
-    let mut indent = String::new();
+    let mut indent = String::with_capacity(depth.saturating_sub(1) * 6);
     for level in 1..depth {
         // Check if there's a future element at this ancestor level
         let ancestor_has_more = has_future_sibling_at_level(elements, index, level);
@@ -346,19 +346,18 @@ fn has_future_sibling_at_level(elements: &[ElementInfo], index: usize, level: us
 
 /// Print a single tree node with the given prefix.
 fn print_tree_node(elem: &ElementInfo, prefix: &str) {
+    use std::fmt::Write;
+
     let mut line = format!("{}{}", prefix, elem.role());
 
-    // Show title if present
     if let Some(title) = elem.title() {
-        line.push_str(&format!(" \"{}\"", title));
+        write!(line, " \"{}\"", title).unwrap();
     }
 
-    // Show size if non-zero
     if elem.width() > 0 || elem.height() > 0 {
-        line.push_str(&format!(" [{}x{}]", elem.width(), elem.height()));
+        write!(line, " [{}x{}]", elem.width(), elem.height()).unwrap();
     }
 
-    // Show disabled marker
     if !elem.enabled() {
         line.push_str(" (disabled)");
     }
