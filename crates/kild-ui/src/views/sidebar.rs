@@ -98,12 +98,8 @@ pub fn render_sidebar(
                 .overflow_y_scroll()
                 // Active section
                 .when(!active_kilds.is_empty(), |this| {
-                    this.child(render_section_header(
-                        "Active",
-                        active_count,
-                        theme::aurora(),
-                    ))
-                    .children(active_kilds.iter().enumerate().map(|(ix, display)| {
+                    let mut active_elements = Vec::new();
+                    for (ix, display) in active_kilds.iter().enumerate() {
                         let session_id = display.session.id.clone();
                         let branch = display.session.branch.clone();
                         let is_selected = selected_id.as_deref() == Some(&session_id);
@@ -111,119 +107,59 @@ pub fn render_sidebar(
                         let time_meta = format_relative_time(&display.session.created_at);
 
                         let tabs_for_session = terminal_tabs.get(&session_id);
+                        let tab_items = render_terminal_items(
+                            &session_id, tabs_for_session, pane_grid,
+                            theme::aurora(), cx,
+                        );
 
-                        div()
-                            .flex()
-                            .flex_col()
-                            // Kild row (clean, no hover actions)
-                            .child(render_kild_row(
-                                ("active-kild", ix),
-                                &branch,
-                                Status::Active,
-                                is_selected,
-                                &time_meta,
-                                cx.listener(move |view, _, window, cx| {
-                                    view.on_kild_select(&session_id_for_click, window, cx);
-                                }),
-                            ))
-                            // Nested terminal tabs
-                            .when_some(tabs_for_session, |this, tabs| {
-                                let sid = session_id.clone();
-                                this.children((0..tabs.len()).map(|tab_idx| {
-                                    let tab_label = tabs
-                                        .get(tab_idx)
-                                        .map(|e| e.label().to_string())
-                                        .unwrap_or_default();
-                                    let mode_label = tabs
-                                        .get(tab_idx)
-                                        .map(|e| match e.backend() {
-                                            crate::views::terminal_tabs::TerminalBackend::Local => "local",
-                                            crate::views::terminal_tabs::TerminalBackend::Daemon { .. } => "daemon",
-                                        })
-                                        .unwrap_or("local");
-                                    let in_grid = pane_grid.find_slot(&sid, tab_idx).is_some();
-                                    let sid = sid.clone();
+                        let sid_for_add = session_id.clone();
+                        active_elements.push(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(render_kild_row(
+                                    ("active-kild", ix),
+                                    &branch,
+                                    Status::Active,
+                                    is_selected,
+                                    &time_meta,
+                                    cx.listener(move |view, _, window, cx| {
+                                        view.on_kild_select(&session_id_for_click, window, cx);
+                                    }),
+                                ))
+                                .children(tab_items)
+                                .child(
                                     div()
                                         .id(gpui::SharedString::from(format!(
-                                            "sidebar-tab-{}-{}",
-                                            sid, tab_idx
+                                            "sidebar-add-terminal-{}",
+                                            sid_for_add
                                         )))
                                         .pl(px(16.0))
-                                        .pr(px(theme::SPACE_2))
                                         .py(px(2.0))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.0))
                                         .cursor_pointer()
+                                        .text_size(px(10.0))
+                                        .text_color(theme::text_muted())
+                                        .opacity(0.4)
                                         .rounded(px(theme::RADIUS_SM))
-                                        .hover(|s| s.bg(theme::surface()))
-                                        .overflow_hidden()
+                                        .hover(|s| s.opacity(1.0).bg(theme::surface()))
                                         .on_mouse_up(
                                             gpui::MouseButton::Left,
                                             cx.listener(move |view, _, window, cx| {
-                                                view.on_sidebar_terminal_click(
-                                                    &sid, tab_idx, window, cx,
-                                                );
+                                                view.on_kild_select(&sid_for_add, window, cx);
+                                                view.on_add_local_tab(&sid_for_add, window, cx);
                                             }),
                                         )
-                                        // Status dot
-                                        .child(
-                                            div()
-                                                .size(px(5.0))
-                                                .rounded_full()
-                                                .flex_shrink_0()
-                                                .bg(theme::aurora()),
-                                        )
-                                        // Terminal name
-                                        .child(
-                                            div()
-                                                .text_size(px(10.0))
-                                                .text_color(if in_grid {
-                                                    theme::text()
-                                                } else {
-                                                    theme::text_muted()
-                                                })
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .child(tab_label),
-                                        )
-                                        // Mode badge
-                                        .child(
-                                            div()
-                                                .text_size(px(9.0))
-                                                .text_color(theme::text_muted())
-                                                .opacity(0.5)
-                                                .flex_shrink_0()
-                                                .child(mode_label),
-                                        )
-                                }))
-                            })
-                            // + terminal link for active kilds
-                            .child({
-                                let sid_for_add = session_id.clone();
-                                div()
-                                    .id(gpui::SharedString::from(format!(
-                                        "sidebar-add-terminal-{}",
-                                        sid_for_add
-                                    )))
-                                    .pl(px(16.0))
-                                    .py(px(2.0))
-                                    .cursor_pointer()
-                                    .text_size(px(10.0))
-                                    .text_color(theme::text_muted())
-                                    .opacity(0.4)
-                                    .rounded(px(theme::RADIUS_SM))
-                                    .hover(|s| s.opacity(1.0).bg(theme::surface()))
-                                    .on_mouse_up(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(move |view, _, window, cx| {
-                                            view.on_kild_select(&sid_for_add, window, cx);
-                                            view.on_add_local_tab(&sid_for_add, window, cx);
-                                        }),
-                                    )
-                                    .child("+ terminal")
-                            })
-                    }))
+                                        .child("+ terminal"),
+                                ),
+                        );
+                    }
+
+                    this.child(render_section_header(
+                        "Active",
+                        active_count,
+                        theme::aurora(),
+                    ))
+                    .children(active_elements)
                 })
                 // Stopped section
                 .when(!stopped_kilds.is_empty(), |this| {
@@ -232,128 +168,69 @@ pub fn render_sidebar(
                         stopped_count,
                         theme::copper(),
                     ))
-                    .children(stopped_kilds.iter().enumerate().map(|(ix, display)| {
-                        let session_id = display.session.id.clone();
-                        let branch = display.session.branch.clone();
-                        let is_selected = selected_id.as_deref() == Some(&session_id);
-                        let session_id_for_click = session_id.clone();
-                        let time_meta = format_relative_time(&display.session.created_at);
+                    .children({
+                        let mut stopped_elements = Vec::new();
+                        for (ix, display) in stopped_kilds.iter().enumerate() {
+                            let session_id = display.session.id.clone();
+                            let branch = display.session.branch.clone();
+                            let is_selected = selected_id.as_deref() == Some(&session_id);
+                            let session_id_for_click = session_id.clone();
+                            let time_meta = format_relative_time(&display.session.created_at);
 
-                        let tabs_for_session = terminal_tabs.get(&session_id);
+                            let tabs_for_session = terminal_tabs.get(&session_id);
+                            let tab_items = render_terminal_items(
+                                &session_id, tabs_for_session, pane_grid,
+                                theme::text_muted(), cx,
+                            );
 
-                        let status = match display.process_status {
-                            ProcessStatus::Stopped => Status::Stopped,
-                            _ => Status::Crashed,
-                        };
+                            let status = match display.process_status {
+                                ProcessStatus::Stopped => Status::Stopped,
+                                _ => Status::Crashed,
+                            };
 
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(render_kild_row(
-                                ("stopped-kild", ix),
-                                &branch,
-                                status,
-                                is_selected,
-                                &time_meta,
-                                cx.listener(move |view, _, window, cx| {
-                                    view.on_kild_select(&session_id_for_click, window, cx);
-                                }),
-                            ))
-                            // Nested terminal tabs
-                            .when_some(tabs_for_session, |this, tabs| {
-                                let sid = session_id.clone();
-                                this.children((0..tabs.len()).map(|tab_idx| {
-                                    let tab_label = tabs
-                                        .get(tab_idx)
-                                        .map(|e| e.label().to_string())
-                                        .unwrap_or_default();
-                                    let mode_label = tabs
-                                        .get(tab_idx)
-                                        .map(|e| match e.backend() {
-                                            crate::views::terminal_tabs::TerminalBackend::Local => "local",
-                                            crate::views::terminal_tabs::TerminalBackend::Daemon { .. } => "daemon",
-                                        })
-                                        .unwrap_or("local");
-                                    let in_grid = pane_grid.find_slot(&sid, tab_idx).is_some();
-                                    let sid = sid.clone();
-                                    div()
-                                        .id(gpui::SharedString::from(format!(
-                                            "sidebar-tab-stopped-{}-{}",
-                                            sid, tab_idx
-                                        )))
-                                        .pl(px(16.0))
-                                        .pr(px(theme::SPACE_2))
-                                        .py(px(2.0))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.0))
-                                        .cursor_pointer()
-                                        .rounded(px(theme::RADIUS_SM))
-                                        .hover(|s| s.bg(theme::surface()))
-                                        .overflow_hidden()
-                                        .on_mouse_up(
-                                            gpui::MouseButton::Left,
-                                            cx.listener(move |view, _, window, cx| {
-                                                view.on_sidebar_terminal_click(
-                                                    &sid, tab_idx, window, cx,
-                                                );
-                                            }),
-                                        )
-                                        .child(
-                                            div()
-                                                .size(px(5.0))
-                                                .rounded_full()
-                                                .flex_shrink_0()
-                                                .bg(theme::text_muted()),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(px(10.0))
-                                                .text_color(if in_grid {
-                                                    theme::text()
-                                                } else {
-                                                    theme::text_muted()
-                                                })
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .child(tab_label),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(px(9.0))
-                                                .text_color(theme::text_muted())
-                                                .opacity(0.5)
-                                                .flex_shrink_0()
-                                                .child(mode_label),
-                                        )
-                                }))
-                            })
-                            // + terminal link
-                            .child({
-                                let sid_for_add = session_id.clone();
+                            let sid_for_add = session_id.clone();
+                            stopped_elements.push(
                                 div()
-                                    .id(gpui::SharedString::from(format!(
-                                        "sidebar-add-terminal-stopped-{}",
-                                        sid_for_add
-                                    )))
-                                    .pl(px(16.0))
-                                    .py(px(2.0))
-                                    .cursor_pointer()
-                                    .text_size(px(10.0))
-                                    .text_color(theme::text_muted())
-                                    .opacity(0.4)
-                                    .rounded(px(theme::RADIUS_SM))
-                                    .hover(|s| s.opacity(1.0).bg(theme::surface()))
-                                    .on_mouse_up(
-                                        gpui::MouseButton::Left,
+                                    .flex()
+                                    .flex_col()
+                                    .child(render_kild_row(
+                                        ("stopped-kild", ix),
+                                        &branch,
+                                        status,
+                                        is_selected,
+                                        &time_meta,
                                         cx.listener(move |view, _, window, cx| {
-                                            view.on_kild_select(&sid_for_add, window, cx);
-                                            view.on_add_local_tab(&sid_for_add, window, cx);
+                                            view.on_kild_select(&session_id_for_click, window, cx);
                                         }),
-                                    )
-                                    .child("+ terminal")
-                            })
-                    }))
+                                    ))
+                                    .children(tab_items)
+                                    .child(
+                                        div()
+                                            .id(gpui::SharedString::from(format!(
+                                                "sidebar-add-terminal-stopped-{}",
+                                                sid_for_add
+                                            )))
+                                            .pl(px(16.0))
+                                            .py(px(2.0))
+                                            .cursor_pointer()
+                                            .text_size(px(10.0))
+                                            .text_color(theme::text_muted())
+                                            .opacity(0.4)
+                                            .rounded(px(theme::RADIUS_SM))
+                                            .hover(|s| s.opacity(1.0).bg(theme::surface()))
+                                            .on_mouse_up(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(move |view, _, window, cx| {
+                                                    view.on_kild_select(&sid_for_add, window, cx);
+                                                    view.on_add_local_tab(&sid_for_add, window, cx);
+                                                }),
+                                            )
+                                            .child("+ terminal"),
+                                    ),
+                            );
+                        }
+                        stopped_elements
+                    })
                 })
                 // Empty state
                 .when(
@@ -469,5 +346,164 @@ fn render_kild_row(
                 .text_size(px(10.0))
                 .text_color(theme::text_muted())
                 .child(time_meta.to_string()),
+        )
+}
+
+/// Collect terminal item elements for a kild's tabs.
+fn render_terminal_items(
+    session_id: &str,
+    tabs: Option<&TerminalTabs>,
+    pane_grid: &super::pane_grid::PaneGrid,
+    dot_color: Rgba,
+    cx: &mut Context<MainView>,
+) -> Vec<gpui::AnyElement> {
+    let Some(tabs) = tabs else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    for tab_idx in 0..tabs.len() {
+        items.push(render_terminal_item(session_id, tab_idx, tabs, pane_grid, dot_color, cx).into_any_element());
+    }
+    items
+}
+
+/// Render a single terminal item row with hover-revealed − (minimize) and × (close) buttons.
+fn render_terminal_item(
+    session_id: &str,
+    tab_idx: usize,
+    tabs: &TerminalTabs,
+    pane_grid: &super::pane_grid::PaneGrid,
+    dot_color: Rgba,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
+    let tab_label = tabs
+        .get(tab_idx)
+        .map(|e| e.label().to_string())
+        .unwrap_or_default();
+    let mode_label = tabs
+        .get(tab_idx)
+        .map(|e| match e.backend() {
+            crate::views::terminal_tabs::TerminalBackend::Local => "local",
+            crate::views::terminal_tabs::TerminalBackend::Daemon { .. } => "daemon",
+        })
+        .unwrap_or("local");
+    let in_grid = pane_grid.find_slot(session_id, tab_idx).is_some();
+    let sid = session_id.to_string();
+    let sid_for_click = sid.clone();
+    let sid_for_minimize = sid.clone();
+    let sid_for_close = sid.clone();
+
+    div()
+        .id(gpui::SharedString::from(format!(
+            "sidebar-tab-{}-{}",
+            sid, tab_idx
+        )))
+        .group("terminal-row")
+        .relative()
+        .pl(px(16.0))
+        .pr(px(theme::SPACE_2))
+        .py(px(2.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .cursor_pointer()
+        .rounded(px(theme::RADIUS_SM))
+        .hover(|s| s.bg(theme::surface()))
+        .overflow_hidden()
+        .on_mouse_up(
+            gpui::MouseButton::Left,
+            cx.listener(move |view, _, window, cx| {
+                view.on_sidebar_terminal_click(&sid_for_click, tab_idx, window, cx);
+            }),
+        )
+        // Status dot
+        .child(
+            div()
+                .size(px(5.0))
+                .rounded_full()
+                .flex_shrink_0()
+                .bg(dot_color),
+        )
+        // Terminal name
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(10.0))
+                .text_color(if in_grid {
+                    theme::text()
+                } else {
+                    theme::text_muted()
+                })
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(tab_label),
+        )
+        // Mode badge — hidden on hover to make room for buttons
+        .child(
+            div()
+                .text_size(px(9.0))
+                .text_color(theme::text_muted())
+                .opacity(0.5)
+                .flex_shrink_0()
+                .group_hover("terminal-row", |s| s.opacity(0.0))
+                .child(mode_label),
+        )
+        // Hover actions: − (minimize) and × (close)
+        .child(
+            div()
+                .absolute()
+                .right(px(4.0))
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                .bg(theme::surface())
+                .opacity(0.0)
+                .group_hover("terminal-row", |s| s.opacity(1.0))
+                // − minimize (remove from grid)
+                .child(
+                    div()
+                        .id(gpui::SharedString::from(format!(
+                            "sidebar-tab-min-{}-{}",
+                            sid_for_minimize, tab_idx
+                        )))
+                        .px(px(3.0))
+                        .cursor_pointer()
+                        .text_size(px(10.0))
+                        .text_color(theme::text_muted())
+                        .rounded(px(2.0))
+                        .hover(|s| s.text_color(theme::text()).bg(theme::elevated()))
+                        .on_mouse_up(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |view, _, window, cx| {
+                                view.on_sidebar_terminal_click(
+                                    &sid_for_minimize, tab_idx, window, cx,
+                                );
+                            }),
+                        )
+                        .child("\u{2212}"), // −
+                )
+                // × close (destroy terminal)
+                .child(
+                    div()
+                        .id(gpui::SharedString::from(format!(
+                            "sidebar-tab-close-{}-{}",
+                            sid_for_close, tab_idx
+                        )))
+                        .px(px(3.0))
+                        .cursor_pointer()
+                        .text_size(px(10.0))
+                        .text_color(theme::text_muted())
+                        .rounded(px(2.0))
+                        .hover(|s| s.text_color(theme::ember()).bg(theme::elevated()))
+                        .on_mouse_up(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |view, _, window, cx| {
+                                view.on_close_tab(&sid_for_close, tab_idx, window, cx);
+                            }),
+                        )
+                        .child("\u{00d7}"), // ×
+                ),
         )
 }
