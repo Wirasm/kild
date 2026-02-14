@@ -39,6 +39,7 @@ pub fn keystroke_to_escape(keystroke: &Keystroke, app_cursor_mode: bool) -> Opti
     if alt {
         match key {
             "backspace" => return Some(vec![0x1b, 0x7f]), // ESC DEL: delete word backward
+            "delete" => return Some(vec![0x1b, b'd']),    // ESC d: delete word forward
             "left" => return Some(vec![0x1b, b'b']),      // ESC b: word backward
             "right" => return Some(vec![0x1b, b'f']),     // ESC f: word forward
             _ => {} // Fall through to printable Alt+key handler
@@ -392,6 +393,14 @@ mod tests {
         assert_eq!(
             keystroke_to_escape(&alt_key("left"), false),
             Some(vec![0x1b, b'b'])
+        );
+    }
+
+    #[test]
+    fn test_alt_delete_deletes_word_forward() {
+        assert_eq!(
+            keystroke_to_escape(&alt_key("delete"), false),
+            Some(vec![0x1b, b'd'])
         );
     }
 
