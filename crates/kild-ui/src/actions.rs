@@ -146,6 +146,7 @@ pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, St
             mode,
             runtime_mode: None,
             resume: false,
+            yolo: false,
         },
         "ui.open_kild",
     )

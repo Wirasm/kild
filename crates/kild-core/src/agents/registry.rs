@@ -90,6 +90,11 @@ pub fn get_process_patterns(name: &str) -> Option<Vec<String>> {
     get_agent(name).map(|backend| backend.process_patterns())
 }
 
+/// Get the yolo mode flags for an agent by name (case-insensitive).
+pub fn get_yolo_flags(name: &str) -> Option<&'static str> {
+    get_agent(name).and_then(|backend| backend.yolo_flags())
+}
+
 /// Get a comma-separated string of all supported agent names.
 ///
 /// Used for error messages to ensure they stay in sync with available agents.
@@ -206,6 +211,46 @@ mod tests {
     #[test]
     fn test_default_agent_type() {
         assert_eq!(default_agent_type(), AgentType::Claude);
+    }
+
+    #[test]
+    fn test_get_yolo_flags() {
+        assert_eq!(
+            get_yolo_flags("claude"),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(get_yolo_flags("amp"), Some("--dangerously-allow-all"));
+        assert_eq!(get_yolo_flags("kiro"), Some("--trust-all-tools"));
+        assert_eq!(get_yolo_flags("codex"), Some("--yolo"));
+        assert_eq!(get_yolo_flags("gemini"), Some("--yolo"));
+        assert_eq!(get_yolo_flags("opencode"), None);
+        assert_eq!(get_yolo_flags("unknown"), None);
+    }
+
+    /// Test the yolo flag merging logic used by CLI create command.
+    /// Yolo flags should be prepended to existing user flags.
+    #[test]
+    fn test_yolo_flags_prepend_to_existing_flags() {
+        let agent = "claude";
+        let yolo_flags = get_yolo_flags(agent).unwrap();
+        let existing_flags = "--verbose --debug";
+
+        let merged = format!("{} {}", yolo_flags, existing_flags);
+        assert_eq!(merged, "--dangerously-skip-permissions --verbose --debug");
+    }
+
+    /// Test yolo flag merging when no existing flags are set.
+    #[test]
+    fn test_yolo_flags_standalone() {
+        let agent = "claude";
+        let yolo_flags = get_yolo_flags(agent).unwrap();
+
+        let result: Option<String> = None;
+        let merged = match result {
+            Some(existing) => format!("{} {}", yolo_flags, existing),
+            None => yolo_flags.to_string(),
+        };
+        assert_eq!(merged, "--dangerously-skip-permissions");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use kild_core::CreateSessionRequest;
 use kild_core::events;
@@ -39,6 +39,35 @@ pub(crate) fn handle_create_command(
         }
         if let Some(flags) = matches.get_one::<String>("flags") {
             config.agent.flags = Some(flags.clone());
+        }
+
+        // Resolve yolo flags and prepend to agent flags
+        if matches.get_flag("yolo") {
+            let agent_name = matches
+                .get_one::<String>("agent")
+                .map(|s| s.as_str())
+                .unwrap_or(&config.agent.default);
+            if let Some(yolo) = kild_core::agents::get_yolo_flags(agent_name) {
+                info!(
+                    event = "cli.create.yolo_flags_resolved",
+                    agent = agent_name,
+                    flags = yolo
+                );
+                config.agent.flags = Some(match config.agent.flags {
+                    Some(existing) => format!("{} {}", yolo, existing),
+                    None => yolo.to_string(),
+                });
+            } else {
+                warn!(
+                    event = "cli.create.yolo_not_supported",
+                    agent = agent_name,
+                    "Agent does not support --yolo mode"
+                );
+                eprintln!(
+                    "Warning: Agent '{}' does not support --yolo mode. Ignoring.",
+                    agent_name
+                );
+            }
         }
     }
 

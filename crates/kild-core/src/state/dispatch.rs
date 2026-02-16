@@ -66,8 +66,9 @@ impl Store for CoreStore {
                 mode,
                 runtime_mode,
                 resume,
+                yolo,
             } => {
-                let session = session_ops::open_session(&branch, mode, runtime_mode, resume)?;
+                let session = session_ops::open_session(&branch, mode, runtime_mode, resume, yolo)?;
                 Ok(vec![Event::KildOpened {
                     branch,
                     agent: session.agent,
@@ -644,6 +645,7 @@ mod tests {
             mode: OpenMode::DefaultAgent,
             runtime_mode: Some(RuntimeMode::Terminal),
             resume: false,
+            yolo: false,
         });
         assert!(matches!(
             result,

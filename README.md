@@ -76,6 +76,9 @@ kild create bugfix/login-error --agent kiro
 # Add a description with --note
 kild create feature-auth --agent claude --note "Implementing JWT authentication"
 
+# Enable autonomous mode (skip all permission prompts)
+kild create my-branch --agent claude --yolo
+
 # Create without launching an agent (opens bare terminal with $SHELL)
 kild create debug-session --no-agent
 
@@ -120,6 +123,9 @@ kild open <branch> --agent <agent>
 kild open <branch> --resume
 kild open <branch> -r  # Short form
 
+# Enable autonomous mode (skip all permission prompts)
+kild open <branch> --yolo
+
 # Open bare terminal with $SHELL instead of an agent
 kild open <branch> --no-agent
 
@@ -137,6 +143,9 @@ kild open --all --agent <agent>
 
 # Resume all stopped kilds with previous session context
 kild open --all --resume
+
+# Open all stopped kilds with autonomous mode enabled
+kild open --all --yolo
 
 # Open bare terminals in all stopped kilds
 kild open --all --no-agent

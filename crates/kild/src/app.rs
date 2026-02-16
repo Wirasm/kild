@@ -76,6 +76,13 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                 )
                 .arg(
+                    Arg::new("yolo")
+                        .long("yolo")
+                        .help("Enable full autonomy mode (skip all permission prompts)")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("no-agent")
+                )
+                .arg(
                     Arg::new("no-agent")
                         .long("no-agent")
                         .help("Create with a bare terminal shell instead of launching an agent")
@@ -197,6 +204,13 @@ pub fn build_cli() -> Command {
                         .long("resume")
                         .short('r')
                         .help("Resume the previous agent conversation instead of starting fresh")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("no-agent")
+                )
+                .arg(
+                    Arg::new("yolo")
+                        .long("yolo")
+                        .help("Enable full autonomy mode (skip all permission prompts)")
                         .action(ArgAction::SetTrue)
                         .conflicts_with("no-agent")
                 )
@@ -1922,6 +1936,99 @@ mod tests {
         let matches = matches.unwrap();
         let sub = matches.subcommand_matches("overlaps").unwrap();
         assert_eq!(sub.get_one::<String>("base").unwrap(), "develop");
+    }
+
+    // --- yolo flag tests ---
+
+    #[test]
+    fn test_cli_create_yolo_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "create", "test-branch", "--yolo"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("yolo"));
+    }
+
+    #[test]
+    fn test_cli_create_yolo_conflicts_with_no_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "test-branch",
+            "--yolo",
+            "--no-agent",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_create_yolo_with_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "test-branch",
+            "--yolo",
+            "--agent",
+            "kiro",
+        ]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("yolo"));
+        assert_eq!(create_matches.get_one::<String>("agent").unwrap(), "kiro");
+    }
+
+    #[test]
+    fn test_cli_create_yolo_with_flags() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "test-branch",
+            "--yolo",
+            "--flags",
+            "--verbose",
+        ]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let create_matches = matches.subcommand_matches("create").unwrap();
+        assert!(create_matches.get_flag("yolo"));
+        assert_eq!(
+            create_matches.get_one::<String>("flags").unwrap(),
+            "--verbose"
+        );
+    }
+
+    #[test]
+    fn test_cli_open_yolo_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "open", "test-branch", "--yolo"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let open_matches = matches.subcommand_matches("open").unwrap();
+        assert!(open_matches.get_flag("yolo"));
+    }
+
+    #[test]
+    fn test_cli_open_yolo_conflicts_with_no_agent() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "open", "test-branch", "--yolo", "--no-agent"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_open_yolo_with_all() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "open", "--all", "--yolo"]);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        let open_matches = matches.subcommand_matches("open").unwrap();
+        assert!(open_matches.get_flag("yolo"));
+        assert!(open_matches.get_flag("all"));
     }
 
     #[test]

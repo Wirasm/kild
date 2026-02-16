@@ -132,6 +132,7 @@ mod tests {
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
                 resume: false,
+                yolo: false,
             })
             .unwrap();
         assert!(matches!(&events[0], Event::KildOpened { branch, .. } if &**branch == "feat"));
@@ -143,6 +144,7 @@ mod tests {
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
+                yolo: false,
             })
             .unwrap();
         assert!(matches!(&events[0], Event::KildOpened { branch, .. } if &**branch == "feat"));
@@ -247,6 +249,7 @@ mod tests {
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
                 resume: false,
+                yolo: false,
             },
             Command::StopKild { branch: "b".into() },
             Command::CompleteKild { branch: "b".into() },

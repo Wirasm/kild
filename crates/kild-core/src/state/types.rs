@@ -77,6 +77,9 @@ pub enum Command {
         /// Resume the previous agent conversation instead of starting fresh.
         #[serde(default)]
         resume: bool,
+        /// Enable full autonomy mode (skip all permission prompts).
+        #[serde(default)]
+        yolo: bool,
     },
     /// Stop the agent process in a kild without destroying it.
     StopKild { branch: BranchName },
@@ -162,12 +165,14 @@ mod tests {
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: Some(RuntimeMode::Terminal),
                 resume: false,
+                yolo: false,
             },
             Command::OpenKild {
                 branch: "feature".into(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
+                yolo: false,
             },
             Command::StopKild {
                 branch: "feature".into(),
@@ -222,12 +227,14 @@ mod tests {
                 mode: OpenMode::Agent("gemini".to_string()),
                 runtime_mode: Some(RuntimeMode::Terminal),
                 resume: false,
+                yolo: false,
             },
             Command::OpenKild {
                 branch: "test".into(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
+                yolo: false,
             },
             Command::StopKild {
                 branch: "test".into(),
@@ -267,6 +274,7 @@ mod tests {
             mode: OpenMode::DefaultAgent,
             runtime_mode: Some(RuntimeMode::Daemon),
             resume: true,
+            yolo: false,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         let roundtripped: Command = serde_json::from_str(&json).unwrap();

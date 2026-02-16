@@ -66,6 +66,7 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 # Run
 cargo run -p kild -- create my-branch --agent claude
 cargo run -p kild -- create my-branch --agent claude --note "Working on auth feature"
+cargo run -p kild -- create my-branch --yolo           # Enable autonomous mode (skip permission prompts)
 cargo run -p kild -- create my-branch --no-agent       # Open bare terminal with $SHELL
 cargo run -p kild -- create my-branch --daemon         # Launch in daemon-owned PTY
 cargo run -p kild -- create my-branch --no-daemon      # Force external terminal (override config)
@@ -77,6 +78,7 @@ cargo run -p kild -- --no-color list             # Disable colored output (respe
 cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (auto-detects runtime mode from session)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
+cargo run -p kild -- open my-branch --yolo       # Enable autonomous mode (skip permission prompts)
 cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
 cargo run -p kild -- open my-branch --resume     # Resume previous agent session (restore conversation context)
 cargo run -p kild -- open my-branch -r           # Short form of --resume
@@ -84,6 +86,7 @@ cargo run -p kild -- open my-branch --daemon     # Override: force daemon-owned 
 cargo run -p kild -- open my-branch --no-daemon  # Override: force external terminal
 cargo run -p kild -- open --all                  # Open agents in all stopped kilds
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
+cargo run -p kild -- open --all --yolo           # Open all stopped kilds with autonomous mode enabled
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
 cargo run -p kild -- open --all --resume         # Resume all stopped kilds with previous session context
 cargo run -p kild -- code my-branch              # Open worktree in editor (CLI > config > $VISUAL > $EDITOR > OS default > PATH scan)
