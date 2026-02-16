@@ -1,11 +1,11 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
-use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, format_partial_failure_error, is_valid_branch_name, load_config_with_warning,
+    self, FailedOperation, format_partial_failure_error, is_valid_branch_name,
+    load_config_with_warning,
 };
 
 pub(crate) fn handle_rebase_command(
@@ -38,15 +38,7 @@ pub(crate) fn handle_rebase_command(
         base = base_branch
     );
 
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.rebase_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "rebase")?;
 
     match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {

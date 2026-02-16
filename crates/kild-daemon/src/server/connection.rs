@@ -100,6 +100,7 @@ async fn dispatch_message(
     writer: Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>,
     shutdown: &tokio_util::sync::CancellationToken,
 ) -> Option<DaemonMessage> {
+    let msg_id = msg.id().to_string();
     match msg {
         ClientMessage::CreateSession {
             id,
@@ -387,6 +388,18 @@ async fn dispatch_message(
         }
 
         ClientMessage::Ping { id } => Some(DaemonMessage::Ack { id }),
+
+        _ => {
+            warn!(
+                event = "daemon.connection.unhandled_message",
+                "Received unknown client message variant"
+            );
+            Some(DaemonMessage::Error {
+                id: msg_id,
+                code: ErrorCode::ProtocolError,
+                message: "Unknown message type".to_string(),
+            })
+        }
     }
 }
 

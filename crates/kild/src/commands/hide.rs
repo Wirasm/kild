@@ -6,7 +6,7 @@ use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, format_count, format_partial_failure_error, get_terminal_info, plural,
+    self, FailedOperation, format_count, format_partial_failure_error, get_terminal_info, plural,
 };
 
 pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -20,15 +20,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.hide_started", branch = branch);
 
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.hide_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "hide")?;
 
     // Daemon-managed sessions have no terminal window to hide
     if session

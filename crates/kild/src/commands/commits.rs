@@ -2,7 +2,8 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::events;
-use kild_core::session_ops;
+
+use super::helpers;
 
 pub(crate) fn handle_commits_command(
     matches: &ArgMatches,
@@ -20,19 +21,7 @@ pub(crate) fn handle_commits_command(
         count = count
     );
 
-    let session = match session_ops::get_session(branch) {
-        Ok(session) => session,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(
-                event = "cli.commits_failed",
-                branch = branch,
-                error = %e
-            );
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "commits")?;
 
     // Run git log in worktree directory via kild-core
     let commits = match kild_core::git::cli::get_commits(&session.worktree_path, count) {

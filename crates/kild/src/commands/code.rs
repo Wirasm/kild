@@ -2,10 +2,8 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::editor::EditorError;
-use kild_core::events;
-use kild_core::session_ops;
 
-use super::helpers::{load_config_with_warning, shorten_home_path};
+use super::helpers::{self, load_config_with_warning, shorten_home_path};
 
 pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -23,15 +21,7 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let config = load_config_with_warning();
 
     // 2. Look up the session to get worktree path
-    let session = match session_ops::get_session(branch) {
-        Ok(session) => session,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.code_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "code")?;
 
     // 3. Open editor via kild-core editor backend
     match kild_core::editor::open_editor(

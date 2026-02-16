@@ -1,11 +1,9 @@
 use clap::ArgMatches;
 use tracing::{error, info, warn};
 
-use kild_core::errors::KildError;
-use kild_core::events;
 use kild_core::session_ops;
 
-use super::helpers::is_valid_branch_name;
+use super::helpers::{self, is_valid_branch_name};
 
 pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -34,19 +32,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     );
 
     // 1. Look up session
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(event = "cli.pr_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-
-            if json_output {
-                return Err(super::helpers::print_json_error(&e, e.error_code()));
-            }
-            eprintln!("No kild found: {}", branch);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session_json(branch, "pr", json_output)?;
 
     // 2. Check for remote
     if !session_ops::has_remote_configured(&session.worktree_path) {

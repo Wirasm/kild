@@ -5,7 +5,7 @@ use clap::ArgMatches;
 use nix::sys::termios;
 use tracing::{error, info, warn};
 
-use kild_core::events;
+use super::helpers;
 
 pub(crate) fn handle_attach_command(
     matches: &ArgMatches,
@@ -17,16 +17,7 @@ pub(crate) fn handle_attach_command(
     info!(event = "cli.attach_started", branch = branch);
 
     // 1. Look up session to get daemon_session_id
-    let session = match kild_core::session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            eprintln!("  Use 'kild list' to see active sessions.");
-            error!(event = "cli.attach_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "attach")?;
 
     let daemon_session_id = match session.latest_agent().and_then(|a| a.daemon_session_id()) {
         Some(id) => id.to_string(),

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// PTY session status as reported by the daemon.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {

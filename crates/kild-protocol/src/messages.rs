@@ -8,6 +8,7 @@ use crate::types::SessionInfo;
 ///
 /// Maps 1:1 with `DaemonError` variants on the server side. Unknown codes
 /// from future daemon versions deserialize to `Unknown` via `#[serde(other)]`.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -65,6 +66,7 @@ impl std::fmt::Display for ErrorCode {
 ///
 /// Each variant maps to a JSONL message with `"type"` as the tag field.
 /// All requests carry an `id` field for response correlation.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
@@ -161,6 +163,7 @@ pub enum ClientMessage {
 ///
 /// Each variant maps to a JSONL message with `"type"` as the tag field.
 /// Response messages echo the request `id`. Streaming messages have no `id`.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum DaemonMessage {

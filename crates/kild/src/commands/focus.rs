@@ -1,8 +1,7 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
-use kild_core::events;
-use kild_core::session_ops;
+use super::helpers;
 
 pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
@@ -12,15 +11,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     info!(event = "cli.focus_started", branch = branch);
 
     // 1. Look up the session
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.focus_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "focus")?;
 
     // 2. Check for daemon-managed session (no terminal window to focus)
     if session

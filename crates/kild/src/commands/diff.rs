@@ -3,8 +3,8 @@ use tracing::{error, info};
 
 use kild_core::events;
 use kild_core::git::get_diff_stats;
-use kild_core::session_ops;
 
+use super::helpers;
 use super::helpers::shorten_home_path;
 
 pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -22,15 +22,7 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     );
 
     // 1. Look up the session
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.diff_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "diff")?;
 
     // Handle --stat flag: show summary instead of full diff
     if stat {

@@ -5,12 +5,11 @@ use tracing::{error, info};
 use kild_core::BranchHealth;
 use kild_core::ConflictStatus;
 use kild_core::MergeReadiness;
-use kild_core::errors::KildError;
-use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, format_partial_failure_error, is_valid_branch_name, load_config_with_warning,
+    self, FailedOperation, format_partial_failure_error, is_valid_branch_name,
+    load_config_with_warning,
 };
 
 /// Combined output for JSON: git health + computed readiness.
@@ -66,19 +65,7 @@ fn handle_single_stats(
         json_output = json_output
     );
 
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(event = "cli.stats_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-
-            if json_output {
-                return Err(super::helpers::print_json_error(&e, e.error_code()));
-            }
-            eprintln!("No kild found: {}", branch);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session_json(branch, "stats", json_output)?;
 
     let health = kild_core::git::collect_branch_health(
         &session.worktree_path,

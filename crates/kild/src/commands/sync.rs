@@ -1,11 +1,11 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
-use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{
-    FailedOperation, format_partial_failure_error, is_valid_branch_name, load_config_with_warning,
+    self, FailedOperation, format_partial_failure_error, is_valid_branch_name,
+    load_config_with_warning,
 };
 
 pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -38,15 +38,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         remote = remote
     );
 
-    let session = match session_ops::get_session(branch) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
-            error!(event = "cli.sync_failed", branch = branch, error = %e);
-            events::log_app_error(&e);
-            return Err(e.into());
-        }
-    };
+    let session = helpers::require_session(branch, "sync")?;
 
     // Fetch from remote — use the project repo path (worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;

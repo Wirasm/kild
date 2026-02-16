@@ -1,9 +1,7 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
-use kild_core::events;
-use kild_core::session_ops;
-
+use super::helpers;
 use super::helpers::is_valid_branch_name;
 
 pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -20,31 +18,17 @@ pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
 
     info!(event = "cli.cd_started", branch = branch);
 
-    match session_ops::get_session(branch) {
-        Ok(session) => {
-            // Print only the path - no formatting, no leading text
-            // This enables shell integration: cd "$(kild cd branch)"
-            println!("{}", session.worktree_path.display());
+    let session = helpers::require_session(branch, "cd")?;
 
-            info!(
-                event = "cli.cd_completed",
-                branch = branch,
-                path = %session.worktree_path.display()
-            );
+    // Print only the path - no formatting, no leading text
+    // This enables shell integration: cd "$(kild cd branch)"
+    println!("{}", session.worktree_path.display());
 
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("No kild found: {}", branch);
+    info!(
+        event = "cli.cd_completed",
+        branch = branch,
+        path = %session.worktree_path.display()
+    );
 
-            error!(
-                event = "cli.cd_failed",
-                branch = branch,
-                error = %e
-            );
-
-            events::log_app_error(&e);
-            Err(e.into())
-        }
-    }
+    Ok(())
 }

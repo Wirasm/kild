@@ -1,8 +1,10 @@
-use tracing::warn;
+use tracing::{error, warn};
 
 use kild_core::Session;
 use kild_core::config::KildConfig;
+use kild_core::errors::KildError;
 use kild_core::terminal::types::TerminalType;
+use kild_core::{events, session_ops};
 
 use super::json_types::JsonError;
 
@@ -16,6 +18,41 @@ pub fn print_json_error(error: &dyn std::fmt::Display, code: &str) -> Box<dyn st
     // Unwrap is safe: JsonError has only String fields, serialization cannot fail
     println!("{}", serde_json::to_string_pretty(&json_err).unwrap());
     error.to_string().into()
+}
+
+/// Look up a session by branch, logging a CLI error on failure.
+///
+/// Prints "No kild found: {branch}" to stderr, logs the structured
+/// `cli.session_lookup_failed` event, and calls `events::log_app_error`.
+pub fn require_session(branch: &str, command: &str) -> Result<Session, Box<dyn std::error::Error>> {
+    session_ops::get_session(branch).map_err(|e| {
+        eprintln!("No kild found: {}", branch);
+        error!(event = "cli.session_lookup_failed", command = command, branch = branch, error = %e);
+        events::log_app_error(&e);
+        let boxed: Box<dyn std::error::Error> = e.into();
+        boxed
+    })
+}
+
+/// Look up a session by branch with JSON error support.
+///
+/// Like `require_session`, but when `json_output` is true, prints a JSON
+/// error object to stdout instead of the human-readable stderr message.
+pub fn require_session_json(
+    branch: &str,
+    command: &str,
+    json_output: bool,
+) -> Result<Session, Box<dyn std::error::Error>> {
+    session_ops::get_session(branch).map_err(|e| {
+        error!(event = "cli.session_lookup_failed", command = command, branch = branch, error = %e);
+        events::log_app_error(&e);
+        if json_output {
+            return print_json_error(&e, e.error_code());
+        }
+        eprintln!("No kild found: {}", branch);
+        let boxed: Box<dyn std::error::Error> = e.into();
+        boxed
+    })
 }
 
 /// Branch name, agent name, and runtime mode for a successfully opened kild
