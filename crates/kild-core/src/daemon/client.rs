@@ -458,6 +458,37 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
     }
 }
 
+/// List all daemon sessions.
+///
+/// Returns all sessions from the daemon. The caller can filter by prefix
+/// to find sessions belonging to a specific kild (e.g., UI-created shells).
+pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonClientError> {
+    let socket_path = crate::daemon::socket_path();
+
+    debug!(event = "core.daemon.list_sessions_started");
+
+    let request = ClientMessage::ListSessions {
+        id: "list-sessions".to_string(),
+        project_id: None,
+    };
+
+    let mut stream = connect(&socket_path)?;
+    let response = send_request(&mut stream, &request)?;
+
+    match response {
+        DaemonMessage::SessionList { sessions, .. } => {
+            debug!(
+                event = "core.daemon.list_sessions_completed",
+                count = sessions.len()
+            );
+            Ok(sessions)
+        }
+        _ => Err(DaemonClientError::ProtocolError {
+            message: "Expected SessionList response".to_string(),
+        }),
+    }
+}
+
 /// Request the daemon to shut down gracefully.
 pub fn request_shutdown() -> Result<(), DaemonClientError> {
     let socket_path = crate::daemon::socket_path();

@@ -309,6 +309,13 @@ pub fn create_session(
             {
                 let scrollback_tail =
                     crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
+                        .inspect_err(|e| {
+                            debug!(
+                                event = "core.session.scrollback_read_failed",
+                                daemon_session_id = daemon_result.daemon_session_id,
+                                error = %e,
+                            );
+                        })
                         .ok()
                         .flatten()
                         .map(|bytes| {

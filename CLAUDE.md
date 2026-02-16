@@ -494,7 +494,7 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `daemon_helpers.rs:build_daemon_create_request()` - Injects shim and Codex env vars into daemon PTY requests
 - `create.rs:create_session()` - Initializes shim state directory, `panes.json`, and Codex notify hook for daemon sessions
 - `open.rs:open_session()` - Ensures Codex notify hook when opening Codex sessions
-- `destroy.rs:destroy_session()` - Destroys child shim PTYs via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
+- `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
 
 ## Codex Notify Hook Integration
 

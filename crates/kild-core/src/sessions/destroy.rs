@@ -268,6 +268,67 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         }
     }
 
+    // 3a. Sweep for untracked daemon sessions (e.g., UI-created shells)
+    //
+    // UI-created daemon sessions use the naming pattern `{kild_id}_ui_shell_{counter}`
+    // and are not tracked in the session file. Query the daemon for all sessions
+    // with a matching prefix and destroy any remaining ones.
+    {
+        let prefix = format!("{}_ui_shell_", session.id);
+        match crate::daemon::client::list_daemon_sessions() {
+            Ok(sessions) => {
+                let ui_sessions: Vec<_> = sessions
+                    .iter()
+                    .filter(|s| s.id.starts_with(&prefix))
+                    .collect();
+
+                if !ui_sessions.is_empty() {
+                    info!(
+                        event = "core.session.destroy_ui_sessions_sweep_started",
+                        session_id = session.id,
+                        count = ui_sessions.len()
+                    );
+                }
+
+                for daemon_session in ui_sessions {
+                    info!(
+                        event = "core.session.destroy_ui_session",
+                        daemon_session_id = daemon_session.id,
+                    );
+                    if let Err(e) =
+                        crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
+                    {
+                        warn!(
+                            event = "core.session.destroy_ui_session_failed",
+                            daemon_session_id = daemon_session.id,
+                            error = %e,
+                        );
+                        eprintln!(
+                            "Warning: Failed to clean up UI terminal session {}: {}",
+                            daemon_session.id, e
+                        );
+                    }
+                }
+            }
+            Err(crate::daemon::client::DaemonClientError::NotRunning { .. }) => {
+                // Daemon not running — no UI sessions to clean up
+                debug!(
+                    event = "core.session.destroy_ui_sessions_sweep_skipped",
+                    session_id = session.id,
+                    reason = "daemon_not_running"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.destroy_ui_sessions_sweep_failed",
+                    session_id = session.id,
+                    error = %e,
+                    "Could not query daemon for orphaned UI sessions"
+                );
+            }
+        }
+    }
+
     // 3b. Clean up tmux shim state and destroy child shim panes
     if let Some(home) = dirs::home_dir() {
         let shim_dir = home.join(".kild").join("shim").join(&session.id);
@@ -539,6 +600,13 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
     // 3. Check if PR exists (best-effort, requires forge CLI)
     // Skip PR check for repos without a remote to avoid false "No PR found" warnings
     let forge_override = crate::config::KildConfig::load_hierarchy()
+        .inspect_err(|e| {
+            debug!(
+                event = "core.session.config_load_failed",
+                error = %e,
+                "Could not load config for forge override — falling back to auto-detection"
+            );
+        })
         .ok()
         .and_then(|c| c.git.forge());
     let pr_status = if has_remote_configured(&session.worktree_path) {
