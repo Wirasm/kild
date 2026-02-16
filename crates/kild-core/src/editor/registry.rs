@@ -77,43 +77,21 @@ fn resolve_editor(
         editor.to_string()
     } else if let Some(editor) = config.editor.default() {
         editor.to_string()
-    } else if let Ok(editor) = std::env::var("VISUAL") {
-        if editor.is_empty() {
-            debug!(
-                event = "core.editor.visual_env_empty",
-                "VISUAL is empty, skipping"
-            );
-            resolve_editor_fallback()?
-        } else {
+    } else {
+        // Unix convention: VISUAL > EDITOR > OS default > PATH detection.
+        // Empty strings are treated as unset so fallback continues.
+        let visual = std::env::var("VISUAL").ok().filter(|s| !s.is_empty());
+        let editor_env = std::env::var("EDITOR").ok().filter(|s| !s.is_empty());
+
+        if let Some(editor) = visual {
             debug!(event = "core.editor.visual_env_found", editor = %editor);
             editor
-        }
-    } else if let Ok(editor) = std::env::var("EDITOR") {
-        if editor.is_empty() {
-            debug!(
-                event = "core.editor.editor_env_empty",
-                "EDITOR is empty, skipping"
-            );
-            resolve_editor_fallback()?
-        } else {
+        } else if let Some(editor) = editor_env {
+            debug!(event = "core.editor.editor_env_found", editor = %editor);
             editor
+        } else {
+            resolve_editor_fallback()?
         }
-    } else if let Some(editor) = detect_os_default_editor() {
-        info!(
-            event = "core.editor.os_default_detected",
-            editor = %editor,
-            "Using OS default editor"
-        );
-        editor
-    } else {
-        // No explicit config — auto-detect from available editors
-        let detected = detect_editor()?;
-        info!(
-            event = "core.editor.auto_detected",
-            editor = detected.as_str(),
-            "No editor configured — auto-detected"
-        );
-        detected.as_str().to_string()
     };
 
     let editor_type = editor_name.parse::<EditorType>().ok();
@@ -192,7 +170,7 @@ fn detect_os_default_editor_inner() -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
 
-    // duti -x txt outputs: bundle_id, app_name, app_path (3 lines)
+    // duti -x txt outputs 3 lines (bundle_id, app_name, app_path); we only need the first
     let bundle_id = lines.first()?.trim();
     map_macos_bundle_to_command(bundle_id)
 }
@@ -300,6 +278,7 @@ pub fn open_editor(
 mod tests {
     use super::*;
     use crate::errors::KildError;
+    use temp_env::with_vars;
 
     #[test]
     fn test_get_backend_zed() {
@@ -458,5 +437,56 @@ mod tests {
     fn test_map_macos_bundle_unknown_returns_none() {
         assert_eq!(map_macos_bundle_to_command("com.apple.TextEdit"), None);
         assert_eq!(map_macos_bundle_to_command("unknown.bundle.id"), None);
+    }
+
+    // --- Environment variable resolution tests ---
+
+    #[test]
+    fn test_resolve_editor_cli_override_ignores_env_vars() {
+        with_vars([("VISUAL", Some("vim")), ("EDITOR", Some("nano"))], || {
+            let config = KildConfig::default();
+            let (name, _) = resolve_editor(Some("zed"), &config).unwrap();
+            assert_eq!(name, "zed");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_visual_takes_precedence_over_editor() {
+        with_vars([("VISUAL", Some("vim")), ("EDITOR", Some("nano"))], || {
+            let config = KildConfig::default();
+            let (name, _) = resolve_editor(None, &config).unwrap();
+            assert_eq!(name, "vim");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_empty_visual_falls_through_to_editor() {
+        with_vars([("VISUAL", Some("")), ("EDITOR", Some("nano"))], || {
+            let config = KildConfig::default();
+            let (name, _) = resolve_editor(None, &config).unwrap();
+            assert_eq!(name, "nano");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_unset_visual_falls_through_to_editor() {
+        with_vars([("VISUAL", None::<&str>), ("EDITOR", Some("nano"))], || {
+            let config = KildConfig::default();
+            let (name, _) = resolve_editor(None, &config).unwrap();
+            assert_eq!(name, "nano");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_both_empty_falls_through_to_detection() {
+        with_vars([("VISUAL", Some("")), ("EDITOR", Some(""))], || {
+            let config = KildConfig::default();
+            let result = resolve_editor(None, &config);
+            // Should either detect an editor or return NoEditorFound
+            match result {
+                Ok((name, _)) => assert!(!name.is_empty()),
+                Err(e) => assert!(matches!(e, EditorError::NoEditorFound)),
+            }
+        });
     }
 }

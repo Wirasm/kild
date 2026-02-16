@@ -26,6 +26,9 @@ base64.workspace = true
 kild-paths.workspace = true
 kild-protocol.workspace = true
 
+[dev-dependencies]
+temp-env.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 xcap.workspace = true
 accessibility-sys.workspace = true

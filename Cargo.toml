@@ -71,3 +71,6 @@ gpui-component = "0.5.1"
 core-text = "=21.0.0"
 unicode-width = "0.2"
 owo-colors = { version = "4", features = ["supports-colors"] }
+
+# Dev/test dependencies
+temp-env = "0.3"
