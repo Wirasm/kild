@@ -48,7 +48,7 @@ pub mod validation;
 // Public API exports
 pub use types::{
     AgentConfig, AgentSettings, Config, EditorConfig, GitConfig, HealthConfig, KildConfig,
-    TerminalConfig, UiConfig,
+    TerminalConfig, UiConfig, VALID_NAV_MODIFIERS,
 };
 pub use validation::{VALID_TERMINALS, validate_config};
 

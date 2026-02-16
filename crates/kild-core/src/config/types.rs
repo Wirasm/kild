@@ -129,6 +129,9 @@ impl Default for KildConfig {
     }
 }
 
+/// Valid values for the `nav_modifier` configuration option.
+pub const VALID_NAV_MODIFIERS: [&str; 3] = ["ctrl", "alt", "cmd+shift"];
+
 /// UI configuration for the KILD native GUI.
 ///
 /// Controls keybindings and navigation behavior in the GUI.
@@ -595,5 +598,81 @@ default = "code"
         let result = config.resolve_editor(None);
         // Result is either $EDITOR value or "code" fallback
         assert!(!result.is_empty());
+    }
+
+    // --- UiConfig tests ---
+
+    #[test]
+    fn test_ui_config_nav_modifier_defaults_to_ctrl() {
+        let config = UiConfig::default();
+        assert_eq!(config.nav_modifier(), "ctrl");
+    }
+
+    #[test]
+    fn test_ui_config_nav_modifier_returns_set_value() {
+        let config = UiConfig {
+            nav_modifier: Some("alt".to_string()),
+        };
+        assert_eq!(config.nav_modifier(), "alt");
+    }
+
+    #[test]
+    fn test_ui_config_merge_override_wins() {
+        let base = UiConfig {
+            nav_modifier: Some("ctrl".to_string()),
+        };
+        let override_config = UiConfig {
+            nav_modifier: Some("alt".to_string()),
+        };
+        let merged = UiConfig::merge(&base, &override_config);
+        assert_eq!(merged.nav_modifier(), "alt");
+    }
+
+    #[test]
+    fn test_ui_config_merge_preserves_base_when_override_none() {
+        let base = UiConfig {
+            nav_modifier: Some("cmd+shift".to_string()),
+        };
+        let override_config = UiConfig { nav_modifier: None };
+        let merged = UiConfig::merge(&base, &override_config);
+        assert_eq!(merged.nav_modifier(), "cmd+shift");
+    }
+
+    #[test]
+    fn test_ui_config_merge_both_none() {
+        let base = UiConfig::default();
+        let override_config = UiConfig::default();
+        let merged = UiConfig::merge(&base, &override_config);
+        assert_eq!(merged.nav_modifier(), "ctrl");
+    }
+
+    #[test]
+    fn test_ui_config_serialization() {
+        let config = UiConfig {
+            nav_modifier: Some("alt".to_string()),
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("nav_modifier = \"alt\""));
+
+        let parsed: UiConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.nav_modifier(), "alt");
+    }
+
+    #[test]
+    fn test_ui_config_from_toml() {
+        let config: KildConfig = toml::from_str(
+            r#"
+[ui]
+nav_modifier = "alt"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.nav_modifier(), "alt");
+    }
+
+    #[test]
+    fn test_ui_config_defaults_when_missing() {
+        let config: KildConfig = toml::from_str("").unwrap();
+        assert_eq!(config.ui.nav_modifier(), "ctrl");
     }
 }

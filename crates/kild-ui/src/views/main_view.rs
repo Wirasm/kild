@@ -153,9 +153,27 @@ enum NavModifier {
 impl NavModifier {
     fn from_config(s: &str) -> Self {
         match s {
+            "ctrl" => Self::Ctrl,
             "alt" => Self::Alt,
             "cmd+shift" => Self::CmdShift,
-            _ => Self::Ctrl,
+            other => {
+                warn!(
+                    event = "ui.config.invalid_nav_modifier",
+                    value = other,
+                    valid_values = "ctrl, alt, cmd+shift",
+                    "Invalid nav_modifier in config, using 'ctrl'"
+                );
+                Self::Ctrl
+            }
+        }
+    }
+
+    /// Return the display string for keyboard hints.
+    fn hint_prefix(&self) -> &'static str {
+        match self {
+            Self::Ctrl => "ctrl",
+            Self::Alt => "alt",
+            Self::CmdShift => "cmd-shift",
         }
     }
 
@@ -391,12 +409,17 @@ impl MainView {
         });
 
         // Load UI config for nav modifier
-        let nav_modifier = NavModifier::from_config(
-            kild_core::KildConfig::load_hierarchy()
-                .map(|c| c.ui.nav_modifier().to_string())
-                .unwrap_or_else(|_| "ctrl".to_string())
-                .as_str(),
-        );
+        let nav_modifier = match kild_core::KildConfig::load_hierarchy() {
+            Ok(config) => NavModifier::from_config(config.ui.nav_modifier()),
+            Err(e) => {
+                warn!(
+                    event = "ui.config.load_failed",
+                    error = %e,
+                    "Failed to load config, using default keybindings (ctrl+1-9)"
+                );
+                NavModifier::Ctrl
+            }
+        };
 
         let mut view = Self {
             state: AppState::new(),
@@ -444,14 +467,38 @@ impl MainView {
         self.name_input = None;
     }
 
+    /// Maximum number of workspaces to prevent unbounded creation.
+    const MAX_WORKSPACES: usize = 10;
+
     /// Get the active workspace's pane grid.
     fn active_pane_grid(&self) -> &super::pane_grid::PaneGrid {
-        &self.workspaces[self.active_workspace]
+        debug_assert!(
+            !self.workspaces.is_empty(),
+            "workspaces must never be empty"
+        );
+        debug_assert!(
+            self.active_workspace < self.workspaces.len(),
+            "active_workspace {} out of bounds (len: {})",
+            self.active_workspace,
+            self.workspaces.len()
+        );
+        &self.workspaces[self.active_workspace.min(self.workspaces.len() - 1)]
     }
 
     /// Get the active workspace's pane grid mutably.
     fn active_pane_grid_mut(&mut self) -> &mut super::pane_grid::PaneGrid {
-        &mut self.workspaces[self.active_workspace]
+        debug_assert!(
+            !self.workspaces.is_empty(),
+            "workspaces must never be empty"
+        );
+        debug_assert!(
+            self.active_workspace < self.workspaces.len(),
+            "active_workspace {} out of bounds (len: {})",
+            self.active_workspace,
+            self.workspaces.len()
+        );
+        let idx = self.active_workspace.min(self.workspaces.len() - 1);
+        &mut self.workspaces[idx]
     }
 
     fn active_terminal_view(&self) -> Option<&gpui::Entity<crate::terminal::TerminalView>> {
@@ -2015,11 +2062,13 @@ impl MainView {
                     .on_mouse_up(
                         gpui::MouseButton::Left,
                         cx.listener(move |view, _, window, cx| {
-                            view.active_workspace = i;
-                            view.active_view = ActiveView::Control;
-                            if view.active_terminal_id.is_some() {
-                                view.focus_region = FocusRegion::Terminal;
-                                view.focus_active_terminal(window, cx);
+                            if i < view.workspaces.len() {
+                                view.active_workspace = i;
+                                view.active_view = ActiveView::Control;
+                                if view.active_terminal_id.is_some() {
+                                    view.focus_region = FocusRegion::Terminal;
+                                    view.focus_active_terminal(window, cx);
+                                }
                             }
                             cx.notify();
                         }),
@@ -2041,6 +2090,13 @@ impl MainView {
                 .on_mouse_up(
                     gpui::MouseButton::Left,
                     cx.listener(|view, _, _, cx| {
+                        if view.workspaces.len() >= Self::MAX_WORKSPACES {
+                            warn!(
+                                event = "ui.workspace.max_limit_reached",
+                                max = Self::MAX_WORKSPACES,
+                            );
+                            return;
+                        }
                         view.workspaces.push(super::pane_grid::PaneGrid::new());
                         view.active_workspace = view.workspaces.len() - 1;
                         view.active_view = ActiveView::Control;
@@ -2400,6 +2456,7 @@ impl Render for MainView {
                             .child(status_bar::render_status_bar(
                                 &self.state,
                                 self.active_view,
+                                self.nav_modifier.hint_prefix(),
                                 cx,
                             )),
                     ),

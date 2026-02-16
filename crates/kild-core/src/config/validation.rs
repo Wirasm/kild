@@ -44,6 +44,19 @@ pub fn validate_config(config: &KildConfig) -> Result<(), ConfigError> {
         });
     }
 
+    // Validate nav_modifier if set
+    if let Some(ref modifier) = config.ui.nav_modifier
+        && !crate::config::types::VALID_NAV_MODIFIERS.contains(&modifier.as_str())
+    {
+        return Err(ConfigError::InvalidConfiguration {
+            message: format!(
+                "Invalid nav_modifier '{}'. Valid values: {}",
+                modifier,
+                crate::config::types::VALID_NAV_MODIFIERS.join(", ")
+            ),
+        });
+    }
+
     // Validate include patterns if configured
     if let Some(ref include_config) = config.include_patterns
         && let Err(e) = include_config.validate()
@@ -126,6 +139,52 @@ mod tests {
         let mut config = KildConfig::default();
         config.terminal.preferred = Some("ghostty".to_string());
 
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_valid_nav_modifiers() {
+        for modifier in ["ctrl", "alt", "cmd+shift"] {
+            let mut config = KildConfig::default();
+            config.ui.nav_modifier = Some(modifier.to_string());
+            assert!(
+                validate_config(&config).is_ok(),
+                "nav_modifier '{}' should be valid",
+                modifier
+            );
+        }
+    }
+
+    #[test]
+    fn test_config_validation_invalid_nav_modifier() {
+        let mut config = KildConfig::default();
+        config.ui.nav_modifier = Some("invalid".to_string());
+
+        let result = validate_config(&config);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ConfigError::InvalidConfiguration { .. }
+        ));
+    }
+
+    #[test]
+    fn test_config_validation_nav_modifier_typos_rejected() {
+        for typo in ["ctr", "command+shift", "cmd shift", "cmd-shift", "CMD"] {
+            let mut config = KildConfig::default();
+            config.ui.nav_modifier = Some(typo.to_string());
+            assert!(
+                validate_config(&config).is_err(),
+                "nav_modifier typo '{}' should be rejected",
+                typo
+            );
+        }
+    }
+
+    #[test]
+    fn test_config_validation_nav_modifier_none_is_valid() {
+        let config = KildConfig::default();
+        // None nav_modifier means use default "ctrl" - should pass validation
         assert!(validate_config(&config).is_ok());
     }
 }
