@@ -1,4 +1,4 @@
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::agents;
 use crate::config::{Config, KildConfig};
@@ -355,37 +355,19 @@ pub fn open_session(
         setup_codex_integration(&agent);
 
         // Terminal path: spawn in external terminal
-        // Always use `env` to strip nesting-detection vars (e.g. CLAUDECODE) so
-        // agents don't refuse to start when kild is invoked from inside Claude Code.
-        // Also sets task list env vars for agents that support them.
+        // Wrap with `env` to strip nesting-detection vars and inject agent env.
         let terminal_command = {
             let mut env_prefix: Vec<(String, String)> = Vec::new();
             if let Some(ref tlid) = new_task_list_id {
                 env_prefix.extend(agents::resume::task_list_env_vars(&agent, tlid));
             }
             env_prefix.extend(agents::resume::codex_env_vars(&agent, &session.branch));
-
-            let env_args: Vec<String> = env_prefix
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect();
-            let unset_args = super::env_cleanup::ENV_VARS_TO_STRIP
-                .iter()
-                .map(|k| format!("-u {}", k))
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            if env_args.is_empty() {
-                format!("env {} {}", unset_args, agent_command)
-            } else {
-                format!(
-                    "env {} {} {}",
-                    unset_args,
-                    env_args.join(" "),
-                    agent_command
-                )
-            }
+            super::env_cleanup::build_env_command(&env_prefix, &agent_command)
         };
+        debug!(
+            event = "core.session.terminal_command_constructed",
+            command = %terminal_command,
+        );
         let spawn_result = terminal::handler::spawn_terminal(
             &session.worktree_path,
             &terminal_command,
