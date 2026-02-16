@@ -8,3 +8,6 @@ description = "Shared IPC protocol types for KILD daemon communication"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

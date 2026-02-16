@@ -204,11 +204,11 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 
 **Workspace structure:**
 - `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
-- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). Also provides `IpcConnection` for JSONL-over-Unix-socket client used by both kild-core and kild-tmux-shim. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only (tempfile for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
-- `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC)
+- `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC via kild-protocol::IpcConnection)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
 - `crates/kild-peek-core` - Core library for native app inspection and interaction (window listing, screenshots, image comparison, assertions, UI automation)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
@@ -217,7 +217,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
-- `daemon/` - Daemon client for IPC communication (sync Unix socket client) and auto-start logic (discovers kild-daemon binary as sibling executable)
+- `daemon/` - Daemon client for IPC communication (delegates to kild-protocol::IpcConnection) and auto-start logic (discovers kild-daemon binary as sibling executable)
 - `editor/` - Editor backend system (Zed, VS Code, Vim, generic fallback) with registry.rs for detection and resolution chain (CLI > config > $VISUAL > $EDITOR > OS default via duti/xdg-mime > PATH scan)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
@@ -263,7 +263,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `parser.rs` - Hand-rolled tmux argument parser for ~15 subcommands + aliases
 - `commands.rs` - Command handlers dispatching to daemon IPC or local state
 - `state.rs` - File-based pane registry with flock concurrency control
-- `ipc.rs` - Sync JSONL client over Unix socket (no kild-core dependency)
+- `ipc.rs` - Domain-specific IPC helpers (delegates to kild-protocol::IpcConnection)
 - `main.rs` - Entry point, file-based logging controlled by KILD_SHIM_LOG env var
 - `errors.rs` - ShimError type
 

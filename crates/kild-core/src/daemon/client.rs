@@ -1,15 +1,14 @@
 //! Synchronous IPC client for communicating with the KILD daemon.
 //!
-//! Uses `std::os::unix::net::UnixStream` — no tokio dependency.
-//! Uses typed `ClientMessage`/`DaemonMessage` enums from `kild-protocol`
-//! for compile-checked protocol correctness.
+//! Delegates JSONL framing to `kild_protocol::IpcConnection`.
+//! This module provides domain-specific request helpers and error mapping.
 
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode, SessionId, SessionStatus};
+use kild_protocol::{
+    ClientMessage, DaemonMessage, ErrorCode, IpcConnection, IpcError, SessionId, SessionStatus,
+};
 use tracing::{debug, info, warn};
 
 use crate::errors::KildError;
@@ -56,65 +55,23 @@ impl KildError for DaemonClientError {
     }
 }
 
-/// Connect to the daemon socket with a timeout.
-fn connect(socket_path: &Path) -> Result<UnixStream, DaemonClientError> {
-    if !socket_path.exists() {
-        return Err(DaemonClientError::NotRunning {
-            path: socket_path.display().to_string(),
-        });
-    }
-
-    let stream = UnixStream::connect(socket_path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::ConnectionRefused {
-            DaemonClientError::NotRunning {
-                path: socket_path.display().to_string(),
+impl From<IpcError> for DaemonClientError {
+    fn from(e: IpcError) -> Self {
+        match e {
+            IpcError::NotRunning { path } => DaemonClientError::NotRunning { path },
+            IpcError::ConnectionFailed(io) => DaemonClientError::ConnectionFailed {
+                message: io.to_string(),
+            },
+            IpcError::DaemonError { code, message } => {
+                DaemonClientError::DaemonError { code, message }
             }
-        } else {
-            DaemonClientError::ConnectionFailed {
-                message: e.to_string(),
-            }
+            IpcError::ProtocolError { message } => DaemonClientError::ProtocolError { message },
+            IpcError::Io(io) => DaemonClientError::Io(io),
+            other => DaemonClientError::ProtocolError {
+                message: other.to_string(),
+            },
         }
-    })?;
-
-    stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-
-    Ok(stream)
-}
-
-/// Send a typed request and read one typed response over a JSONL connection.
-fn send_request(
-    stream: &mut UnixStream,
-    request: &ClientMessage,
-) -> Result<DaemonMessage, DaemonClientError> {
-    let msg = serde_json::to_string(request).map_err(|e| DaemonClientError::ProtocolError {
-        message: e.to_string(),
-    })?;
-
-    writeln!(stream, "{}", msg)?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-
-    if line.is_empty() {
-        return Err(DaemonClientError::ProtocolError {
-            message: "Empty response from daemon".to_string(),
-        });
     }
-
-    let response: DaemonMessage =
-        serde_json::from_str(&line).map_err(|e| DaemonClientError::ProtocolError {
-            message: format!("Invalid JSON response: {}", e),
-        })?;
-
-    // Check for error responses
-    if let DaemonMessage::Error { code, message, .. } = response {
-        return Err(DaemonClientError::DaemonError { code, message });
-    }
-
-    Ok(response)
 }
 
 /// Parameters for creating a daemon-managed PTY session.
@@ -174,8 +131,8 @@ pub fn create_pty_session(
         use_login_shell: request.use_login_shell,
     };
 
-    let mut stream = connect(&socket_path)?;
-    let response = send_request(&mut stream, &msg)?;
+    let mut conn = IpcConnection::connect(&socket_path)?;
+    let response = conn.send(&msg)?;
 
     let session_id = match response {
         DaemonMessage::SessionCreated { session, .. } => session.id,
@@ -210,8 +167,8 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, &request)?;
+    let mut conn = IpcConnection::connect(&socket_path)?;
+    conn.send(&request)?;
 
     info!(
         event = "core.daemon.stop_session_completed",
@@ -240,8 +197,8 @@ pub fn destroy_daemon_session(
         force,
     };
 
-    let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, &request)?;
+    let mut conn = IpcConnection::connect(&socket_path)?;
+    conn.send(&request)?;
 
     info!(
         event = "core.daemon.destroy_session_completed",
@@ -261,16 +218,16 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
         id: "ping".to_string(),
     };
 
-    let mut stream = match connect(&socket_path) {
-        Ok(s) => s,
-        Err(DaemonClientError::NotRunning { .. }) => return Ok(false),
-        Err(e) => return Err(e),
+    let mut conn = match IpcConnection::connect(&socket_path) {
+        Ok(c) => c,
+        Err(IpcError::NotRunning { .. }) => return Ok(false),
+        Err(e) => return Err(e.into()),
     };
 
     // Use a short timeout for ping
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, &request) {
+    match conn.send(&request) {
         Ok(_) => {
             debug!(event = "core.daemon.ping_completed", alive = true);
             Ok(true)
@@ -303,9 +260,9 @@ pub fn get_session_status(
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut stream = match connect(&socket_path) {
-        Ok(s) => s,
-        Err(DaemonClientError::NotRunning { .. }) => {
+    let mut conn = match IpcConnection::connect(&socket_path) {
+        Ok(c) => c,
+        Err(IpcError::NotRunning { .. }) => {
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -314,14 +271,14 @@ pub fn get_session_status(
             return Ok(None);
         }
         Err(e) => {
-            return Err(e);
+            return Err(e.into());
         }
     };
 
     // Use a short timeout for status queries
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, &request) {
+    match conn.send(&request) {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
             debug!(
                 event = "core.daemon.get_session_status_completed",
@@ -341,9 +298,7 @@ pub fn get_session_status(
                 message: "Expected SessionInfo response".to_string(),
             })
         }
-        Err(DaemonClientError::DaemonError { ref code, .. })
-            if *code == ErrorCode::SessionNotFound =>
-        {
+        Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -352,12 +307,13 @@ pub fn get_session_status(
             Ok(None)
         }
         Err(e) => {
+            let err: DaemonClientError = e.into();
             warn!(
                 event = "core.daemon.get_session_status_failed",
                 daemon_session_id = daemon_session_id,
-                error = %e
+                error = %err
             );
-            Err(e)
+            Err(err)
         }
     }
 }
@@ -376,15 +332,15 @@ pub fn get_session_info(
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut stream = match connect(&socket_path) {
-        Ok(s) => s,
-        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
-        Err(e) => return Err(e),
+    let mut conn = match IpcConnection::connect(&socket_path) {
+        Ok(c) => c,
+        Err(IpcError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e.into()),
     };
 
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, &request) {
+    match conn.send(&request) {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
             Ok(Some((session.status, session.exit_code)))
         }
@@ -399,12 +355,10 @@ pub fn get_session_info(
                 message: "Expected SessionInfo response".to_string(),
             })
         }
-        Err(DaemonClientError::DaemonError { ref code, .. })
-            if *code == ErrorCode::SessionNotFound =>
-        {
+        Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
             Ok(None)
         }
-        Err(e) => Err(e),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -420,15 +374,15 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut stream = match connect(&socket_path) {
-        Ok(s) => s,
-        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
-        Err(e) => return Err(e),
+    let mut conn = match IpcConnection::connect(&socket_path) {
+        Ok(c) => c,
+        Err(IpcError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e.into()),
     };
 
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
-    match send_request(&mut stream, &request) {
+    match conn.send(&request) {
         Ok(DaemonMessage::ScrollbackContents { data, .. }) => {
             use base64::Engine;
             let decoded = base64::engine::general_purpose::STANDARD
@@ -449,12 +403,10 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
                 message: "Expected ScrollbackContents response".to_string(),
             })
         }
-        Err(DaemonClientError::DaemonError { ref code, .. })
-            if *code == ErrorCode::SessionNotFound =>
-        {
+        Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
             Ok(None)
         }
-        Err(e) => Err(e),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -472,8 +424,8 @@ pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonC
         project_id: None,
     };
 
-    let mut stream = connect(&socket_path)?;
-    let response = send_request(&mut stream, &request)?;
+    let mut conn = IpcConnection::connect(&socket_path)?;
+    let response = conn.send(&request)?;
 
     match response {
         DaemonMessage::SessionList { sessions, .. } => {
@@ -499,8 +451,8 @@ pub fn request_shutdown() -> Result<(), DaemonClientError> {
         id: "shutdown".to_string(),
     };
 
-    let mut stream = connect(&socket_path)?;
-    send_request(&mut stream, &request)?;
+    let mut conn = IpcConnection::connect(&socket_path)?;
+    conn.send(&request)?;
 
     info!(event = "core.daemon.shutdown_completed");
     Ok(())
@@ -515,10 +467,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("daemon.sock");
 
-        let result = connect(&socket_path);
+        let result = IpcConnection::connect(&socket_path);
         assert!(result.is_err());
         assert!(
-            matches!(result.unwrap_err(), DaemonClientError::NotRunning { .. }),
+            matches!(result.unwrap_err(), IpcError::NotRunning { .. }),
             "Should return NotRunning when daemon socket doesn't exist"
         );
     }
@@ -593,5 +545,60 @@ mod tests {
             !DaemonClientError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test"))
                 .is_user_error()
         );
+    }
+
+    #[test]
+    fn test_from_ipc_error_not_running() {
+        let ipc_err = IpcError::NotRunning {
+            path: "/tmp/test.sock".to_string(),
+        };
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::NotRunning { path } if path == "/tmp/test.sock")
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_daemon_error() {
+        let ipc_err = IpcError::DaemonError {
+            code: ErrorCode::SessionNotFound,
+            message: "not found".to_string(),
+        };
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::DaemonError { code, message }
+            if code == ErrorCode::SessionNotFound && message == "not found")
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_connection_failed() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+        let ipc_err = IpcError::ConnectionFailed(io_err);
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::ConnectionFailed { message }
+            if message.contains("permission denied"))
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_protocol_error() {
+        let ipc_err = IpcError::ProtocolError {
+            message: "bad format".to_string(),
+        };
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::ProtocolError { message }
+            if message == "bad format")
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout");
+        let ipc_err = IpcError::Io(io_err);
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(matches!(daemon_err, DaemonClientError::Io(_)));
     }
 }
