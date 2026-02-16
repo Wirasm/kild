@@ -67,6 +67,9 @@ impl From<IpcError> for DaemonClientError {
             }
             IpcError::ProtocolError { message } => DaemonClientError::ProtocolError { message },
             IpcError::Io(io) => DaemonClientError::Io(io),
+            other => DaemonClientError::ProtocolError {
+                message: other.to_string(),
+            },
         }
     }
 }
@@ -566,5 +569,36 @@ mod tests {
             matches!(daemon_err, DaemonClientError::DaemonError { code, message }
             if code == ErrorCode::SessionNotFound && message == "not found")
         );
+    }
+
+    #[test]
+    fn test_from_ipc_error_connection_failed() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+        let ipc_err = IpcError::ConnectionFailed(io_err);
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::ConnectionFailed { message }
+            if message.contains("permission denied"))
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_protocol_error() {
+        let ipc_err = IpcError::ProtocolError {
+            message: "bad format".to_string(),
+        };
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(
+            matches!(daemon_err, DaemonClientError::ProtocolError { message }
+            if message == "bad format")
+        );
+    }
+
+    #[test]
+    fn test_from_ipc_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout");
+        let ipc_err = IpcError::Io(io_err);
+        let daemon_err: DaemonClientError = ipc_err.into();
+        assert!(matches!(daemon_err, DaemonClientError::Io(_)));
     }
 }

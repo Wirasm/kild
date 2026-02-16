@@ -12,6 +12,7 @@ use std::time::Duration;
 use crate::{ClientMessage, DaemonMessage, ErrorCode};
 
 /// Error from the shared IPC client layer.
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum IpcError {
     /// Daemon socket does not exist or connection was refused.
