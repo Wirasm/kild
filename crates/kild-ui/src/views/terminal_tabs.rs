@@ -265,6 +265,7 @@ pub fn render_tab_bar(ctx: &TabBarContext, cx: &mut Context<MainView>) -> gpui::
                 return div()
                     .flex()
                     .items_center()
+                    .min_w(px(120.0))
                     .px(px(theme::SPACE_2))
                     .py(px(2.0))
                     .rounded(px(theme::RADIUS_SM))
