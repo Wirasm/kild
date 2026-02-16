@@ -589,6 +589,23 @@ pub fn build_cli() -> Command {
                         .value_parser(clap::value_parser!(Shell))
                 )
         )
+        .subcommand(
+            Command::new("init-hooks")
+                .about("Initialize agent integration hooks in the current project")
+                .arg(
+                    Arg::new("agent")
+                        .help("Agent to configure (opencode)")
+                        .required(true)
+                        .index(1)
+                        .value_parser(["opencode"])
+                )
+                .arg(
+                    Arg::new("no-install")
+                        .long("no-install")
+                        .help("Skip running bun install after generating files")
+                        .action(ArgAction::SetTrue)
+                )
+        )
 }
 
 #[cfg(test)]
@@ -1935,5 +1952,46 @@ mod tests {
 
         let matches = matches.unwrap();
         assert!(!matches.get_flag("no-color"));
+    }
+
+    // --- init-hooks command tests ---
+
+    #[test]
+    fn test_cli_init_hooks_command() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "init-hooks", "opencode"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("init-hooks").unwrap();
+        assert_eq!(sub.get_one::<String>("agent").unwrap(), "opencode");
+        assert!(!sub.get_flag("no-install"));
+    }
+
+    #[test]
+    fn test_cli_init_hooks_requires_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "init-hooks"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_init_hooks_rejects_invalid_agent() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "init-hooks", "codex"]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn test_cli_init_hooks_no_install_flag() {
+        let app = build_cli();
+        let matches =
+            app.try_get_matches_from(vec!["kild", "init-hooks", "opencode", "--no-install"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        let sub = matches.subcommand_matches("init-hooks").unwrap();
+        assert_eq!(sub.get_one::<String>("agent").unwrap(), "opencode");
+        assert!(sub.get_flag("no-install"));
     }
 }

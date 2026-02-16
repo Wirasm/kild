@@ -9,6 +9,7 @@ use crate::terminal;
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_codex_integration,
+    setup_opencode_integration,
 };
 
 pub fn create_session(
@@ -198,6 +199,7 @@ pub fn create_session(
     let initial_agent = match request.runtime_mode {
         crate::state::types::RuntimeMode::Terminal => {
             setup_codex_integration(&validated.agent);
+            setup_opencode_integration(&validated.agent, &worktree.path);
 
             // Terminal path: spawn in external terminal
             // Wrap with `env` to strip nesting-detection vars and inject agent env.
@@ -257,6 +259,7 @@ pub fn create_session(
             }
 
             setup_codex_integration(&validated.agent);
+            setup_opencode_integration(&validated.agent, &worktree.path);
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).

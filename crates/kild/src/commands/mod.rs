@@ -21,6 +21,7 @@ mod diff;
 mod focus;
 mod health;
 mod hide;
+mod init_hooks;
 mod list;
 mod open;
 mod overlaps;
@@ -61,6 +62,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("health", sub_matches)) => health::handle_health_command(sub_matches),
         Some(("daemon", sub_matches)) => daemon::handle_daemon_command(sub_matches),
         Some(("attach", sub_matches)) => attach::handle_attach_command(sub_matches),
+        Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");
             Err("Unknown command".into())
