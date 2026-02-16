@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use gpui::{Hsla, Rgba};
 
@@ -8,7 +10,7 @@ use crate::theme;
 /// Index 0-7: standard colors, 8-15: bright colors.
 /// These are intentionally more vivid than the muted brand palette
 /// for terminal readability on dark backgrounds.
-fn ansi_colors() -> [Hsla; 16] {
+static ANSI_COLORS: LazyLock<[Hsla; 16]> = LazyLock::new(|| {
     [
         Hsla::from(theme::ansi_black()),
         Hsla::from(theme::ansi_red()),
@@ -27,7 +29,7 @@ fn ansi_colors() -> [Hsla; 16] {
         Hsla::from(theme::ansi_bright_cyan()),
         Hsla::from(theme::ansi_bright_white()),
     ]
-}
+});
 
 /// Convert an alacritty_terminal Color to a GPUI Hsla.
 pub fn resolve_color(color: &Color) -> Hsla {
@@ -45,7 +47,7 @@ pub fn resolve_color(color: &Color) -> Hsla {
 
 /// Resolve a named ANSI color to Hsla.
 fn resolve_named(named: NamedColor) -> Hsla {
-    let table = ansi_colors();
+    let table = &*ANSI_COLORS;
     match named {
         // Standard 0-7
         NamedColor::Black => table[0],
@@ -89,7 +91,7 @@ fn resolve_indexed(idx: u8) -> Hsla {
     match idx {
         // 0-15: same as named ANSI colors
         0..=15 => {
-            let table = ansi_colors();
+            let table = &*ANSI_COLORS;
             table[idx as usize]
         }
         // 16-231: 6x6x6 RGB color cube

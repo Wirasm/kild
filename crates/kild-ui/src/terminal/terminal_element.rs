@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
@@ -65,6 +65,23 @@ pub(crate) struct MouseState {
     pub(crate) cmd_held: bool,
 }
 
+/// Cached font objects — terminal uses a single monospace font family.
+/// `LazyLock` avoids reconstructing these on every text run per frame.
+static FONT_NORMAL: LazyLock<Font> = LazyLock::new(|| font(theme::FONT_MONO));
+static FONT_BOLD: LazyLock<Font> = LazyLock::new(|| Font {
+    weight: FontWeight::BOLD,
+    ..font(theme::FONT_MONO)
+});
+static FONT_ITALIC: LazyLock<Font> = LazyLock::new(|| Font {
+    style: gpui::FontStyle::Italic,
+    ..font(theme::FONT_MONO)
+});
+static FONT_BOLD_ITALIC: LazyLock<Font> = LazyLock::new(|| Font {
+    weight: FontWeight::BOLD,
+    style: gpui::FontStyle::Italic,
+    ..font(theme::FONT_MONO)
+});
+
 /// Custom GPUI Element that renders terminal cells as GPU draw calls.
 pub struct TerminalElement {
     term: Arc<FairMutex<Term<KildListener>>>,
@@ -88,32 +105,6 @@ impl TerminalElement {
             resize_handle,
             cursor_visible,
             mouse_state,
-        }
-    }
-
-    fn terminal_font() -> Font {
-        font(theme::FONT_MONO)
-    }
-
-    fn bold_font() -> Font {
-        Font {
-            weight: FontWeight::BOLD,
-            ..font(theme::FONT_MONO)
-        }
-    }
-
-    fn italic_font() -> Font {
-        Font {
-            style: gpui::FontStyle::Italic,
-            ..font(theme::FONT_MONO)
-        }
-    }
-
-    fn bold_italic_font() -> Font {
-        Font {
-            weight: FontWeight::BOLD,
-            style: gpui::FontStyle::Italic,
-            ..font(theme::FONT_MONO)
         }
     }
 
@@ -144,7 +135,7 @@ impl TerminalElement {
         let font_size = px(theme::TEXT_BASE);
         let run = TextRun {
             len: 1,
-            font: Self::terminal_font(),
+            font: FONT_NORMAL.clone(),
             color: gpui::black(),
             background_color: None,
             underline: None,
@@ -289,9 +280,9 @@ impl Element for TerminalElement {
         let mut bg_line: i32 = -1;
 
         // Per-line text accumulation for URL scanning.
-        // Each entry: (line_index, line_text, col_offsets).
-        // col_offsets maps char index to (grid_column, cell_width) to handle wide chars.
-        let mut line_texts: Vec<LineText> = Vec::with_capacity(rows);
+        // Only populated when Cmd is held (URLs are only displayed on Cmd+hover).
+        let cmd_held = self.mouse_state.cmd_held;
+        let mut line_texts: Vec<LineText> = Vec::new();
         let mut current_line_text = String::new();
         let mut current_col_offsets: Vec<(usize, usize)> = Vec::new();
         let mut url_text_line: i32 = -1;
@@ -462,8 +453,10 @@ impl Element for TerminalElement {
                     strikethrough,
                 ));
                 // Track for URL scanning (wide char = 1 char, 2 grid columns)
-                current_col_offsets.push((col, 2));
-                current_line_text.push(wch);
+                if cmd_held {
+                    current_col_offsets.push((col, 2));
+                    current_line_text.push(wch);
+                }
                 continue;
             }
 
@@ -500,8 +493,10 @@ impl Element for TerminalElement {
             let display_ch = if ch != ' ' && ch != '\0' { ch } else { ' ' };
             run_text.push(display_ch);
             // Track for URL scanning (normal char = 1 grid column)
-            current_col_offsets.push((col, 1));
-            current_line_text.push(display_ch);
+            if cmd_held {
+                current_col_offsets.push((col, 1));
+                current_line_text.push(display_ch);
+            }
         }
 
         // Flush final run/line/bg
@@ -538,8 +533,12 @@ impl Element for TerminalElement {
             line_texts.push((url_text_line, current_line_text, current_col_offsets));
         }
 
-        // URL detection — scan accumulated line texts with linkify
-        let url_regions = detect_urls(&line_texts, bounds, cell_width, cell_height);
+        // URL detection — only scan when Cmd is held (URLs are only displayed on Cmd+hover)
+        let url_regions = if cmd_held {
+            detect_urls(&line_texts, bounds, cell_width, cell_height)
+        } else {
+            Vec::new()
+        };
 
         // Selection highlight rectangles
         let selection_color = Hsla::from(theme::terminal_selection());
@@ -689,10 +688,10 @@ impl Element for TerminalElement {
                 let x = bounds.origin.x + run.start_col() as f32 * prepaint.cell_width;
 
                 let f = match (run.bold(), run.italic()) {
-                    (true, true) => Self::bold_italic_font(),
-                    (true, false) => Self::bold_font(),
-                    (false, true) => Self::italic_font(),
-                    (false, false) => Self::terminal_font(),
+                    (true, true) => FONT_BOLD_ITALIC.clone(),
+                    (true, false) => FONT_BOLD.clone(),
+                    (false, true) => FONT_ITALIC.clone(),
+                    (false, false) => FONT_NORMAL.clone(),
                 };
 
                 let underline = if run.underline() {
@@ -756,7 +755,7 @@ impl Element for TerminalElement {
 
             let badge_run = TextRun {
                 len: badge_text.len(),
-                font: Self::terminal_font(),
+                font: FONT_NORMAL.clone(),
                 color: badge_fg,
                 background_color: None,
                 underline: None,
@@ -805,8 +804,7 @@ impl Element for TerminalElement {
         window.on_mouse_event::<ScrollWheelEvent>(move |event, phase, window, _cx| {
             if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
                 let pixel_delta = event.delta.pixel_delta(cell_height);
-                // GPUI: negative y = scroll up. Alacritty: positive Delta = scroll up.
-                let lines = -(pixel_delta.y / cell_height).round() as i32;
+                let lines = scroll_delta_lines(pixel_delta.y, cell_height);
                 if lines != 0 {
                     term.lock().scroll_display(Scroll::Delta(lines));
                 }
@@ -901,6 +899,15 @@ impl Element for TerminalElement {
             }
         });
     }
+}
+
+/// Convert a GPUI pixel scroll delta to an alacritty line count.
+///
+/// Both GPUI and alacritty use the same sign convention: positive = scroll up
+/// (toward history). The result is rounded to the nearest integer and returned
+/// as-is — no negation needed.
+pub(crate) fn scroll_delta_lines(pixel_delta_y: Pixels, cell_height: Pixels) -> i32 {
+    (pixel_delta_y / cell_height).round() as i32
 }
 
 /// Extract URLs from terminal line texts and compute their pixel bounds.
@@ -1195,5 +1202,58 @@ mod tests {
         assert_eq!(regions[0].bounds.origin.y, px(0.0)); // line 0
         assert_eq!(regions[1].url, "https://b.com");
         assert_eq!(regions[1].bounds.origin.y, px(40.0)); // line 2 * 20.0
+    }
+
+    // --- scroll direction tests ---
+
+    #[test]
+    fn scroll_up_produces_positive_delta() {
+        // GPUI: positive pixel_delta.y = user scrolled up (toward history).
+        // Alacritty: positive Scroll::Delta = scroll display up.
+        // These must agree — no negation.
+        let lines = scroll_delta_lines(px(60.0), px(20.0));
+        assert_eq!(lines, 3);
+    }
+
+    #[test]
+    fn scroll_down_produces_negative_delta() {
+        let lines = scroll_delta_lines(px(-60.0), px(20.0));
+        assert_eq!(lines, -3);
+    }
+
+    #[test]
+    fn scroll_small_delta_rounds_to_zero() {
+        // Sub-half-cell movement should round to 0 and be ignored.
+        let lines = scroll_delta_lines(px(5.0), px(20.0));
+        assert_eq!(lines, 0);
+    }
+
+    #[test]
+    fn scroll_half_cell_rounds_to_one() {
+        let lines = scroll_delta_lines(px(10.0), px(20.0));
+        assert_eq!(lines, 1);
+    }
+
+    // --- cmd_held URL gate tests ---
+
+    #[test]
+    fn url_detection_returns_empty_when_no_lines_accumulated() {
+        // When cmd_held is false, no line text is accumulated → detect_urls
+        // receives an empty slice and returns no regions. This test documents
+        // that invariant to prevent performance regression if the gate is removed.
+        let empty: Vec<LineText> = vec![];
+        let regions = detect_urls(&empty, test_bounds(), cell_w(), cell_h());
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn url_detection_finds_urls_when_lines_accumulated() {
+        // When cmd_held is true, lines are accumulated and passed to detect_urls.
+        let text = "See https://example.com for details".to_string();
+        let col_offsets = build_col_offsets(&text, &[]);
+        let line_texts = vec![(0i32, text, col_offsets)];
+        let regions = detect_urls(&line_texts, test_bounds(), cell_w(), cell_h());
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].url, "https://example.com");
     }
 }
