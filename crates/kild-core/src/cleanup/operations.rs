@@ -12,7 +12,7 @@ use crate::cleanup::errors::CleanupError;
 use git2::{BranchType, Repository};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tracing::warn;
+use tracing::{debug, warn};
 
 pub fn validate_cleanup_request() -> Result<(), CleanupError> {
     // Check if we're in a git repository
@@ -47,11 +47,30 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
         match repo.find_worktree(worktree_name) {
             Ok(worktree) => {
                 // Try to get the branch name from the worktree
-                if let Ok(worktree_repo) = Repository::open(worktree.path())
-                    && let Ok(head) = worktree_repo.head()
-                    && let Some(branch_name) = head.shorthand()
-                {
-                    active_branches.insert(branch_name.to_string());
+                match Repository::open(worktree.path()) {
+                    Ok(worktree_repo) => match worktree_repo.head() {
+                        Ok(head) => {
+                            if let Some(branch_name) = head.shorthand() {
+                                active_branches.insert(branch_name.to_string());
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                event = "core.cleanup.worktree_head_read_failed",
+                                worktree_name = %worktree_name,
+                                error = %e,
+                                "Could not read worktree HEAD — its branch may be falsely reported as orphaned"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        warn!(
+                            event = "core.cleanup.worktree_open_failed",
+                            worktree_name = %worktree_name,
+                            error = %e,
+                            "Could not open worktree repository — its branch may be falsely reported as orphaned"
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -65,7 +84,7 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
         }
     }
 
-    // Also add the main branch (current HEAD of main repo)
+    // Also add the current branch from the main repository's HEAD
     match repo.head() {
         Ok(head) => {
             if let Some(branch_name) = head.shorthand() {
@@ -83,12 +102,23 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
 
     // Check each branch to see if it's orphaned
     for (branch, _) in branches.flatten() {
-        if let Some(branch_name) = branch.name().ok().flatten() {
-            // Check if this is a kild-managed branch that's not actively used by a worktree
-            let is_kild_branch = branch_name.starts_with(crate::git::naming::KILD_BRANCH_PREFIX)
-                || branch_name.starts_with("kild_");
-            if is_kild_branch && !active_branches.contains(branch_name) {
-                orphaned_branches.push(branch_name.to_string());
+        match branch.name() {
+            Ok(Some(branch_name)) => {
+                // Check if this is a kild-managed branch that's not actively used by a worktree
+                let is_kild_branch = branch_name
+                    .starts_with(crate::git::naming::KILD_BRANCH_PREFIX)
+                    || branch_name.starts_with("kild_");
+                if is_kild_branch && !active_branches.contains(branch_name) {
+                    orphaned_branches.push(branch_name.to_string());
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                debug!(
+                    event = "core.cleanup.branch_name_read_failed",
+                    error = %e,
+                    "Could not read branch name — skipping from orphan detection"
+                );
             }
         }
     }
@@ -126,18 +156,31 @@ pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, Clea
             match Repository::open(worktree_path) {
                 Ok(worktree_repo) => {
                     // Check if HEAD is detached or in a bad state
-                    if let Ok(head) = worktree_repo.head() {
-                        if head.target().is_none() {
-                            // Detached HEAD with no target - likely orphaned
+                    match worktree_repo.head() {
+                        Ok(head) => {
+                            if head.target().is_none() {
+                                // Detached HEAD with no target - likely orphaned
+                                orphaned_worktrees.push(worktree_path.to_path_buf());
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                event = "core.cleanup.orphaned_worktree_head_unreadable",
+                                path = %worktree_path.display(),
+                                error = %e,
+                                "Could not read worktree HEAD — marked as orphaned"
+                            );
                             orphaned_worktrees.push(worktree_path.to_path_buf());
                         }
-                    } else {
-                        // Can't read HEAD - likely corrupted
-                        orphaned_worktrees.push(worktree_path.to_path_buf());
                     }
                 }
-                Err(_) => {
-                    // Can't open as repository - likely corrupted
+                Err(e) => {
+                    warn!(
+                        event = "core.cleanup.orphaned_worktree_open_failed",
+                        path = %worktree_path.display(),
+                        error = %e,
+                        "Could not open worktree as repository — marked as orphaned"
+                    );
                     orphaned_worktrees.push(worktree_path.to_path_buf());
                 }
             }

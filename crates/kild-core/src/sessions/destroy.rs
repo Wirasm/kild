@@ -270,7 +270,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     // 3a. Sweep for untracked daemon sessions (e.g., UI-created shells)
     //
-    // UI-created daemon sessions use the naming pattern `{session_id}_ui_shell_{N}`
+    // UI-created daemon sessions use the naming pattern `{kild_id}_ui_shell_{counter}`
     // and are not tracked in the session file. Query the daemon for all sessions
     // with a matching prefix and destroy any remaining ones.
     {
@@ -600,6 +600,13 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
     // 3. Check if PR exists (best-effort, requires forge CLI)
     // Skip PR check for repos without a remote to avoid false "No PR found" warnings
     let forge_override = crate::config::KildConfig::load_hierarchy()
+        .inspect_err(|e| {
+            debug!(
+                event = "core.session.config_load_failed",
+                error = %e,
+                "Could not load config for forge override — falling back to auto-detection"
+            );
+        })
         .ok()
         .and_then(|c| c.git.forge());
     let pr_status = if has_remote_configured(&session.worktree_path) {
