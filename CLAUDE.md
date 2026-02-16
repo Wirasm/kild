@@ -371,6 +371,11 @@ info!(event = "core.session.codex_config_patched", path = %config_path.display()
 info!(event = "core.session.codex_config_already_configured");
 warn!(event = "core.session.codex_config_patch_failed", error = %msg);
 
+// Auto-attach for daemon sessions
+info!(event = "core.session.auto_attach_started", branch = branch);
+info!(event = "core.session.auto_attach_completed", branch = branch, window_id = ?window_id);
+warn!(event = "core.session.auto_attach_failed", branch = branch, error = %e);
+
 // Structured fields - use Display (%e) for errors, Debug (?val) for complex types
 error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
 warn!(event = "core.files.walk.error", error = %e, path = %path.display());
@@ -560,7 +565,7 @@ Runtime mode resolution for `kild create`:
 3. Config `daemon.enabled = true` → Daemon mode
 4. Default → Terminal mode
 
-All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect to daemon sessions (Ctrl+C to detach).
+All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Daemon sessions automatically open a Ghostty attach window running `kild attach <branch>` for immediate visual feedback (Ctrl+C to detach). If auto-attach fails, manually run `kild attach <branch>`.
 
 Runtime mode resolution for `kild open`:
 1. `--daemon` flag → Daemon mode

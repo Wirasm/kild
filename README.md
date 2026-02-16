@@ -164,7 +164,7 @@ kild code <branch> --editor vim
 kild focus <branch>
 ```
 
-**Note:** For daemon-managed sessions, use `kild attach <branch>` to connect.
+**Note:** Daemon-managed sessions automatically open an attach window. If auto-attach fails, use `kild attach <branch>` to connect manually.
 
 ### Hide a kild
 ```bash
@@ -175,7 +175,7 @@ kild hide <branch>
 kild hide --all
 ```
 
-**Note:** Daemon-managed sessions have no window to hide. Use `kild attach <branch>` to connect to daemon sessions.
+**Note:** Daemon-managed sessions have no persistent window to hide (attach windows are ephemeral). Use `kild attach <branch>` to reconnect if needed.
 
 ### View git changes in a kild
 ```bash
@@ -257,12 +257,12 @@ kild daemon stop
 kild daemon status
 kild daemon status --json
 
-# Attach to daemon-managed session
+# Attach to daemon-managed session (if auto-attach window was closed)
 kild attach <branch>
 # Press Ctrl+C to detach
 ```
 
-**Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands. Daemon sessions automatically enable Claude Code agent teams by injecting a tmux-compatible shim.
+**Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands. When creating or opening daemon sessions, KILD automatically spawns a Ghostty attach window for immediate visual feedback. Daemon sessions automatically enable Claude Code agent teams by injecting a tmux-compatible shim.
 
 ### Stop a kild
 ```bash

@@ -575,7 +575,7 @@ Runtime mode resolution for `kild create`:
 3. Config `daemon.enabled = true` → Daemon mode
 4. Default → Terminal mode
 
-All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Use `kild attach <branch>` to connect to daemon sessions (Ctrl+C to detach).
+All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Daemon sessions automatically open a Ghostty attach window running `kild attach <branch>` for immediate visual feedback (Ctrl+C to detach). If auto-attach fails, manually run `kild attach <branch>`.
 
 Runtime mode resolution for `kild open`:
 
