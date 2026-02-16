@@ -6,6 +6,7 @@ use kild_core::events;
 use kild_core::session_ops;
 
 use super::helpers::{FailedOperation, format_count, format_partial_failure_error};
+use crate::color;
 
 pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     // Check for --all flag first
@@ -22,13 +23,17 @@ pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     match session_ops::stop_session(branch) {
         Ok(()) => {
-            println!("Stopped. Worktree preserved.");
-            println!("  Resume: kild open {}", branch);
+            println!("{}", color::muted("Stopped. Worktree preserved."));
+            println!(
+                "  {} kild open {}",
+                color::muted("Resume:"),
+                color::ice(branch)
+            );
             info!(event = "cli.stop_completed", branch = branch);
             Ok(())
         }
         Err(e) => {
-            eprintln!("Could not stop '{}': {}", branch, e);
+            eprintln!("{} '{}': {}", color::error("Could not stop"), branch, e);
             error!(event = "cli.stop_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())
@@ -75,17 +80,23 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
 
     // Report successes
     if !stopped.is_empty() {
-        println!("Stopped {}:", format_count(stopped.len()));
+        println!(
+            "{}",
+            color::muted(&format!("Stopped {}:", format_count(stopped.len())))
+        );
         for branch in &stopped {
-            println!("  {}", branch);
+            println!("  {}", color::ice(branch));
         }
     }
 
     // Report failures
     if !errors.is_empty() {
-        eprintln!("{} failed to stop:", format_count(errors.len()));
+        eprintln!(
+            "{}",
+            color::error(&format!("{} failed to stop:", format_count(errors.len())))
+        );
         for (branch, err) in &errors {
-            eprintln!("  {}: {}", branch, err);
+            eprintln!("  {}: {}", color::ice(branch), err);
         }
     }
 

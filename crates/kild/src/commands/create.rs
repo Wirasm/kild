@@ -7,6 +7,7 @@ use kild_core::session_ops;
 use kild_core::sessions::daemon_helpers::spawn_attach_window;
 
 use super::helpers::{load_config_with_warning, resolve_runtime_mode, shorten_home_path};
+use crate::color;
 
 pub(crate) fn handle_create_command(
     matches: &ArgMatches,
@@ -71,19 +72,38 @@ pub(crate) fn handle_create_command(
                 spawn_attach_window(&session.branch, &spawn_id, &session.worktree_path, &config);
             }
 
-            println!("Kild created.");
-            println!("  Branch:   {}", session.branch);
-            if session.agent == "shell" {
-                println!("  Agent:    (none)");
-            } else {
-                println!("  Agent:    {}", session.agent);
-            }
-            println!("  Worktree: {}", shorten_home_path(&session.worktree_path));
+            println!("{}", color::aurora("Kild created."));
             println!(
-                "  Ports:    {}-{}",
-                session.port_range_start, session.port_range_end
+                "  {}   {}",
+                color::muted("Branch:"),
+                color::ice(&session.branch)
             );
-            println!("  Status:   {:?}", session.status);
+            if session.agent == "shell" {
+                println!("  {}    {}", color::muted("Agent:"), color::muted("(none)"));
+            } else {
+                println!(
+                    "  {}    {}",
+                    color::muted("Agent:"),
+                    color::kiri(&session.agent)
+                );
+            }
+            println!(
+                "  {} {}",
+                color::muted("Worktree:"),
+                shorten_home_path(&session.worktree_path)
+            );
+            println!(
+                "  {}    {}-{}",
+                color::muted("Ports:"),
+                session.port_range_start,
+                session.port_range_end
+            );
+            let status_str = format!("{:?}", session.status).to_lowercase();
+            println!(
+                "  {}   {}",
+                color::muted("Status:"),
+                color::status(&status_str)
+            );
 
             info!(
                 event = "cli.create_completed",
@@ -97,12 +117,15 @@ pub(crate) fn handle_create_command(
             // Surface actionable hint for fetch failures
             let err_str = e.to_string();
             if err_str.contains("Failed to fetch") {
-                eprintln!("{}", e);
+                eprintln!("{}", color::error(&err_str));
                 eprintln!(
-                    "  Hint: Use --no-fetch to skip fetching, or check your network/remote config."
+                    "  {}",
+                    color::hint(
+                        "Hint: Use --no-fetch to skip fetching, or check your network/remote config."
+                    )
                 );
             } else {
-                eprintln!("{}", e);
+                eprintln!("{}", color::error(&err_str));
             }
 
             error!(

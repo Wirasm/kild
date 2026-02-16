@@ -4,6 +4,8 @@ use kild_core::PrInfo;
 use kild_core::Session;
 use kild_core::sessions::types::AgentStatusInfo;
 
+use crate::color;
+
 pub struct TableFormatter {
     branch_width: usize,
     agent_width: usize,
@@ -197,15 +199,15 @@ impl TableFormatter {
             .latest_agent()
             .map_or("".to_string(), |a| a.command().to_string());
 
+        let status_str = format!("{:?}", session.status).to_lowercase();
+        let sep = color::muted("│");
+
         println!(
-            "│ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │",
-            pad(&session.branch, self.branch_width),
-            pad(&agent_display, self.agent_width),
-            pad(
-                &format!("{:?}", session.status).to_lowercase(),
-                self.status_width
-            ),
-            pad(&activity_display, self.activity_width),
+            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep}",
+            color::ice(&pad(&session.branch, self.branch_width)),
+            color::kiri(&pad(&agent_display, self.agent_width)),
+            color::status(&pad(&status_str, self.status_width)),
+            color::activity(&pad(&activity_display, self.activity_width)),
             pad(&session.created_at, self.created_width),
             pad(&port_range, self.port_width),
             pad(&process_status, self.process_width),
@@ -216,7 +218,7 @@ impl TableFormatter {
     }
 
     fn top_border(&self) -> String {
-        format!(
+        color::muted(&format!(
             "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
@@ -228,27 +230,28 @@ impl TableFormatter {
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
-        )
+        ))
     }
 
     fn header_row(&self) -> String {
+        let sep = color::muted("│");
         format!(
-            "│ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │ {} │",
-            pad("Branch", self.branch_width),
-            pad("Agent", self.agent_width),
-            pad("Status", self.status_width),
-            pad("Activity", self.activity_width),
-            pad("Created", self.created_width),
-            pad("Port Range", self.port_width),
-            pad("Process", self.process_width),
-            pad("Command", self.command_width),
-            pad("PR", self.pr_width),
-            pad("Note", self.note_width),
+            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep}",
+            color::bold(&pad("Branch", self.branch_width)),
+            color::bold(&pad("Agent", self.agent_width)),
+            color::bold(&pad("Status", self.status_width)),
+            color::bold(&pad("Activity", self.activity_width)),
+            color::bold(&pad("Created", self.created_width)),
+            color::bold(&pad("Port Range", self.port_width)),
+            color::bold(&pad("Process", self.process_width)),
+            color::bold(&pad("Command", self.command_width)),
+            color::bold(&pad("PR", self.pr_width)),
+            color::bold(&pad("Note", self.note_width)),
         )
     }
 
     fn separator(&self) -> String {
-        format!(
+        color::muted(&format!(
             "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
@@ -260,11 +263,11 @@ impl TableFormatter {
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
-        )
+        ))
     }
 
     fn bottom_border(&self) -> String {
-        format!(
+        color::muted(&format!(
             "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
@@ -276,7 +279,7 @@ impl TableFormatter {
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
             "─".repeat(self.note_width + 2),
-        )
+        ))
     }
 }
 

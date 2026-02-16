@@ -7,6 +7,7 @@ use kild_core::session_ops;
 use super::helpers::{
     FailedOperation, format_count, format_partial_failure_error, is_confirmation_accepted,
 };
+use crate::color;
 
 pub(crate) fn handle_destroy_command(
     matches: &ArgMatches,
@@ -36,21 +37,35 @@ pub(crate) fn handle_destroy_command(
         let warnings = safety_info.warning_messages();
         for warning in &warnings {
             if safety_info.should_block() {
-                eprintln!("Warning: {}", warning);
+                eprintln!("{} {}", color::warning("Warning:"), warning);
             } else {
-                println!("Warning: {}", warning);
+                println!("{} {}", color::copper("Warning:"), warning);
             }
         }
 
         // Block on uncommitted changes
         if safety_info.should_block() {
             eprintln!();
-            eprintln!("Cannot destroy '{}': uncommitted changes.", branch);
-            eprintln!("  Inspect first: git -C $(kild cd {}) diff", branch);
             eprintln!(
-                "  If you are an agent, do NOT force-destroy without checking the kild first."
+                "{} '{}': uncommitted changes.",
+                color::error("Cannot destroy"),
+                branch
             );
-            eprintln!("  Use --force to destroy anyway (changes will be lost).");
+            eprintln!(
+                "  {} git -C $(kild cd {}) diff",
+                color::hint("Inspect first:"),
+                branch
+            );
+            eprintln!(
+                "  {}",
+                color::hint(
+                    "If you are an agent, do NOT force-destroy without checking the kild first."
+                )
+            );
+            eprintln!(
+                "  {}",
+                color::hint("Use --force to destroy anyway (changes will be lost).")
+            );
 
             error!(
                 event = "cli.destroy_blocked",
@@ -64,14 +79,18 @@ pub(crate) fn handle_destroy_command(
 
     match session_ops::destroy_session(branch, force) {
         Ok(()) => {
-            println!("Destroyed. Branch kild/{} removed.", branch);
+            println!(
+                "{} Branch kild/{} removed.",
+                color::aurora("Destroyed."),
+                branch
+            );
 
             info!(event = "cli.destroy_completed", branch = branch);
 
             Ok(())
         }
         Err(e) => {
-            eprintln!("Could not destroy '{}': {}", branch, e);
+            eprintln!("{} '{}': {}", color::error("Could not destroy"), branch, e);
 
             error!(
                 event = "cli.destroy_failed",
@@ -144,17 +163,26 @@ fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     // Report successes
     if !destroyed.is_empty() {
-        println!("Destroyed {}:", format_count(destroyed.len()));
+        println!(
+            "{}",
+            color::aurora(&format!("Destroyed {}:", format_count(destroyed.len())))
+        );
         for branch in &destroyed {
-            println!("  {}", branch);
+            println!("  {}", color::ice(branch));
         }
     }
 
     // Report failures
     if !errors.is_empty() {
-        eprintln!("{} failed to destroy:", format_count(errors.len()));
+        eprintln!(
+            "{}",
+            color::error(&format!(
+                "{} failed to destroy:",
+                format_count(errors.len())
+            ))
+        );
         for (branch, err) in &errors {
-            eprintln!("  {}: {}", branch, err);
+            eprintln!("  {}: {}", color::ice(branch), err);
         }
     }
 

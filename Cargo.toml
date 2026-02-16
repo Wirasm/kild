@@ -70,3 +70,4 @@ gpui-component = "0.5.1"
 # requires core-graphics 0.24.0, causing type mismatches at compile time.
 core-text = "=21.0.0"
 unicode-width = "0.2"
+owo-colors = { version = "4", features = ["supports-colors"] }

@@ -77,7 +77,33 @@ fn resolve_editor(
         editor.to_string()
     } else if let Some(editor) = config.editor.default() {
         editor.to_string()
+    } else if let Ok(editor) = std::env::var("VISUAL") {
+        if editor.is_empty() {
+            debug!(
+                event = "core.editor.visual_env_empty",
+                "VISUAL is empty, skipping"
+            );
+            resolve_editor_fallback()?
+        } else {
+            debug!(event = "core.editor.visual_env_found", editor = %editor);
+            editor
+        }
     } else if let Ok(editor) = std::env::var("EDITOR") {
+        if editor.is_empty() {
+            debug!(
+                event = "core.editor.editor_env_empty",
+                "EDITOR is empty, skipping"
+            );
+            resolve_editor_fallback()?
+        } else {
+            editor
+        }
+    } else if let Some(editor) = detect_os_default_editor() {
+        info!(
+            event = "core.editor.os_default_detected",
+            editor = %editor,
+            "Using OS default editor"
+        );
         editor
     } else {
         // No explicit config — auto-detect from available editors
@@ -107,6 +133,115 @@ fn resolve_editor(
     );
 
     Ok((editor_name, editor_type))
+}
+
+/// Fallback when env vars are empty: try OS default, then PATH detection.
+fn resolve_editor_fallback() -> Result<String, EditorError> {
+    if let Some(editor) = detect_os_default_editor() {
+        info!(
+            event = "core.editor.os_default_detected",
+            editor = %editor,
+            "Using OS default editor"
+        );
+        Ok(editor)
+    } else {
+        let detected = detect_editor()?;
+        info!(
+            event = "core.editor.auto_detected",
+            editor = detected.as_str(),
+            "No editor configured — auto-detected"
+        );
+        Ok(detected.as_str().to_string())
+    }
+}
+
+/// Detect the OS-level default text editor.
+///
+/// - macOS: uses `duti -x txt` to find the default app for text files
+/// - Linux: uses `xdg-mime query default text/plain` to find the .desktop file
+///
+/// Returns None if the tool is not installed or detection fails.
+fn detect_os_default_editor() -> Option<String> {
+    debug!(event = "core.editor.os_default_detection_started");
+
+    let result = detect_os_default_editor_inner();
+
+    match &result {
+        Some(editor) => {
+            debug!(event = "core.editor.os_default_found", editor = %editor);
+        }
+        None => {
+            debug!(event = "core.editor.os_default_not_found");
+        }
+    }
+
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn detect_os_default_editor_inner() -> Option<String> {
+    let output = std::process::Command::new("duti")
+        .args(["-x", "txt"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    // duti -x txt outputs: bundle_id, app_name, app_path (3 lines)
+    let bundle_id = lines.first()?.trim();
+    map_macos_bundle_to_command(bundle_id)
+}
+
+#[cfg(target_os = "linux")]
+fn detect_os_default_editor_inner() -> Option<String> {
+    let output = std::process::Command::new("xdg-mime")
+        .args(["query", "default", "text/plain"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let desktop_file = stdout.trim();
+
+    if desktop_file.is_empty() {
+        return None;
+    }
+
+    // Strip .desktop suffix to get command name
+    Some(
+        desktop_file
+            .strip_suffix(".desktop")
+            .unwrap_or(desktop_file)
+            .to_string(),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn detect_os_default_editor_inner() -> Option<String> {
+    None
+}
+
+/// Map macOS bundle IDs to CLI command names.
+#[cfg(target_os = "macos")]
+fn map_macos_bundle_to_command(bundle_id: &str) -> Option<String> {
+    let command = match bundle_id {
+        "com.microsoft.VSCode" => "code",
+        "dev.zed.Zed" => "zed",
+        "com.sublimetext.4" | "com.sublimetext.3" => "subl",
+        "com.vim.MacVim" => "mvim",
+        "com.cursor.Cursor" => "cursor",
+        "com.jetbrains.intellij" | "com.jetbrains.intellij.ce" => "idea",
+        _ => return None,
+    };
+    Some(command.to_string())
 }
 
 /// Open a path in the resolved editor.
@@ -285,5 +420,43 @@ mod tests {
         let (name, editor_type) = resolve_editor(Some("helix"), &config).unwrap();
         assert_eq!(name, "helix");
         assert_eq!(editor_type, Some(EditorType::Vim));
+    }
+
+    #[test]
+    fn test_detect_os_default_editor_does_not_panic() {
+        // Should return Some or None gracefully, never panic
+        let _result = detect_os_default_editor();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_map_macos_bundle_known_editors() {
+        assert_eq!(
+            map_macos_bundle_to_command("com.microsoft.VSCode"),
+            Some("code".to_string())
+        );
+        assert_eq!(
+            map_macos_bundle_to_command("dev.zed.Zed"),
+            Some("zed".to_string())
+        );
+        assert_eq!(
+            map_macos_bundle_to_command("com.sublimetext.4"),
+            Some("subl".to_string())
+        );
+        assert_eq!(
+            map_macos_bundle_to_command("com.vim.MacVim"),
+            Some("mvim".to_string())
+        );
+        assert_eq!(
+            map_macos_bundle_to_command("com.cursor.Cursor"),
+            Some("cursor".to_string())
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_map_macos_bundle_unknown_returns_none() {
+        assert_eq!(map_macos_bundle_to_command("com.apple.TextEdit"), None);
+        assert_eq!(map_macos_bundle_to_command("unknown.bundle.id"), None);
     }
 }

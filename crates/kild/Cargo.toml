@@ -20,6 +20,7 @@ serde_json.workspace = true
 base64.workspace = true
 nix.workspace = true
 unicode-width.workspace = true
+owo-colors.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

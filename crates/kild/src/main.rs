@@ -1,12 +1,18 @@
 use kild_core::init_logging;
 
 mod app;
+pub(crate) mod color;
 mod commands;
 mod table;
 
 fn main() {
     let app = app::build_cli();
     let matches = app.get_matches();
+
+    // Handle --no-color before any output
+    if matches.get_flag("no-color") {
+        color::set_no_color();
+    }
 
     let verbose = matches.get_flag("verbose");
     let quiet = !verbose;

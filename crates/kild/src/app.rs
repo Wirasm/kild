@@ -14,6 +14,13 @@ pub fn build_cli() -> Command {
                 .action(ArgAction::SetTrue)
                 .global(true),
         )
+        .arg(
+            Arg::new("no-color")
+                .long("no-color")
+                .help("Disable colored output")
+                .action(ArgAction::SetTrue)
+                .global(true),
+        )
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
@@ -1898,5 +1905,35 @@ mod tests {
         let matches = matches.unwrap();
         let sub = matches.subcommand_matches("overlaps").unwrap();
         assert_eq!(sub.get_one::<String>("base").unwrap(), "develop");
+    }
+
+    #[test]
+    fn test_cli_no_color_flag() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "--no-color", "list"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        assert!(matches.get_flag("no-color"));
+    }
+
+    #[test]
+    fn test_cli_no_color_flag_after_subcommand() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "list", "--no-color"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        assert!(matches.get_flag("no-color"));
+    }
+
+    #[test]
+    fn test_cli_no_color_default_false() {
+        let app = build_cli();
+        let matches = app.try_get_matches_from(vec!["kild", "list"]);
+        assert!(matches.is_ok());
+
+        let matches = matches.unwrap();
+        assert!(!matches.get_flag("no-color"));
     }
 }

@@ -8,6 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::helpers::{self, load_config_with_warning, shorten_home_path};
 use super::json_types::EnrichedSession;
+use crate::color;
 
 pub(crate) fn handle_status_command(
     matches: &ArgMatches,
@@ -193,15 +194,18 @@ pub(crate) fn handle_status_command(
     let inner_width = label_width + value_width;
     let border = "─".repeat(inner_width + 2);
 
-    println!("Status: {}", branch);
-    println!("┌{}┐", border);
+    println!("{} {}", color::bold("Status:"), color::ice(branch));
+    println!("{}", color::muted(&format!("┌{}┐", border)));
 
     // Print main rows (up to but not including agent detail rows)
     for (label, value) in &rows {
+        let colored_value = colorize_status_value(label, value);
         println!(
-            "│ {:<label_w$}{:<value_w$} │",
-            label,
-            value,
+            "{} {:<label_w$}{:<value_w$} {}",
+            color::muted("│"),
+            color::muted(label),
+            colored_value,
+            color::muted("│"),
             label_w = label_width,
             value_w = value_width,
         );
@@ -209,17 +213,18 @@ pub(crate) fn handle_status_command(
 
     // Print agent detail rows
     for row in &agent_rows {
-        // Indent agent detail rows under the Agents label
         println!(
-            "│ {:<label_w$}{:<value_w$} │",
+            "{} {:<label_w$}{:<value_w$} {}",
+            color::muted("│"),
             "",
             row,
+            color::muted("│"),
             label_w = label_width,
             value_w = value_width,
         );
     }
 
-    println!("└{}┘", border);
+    println!("{}", color::muted(&format!("└{}┘", border)));
 
     info!(
         event = "cli.status_completed",
@@ -228,6 +233,18 @@ pub(crate) fn handle_status_command(
     );
 
     Ok(())
+}
+
+/// Apply semantic coloring to a status detail value based on its label.
+fn colorize_status_value(label: &str, value: &str) -> String {
+    match label {
+        "Branch:" => color::ice(value),
+        "Status:" => color::status(value),
+        "Activity:" => color::activity(value),
+        "Agent:" => color::kiri(value),
+        "Agents:" => value.to_string(),
+        _ => value.to_string(),
+    }
 }
 
 /// Compute overlapping files for a session by loading all sessions and detecting overlaps.

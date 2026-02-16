@@ -8,6 +8,7 @@ use kild_core::events;
 use kild_core::session_ops;
 
 use super::json_types::{EnrichedSession, FleetSummary, ListOutput};
+use crate::color;
 
 pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let json_output = matches.get_flag("json");
@@ -116,7 +117,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 let output = ListOutput::new(enriched, &kilds_with_conflicts);
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
-                println!("Active kilds:");
+                println!("{}", color::bold("Active kilds:"));
                 // Read sidecar statuses for table display
                 let statuses: Vec<Option<kild_core::sessions::types::AgentStatusInfo>> = sessions
                     .iter()
@@ -143,10 +144,10 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 println!(
                     "{} kilds: {} active, {} stopped | {} conflicts | {} needs push",
                     summary.total,
-                    summary.active,
-                    summary.stopped,
-                    summary.conflicts,
-                    summary.needs_push,
+                    color::aurora(&summary.active.to_string()),
+                    color::muted(&summary.stopped.to_string()),
+                    color::ember(&summary.conflicts.to_string()),
+                    color::copper(&summary.needs_push.to_string()),
                 );
             }
 

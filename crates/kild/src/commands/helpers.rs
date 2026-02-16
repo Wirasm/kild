@@ -7,6 +7,7 @@ use kild_core::terminal::types::TerminalType;
 use kild_core::{events, session_ops};
 
 use super::json_types::JsonError;
+use crate::color;
 
 /// Print a JSON error object to stdout for --json mode.
 /// Returns the error wrapped in Box for chaining with `return Err(...)`.
@@ -29,7 +30,7 @@ pub fn require_session(
     failed_event: &str,
 ) -> Result<Session, Box<dyn std::error::Error>> {
     session_ops::get_session(branch).map_err(|e| {
-        eprintln!("No kild found: {}", branch);
+        eprintln!("{} {}", color::error("No kild found:"), branch);
         error!(event = failed_event, branch = branch, error = %e);
         events::log_app_error(&e);
         let boxed: Box<dyn std::error::Error> = e.into();
@@ -52,7 +53,7 @@ pub fn require_session_json(
         if json_output {
             print_json_error(&e, e.error_code())
         } else {
-            eprintln!("No kild found: {}", branch);
+            eprintln!("{} {}", color::error("No kild found:"), branch);
             e.into()
         }
     })
@@ -95,9 +96,10 @@ pub fn load_config_with_warning() -> KildConfig {
         Ok(config) => config,
         Err(e) => {
             eprintln!(
-                "Warning: Could not load config: {}. Using defaults.\n\
-                 Tip: Check ~/.kild/config.toml and ./.kild/config.toml for syntax errors.",
-                e
+                "{} Could not load config: {}. Using defaults.\n{} Check ~/.kild/config.toml and ./.kild/config.toml for syntax errors.",
+                color::warning("Warning:"),
+                e,
+                color::hint("Tip:")
             );
             warn!(
                 event = "cli.config.load_failed",
