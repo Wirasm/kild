@@ -13,6 +13,7 @@ mod components;
 mod daemon_client;
 mod refresh;
 mod state;
+mod teams;
 mod terminal;
 mod theme;
 mod theme_bridge;

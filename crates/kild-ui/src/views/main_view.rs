@@ -180,6 +180,10 @@ pub struct MainView {
     daemon_session_counter: u64,
     /// 2x2 pane grid for Control view multi-terminal layout.
     pane_grid: super::pane_grid::PaneGrid,
+    /// Agent team manager (owns watcher + cached team state).
+    team_manager: crate::teams::TeamManager,
+    /// Handle to the team watcher task. Must be stored to prevent cancellation.
+    _team_watcher_task: Task<()>,
 }
 
 impl MainView {
@@ -311,6 +315,45 @@ impl MainView {
         });
         spike_task.detach();
 
+        // Team watcher task: polls TeamManager for file changes
+        let team_watcher_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            tracing::debug!(event = "ui.team_watcher_task.started");
+
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(200))
+                    .await;
+
+                if let Err(e) = this.update(cx, |view, cx| {
+                    if view.team_manager.has_pending_events() {
+                        tracing::info!(event = "ui.teams.refresh_triggered");
+
+                        // Collect session IDs for cross-referencing
+                        let session_ids: Vec<(String, String)> = view
+                            .state
+                            .displays()
+                            .iter()
+                            .map(|d| (d.session.id.clone(), d.session.branch.clone()))
+                            .collect();
+                        let refs: Vec<(&str, &str)> = session_ids
+                            .iter()
+                            .map(|(id, branch)| (id.as_str(), branch.as_str()))
+                            .collect();
+                        view.team_manager.refresh(&refs);
+                        view.sync_teammate_tabs(cx);
+                        cx.notify();
+                    }
+                }) {
+                    tracing::debug!(
+                        event = "ui.team_watcher_task.stopped",
+                        reason = "view_dropped",
+                        error = ?e
+                    );
+                    break;
+                }
+            }
+        });
+
         let mut view = Self {
             state: AppState::new(),
             focus_handle: cx.focus_handle(),
@@ -330,6 +373,8 @@ impl MainView {
             daemon_starting: false,
             daemon_session_counter: 1,
             pane_grid: super::pane_grid::PaneGrid::new(),
+            team_manager: crate::teams::TeamManager::new(),
+            _team_watcher_task: team_watcher_task,
         };
         view.refresh_daemon_available(cx);
         view
@@ -733,6 +778,114 @@ impl MainView {
         .detach();
     }
 
+    /// Sync teammate terminal tabs with team manager state.
+    ///
+    /// For each session with an active team, adds missing teammate tabs
+    /// and removes tabs for teammates that are no longer present.
+    fn sync_teammate_tabs(&mut self, cx: &mut Context<Self>) {
+        // First pass: collect all (session_id, teammate) pairs that need new tabs.
+        // Must collect all data upfront to avoid borrow conflicts.
+        let mut to_add: Vec<(String, String, String, kild_teams::TeamColor)> = Vec::new();
+
+        for display in self.state.displays() {
+            let session_id = &display.session.id;
+            let teammates = self.team_manager.teammates_for_session(session_id);
+            if teammates.is_empty() {
+                continue;
+            }
+
+            let tabs = self.terminal_tabs.get(session_id);
+
+            for member in teammates {
+                let Some(daemon_session_id) = &member.daemon_session_id else {
+                    continue;
+                };
+                let already_exists = tabs.is_some_and(|t| t.has_daemon_session(daemon_session_id));
+                if already_exists {
+                    continue;
+                }
+                to_add.push((
+                    session_id.clone(),
+                    daemon_session_id.clone(),
+                    member.name.clone(),
+                    member.color,
+                ));
+            }
+        }
+
+        // Second pass: add the tabs
+        for (session_id, daemon_session_id, name, color) in to_add {
+            tracing::info!(
+                event = "ui.teams.adding_teammate_tab",
+                session_id = session_id,
+                teammate = name,
+                daemon_session_id = daemon_session_id
+            );
+            self.add_teammate_terminal_tab(&session_id, &daemon_session_id, name, color, cx);
+        }
+    }
+
+    /// Add a teammate terminal tab (attaches to daemon PTY, doesn't steal focus).
+    fn add_teammate_terminal_tab(
+        &mut self,
+        kild_session_id: &str,
+        daemon_session_id: &str,
+        teammate_name: String,
+        color: kild_teams::TeamColor,
+        cx: &mut Context<Self>,
+    ) {
+        let kild_id = kild_session_id.to_string();
+        let daemon_id = daemon_session_id.to_string();
+
+        cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let conn = match cx
+                .background_executor()
+                .spawn({
+                    let daemon_id = daemon_id.clone();
+                    async move {
+                        crate::daemon_client::connect_for_attach(&daemon_id, 24, 80).await
+                    }
+                })
+                .await
+            {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::warn!(
+                        event = "ui.teams.teammate_attach_failed",
+                        daemon_session_id = daemon_id,
+                        teammate = teammate_name,
+                        error = %e,
+                    );
+                    return;
+                }
+            };
+
+            if let Err(e) = this.update(cx, |view, cx| {
+                let daemon_id_clone = daemon_id.clone();
+                let name = teammate_name.clone();
+                match crate::terminal::state::Terminal::from_daemon(daemon_id, conn, cx) {
+                    Ok(terminal) => {
+                        let entity = cx.new(|cx| {
+                            crate::terminal::TerminalView::from_terminal_unfocused(terminal, cx)
+                        });
+                        let tabs = view.terminal_tabs.entry(kild_id.clone()).or_default();
+                        tabs.push_teammate(entity, name, color, daemon_id_clone);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            event = "ui.teams.teammate_terminal_failed",
+                            error = %e,
+                        );
+                    }
+                }
+                cx.notify();
+            }) {
+                tracing::debug!(event = "ui.teams.add_teammate_tab.view_dropped", error = ?e);
+            }
+        })
+        .detach();
+    }
+
     /// Stop a daemon session in the background.
     fn stop_daemon_session_async(daemon_session_id: String, cx: &mut Context<MainView>) {
         cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
@@ -941,6 +1094,28 @@ impl MainView {
         );
         let prev_id = displays[prev_idx].session.id.clone();
         self.on_kild_select(&prev_id, window, cx);
+    }
+
+    /// Navigate to the next teammate terminal tab within the current kild.
+    fn navigate_next_teammate_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = &self.active_terminal_id
+            && let Some(tabs) = self.terminal_tabs.get_mut(id)
+            && tabs.len() > 1
+        {
+            tabs.cycle_next();
+            self.focus_active_terminal(window, cx);
+        }
+    }
+
+    /// Navigate to the previous teammate terminal tab within the current kild.
+    fn navigate_prev_teammate_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = &self.active_terminal_id
+            && let Some(tabs) = self.terminal_tabs.get_mut(id)
+            && tabs.len() > 1
+        {
+            tabs.cycle_prev();
+            self.focus_active_terminal(window, cx);
+        }
     }
 
     /// Handle kild row click - select and open its terminal in Control view.
@@ -1760,9 +1935,12 @@ impl MainView {
                 super::pane_grid::render_pane_grid(&self.pane_grid, &self.terminal_tabs, cx)
                     .into_any_element()
             }
-            ActiveView::Dashboard => {
-                dashboard_view::render_dashboard(&self.state, &self.terminal_tabs, cx)
-            }
+            ActiveView::Dashboard => dashboard_view::render_dashboard(
+                &self.state,
+                &self.terminal_tabs,
+                &self.team_manager,
+                cx,
+            ),
             ActiveView::Detail => {
                 detail_view::render_detail_view(&self.state, &self.terminal_tabs, cx)
             }
@@ -1846,6 +2024,19 @@ impl MainView {
         // Cmd+J/K/D: kild navigation (works in both dashboard and terminal mode)
         // Note: Cmd+1-9 index jumping deferred to #415 (configurable modifier)
         let cmd = event.keystroke.modifiers.platform;
+
+        // Cmd+Shift+J/K: cycle between teammate terminals in the tab bar
+        if cmd && event.keystroke.modifiers.shift && key_str == "j" {
+            self.navigate_next_teammate_tab(window, cx);
+            cx.notify();
+            return;
+        }
+
+        if cmd && event.keystroke.modifiers.shift && key_str == "k" {
+            self.navigate_prev_teammate_tab(window, cx);
+            cx.notify();
+            return;
+        }
 
         if cmd && key_str == "j" {
             self.navigate_next_kild(window, cx);

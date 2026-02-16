@@ -59,6 +59,7 @@ kild-core = { path = "crates/kild-core" }
 kild-daemon = { path = "crates/kild-daemon" }
 kild-peek-core = { path = "crates/kild-peek-core" }
 kild-protocol = { path = "crates/kild-protocol" }
+kild-teams = { path = "crates/kild-teams" }
 
 # UI dependencies
 gpui = "0.2"

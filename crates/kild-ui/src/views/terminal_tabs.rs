@@ -15,9 +15,17 @@ use crate::theme;
 use crate::views::main_view::MainView;
 
 /// Tracks how a terminal tab was created.
+#[allow(dead_code)]
 pub enum TerminalBackend {
     Local,
-    Daemon { daemon_session_id: String },
+    Daemon {
+        daemon_session_id: String,
+    },
+    Teammate {
+        daemon_session_id: String,
+        teammate_name: String,
+        color: kild_teams::TeamColor,
+    },
 }
 
 /// A single terminal tab within a kild's tab bar.
@@ -93,6 +101,7 @@ impl TerminalTabs {
         let label = match &backend {
             TerminalBackend::Local => base,
             TerminalBackend::Daemon { .. } => format!("D • {}", base),
+            TerminalBackend::Teammate { teammate_name, .. } => teammate_name.clone(),
         };
         tracing::debug!(
             event = "ui.terminal_tabs.push",
@@ -106,6 +115,47 @@ impl TerminalTabs {
         });
         self.active = self.tabs.len() - 1;
         self.next_id += 1;
+    }
+
+    /// Push a teammate terminal tab. Does NOT steal focus (teammates appear in background).
+    pub fn push_teammate(
+        &mut self,
+        view: gpui::Entity<TerminalView>,
+        name: String,
+        color: kild_teams::TeamColor,
+        daemon_session_id: String,
+    ) {
+        tracing::debug!(
+            event = "ui.terminal_tabs.push_teammate",
+            name = name,
+            daemon_session_id = daemon_session_id,
+            new_len = self.tabs.len() + 1
+        );
+        self.tabs.push(TabEntry {
+            view,
+            label: name.clone(),
+            backend: TerminalBackend::Teammate {
+                daemon_session_id,
+                teammate_name: name,
+                color,
+            },
+        });
+        // Don't change self.active — teammate tabs don't steal focus
+        self.next_id += 1;
+    }
+
+    /// Check if a tab with the given daemon session ID already exists.
+    pub fn has_daemon_session(&self, daemon_session_id: &str) -> bool {
+        self.tabs.iter().any(|tab| match &tab.backend {
+            TerminalBackend::Daemon {
+                daemon_session_id: id,
+            } => id == daemon_session_id,
+            TerminalBackend::Teammate {
+                daemon_session_id: id,
+                ..
+            } => id == daemon_session_id,
+            TerminalBackend::Local => false,
+        })
     }
 
     /// Close a tab at `idx`. Returns the daemon session ID if the closed tab
@@ -139,6 +189,22 @@ impl TerminalTabs {
                     remaining = self.tabs.len() - 1
                 );
                 Some(daemon_session_id.clone())
+            }
+            TerminalBackend::Teammate {
+                teammate_name,
+                daemon_session_id,
+                ..
+            } => {
+                // Teammate tabs don't stop the daemon session — shim owns the lifecycle.
+                tracing::debug!(
+                    event = "ui.terminal_tabs.close",
+                    idx = idx,
+                    backend = "teammate",
+                    teammate = teammate_name,
+                    daemon_session_id = daemon_session_id,
+                    remaining = self.tabs.len() - 1
+                );
+                None
             }
         };
         self.tabs.remove(idx);

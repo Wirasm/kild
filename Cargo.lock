@@ -3473,6 +3473,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kild-teams"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "notify 8.2.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tracing",
+]
+
+[[package]]
 name = "kild-tmux-shim"
 version = "0.1.0"
 dependencies = [
@@ -3503,6 +3516,7 @@ dependencies = [
  "gpui-component",
  "kild-core",
  "kild-protocol",
+ "kild-teams",
  "linkify",
  "notify 8.2.0",
  "open",

@@ -21,6 +21,7 @@ const MAX_NOTE_LENGTH: usize = 50;
 pub fn render_dashboard(
     state: &AppState,
     terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
+    team_manager: &crate::teams::TeamManager,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     let displays = state.filtered_displays();
@@ -109,7 +110,10 @@ pub fn render_dashboard(
         .child({
             let mut cards = Vec::new();
             for (ix, display) in displays.iter().enumerate() {
-                cards.push(render_card(display, ix, terminal_tabs, cx));
+                let teammate_count = team_manager
+                    .teammates_for_session(&display.session.id)
+                    .len();
+                cards.push(render_card(display, ix, terminal_tabs, teammate_count, cx));
             }
             div()
                 .flex()
@@ -125,6 +129,7 @@ fn render_card(
     display: &kild_core::SessionInfo,
     ix: usize,
     terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
+    teammate_count: usize,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     let session = &display.session;
@@ -243,6 +248,13 @@ fn render_card(
                         .text_color(theme::text_muted())
                         .child(format_relative_time(&created_at)),
                 )
+                .when(teammate_count > 0, |row| {
+                    row.child(div().text_color(theme::kiri()).child(format!(
+                        "{} agent{}",
+                        teammate_count,
+                        if teammate_count == 1 { "" } else { "s" }
+                    )))
+                })
                 .when(terminal_count > 0, |row| {
                     row.child(
                         div()

@@ -349,6 +349,7 @@ fn render_terminal_list(
         let mode = match entry.backend() {
             TerminalBackend::Daemon { .. } => "daemon",
             TerminalBackend::Local => "local",
+            TerminalBackend::Teammate { .. } => "team",
         };
         let sid = session_id.to_string();
         let tab_idx = i;

@@ -353,13 +353,16 @@ fn render_terminal_item(
         .get(tab_idx)
         .map(|e| e.label().to_string())
         .unwrap_or_default();
-    let mode_label = tabs
+    let (mode_label, effective_dot_color) = tabs
         .get(tab_idx)
         .map(|e| match e.backend() {
-            crate::views::terminal_tabs::TerminalBackend::Local => "local",
-            crate::views::terminal_tabs::TerminalBackend::Daemon { .. } => "daemon",
+            crate::views::terminal_tabs::TerminalBackend::Local => ("local", dot_color),
+            crate::views::terminal_tabs::TerminalBackend::Daemon { .. } => ("daemon", dot_color),
+            crate::views::terminal_tabs::TerminalBackend::Teammate { color, .. } => {
+                ("team", crate::teams::team_color_to_rgba(color))
+            }
         })
-        .unwrap_or("local");
+        .unwrap_or(("local", dot_color));
     let in_grid = pane_grid.find_slot(session_id, tab_idx).is_some();
     let sid: gpui::SharedString = format!("sidebar-tab-{}-{}", session_id, tab_idx).into();
     let sid_close: gpui::SharedString =
@@ -387,13 +390,13 @@ fn render_terminal_item(
                 view.on_sidebar_terminal_click(&sid_for_click, tab_idx, window, cx);
             }),
         )
-        // Status dot
+        // Status dot (uses team color for teammate tabs)
         .child(
             div()
                 .size(px(theme::TERMINAL_DOT_SIZE))
                 .rounded_full()
                 .flex_shrink_0()
-                .bg(dot_color),
+                .bg(effective_dot_color),
         )
         // Terminal name
         .child(

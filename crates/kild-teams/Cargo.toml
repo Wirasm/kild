@@ -1,0 +1,17 @@
+[package]
+name = "kild-teams"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent team discovery and state management for KILD UI"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }
+notify = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
