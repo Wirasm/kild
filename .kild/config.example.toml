@@ -168,7 +168,7 @@ auto_start = true
 # Advanced daemon settings (optional, sensible defaults used if omitted)
 # socket_path = "~/.kild/daemon.sock"   # Unix socket location
 # pid_path = "~/.kild/daemon.pid"       # PID file location
-# scrollback_buffer_size = 65536        # Bytes per session (default: 64 KB)
+# scrollback_buffer_size = 262144       # Bytes per session (default: 256 KB)
 # pty_output_batch_ms = 4               # PTY output batching interval (ms)
-# client_buffer_size = 262144           # Per-client broadcast buffer (default: 256 KB)
+# client_buffer_size = 1048576          # Per-client broadcast buffer (default: 1 MB)
 # shutdown_timeout_secs = 5             # Wait for agents to exit on shutdown
