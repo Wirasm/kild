@@ -44,22 +44,41 @@ pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, Cleanu
 
     // Collect branches that are actively used by worktrees
     for worktree_name in worktrees.iter().flatten() {
-        if let Ok(worktree) = repo.find_worktree(worktree_name) {
-            // Try to get the branch name from the worktree
-            if let Ok(worktree_repo) = Repository::open(worktree.path())
-                && let Ok(head) = worktree_repo.head()
-                && let Some(branch_name) = head.shorthand()
-            {
-                active_branches.insert(branch_name.to_string());
+        match repo.find_worktree(worktree_name) {
+            Ok(worktree) => {
+                // Try to get the branch name from the worktree
+                if let Ok(worktree_repo) = Repository::open(worktree.path())
+                    && let Ok(head) = worktree_repo.head()
+                    && let Some(branch_name) = head.shorthand()
+                {
+                    active_branches.insert(branch_name.to_string());
+                }
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.cleanup.worktree_find_failed",
+                    worktree_name = %worktree_name,
+                    error = %e,
+                    "Could not access registered worktree during branch scan — its branch may be falsely reported as orphaned"
+                );
             }
         }
     }
 
     // Also add the main branch (current HEAD of main repo)
-    if let Ok(head) = repo.head()
-        && let Some(branch_name) = head.shorthand()
-    {
-        active_branches.insert(branch_name.to_string());
+    match repo.head() {
+        Ok(head) => {
+            if let Some(branch_name) = head.shorthand() {
+                active_branches.insert(branch_name.to_string());
+            }
+        }
+        Err(e) => {
+            warn!(
+                event = "core.cleanup.repo_head_read_failed",
+                error = %e,
+                "Could not read repository HEAD — main branch may be falsely reported as orphaned"
+            );
+        }
     }
 
     // Check each branch to see if it's orphaned
@@ -87,34 +106,44 @@ pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, Clea
         })?;
 
     for worktree_name in worktrees.iter().flatten() {
-        if let Ok(worktree) = repo.find_worktree(worktree_name) {
-            let worktree_path = worktree.path();
+        let worktree = match repo.find_worktree(worktree_name) {
+            Ok(wt) => wt,
+            Err(e) => {
+                warn!(
+                    event = "core.cleanup.worktree_find_failed",
+                    worktree_name = %worktree_name,
+                    error = %e,
+                    "Could not access registered worktree during orphan scan — skipping"
+                );
+                continue;
+            }
+        };
+        let worktree_path = worktree.path();
 
-            // Check if worktree directory exists but is in a bad state
-            if worktree_path.exists() {
-                // Try to open the worktree as a repository
-                match Repository::open(worktree_path) {
-                    Ok(worktree_repo) => {
-                        // Check if HEAD is detached or in a bad state
-                        if let Ok(head) = worktree_repo.head() {
-                            if head.target().is_none() {
-                                // Detached HEAD with no target - likely orphaned
-                                orphaned_worktrees.push(worktree_path.to_path_buf());
-                            }
-                        } else {
-                            // Can't read HEAD - likely corrupted
+        // Check if worktree directory exists but is in a bad state
+        if worktree_path.exists() {
+            // Try to open the worktree as a repository
+            match Repository::open(worktree_path) {
+                Ok(worktree_repo) => {
+                    // Check if HEAD is detached or in a bad state
+                    if let Ok(head) = worktree_repo.head() {
+                        if head.target().is_none() {
+                            // Detached HEAD with no target - likely orphaned
                             orphaned_worktrees.push(worktree_path.to_path_buf());
                         }
-                    }
-                    Err(_) => {
-                        // Can't open as repository - likely corrupted
+                    } else {
+                        // Can't read HEAD - likely corrupted
                         orphaned_worktrees.push(worktree_path.to_path_buf());
                     }
                 }
-            } else {
-                // Worktree registered but directory doesn't exist
-                orphaned_worktrees.push(worktree_path.to_path_buf());
+                Err(_) => {
+                    // Can't open as repository - likely corrupted
+                    orphaned_worktrees.push(worktree_path.to_path_buf());
+                }
             }
+        } else {
+            // Worktree registered but directory doesn't exist
+            orphaned_worktrees.push(worktree_path.to_path_buf());
         }
     }
 

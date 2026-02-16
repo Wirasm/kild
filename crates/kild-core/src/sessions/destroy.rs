@@ -268,6 +268,67 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         }
     }
 
+    // 3a. Sweep for untracked daemon sessions (e.g., UI-created shells)
+    //
+    // UI-created daemon sessions use the naming pattern `{session_id}_ui_shell_{N}`
+    // and are not tracked in the session file. Query the daemon for all sessions
+    // with a matching prefix and destroy any remaining ones.
+    {
+        let prefix = format!("{}_ui_shell_", session.id);
+        match crate::daemon::client::list_daemon_sessions() {
+            Ok(sessions) => {
+                let ui_sessions: Vec<_> = sessions
+                    .iter()
+                    .filter(|s| s.id.starts_with(&prefix))
+                    .collect();
+
+                if !ui_sessions.is_empty() {
+                    info!(
+                        event = "core.session.destroy_ui_sessions_sweep_started",
+                        session_id = session.id,
+                        count = ui_sessions.len()
+                    );
+                }
+
+                for daemon_session in ui_sessions {
+                    info!(
+                        event = "core.session.destroy_ui_session",
+                        daemon_session_id = daemon_session.id,
+                    );
+                    if let Err(e) =
+                        crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
+                    {
+                        warn!(
+                            event = "core.session.destroy_ui_session_failed",
+                            daemon_session_id = daemon_session.id,
+                            error = %e,
+                        );
+                        eprintln!(
+                            "Warning: Failed to clean up UI terminal session {}: {}",
+                            daemon_session.id, e
+                        );
+                    }
+                }
+            }
+            Err(crate::daemon::client::DaemonClientError::NotRunning { .. }) => {
+                // Daemon not running — no UI sessions to clean up
+                debug!(
+                    event = "core.session.destroy_ui_sessions_sweep_skipped",
+                    session_id = session.id,
+                    reason = "daemon_not_running"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.destroy_ui_sessions_sweep_failed",
+                    session_id = session.id,
+                    error = %e,
+                    "Could not query daemon for orphaned UI sessions"
+                );
+            }
+        }
+    }
+
     // 3b. Clean up tmux shim state and destroy child shim panes
     if let Some(home) = dirs::home_dir() {
         let shim_dir = home.join(".kild").join("shim").join(&session.id);
