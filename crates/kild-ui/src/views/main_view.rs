@@ -1801,6 +1801,36 @@ impl MainView {
         cx.notify();
     }
 
+    /// Remove terminal from pane grid without killing it.
+    pub(crate) fn on_minimize_tab(
+        &mut self,
+        session_id: &str,
+        tab_idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(slot_idx) = self.pane_grid.find_slot(session_id, tab_idx) {
+            self.pane_grid.remove(slot_idx);
+
+            if let Some(next) = self.pane_grid.next_occupied_slot() {
+                self.pane_grid.set_focus(next);
+                if let super::pane_grid::PaneSlot::Occupied {
+                    session_id: next_sid,
+                    ..
+                } = self.pane_grid.slot(next)
+                {
+                    self.active_terminal_id = Some(next_sid.clone());
+                }
+            } else {
+                self.active_terminal_id = None;
+                self.active_view = ActiveView::Dashboard;
+                self.focus_region = FocusRegion::Dashboard;
+                window.focus(&self.focus_handle);
+            }
+            cx.notify();
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn on_close_tab(
         &mut self,

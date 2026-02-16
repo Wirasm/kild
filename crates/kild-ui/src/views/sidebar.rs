@@ -367,8 +367,11 @@ fn render_terminal_item(
     let sid: gpui::SharedString = format!("sidebar-tab-{}-{}", session_id, tab_idx).into();
     let sid_close: gpui::SharedString =
         format!("sidebar-tab-close-{}-{}", session_id, tab_idx).into();
+    let sid_minimize: gpui::SharedString =
+        format!("sidebar-tab-min-{}-{}", session_id, tab_idx).into();
     let sid_for_click = session_id.to_string();
     let sid_for_close = session_id.to_string();
+    let sid_for_minimize = session_id.to_string();
 
     div()
         .id(sid)
@@ -422,7 +425,7 @@ fn render_terminal_item(
                 .group_hover("terminal-row", |s| s.opacity(0.0))
                 .child(mode_label),
         )
-        // Hover action: × (close/destroy terminal)
+        // Hover actions: − (minimize) and × (close)
         .child(
             div()
                 .absolute()
@@ -431,9 +434,31 @@ fn render_terminal_item(
                 .bottom_0()
                 .flex()
                 .items_center()
+                .gap(px(1.0))
                 .bg(theme::surface())
                 .opacity(0.0)
                 .group_hover("terminal-row", |s| s.opacity(1.0))
+                // − (minimize): remove from pane grid, keep alive
+                .when(in_grid, |this| {
+                    this.child(
+                        div()
+                            .id(sid_minimize)
+                            .px(px(3.0))
+                            .cursor_pointer()
+                            .text_size(px(theme::TEXT_XXS))
+                            .text_color(theme::text_muted())
+                            .rounded(px(theme::SPACE_HALF))
+                            .hover(|s| s.text_color(theme::text()).bg(theme::elevated()))
+                            .on_mouse_up(
+                                gpui::MouseButton::Left,
+                                cx.listener(move |view, _, window, cx| {
+                                    view.on_minimize_tab(&sid_for_minimize, tab_idx, window, cx);
+                                }),
+                            )
+                            .child("\u{2212}"), // −
+                    )
+                })
+                // × (close): destroy terminal entirely
                 .child(
                     div()
                         .id(sid_close)
