@@ -1,12 +1,9 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use base64::Engine;
 use kild_paths::KildPaths;
-use kild_protocol::{ClientMessage, DaemonMessage, SessionId};
+use kild_protocol::{ClientMessage, DaemonMessage, IpcConnection, SessionId};
 use tracing::debug;
 
 use crate::errors::ShimError;
@@ -14,61 +11,6 @@ use crate::errors::ShimError;
 fn socket_path() -> Result<PathBuf, ShimError> {
     let paths = KildPaths::resolve().map_err(|e| ShimError::state(e.to_string()))?;
     Ok(paths.daemon_socket())
-}
-
-fn connect() -> Result<UnixStream, ShimError> {
-    let path = socket_path()?;
-    if !path.exists() {
-        return Err(ShimError::DaemonNotRunning);
-    }
-
-    let stream = UnixStream::connect(&path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::ConnectionRefused {
-            ShimError::DaemonNotRunning
-        } else {
-            ShimError::ipc(format!("connection failed: {}", e))
-        }
-    })?;
-
-    stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-
-    Ok(stream)
-}
-
-fn send_request(
-    mut stream: UnixStream,
-    request: &ClientMessage,
-    operation: &str,
-) -> Result<DaemonMessage, ShimError> {
-    let msg = serde_json::to_string(request)
-        .map_err(|e| ShimError::ipc(format!("{}: serialization failed: {}", operation, e)))?;
-
-    writeln!(stream, "{}", msg)?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-
-    if line.is_empty() {
-        return Err(ShimError::ipc(format!(
-            "{}: empty response from daemon",
-            operation
-        )));
-    }
-
-    let response: DaemonMessage = serde_json::from_str(&line)
-        .map_err(|e| ShimError::ipc(format!("{}: invalid JSON response: {}", operation, e)))?;
-
-    if let DaemonMessage::Error { code, message, .. } = &response {
-        return Err(ShimError::ipc(format!(
-            "{}: [{}] {}",
-            operation, code, message
-        )));
-    }
-
-    Ok(response)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -100,8 +42,8 @@ pub fn create_session(
         use_login_shell,
     };
 
-    let stream = connect()?;
-    let response = send_request(stream, &request, "create_session")?;
+    let mut conn = IpcConnection::connect(&socket_path()?)?;
+    let response = conn.send(&request)?;
 
     let daemon_session_id = match response {
         DaemonMessage::SessionCreated { session, .. } => session.id.into_inner(),
@@ -135,8 +77,8 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
         data: encoded,
     };
 
-    let stream = connect()?;
-    send_request(stream, &request, "write_stdin")?;
+    let mut conn = IpcConnection::connect(&socket_path()?)?;
+    conn.send(&request)?;
 
     debug!(
         event = "shim.ipc.write_stdin_completed",
@@ -158,8 +100,8 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
         force,
     };
 
-    let stream = connect()?;
-    send_request(stream, &request, "destroy_session")?;
+    let mut conn = IpcConnection::connect(&socket_path()?)?;
+    conn.send(&request)?;
 
     debug!(
         event = "shim.ipc.destroy_session_completed",
@@ -179,8 +121,8 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
         session_id: SessionId::new(session_id),
     };
 
-    let stream = connect()?;
-    let response = send_request(stream, &request, "read_scrollback")?;
+    let mut conn = IpcConnection::connect(&socket_path()?)?;
+    let response = conn.send(&request)?;
 
     let decoded = match response {
         DaemonMessage::ScrollbackContents { data, .. } => base64::engine::general_purpose::STANDARD
@@ -218,8 +160,8 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
         cols,
     };
 
-    let stream = connect()?;
-    send_request(stream, &request, "resize_pty")?;
+    let mut conn = IpcConnection::connect(&socket_path()?)?;
+    conn.send(&request)?;
 
     debug!(
         event = "shim.ipc.resize_pty_completed",
@@ -287,207 +229,5 @@ mod tests {
             ShimError::DaemonNotRunning => {}
             other => panic!("expected DaemonNotRunning, got: {:?}", other),
         }
-    }
-
-    #[test]
-    fn test_send_request_error_response() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempfile::tempdir().unwrap();
-        let sock_path = dir.path().join("test.sock");
-        let listener = UnixListener::bind(&sock_path).unwrap();
-
-        // Spawn a mock server that returns an error response
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap(); // read the request
-
-            use std::io::Write;
-            let response = r#"{"type":"error","id":"1","code":"session_not_found","message":"no such session"}"#;
-            writeln!(stream, "{}", response).unwrap();
-            stream.flush().unwrap();
-        });
-
-        // Connect to mock server
-        let stream = UnixStream::connect(&sock_path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-
-        let request = ClientMessage::Ping {
-            id: "test".to_string(),
-        };
-        let result = send_request(stream, &request, "test_op");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("session_not_found"), "got: {}", err);
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_send_request_empty_response() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempfile::tempdir().unwrap();
-        let sock_path = dir.path().join("test.sock");
-        let listener = UnixListener::bind(&sock_path).unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap(); // read request
-            // Close without sending response
-            drop(stream);
-        });
-
-        let stream = UnixStream::connect(&sock_path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-
-        let request = ClientMessage::Ping {
-            id: "test".to_string(),
-        };
-        let result = send_request(stream, &request, "test_op");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("empty response"), "got: {}", err);
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_send_request_invalid_json() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempfile::tempdir().unwrap();
-        let sock_path = dir.path().join("test.sock");
-        let listener = UnixListener::bind(&sock_path).unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-
-            use std::io::Write;
-            writeln!(stream, "not-json{{").unwrap();
-            stream.flush().unwrap();
-        });
-
-        let stream = UnixStream::connect(&sock_path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-
-        let request = ClientMessage::Ping {
-            id: "test".to_string(),
-        };
-        let result = send_request(stream, &request, "test_op");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("invalid JSON"), "got: {}", err);
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_send_request_success() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempfile::tempdir().unwrap();
-        let sock_path = dir.path().join("test.sock");
-        let listener = UnixListener::bind(&sock_path).unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-
-            use std::io::Write;
-            let response = r#"{"type":"ack","id":"test-123"}"#;
-            writeln!(stream, "{}", response).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let stream = UnixStream::connect(&sock_path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-
-        let request = ClientMessage::Ping {
-            id: "test".to_string(),
-        };
-        let result = send_request(stream, &request, "test_op");
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(matches!(response, DaemonMessage::Ack { .. }));
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_read_scrollback_success() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempfile::tempdir().unwrap();
-        let sock_path = dir.path().join("test.sock");
-        let listener = UnixListener::bind(&sock_path).unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-
-            use std::io::Write;
-            // Known-good base64 for b"hello world"
-            let response =
-                r#"{"type":"scrollback_contents","id":"test","data":"aGVsbG8gd29ybGQ="}"#;
-            writeln!(stream, "{}", response).unwrap();
-            stream.flush().unwrap();
-        });
-
-        let stream = UnixStream::connect(&sock_path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-
-        let request = ClientMessage::ReadScrollback {
-            id: "test".to_string(),
-            session_id: SessionId::new("test-session"),
-        };
-        let response = send_request(stream, &request, "read_scrollback").unwrap();
-
-        if let DaemonMessage::ScrollbackContents { data, .. } = response {
-            let decoded = base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .unwrap();
-            assert_eq!(&decoded, b"hello world");
-        } else {
-            panic!("expected ScrollbackContents, got: {:?}", response);
-        }
-
-        handle.join().unwrap();
     }
 }

@@ -18,6 +18,17 @@ pub enum ShimError {
     DaemonNotRunning,
 }
 
+impl From<kild_protocol::IpcError> for ShimError {
+    fn from(e: kild_protocol::IpcError) -> Self {
+        match e {
+            kild_protocol::IpcError::NotRunning { .. } => ShimError::DaemonNotRunning,
+            other => ShimError::IpcError {
+                message: other.to_string(),
+            },
+        }
+    }
+}
+
 impl ShimError {
     pub fn parse(msg: impl fmt::Display) -> Self {
         Self::ParseError {
