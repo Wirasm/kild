@@ -278,4 +278,154 @@ mod tests {
         assert_eq!(error.error_code(), "DAEMON_PTY_EXITED_EARLY");
         assert!(!error.is_user_error());
     }
+
+    #[test]
+    fn test_worktree_not_found_error() {
+        let error = SessionError::WorktreeNotFound {
+            path: std::path::PathBuf::from("/tmp/missing"),
+        };
+        assert!(error.to_string().contains("/tmp/missing"));
+        assert_eq!(error.error_code(), "WORKTREE_NOT_FOUND");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_invalid_structure_error() {
+        let error = SessionError::InvalidStructure {
+            field: "session ID is empty".to_string(),
+        };
+        assert!(error.to_string().contains("session ID is empty"));
+        assert_eq!(error.error_code(), "INVALID_SESSION_STRUCTURE");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_invalid_port_count_error() {
+        let error = SessionError::InvalidPortCount;
+        assert!(error.to_string().contains("must be greater than 0"));
+        assert_eq!(error.error_code(), "INVALID_PORT_COUNT");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_port_range_exhausted_error() {
+        let error = SessionError::PortRangeExhausted;
+        assert!(error.to_string().contains("no available ports"));
+        assert_eq!(error.error_code(), "PORT_RANGE_EXHAUSTED");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_port_allocation_failed_error() {
+        let error = SessionError::PortAllocationFailed {
+            message: "conflict".to_string(),
+        };
+        assert!(error.to_string().contains("conflict"));
+        assert_eq!(error.error_code(), "PORT_ALLOCATION_FAILED");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_git_error_wrapping() {
+        let git_err = crate::git::errors::GitError::NotInRepository;
+        let error = SessionError::GitError { source: git_err };
+        assert!(error.to_string().contains("Git operation failed"));
+        assert_eq!(error.error_code(), "GIT_ERROR");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_terminal_error_wrapping() {
+        let term_err = crate::terminal::errors::TerminalError::NoTerminalFound;
+        let error = SessionError::TerminalError { source: term_err };
+        assert!(error.to_string().contains("Terminal operation failed"));
+        assert_eq!(error.error_code(), "TERMINAL_ERROR");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_io_error_wrapping() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let error = SessionError::IoError { source: io_err };
+        assert!(error.to_string().contains("IO operation failed"));
+        assert_eq!(error.error_code(), "IO_ERROR");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_process_not_found_error() {
+        let error = SessionError::ProcessNotFound { pid: 12345 };
+        assert!(error.to_string().contains("12345"));
+        assert_eq!(error.error_code(), "PROCESS_NOT_FOUND");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_process_kill_failed_error() {
+        let error = SessionError::ProcessKillFailed {
+            pid: 99,
+            message: "permission denied".to_string(),
+        };
+        assert!(error.to_string().contains("99"));
+        assert!(error.to_string().contains("permission denied"));
+        assert_eq!(error.error_code(), "PROCESS_KILL_FAILED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_process_access_denied_error() {
+        let error = SessionError::ProcessAccessDenied { pid: 42 };
+        assert!(error.to_string().contains("42"));
+        assert_eq!(error.error_code(), "PROCESS_ACCESS_DENIED");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_invalid_process_metadata_error() {
+        let error = SessionError::InvalidProcessMetadata;
+        assert!(
+            error
+                .to_string()
+                .contains("must all be present or all absent")
+        );
+        assert_eq!(error.error_code(), "INVALID_PROCESS_METADATA");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_config_error() {
+        let error = SessionError::ConfigError {
+            message: "bad toml".to_string(),
+        };
+        assert!(error.to_string().contains("bad toml"));
+        assert_eq!(error.error_code(), "CONFIG_ERROR");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_daemon_error() {
+        let error = SessionError::DaemonError {
+            message: "connection refused".to_string(),
+        };
+        assert!(error.to_string().contains("connection refused"));
+        assert_eq!(error.error_code(), "DAEMON_ERROR");
+        assert!(!error.is_user_error());
+    }
+
+    #[test]
+    fn test_daemon_auto_start_failed_delegates_is_user_error() {
+        let disabled_error = SessionError::DaemonAutoStartFailed {
+            source: crate::daemon::errors::DaemonAutoStartError::Disabled,
+        };
+        assert_eq!(disabled_error.error_code(), "DAEMON_AUTO_START_FAILED");
+        assert!(disabled_error.is_user_error());
+
+        let spawn_error = SessionError::DaemonAutoStartFailed {
+            source: crate::daemon::errors::DaemonAutoStartError::SpawnFailed {
+                message: "failed".to_string(),
+            },
+        };
+        assert_eq!(spawn_error.error_code(), "DAEMON_AUTO_START_FAILED");
+        assert!(!spawn_error.is_user_error());
+    }
 }

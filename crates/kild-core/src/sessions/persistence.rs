@@ -1353,4 +1353,119 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_save_load_roundtrip_all_fields() {
+        use crate::state::types::RuntimeMode;
+        use crate::terminal::types::TerminalType;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        let worktree_dir = sessions_dir.join("worktree");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let agent = super::super::types::AgentProcess::new(
+            "claude".to_string(),
+            "proj_feat_0".to_string(),
+            Some(12345),
+            Some("claude-code".to_string()),
+            Some(1705318200),
+            Some(TerminalType::Ghostty),
+            Some("kild-feat".to_string()),
+            "claude --session-id abc".to_string(),
+            "2024-01-15T10:30:00Z".to_string(),
+            None,
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "proj/feat".to_string(),
+            "proj".to_string(),
+            "feat".to_string(),
+            worktree_dir,
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-15T10:30:00Z".to_string()),
+            Some("Implementing auth".to_string()),
+            vec![agent],
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+            Some("tl_proj_feat".to_string()),
+            Some(RuntimeMode::Daemon),
+        );
+
+        save_session_to_file(&session, sessions_dir).unwrap();
+
+        let loaded = find_session_by_name(sessions_dir, "feat")
+            .unwrap()
+            .expect("session should be found");
+
+        assert_eq!(loaded.id, session.id);
+        assert_eq!(loaded.project_id, session.project_id);
+        assert_eq!(loaded.branch, session.branch);
+        assert_eq!(loaded.worktree_path, session.worktree_path);
+        assert_eq!(loaded.agent, session.agent);
+        assert_eq!(loaded.status, session.status);
+        assert_eq!(loaded.created_at, session.created_at);
+        assert_eq!(loaded.port_range_start, session.port_range_start);
+        assert_eq!(loaded.port_range_end, session.port_range_end);
+        assert_eq!(loaded.port_count, session.port_count);
+        assert_eq!(loaded.last_activity, session.last_activity);
+        assert_eq!(loaded.note, session.note);
+        assert_eq!(loaded.agent_session_id, session.agent_session_id);
+        assert_eq!(loaded.task_list_id, session.task_list_id);
+        assert_eq!(loaded.runtime_mode, session.runtime_mode);
+        assert_eq!(loaded.agent_count(), 1);
+        let agent = loaded.latest_agent().unwrap();
+        assert_eq!(agent.agent(), "claude");
+        assert_eq!(agent.spawn_id(), "proj_feat_0");
+        assert_eq!(agent.process_id(), Some(12345));
+        assert_eq!(agent.process_name(), Some("claude-code"));
+        assert_eq!(agent.process_start_time(), Some(1705318200));
+        assert_eq!(agent.terminal_type(), Some(&TerminalType::Ghostty));
+        assert_eq!(agent.terminal_window_id(), Some("kild-feat"));
+        assert_eq!(agent.command(), "claude --session-id abc");
+        assert_eq!(agent.opened_at(), "2024-01-15T10:30:00Z");
+        assert!(agent.daemon_session_id().is_none());
+    }
+
+    #[test]
+    fn test_session_id_filename_mapping() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        let worktree_dir = sessions_dir.join("wt");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let session = Session::new(
+            "my-project/deep/nested".to_string(),
+            "my-project".to_string(),
+            "deep-nested".to_string(),
+            worktree_dir,
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            vec![],
+            None,
+            None,
+            None,
+        );
+
+        save_session_to_file(&session, sessions_dir).unwrap();
+
+        let expected_file = sessions_dir.join("my-project_deep_nested.json");
+        assert!(expected_file.exists());
+
+        let loaded = load_session_from_file("deep-nested", sessions_dir).unwrap();
+        assert_eq!(loaded.id, "my-project/deep/nested");
+    }
 }

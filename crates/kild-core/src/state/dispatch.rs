@@ -177,6 +177,7 @@ impl Store for CoreStore {
 mod tests {
     use super::*;
     use crate::projects::persistence::test_helpers::*;
+    use crate::sessions::errors::SessionError;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -512,5 +513,92 @@ mod tests {
         // Verify persisted
         let loaded = load_projects();
         assert!(loaded.active.is_none());
+    }
+
+    #[test]
+    fn test_dispatch_destroy_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::DestroyKild {
+            branch: "nonexistent-branch".to_string(),
+            force: false,
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_stop_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::StopKild {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_complete_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::CompleteKild {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_open_kild_not_found() {
+        use crate::state::types::{OpenMode, RuntimeMode};
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::OpenKild {
+            branch: "nonexistent-branch".to_string(),
+            mode: OpenMode::DefaultAgent,
+            runtime_mode: Some(RuntimeMode::Terminal),
+            resume: false,
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_update_agent_status_not_found() {
+        use crate::sessions::types::AgentStatus;
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::UpdateAgentStatus {
+            branch: "nonexistent-branch".to_string(),
+            status: AgentStatus::Working,
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_refresh_sessions_succeeds() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::RefreshSessions);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![Event::SessionsRefreshed]);
+    }
+
+    #[test]
+    fn test_dispatch_refresh_pr_status_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::RefreshPrStatus {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(matches!(
+            result,
+            Err(DispatchError::Session(SessionError::NotFound { .. }))
+        ));
     }
 }

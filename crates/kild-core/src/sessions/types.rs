@@ -1778,6 +1778,203 @@ mod tests {
     }
 
     #[test]
+    fn test_session_new_sets_all_fields() {
+        use crate::state::types::RuntimeMode;
+
+        let session = Session::new(
+            "proj/feature".to_string(),
+            "proj".to_string(),
+            "feature".to_string(),
+            PathBuf::from("/worktrees/feature"),
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            3000,
+            3009,
+            10,
+            Some("2024-01-01T12:00:00Z".to_string()),
+            Some("Auth feature".to_string()),
+            vec![],
+            Some("sid-123".to_string()),
+            Some("tl-456".to_string()),
+            Some(RuntimeMode::Daemon),
+        );
+
+        assert_eq!(session.id, "proj/feature");
+        assert_eq!(session.project_id, "proj");
+        assert_eq!(session.branch, "feature");
+        assert_eq!(session.worktree_path, PathBuf::from("/worktrees/feature"));
+        assert_eq!(session.agent, "claude");
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(session.created_at, "2024-01-01T00:00:00Z");
+        assert_eq!(session.port_range_start, 3000);
+        assert_eq!(session.port_range_end, 3009);
+        assert_eq!(session.port_count, 10);
+        assert_eq!(
+            session.last_activity,
+            Some("2024-01-01T12:00:00Z".to_string())
+        );
+        assert_eq!(session.note, Some("Auth feature".to_string()));
+        assert_eq!(session.agent_session_id, Some("sid-123".to_string()));
+        assert_eq!(session.task_list_id, Some("tl-456".to_string()));
+        assert_eq!(session.runtime_mode, Some(RuntimeMode::Daemon));
+        assert!(!session.has_agents());
+        assert_eq!(session.agent_count(), 0);
+    }
+
+    #[test]
+    fn test_agent_process_accessor_methods() {
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "proj_feat_0".to_string(),
+            Some(42),
+            Some("claude-code".to_string()),
+            Some(1705318200),
+            Some(TerminalType::Ghostty),
+            Some("kild-win".to_string()),
+            "claude --print".to_string(),
+            "2024-01-15T10:30:00Z".to_string(),
+            Some("daemon-sid-abc".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(agent.agent(), "claude");
+        assert_eq!(agent.spawn_id(), "proj_feat_0");
+        assert_eq!(agent.process_id(), Some(42));
+        assert_eq!(agent.process_name(), Some("claude-code"));
+        assert_eq!(agent.process_start_time(), Some(1705318200));
+        assert_eq!(agent.terminal_type(), Some(&TerminalType::Ghostty));
+        assert_eq!(agent.terminal_window_id(), Some("kild-win"));
+        assert_eq!(agent.command(), "claude --print");
+        assert_eq!(agent.opened_at(), "2024-01-15T10:30:00Z");
+        assert_eq!(agent.daemon_session_id(), Some("daemon-sid-abc"));
+    }
+
+    #[test]
+    fn test_agent_process_daemon_only_no_pid() {
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "proj_feat_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude --print".to_string(),
+            "2024-01-01T00:00:00Z".to_string(),
+            Some("daemon-session-1".to_string()),
+        )
+        .unwrap();
+
+        assert!(agent.process_id().is_none());
+        assert!(agent.process_name().is_none());
+        assert!(agent.process_start_time().is_none());
+        assert!(agent.terminal_type().is_none());
+        assert!(agent.terminal_window_id().is_none());
+        assert_eq!(agent.daemon_session_id(), Some("daemon-session-1"));
+    }
+
+    #[test]
+    fn test_session_agent_methods() {
+        let agents = vec![
+            AgentProcess::new(
+                "claude".to_string(),
+                "test_0".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                "cmd1".to_string(),
+                "2024-01-01T00:00:00Z".to_string(),
+                None,
+            )
+            .unwrap(),
+            AgentProcess::new(
+                "kiro".to_string(),
+                "test_1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                "cmd2".to_string(),
+                "2024-01-01T00:01:00Z".to_string(),
+                None,
+            )
+            .unwrap(),
+        ];
+
+        let session = Session::new(
+            "test/branch".to_string(),
+            "test".to_string(),
+            "branch".to_string(),
+            PathBuf::from("/tmp/test"),
+            "kiro".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            None,
+            None,
+            agents,
+            None,
+            None,
+            None,
+        );
+
+        assert!(session.has_agents());
+        assert_eq!(session.agent_count(), 2);
+        assert_eq!(session.agents().len(), 2);
+        assert_eq!(session.agents()[0].agent(), "claude");
+        assert_eq!(session.agents()[1].agent(), "kiro");
+        assert_eq!(session.latest_agent().unwrap().agent(), "kiro");
+    }
+
+    #[test]
+    fn test_session_add_and_clear_agents() {
+        let mut session = Session::new_for_test("test".to_string(), PathBuf::from("/tmp/test"));
+
+        assert!(!session.has_agents());
+        assert_eq!(session.agent_count(), 0);
+        assert!(session.latest_agent().is_none());
+
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "cmd".to_string(),
+            "2024-01-01T00:00:00Z".to_string(),
+            None,
+        )
+        .unwrap();
+
+        session.add_agent(agent);
+        assert!(session.has_agents());
+        assert_eq!(session.agent_count(), 1);
+
+        session.clear_agents();
+        assert!(!session.has_agents());
+        assert_eq!(session.agent_count(), 0);
+    }
+
+    #[test]
+    fn test_session_new_for_test_helper() {
+        let session = Session::new_for_test("my-branch".to_string(), PathBuf::from("/tmp/wt"));
+        assert_eq!(session.id, "test-my-branch");
+        assert_eq!(session.project_id, "test-project");
+        assert_eq!(session.branch, "my-branch");
+        assert_eq!(session.agent, "test");
+        assert_eq!(session.status, SessionStatus::Active);
+        assert!(!session.has_agents());
+    }
+
+    #[test]
     fn test_session_with_old_pascal_case_status_deserializes() {
         let json = r#"{
             "id": "test/branch",

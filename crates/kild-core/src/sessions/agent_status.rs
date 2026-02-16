@@ -94,3 +94,74 @@ pub fn find_session_by_worktree_path(
         .into_iter()
         .find(|session| worktree_path.starts_with(&session.worktree_path)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worktree_path_match_exact() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let mut session = Session::new_for_test("feat".to_string(), worktree.clone());
+        session.worktree_path = worktree.clone();
+        persistence::save_session_to_file(&session, &sessions_dir).unwrap();
+
+        let (sessions, _) = persistence::load_sessions_from_files(&sessions_dir).unwrap();
+        let found = sessions
+            .iter()
+            .find(|s| worktree.starts_with(&s.worktree_path));
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().branch, "feat");
+    }
+
+    #[test]
+    fn test_worktree_path_match_subdirectory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let mut session = Session::new_for_test("feat".to_string(), worktree.clone());
+        session.worktree_path = worktree.clone();
+        persistence::save_session_to_file(&session, &sessions_dir).unwrap();
+
+        let (sessions, _) = persistence::load_sessions_from_files(&sessions_dir).unwrap();
+
+        let subdir = worktree.join("src").join("main.rs");
+        let found = sessions
+            .iter()
+            .find(|s| subdir.starts_with(&s.worktree_path));
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().branch, "feat");
+    }
+
+    #[test]
+    fn test_worktree_path_no_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let mut session = Session::new_for_test("feat".to_string(), worktree.clone());
+        session.worktree_path = worktree;
+        persistence::save_session_to_file(&session, &sessions_dir).unwrap();
+
+        let (sessions, _) = persistence::load_sessions_from_files(&sessions_dir).unwrap();
+
+        let other_path = tmp.path().join("other_project");
+        let found = sessions
+            .iter()
+            .find(|s| other_path.starts_with(&s.worktree_path));
+        assert!(found.is_none());
+    }
+}

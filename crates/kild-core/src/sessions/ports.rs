@@ -249,4 +249,48 @@ mod tests {
         assert!(names.contains(&"KILD_PORT_RANGE_END"));
         assert!(names.contains(&"KILD_PORT_COUNT"));
     }
+
+    #[test]
+    fn test_allocate_port_range_empty_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (start, end) = allocate_port_range(tmp.path(), 10, 3000).unwrap();
+        assert_eq!(start, 3000);
+        assert_eq!(end, 3009);
+    }
+
+    #[test]
+    fn test_allocate_port_range_avoids_existing_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+
+        let mut existing = Session::new_for_test("existing".to_string(), wt);
+        existing.port_range_start = 3000;
+        existing.port_range_end = 3009;
+        existing.port_count = 10;
+        super::super::persistence::save_session_to_file(&existing, tmp.path()).unwrap();
+
+        let (start, end) = allocate_port_range(tmp.path(), 10, 3000).unwrap();
+        assert_eq!(start, 3010);
+        assert_eq!(end, 3019);
+    }
+
+    #[test]
+    fn test_allocate_port_range_nonexistent_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let nonexistent = tmp.path().join("does_not_exist");
+
+        let (start, end) = allocate_port_range(&nonexistent, 10, 3000).unwrap();
+        assert_eq!(start, 3000);
+        assert_eq!(end, 3009);
+    }
+
+    #[test]
+    fn test_allocate_port_range_custom_port_count() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (start, end) = allocate_port_range(tmp.path(), 5, 8000).unwrap();
+        assert_eq!(start, 8000);
+        assert_eq!(end, 8004);
+    }
 }
