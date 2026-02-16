@@ -22,7 +22,7 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     );
 
     // 1. Look up the session
-    let session = helpers::require_session(branch, "diff")?;
+    let session = helpers::require_session(branch, "cli.diff_failed")?;
 
     // Handle --stat flag: show summary instead of full diff
     if stat {

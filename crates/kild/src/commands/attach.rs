@@ -17,7 +17,7 @@ pub(crate) fn handle_attach_command(
     info!(event = "cli.attach_started", branch = branch);
 
     // 1. Look up session to get daemon_session_id
-    let session = helpers::require_session(branch, "attach")?;
+    let session = helpers::require_session(branch, "cli.attach_failed")?;
 
     let daemon_session_id = match session.latest_agent().and_then(|a| a.daemon_session_id()) {
         Some(id) => id.to_string(),

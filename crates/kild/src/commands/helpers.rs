@@ -23,11 +23,14 @@ pub fn print_json_error(error: &dyn std::fmt::Display, code: &str) -> Box<dyn st
 /// Look up a session by branch, logging a CLI error on failure.
 ///
 /// Prints "No kild found: {branch}" to stderr, logs the structured
-/// `cli.session_lookup_failed` event, and calls `events::log_app_error`.
-pub fn require_session(branch: &str, command: &str) -> Result<Session, Box<dyn std::error::Error>> {
+/// `failed_event` (e.g. `"cli.attach_failed"`), and calls `events::log_app_error`.
+pub fn require_session(
+    branch: &str,
+    failed_event: &str,
+) -> Result<Session, Box<dyn std::error::Error>> {
     session_ops::get_session(branch).map_err(|e| {
         eprintln!("No kild found: {}", branch);
-        error!(event = "cli.session_lookup_failed", command = command, branch = branch, error = %e);
+        error!(event = failed_event, branch = branch, error = %e);
         events::log_app_error(&e);
         let boxed: Box<dyn std::error::Error> = e.into();
         boxed
@@ -40,18 +43,18 @@ pub fn require_session(branch: &str, command: &str) -> Result<Session, Box<dyn s
 /// error object to stdout instead of the human-readable stderr message.
 pub fn require_session_json(
     branch: &str,
-    command: &str,
+    failed_event: &str,
     json_output: bool,
 ) -> Result<Session, Box<dyn std::error::Error>> {
     session_ops::get_session(branch).map_err(|e| {
-        error!(event = "cli.session_lookup_failed", command = command, branch = branch, error = %e);
+        error!(event = failed_event, branch = branch, error = %e);
         events::log_app_error(&e);
         if json_output {
-            return print_json_error(&e, e.error_code());
+            print_json_error(&e, e.error_code())
+        } else {
+            eprintln!("No kild found: {}", branch);
+            e.into()
         }
-        eprintln!("No kild found: {}", branch);
-        let boxed: Box<dyn std::error::Error> = e.into();
-        boxed
     })
 }
 

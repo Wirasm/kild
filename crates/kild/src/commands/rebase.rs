@@ -38,7 +38,7 @@ pub(crate) fn handle_rebase_command(
         base = base_branch
     );
 
-    let session = helpers::require_session(branch, "rebase")?;
+    let session = helpers::require_session(branch, "cli.rebase_failed")?;
 
     match kild_core::git::remote::rebase_worktree(&session.worktree_path, base_branch) {
         Ok(()) => {

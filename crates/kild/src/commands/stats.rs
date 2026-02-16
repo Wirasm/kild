@@ -65,7 +65,7 @@ fn handle_single_stats(
         json_output = json_output
     );
 
-    let session = helpers::require_session_json(branch, "stats", json_output)?;
+    let session = helpers::require_session_json(branch, "cli.stats_failed", json_output)?;
 
     let health = kild_core::git::collect_branch_health(
         &session.worktree_path,

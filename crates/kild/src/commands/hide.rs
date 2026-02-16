@@ -20,7 +20,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.hide_started", branch = branch);
 
-    let session = helpers::require_session(branch, "hide")?;
+    let session = helpers::require_session(branch, "cli.hide_failed")?;
 
     // Daemon-managed sessions have no terminal window to hide
     if session

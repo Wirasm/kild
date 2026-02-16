@@ -26,7 +26,7 @@ pub(crate) fn handle_status_command(
     let config = load_config_with_warning();
     let base_branch = config.git.base_branch();
 
-    let mut session = helpers::require_session_json(branch, "status", json_output)?;
+    let mut session = helpers::require_session_json(branch, "cli.status_failed", json_output)?;
 
     // Sync daemon-managed session: if daemon says stopped, update JSON
     session_ops::sync_daemon_session_status(&mut session);

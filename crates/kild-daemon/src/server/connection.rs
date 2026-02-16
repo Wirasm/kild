@@ -389,15 +389,17 @@ async fn dispatch_message(
 
         ClientMessage::Ping { id } => Some(DaemonMessage::Ack { id }),
 
-        _ => {
+        other => {
             warn!(
                 event = "daemon.connection.unhandled_message",
+                client_id = client_id,
+                message = ?other,
                 "Received unknown client message variant"
             );
             Some(DaemonMessage::Error {
                 id: msg_id,
                 code: ErrorCode::ProtocolError,
-                message: "Unknown message type".to_string(),
+                message: "Unknown message type. The daemon may need to be updated.".to_string(),
             })
         }
     }

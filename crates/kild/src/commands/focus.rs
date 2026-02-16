@@ -11,7 +11,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     info!(event = "cli.focus_started", branch = branch);
 
     // 1. Look up the session
-    let session = helpers::require_session(branch, "focus")?;
+    let session = helpers::require_session(branch, "cli.focus_failed")?;
 
     // 2. Check for daemon-managed session (no terminal window to focus)
     if session

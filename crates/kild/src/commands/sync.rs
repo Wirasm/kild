@@ -38,7 +38,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         remote = remote
     );
 
-    let session = helpers::require_session(branch, "sync")?;
+    let session = helpers::require_session(branch, "cli.sync_failed")?;
 
     // Fetch from remote — use the project repo path (worktrees share the same .git)
     let project = kild_core::git::handler::detect_project()?;

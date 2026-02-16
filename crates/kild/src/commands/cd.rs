@@ -18,7 +18,7 @@ pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
 
     info!(event = "cli.cd_started", branch = branch);
 
-    let session = helpers::require_session(branch, "cd")?;
+    let session = helpers::require_session(branch, "cli.cd_failed")?;
 
     // Print only the path - no formatting, no leading text
     // This enables shell integration: cd "$(kild cd branch)"

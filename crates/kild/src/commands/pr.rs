@@ -32,7 +32,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
     );
 
     // 1. Look up session
-    let session = helpers::require_session_json(branch, "pr", json_output)?;
+    let session = helpers::require_session_json(branch, "cli.pr_failed", json_output)?;
 
     // 2. Check for remote
     if !session_ops::has_remote_configured(&session.worktree_path) {

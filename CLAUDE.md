@@ -200,7 +200,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 ## Architecture
 
 **Workspace structure:**
-- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode). Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode). All public enums are `#[non_exhaustive]` for forward compatibility. Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.

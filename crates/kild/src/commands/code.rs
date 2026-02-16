@@ -21,7 +21,7 @@ pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let config = load_config_with_warning();
 
     // 2. Look up the session to get worktree path
-    let session = helpers::require_session(branch, "code")?;
+    let session = helpers::require_session(branch, "cli.code_failed")?;
 
     // 3. Open editor via kild-core editor backend
     match kild_core::editor::open_editor(
