@@ -164,7 +164,7 @@ impl PaneGrid {
     ) {
         for display in displays {
             // Only auto-populate from sessions that have terminal tabs
-            if !terminal_tabs.contains_key(&display.session.id) {
+            if !terminal_tabs.contains_key(&*display.session.id) {
                 continue;
             }
             // Skip if already in the grid
@@ -174,9 +174,9 @@ impl PaneGrid {
             let status = process_status_to_status(display.process_status);
             if self
                 .add_terminal(
-                    display.session.id.clone(),
+                    display.session.id.to_string(),
                     0,
-                    display.session.branch.clone(),
+                    display.session.branch.to_string(),
                     status,
                 )
                 .is_none()

@@ -2,6 +2,7 @@ use clap::ArgMatches;
 use tracing::{error, info};
 
 use kild_core::AgentStatus;
+use kild_core::BranchName;
 use kild_core::errors::KildError;
 use kild_core::session_ops;
 
@@ -25,7 +26,7 @@ pub(crate) fn handle_agent_status_command(
             })?;
             (session.branch, status.as_str())
         }
-        (false, [branch, status]) => ((*branch).clone(), status.as_str()),
+        (false, [branch, status]) => (BranchName::new((*branch).clone()), status.as_str()),
         (true, _) => return Err("Usage: kild agent-status --self <status>".into()),
         (false, _) => return Err("Usage: kild agent-status <branch> <status>".into()),
     };

@@ -87,7 +87,7 @@ pub fn render_detail_view(
     let note = session.note.clone();
     let worktree_path = session.worktree_path.display().to_string();
     let created_at = session.created_at.clone();
-    let session_id = session.id.clone();
+    let session_id = session.id.to_string();
 
     let status = match kild.process_status {
         ProcessStatus::Running => Status::Active,
@@ -159,7 +159,7 @@ pub fn render_detail_view(
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(theme::text_white())
                         .mb(px(theme::SPACE_1))
-                        .child(branch.clone()),
+                        .child(branch.to_string()),
                 )
                 .child(
                     div()

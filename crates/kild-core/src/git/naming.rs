@@ -70,13 +70,13 @@ pub fn derive_project_name_from_remote(remote_url: &str) -> String {
     }
 }
 
-pub fn generate_project_id(repo_path: &Path) -> String {
+pub fn generate_project_id(repo_path: &Path) -> kild_protocol::ProjectId {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
     repo_path.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    kild_protocol::ProjectId::new(format!("{:x}", hasher.finish()))
 }
 
 #[cfg(test)]

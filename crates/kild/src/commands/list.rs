@@ -92,7 +92,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                             overlap_report
                                 .overlapping_files
                                 .iter()
-                                .filter(|fo| fo.branches.contains(&session.branch))
+                                .filter(|fo| fo.branches.iter().any(|b| b == &*session.branch))
                                 .map(|fo| fo.file.display().to_string())
                                 .collect(),
                         );

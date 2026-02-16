@@ -18,7 +18,7 @@ pub fn validate_session_request(
     }
 
     Ok(ValidatedRequest {
-        name: name.trim().to_string(),
+        name: name.trim().into(),
         command: command.trim().to_string(),
         agent: agent.to_string(),
     })
@@ -81,7 +81,7 @@ mod tests {
         assert!(result.is_ok());
 
         let validated = result.unwrap();
-        assert_eq!(validated.name, "test");
+        assert_eq!(&*validated.name, "test");
         assert_eq!(validated.command, "echo hello");
         assert_eq!(validated.agent, "claude");
     }
@@ -104,7 +104,7 @@ mod tests {
         assert!(result.is_ok());
 
         let validated = result.unwrap();
-        assert_eq!(validated.name, "test");
+        assert_eq!(&*validated.name, "test");
         assert_eq!(validated.command, "echo hello");
     }
 
@@ -131,9 +131,9 @@ mod tests {
 
         // Valid session with existing worktree path
         let valid_session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -152,9 +152,9 @@ mod tests {
 
         // Invalid session - empty id
         let invalid_session = Session::new(
-            "".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "".into(),
+            "test".into(),
+            "branch".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -178,9 +178,9 @@ mod tests {
 
         // Invalid session - empty worktree path
         let invalid_session2 = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::new(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -206,9 +206,9 @@ mod tests {
         // Worktree existence is checked at operation time, not during loading.
         let nonexistent_path = temp_dir.join("nonexistent");
         let session_missing_worktree = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             nonexistent_path.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -239,9 +239,9 @@ mod tests {
 
         // Test empty project_id
         let session_empty_project = Session::new(
-            "test/branch".to_string(),
-            "".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "".into(),
+            "branch".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -264,9 +264,9 @@ mod tests {
 
         // Test empty branch
         let session_empty_branch = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -289,9 +289,9 @@ mod tests {
 
         // Test empty agent
         let session_empty_agent = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             temp_dir.clone(),
             "".to_string(),
             SessionStatus::Active,
@@ -314,9 +314,9 @@ mod tests {
 
         // Test empty created_at
         let session_empty_created_at = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,

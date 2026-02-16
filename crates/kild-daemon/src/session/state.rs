@@ -213,7 +213,7 @@ impl DaemonSession {
             SessionState::Stopped => SessionStatus::Stopped,
         };
         SessionInfo {
-            id: self.id.clone(),
+            id: self.id.clone().into(),
             working_directory: self.working_directory.clone(),
             command: self.command.clone(),
             status,
@@ -314,7 +314,7 @@ mod tests {
         session.attach_client(2);
 
         let info = session.to_session_info();
-        assert_eq!(info.id, "myapp_feature");
+        assert_eq!(&*info.id, "myapp_feature");
         assert_eq!(info.working_directory, "/tmp/wt");
         assert_eq!(info.command, "claude");
         assert_eq!(info.status, SessionStatus::Creating);

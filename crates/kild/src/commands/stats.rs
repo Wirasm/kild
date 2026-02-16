@@ -160,7 +160,7 @@ fn handle_all_stats(
                 results.push((h, readiness));
             }
             Err(msg) => {
-                errors.push((session.branch.clone(), msg));
+                errors.push((session.branch.to_string(), msg));
             }
         }
     }

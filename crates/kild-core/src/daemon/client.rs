@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode, SessionStatus};
+use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode, SessionId, SessionStatus};
 use tracing::{debug, info, warn};
 
 use crate::errors::KildError;
@@ -164,7 +164,7 @@ pub fn create_pty_session(
 
     let msg = ClientMessage::CreateSession {
         id: request.request_id.to_string(),
-        session_id: request.session_id.to_string(),
+        session_id: SessionId::new(request.session_id),
         working_directory: request.working_directory.to_string_lossy().to_string(),
         command: request.command.to_string(),
         args: request.args.to_vec(),
@@ -188,11 +188,11 @@ pub fn create_pty_session(
 
     info!(
         event = "core.daemon.create_pty_session_completed",
-        daemon_session_id = session_id
+        daemon_session_id = %session_id
     );
 
     Ok(DaemonCreateResult {
-        daemon_session_id: session_id,
+        daemon_session_id: session_id.into_inner(),
     })
 }
 
@@ -207,7 +207,7 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
 
     let request = ClientMessage::StopSession {
         id: format!("stop-{}", daemon_session_id),
-        session_id: daemon_session_id.to_string(),
+        session_id: SessionId::new(daemon_session_id),
     };
 
     let mut stream = connect(&socket_path)?;
@@ -236,7 +236,7 @@ pub fn destroy_daemon_session(
 
     let request = ClientMessage::DestroySession {
         id: format!("destroy-{}", daemon_session_id),
-        session_id: daemon_session_id.to_string(),
+        session_id: SessionId::new(daemon_session_id),
         force,
     };
 
@@ -300,7 +300,7 @@ pub fn get_session_status(
 
     let request = ClientMessage::GetSession {
         id: format!("status-{}", daemon_session_id),
-        session_id: daemon_session_id.to_string(),
+        session_id: SessionId::new(daemon_session_id),
     };
 
     let mut stream = match connect(&socket_path) {
@@ -373,7 +373,7 @@ pub fn get_session_info(
 
     let request = ClientMessage::GetSession {
         id: format!("info-{}", daemon_session_id),
-        session_id: daemon_session_id.to_string(),
+        session_id: SessionId::new(daemon_session_id),
     };
 
     let mut stream = match connect(&socket_path) {
@@ -417,7 +417,7 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
 
     let request = ClientMessage::ReadScrollback {
         id: format!("scrollback-{}", daemon_session_id),
-        session_id: daemon_session_id.to_string(),
+        session_id: SessionId::new(daemon_session_id),
     };
 
     let mut stream = match connect(&socket_path) {

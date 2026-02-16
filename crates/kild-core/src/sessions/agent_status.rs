@@ -51,14 +51,14 @@ pub fn update_agent_status(
 
     info!(
         event = "core.session.agent_status_update_completed",
-        session_id = session.id,
+        session_id = %session.id,
         status = %status,
     );
 
     if crate::notify::should_notify(notify, status) {
         info!(
             event = "core.session.agent_status_notify_triggered",
-            branch = session.branch,
+            branch = %session.branch,
             status = %status,
         );
         let message =
@@ -67,7 +67,7 @@ pub fn update_agent_status(
     }
 
     Ok(AgentStatusResult {
-        branch: session.branch.clone(),
+        branch: session.branch.to_string(),
         status,
         updated_at: now,
     })
@@ -117,7 +117,7 @@ mod tests {
             .iter()
             .find(|s| worktree.starts_with(&s.worktree_path));
         assert!(found.is_some());
-        assert_eq!(found.unwrap().branch, "feat");
+        assert_eq!(&*found.unwrap().branch, "feat");
     }
 
     #[test]
@@ -140,7 +140,7 @@ mod tests {
             .iter()
             .find(|s| subdir.starts_with(&s.worktree_path));
         assert!(found.is_some());
-        assert_eq!(found.unwrap().branch, "feat");
+        assert_eq!(&*found.unwrap().branch, "feat");
     }
 
     #[test]

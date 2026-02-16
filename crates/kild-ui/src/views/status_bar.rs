@@ -299,7 +299,7 @@ mod tests {
         let mut alerts = Vec::new();
 
         for display in displays {
-            if let Some(err) = errors.get(&display.session.branch) {
+            if let Some(err) = errors.get(&*display.session.branch) {
                 alerts.push(Alert {
                     message: format!("{}: {}", display.session.branch, err.message),
                     is_error: true,

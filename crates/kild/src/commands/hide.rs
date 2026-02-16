@@ -89,8 +89,8 @@ fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|a| a.daemon_session_id())
             .is_some()
         {
-            debug!(event = "cli.hide_skipped_daemon", branch = session.branch);
-            skipped.push(session.branch);
+            debug!(event = "cli.hide_skipped_daemon", branch = %session.branch);
+            skipped.push(session.branch.to_string());
             continue;
         }
 
@@ -99,26 +99,26 @@ fn handle_hide_all() -> Result<(), Box<dyn std::error::Error>> {
             Err(msg) => {
                 warn!(
                     event = "cli.hide_skipped",
-                    branch = session.branch,
+                    branch = %session.branch,
                     reason = %msg
                 );
-                errors.push((session.branch.clone(), msg));
+                errors.push((session.branch.to_string(), msg));
                 continue;
             }
         };
 
         match kild_core::terminal_ops::hide_terminal(&terminal_type, &window_id) {
             Ok(()) => {
-                info!(event = "cli.hide_completed", branch = session.branch);
-                hidden.push(session.branch);
+                info!(event = "cli.hide_completed", branch = %session.branch);
+                hidden.push(session.branch.to_string());
             }
             Err(e) => {
                 error!(
                     event = "cli.hide_failed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     error = %e
                 );
-                errors.push((session.branch, e.to_string()));
+                errors.push((session.branch.to_string(), e.to_string()));
             }
         }
     }

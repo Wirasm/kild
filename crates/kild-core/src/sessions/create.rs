@@ -93,7 +93,7 @@ pub fn create_session(
 
     info!(
         event = "core.session.create_started",
-        branch = request.branch,
+        branch = %request.branch,
         agent = agent,
         command = agent_command
     );
@@ -119,12 +119,13 @@ pub fn create_session(
         event = "core.session.project_detected",
         project_id = project.id,
         project_name = project.name,
-        branch = validated.name
+        branch = %validated.name
     );
 
     // 3. Create worktree (I/O)
     let config = Config::new();
-    let session_id = ports::generate_session_id(&project.id, &validated.name);
+    let project_id: kild_protocol::ProjectId = project.id.clone().into();
+    let session_id = ports::generate_session_id(&project_id, &validated.name);
 
     // Generate task list ID for agents that support it (depends on session_id)
     let task_list_id = if agents::resume::supports_resume(&agent) {
@@ -157,7 +158,7 @@ pub fn create_session(
 
     info!(
         event = "core.session.port_allocated",
-        session_id = session_id,
+        session_id = %session_id,
         port_range_start = port_start,
         port_range_end = port_end,
         port_count = config.default_port_count
@@ -185,7 +186,7 @@ pub fn create_session(
 
     info!(
         event = "core.session.worktree_created",
-        session_id = session_id,
+        session_id = %session_id,
         worktree_path = %worktree.path.display(),
         branch = worktree.branch
     );
@@ -388,7 +389,7 @@ pub fn create_session(
             if let Err(e) = shim_init_result {
                 error!(
                     event = "core.session.shim_init_failed",
-                    session_id = session_id,
+                    session_id = %session_id,
                     error = %e,
                 );
                 eprintln!("Warning: Failed to initialize agent team support: {}", e);
@@ -413,7 +414,7 @@ pub fn create_session(
     // 6. Create session record
     let session = Session::new(
         session_id.clone(),
-        project.id,
+        project_id,
         validated.name.clone(),
         worktree.path,
         validated.agent.clone(),
@@ -435,8 +436,8 @@ pub fn create_session(
 
     info!(
         event = "core.session.create_completed",
-        session_id = session_id,
-        branch = validated.name,
+        session_id = %session_id,
+        branch = %validated.name,
         agent = session.agent,
         process_id = session.latest_agent().and_then(|a| a.process_id()),
         process_name = ?session.latest_agent().map(|a| a.process_name())
@@ -465,9 +466,9 @@ mod tests {
 
         // 1. Create a test session manually
         let session = Session::new(
-            "test-project_test-branch".to_string(),
-            "test-project".to_string(),
-            "test-branch".to_string(),
+            "test-project_test-branch".into(),
+            "test-project".into(),
+            "test-branch".into(),
             temp_dir.join("worktree").to_path_buf(),
             "test-agent".to_string(),
             SessionStatus::Active,
@@ -495,7 +496,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(skipped, 0);
         assert_eq!(sessions[0].id, session.id);
-        assert_eq!(sessions[0].branch, "test-branch");
+        assert_eq!(&*sessions[0].branch, "test-branch");
 
         // 4. Find session by name
         let found_session = persistence::find_session_by_name(&sessions_dir, "test-branch")
@@ -574,9 +575,9 @@ mod tests {
             )
             .unwrap();
             let session = Session::new(
-                format!("test-project_{}", branch_name),
-                "test-project".to_string(),
-                branch_name.to_string(),
+                format!("test-project_{}", branch_name).into(),
+                "test-project".into(),
+                (*branch_name).into(),
                 worktree_dir.clone(),
                 "test-agent".to_string(),
                 SessionStatus::Active,
@@ -737,9 +738,9 @@ mod tests {
         // Create a session pointing to a worktree that does NOT exist
         let missing_worktree = temp_dir.join("worktree_does_not_exist");
         let session = Session::new(
-            "test-project_orphaned-session".to_string(),
-            "test-project".to_string(),
-            "orphaned-session".to_string(),
+            "test-project_orphaned-session".into(),
+            "test-project".into(),
+            "orphaned-session".into(),
             missing_worktree.clone(),
             "claude".to_string(),
             SessionStatus::Stopped,
@@ -834,9 +835,9 @@ mod tests {
         )
         .unwrap();
         let session = Session::new(
-            "test-project_destroy-test".to_string(),
-            "test-project".to_string(),
-            "destroy-test".to_string(),
+            "test-project_destroy-test".into(),
+            "test-project".into(),
+            "destroy-test".into(),
             worktree_dir.clone(),
             "test-agent".to_string(),
             SessionStatus::Active,
@@ -899,9 +900,9 @@ mod tests {
 
         // Create an "old" session WITHOUT agents (simulating pre-feature sessions)
         let session = Session::new(
-            "test-project_compat-test".to_string(),
-            "test-project".to_string(),
-            "compat-test".to_string(),
+            "test-project_compat-test".into(),
+            "test-project".into(),
+            "compat-test".into(),
             worktree_dir.clone(),
             "test-agent".to_string(),
             SessionStatus::Active,

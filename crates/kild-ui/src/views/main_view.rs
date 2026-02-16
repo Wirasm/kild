@@ -333,7 +333,7 @@ impl MainView {
                             .state
                             .displays()
                             .iter()
-                            .map(|d| (d.session.id.clone(), d.session.branch.clone()))
+                            .map(|d| (d.session.id.to_string(), d.session.branch.to_string()))
                             .collect();
                         let refs: Vec<(&str, &str)> = session_ids
                             .iter()
@@ -410,7 +410,7 @@ impl MainView {
             .state
             .displays()
             .iter()
-            .map(|d| d.session.id.as_str())
+            .map(|d| &*d.session.id)
             .collect();
 
         self.terminal_tabs
@@ -794,7 +794,7 @@ impl MainView {
                 continue;
             }
 
-            let tabs = self.terminal_tabs.get(session_id);
+            let tabs = self.terminal_tabs.get(&**session_id);
 
             for member in teammates {
                 let Some(daemon_session_id) = &member.daemon_session_id else {
@@ -805,7 +805,7 @@ impl MainView {
                     continue;
                 }
                 to_add.push((
-                    session_id.clone(),
+                    session_id.to_string(),
                     daemon_session_id.clone(),
                     member.name.clone(),
                     member.color,
@@ -921,7 +921,7 @@ impl MainView {
             .state
             .displays()
             .iter()
-            .find(|d| d.session.id == session_id)
+            .find(|d| &*d.session.id == session_id)
         else {
             return;
         };
@@ -938,7 +938,7 @@ impl MainView {
             .state
             .displays()
             .iter()
-            .find(|d| d.session.id == session_id)
+            .find(|d| &*d.session.id == session_id)
         else {
             return;
         };
@@ -1059,7 +1059,7 @@ impl MainView {
         let current_idx = self
             .state
             .selected_id()
-            .and_then(|id| displays.iter().position(|d| d.session.id == id));
+            .and_then(|id| displays.iter().position(|d| &*d.session.id == id));
         let next_idx = match current_idx {
             Some(idx) => (idx + 1) % displays.len(),
             None => 0,
@@ -1069,7 +1069,7 @@ impl MainView {
             from = ?self.state.selected_id(),
             to_idx = next_idx
         );
-        let next_id = displays[next_idx].session.id.clone();
+        let next_id = displays[next_idx].session.id.to_string();
         self.on_kild_select(&next_id, window, cx);
     }
 
@@ -1082,7 +1082,7 @@ impl MainView {
         let current_idx = self
             .state
             .selected_id()
-            .and_then(|id| displays.iter().position(|d| d.session.id == id));
+            .and_then(|id| displays.iter().position(|d| &*d.session.id == id));
         let prev_idx = match current_idx {
             Some(0) | None => displays.len() - 1,
             Some(idx) => idx - 1,
@@ -1092,7 +1092,7 @@ impl MainView {
             from = ?self.state.selected_id(),
             to_idx = prev_idx
         );
-        let prev_id = displays[prev_idx].session.id.clone();
+        let prev_id = displays[prev_idx].session.id.to_string();
         self.on_kild_select(&prev_id, window, cx);
     }
 
@@ -1225,10 +1225,10 @@ impl MainView {
             .state
             .displays()
             .iter()
-            .find(|d| d.session.id == session_id)
+            .find(|d| &*d.session.id == session_id)
             .map(|d| {
                 (
-                    d.session.branch.clone(),
+                    d.session.branch.to_string(),
                     super::pane_grid::process_status_to_status(d.process_status),
                 )
             })

@@ -127,17 +127,17 @@ fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     for session in sessions {
         match session_ops::destroy_session(&session.branch, force) {
             Ok(()) => {
-                info!(event = "cli.destroy_completed", branch = session.branch);
-                destroyed.push(session.branch);
+                info!(event = "cli.destroy_completed", branch = %session.branch);
+                destroyed.push(session.branch.to_string());
             }
             Err(e) => {
                 error!(
                     event = "cli.destroy_failed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     error = %e
                 );
                 events::log_app_error(&e);
-                errors.push((session.branch, e.to_string()));
+                errors.push((session.branch.to_string(), e.to_string()));
             }
         }
     }

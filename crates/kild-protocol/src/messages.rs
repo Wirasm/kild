@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::SessionInfo;
+use crate::types::{ProjectId, SessionId, SessionInfo};
 
 /// Error codes returned by the daemon in error responses.
 ///
@@ -78,7 +78,7 @@ pub enum ClientMessage {
     CreateSession {
         id: String,
         /// Unique session identifier (e.g. "myapp_feature-auth").
-        session_id: String,
+        session_id: SessionId,
         /// Working directory for the PTY process.
         working_directory: String,
         /// Command to execute in the PTY.
@@ -104,18 +104,18 @@ pub enum ClientMessage {
     #[serde(rename = "attach")]
     Attach {
         id: String,
-        session_id: String,
+        session_id: SessionId,
         rows: u16,
         cols: u16,
     },
 
     #[serde(rename = "detach")]
-    Detach { id: String, session_id: String },
+    Detach { id: String, session_id: SessionId },
 
     #[serde(rename = "resize_pty")]
     ResizePty {
         id: String,
-        session_id: String,
+        session_id: SessionId,
         rows: u16,
         cols: u16,
     },
@@ -123,18 +123,18 @@ pub enum ClientMessage {
     #[serde(rename = "write_stdin")]
     WriteStdin {
         id: String,
-        session_id: String,
+        session_id: SessionId,
         /// Base64-encoded bytes to write to PTY stdin.
         data: String,
     },
 
     #[serde(rename = "stop_session")]
-    StopSession { id: String, session_id: String },
+    StopSession { id: String, session_id: SessionId },
 
     #[serde(rename = "destroy_session")]
     DestroySession {
         id: String,
-        session_id: String,
+        session_id: SessionId,
         #[serde(default)]
         force: bool,
     },
@@ -143,14 +143,14 @@ pub enum ClientMessage {
     ListSessions {
         id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        project_id: Option<String>,
+        project_id: Option<ProjectId>,
     },
 
     #[serde(rename = "get_session")]
-    GetSession { id: String, session_id: String },
+    GetSession { id: String, session_id: SessionId },
 
     #[serde(rename = "read_scrollback")]
-    ReadScrollback { id: String, session_id: String },
+    ReadScrollback { id: String, session_id: SessionId },
 
     #[serde(rename = "daemon_stop")]
     DaemonStop { id: String },
@@ -173,7 +173,7 @@ pub enum DaemonMessage {
     /// Streaming PTY output. No `id` — pushed after attach.
     #[serde(rename = "pty_output")]
     PtyOutput {
-        session_id: String,
+        session_id: SessionId,
         /// Base64-encoded raw PTY output bytes.
         data: String,
     },
@@ -181,7 +181,7 @@ pub enum DaemonMessage {
     /// Notification that PTY output was dropped for a slow client.
     #[serde(rename = "pty_output_dropped")]
     PtyOutputDropped {
-        session_id: String,
+        session_id: SessionId,
         bytes_dropped: usize,
     },
 
@@ -189,7 +189,7 @@ pub enum DaemonMessage {
     #[serde(rename = "session_event")]
     SessionEvent {
         event: String,
-        session_id: String,
+        session_id: SessionId,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<serde_json::Value>,
     },
@@ -257,7 +257,7 @@ mod tests {
     fn test_client_message_create_session_roundtrip() {
         let msg = ClientMessage::CreateSession {
             id: "req-001".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
             working_directory: "/tmp/worktrees/feature-auth".to_string(),
             command: "claude".to_string(),
             args: vec!["--dangerously-skip-permissions".to_string()],
@@ -279,7 +279,7 @@ mod tests {
     fn test_client_message_attach_roundtrip() {
         let msg = ClientMessage::Attach {
             id: "req-002".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
             rows: 24,
             cols: 80,
         };
@@ -292,7 +292,7 @@ mod tests {
     fn test_client_message_write_stdin_roundtrip() {
         let msg = ClientMessage::WriteStdin {
             id: "req-005".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
             data: "bHMgLWxhCg==".to_string(),
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -316,7 +316,7 @@ mod tests {
         let messages: Vec<ClientMessage> = vec![
             ClientMessage::CreateSession {
                 id: "1".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
                 working_directory: "/tmp".to_string(),
                 command: "bash".to_string(),
                 args: vec![],
@@ -327,32 +327,32 @@ mod tests {
             },
             ClientMessage::Attach {
                 id: "2".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
                 rows: 24,
                 cols: 80,
             },
             ClientMessage::Detach {
                 id: "3".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
             },
             ClientMessage::ResizePty {
                 id: "4".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
                 rows: 40,
                 cols: 120,
             },
             ClientMessage::WriteStdin {
                 id: "5".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
                 data: "dGVzdA==".to_string(),
             },
             ClientMessage::StopSession {
                 id: "6".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
             },
             ClientMessage::DestroySession {
                 id: "7".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
                 force: true,
             },
             ClientMessage::ListSessions {
@@ -361,11 +361,11 @@ mod tests {
             },
             ClientMessage::GetSession {
                 id: "9".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
             },
             ClientMessage::ReadScrollback {
                 id: "9b".to_string(),
-                session_id: "s".to_string(),
+                session_id: SessionId::new("s"),
             },
             ClientMessage::DaemonStop {
                 id: "10".to_string(),
@@ -387,7 +387,7 @@ mod tests {
         let msg = DaemonMessage::SessionCreated {
             id: "req-001".to_string(),
             session: SessionInfo {
-                id: "myapp_feature-auth".to_string(),
+                id: crate::SessionId::new("myapp_feature-auth"),
                 working_directory: "/tmp/worktrees/feature-auth".to_string(),
                 command: "claude".to_string(),
                 status: crate::types::SessionStatus::Running,
@@ -411,14 +411,14 @@ mod tests {
     #[test]
     fn test_daemon_message_pty_output_roundtrip() {
         let msg = DaemonMessage::PtyOutput {
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
             data: "dG90YWwgNDgK".to_string(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"pty_output"#));
         let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
         if let DaemonMessage::PtyOutput { session_id, data } = parsed {
-            assert_eq!(session_id, "myapp_feature-auth");
+            assert_eq!(&*session_id, "myapp_feature-auth");
             assert_eq!(data, "dG90YWwgNDgK");
         } else {
             panic!("wrong variant");
@@ -495,7 +495,7 @@ mod tests {
     fn test_daemon_message_session_event_roundtrip() {
         let msg = DaemonMessage::SessionEvent {
             event: "stopped".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
             details: Some(serde_json::json!({"exit_code": 0})),
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -507,7 +507,7 @@ mod tests {
         } = parsed
         {
             assert_eq!(event, "stopped");
-            assert_eq!(session_id, "myapp_feature-auth");
+            assert_eq!(&*session_id, "myapp_feature-auth");
             assert!(details.is_some());
         } else {
             panic!("wrong variant");
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn test_daemon_message_pty_output_dropped_roundtrip() {
         let msg = DaemonMessage::PtyOutputDropped {
-            session_id: "test".to_string(),
+            session_id: SessionId::new("test"),
             bytes_dropped: 4096,
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -527,7 +527,7 @@ mod tests {
             bytes_dropped,
         } = parsed
         {
-            assert_eq!(session_id, "test");
+            assert_eq!(&*session_id, "test");
             assert_eq!(bytes_dropped, 4096);
         } else {
             panic!("wrong variant");
@@ -576,7 +576,7 @@ mod tests {
             ..
         } = parsed
         {
-            assert_eq!(session_id, "myapp_feature-auth");
+            assert_eq!(&*session_id, "myapp_feature-auth");
             assert_eq!(command, "claude");
             assert_eq!(args, vec!["--dangerously-skip-permissions"]);
         } else {

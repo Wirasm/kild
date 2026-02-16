@@ -4,7 +4,7 @@ use tracing::debug;
 
 use crate::git::errors::GitError;
 
-pub fn validate_branch_name(branch: &str) -> Result<String, GitError> {
+pub fn validate_branch_name(branch: &str) -> Result<kild_protocol::BranchName, GitError> {
     let trimmed = branch.trim();
 
     if trimmed.is_empty() {
@@ -25,7 +25,7 @@ pub fn validate_branch_name(branch: &str) -> Result<String, GitError> {
         });
     }
 
-    Ok(trimmed.to_string())
+    Ok(kild_protocol::BranchName::new(trimmed))
 }
 
 /// Validate a git argument to prevent injection.

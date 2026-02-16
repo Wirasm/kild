@@ -70,7 +70,7 @@ pub fn create_kild(
     // UI always creates with an agent — bare shell (AgentMode::BareShell) is CLI-only.
     dispatch_command(
         Command::CreateKild {
-            branch,
+            branch: branch.into(),
             agent_mode: kild_core::AgentMode::Agent(agent),
             note,
             project_path,
@@ -118,7 +118,13 @@ pub fn destroy_kild(branch: String, force: bool) -> Result<Vec<Event>, String> {
         force = force
     );
 
-    dispatch_command(Command::DestroyKild { branch, force }, "ui.destroy_kild")
+    dispatch_command(
+        Command::DestroyKild {
+            branch: branch.into(),
+            force,
+        },
+        "ui.destroy_kild",
+    )
 }
 
 /// Open a new agent terminal in an existing kild (additive - doesn't close existing terminals).
@@ -136,7 +142,7 @@ pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, St
 
     dispatch_command(
         Command::OpenKild {
-            branch,
+            branch: branch.into(),
             mode,
             runtime_mode: None,
             resume: false,
@@ -153,7 +159,12 @@ pub fn open_kild(branch: String, agent: Option<String>) -> Result<Vec<Event>, St
 pub fn stop_kild(branch: String) -> Result<Vec<Event>, String> {
     tracing::info!(event = "ui.stop_kild.started", branch = %branch);
 
-    dispatch_command(Command::StopKild { branch }, "ui.stop_kild")
+    dispatch_command(
+        Command::StopKild {
+            branch: branch.into(),
+        },
+        "ui.stop_kild",
+    )
 }
 
 // --- Project Management Actions (dispatch-based) ---
@@ -213,7 +224,7 @@ mod tests {
         displays
             .iter()
             .filter(|d| d.process_status == ProcessStatus::Stopped)
-            .map(|d| d.session.branch.clone())
+            .map(|d| d.session.branch.to_string())
             .collect()
     }
 
@@ -222,15 +233,15 @@ mod tests {
         displays
             .iter()
             .filter(|d| d.process_status == ProcessStatus::Running)
-            .map(|d| d.session.branch.clone())
+            .map(|d| d.session.branch.to_string())
             .collect()
     }
 
     fn make_session(id: &str, branch: &str) -> Session {
         Session::new(
-            id.to_string(),
-            "test-project".to_string(),
-            branch.to_string(),
+            id.into(),
+            "test-project".into(),
+            branch.into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,

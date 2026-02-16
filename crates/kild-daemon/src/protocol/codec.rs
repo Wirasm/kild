@@ -109,7 +109,7 @@ mod tests {
         };
         let msg2 = ClientMessage::ListSessions {
             id: "2".to_string(),
-            project_id: Some("myapp".to_string()),
+            project_id: Some("myapp".into()),
         };
 
         let mut buf: Vec<u8> = Vec::new();
@@ -134,7 +134,7 @@ mod tests {
         let msg = DaemonMessage::SessionCreated {
             id: "req-1".to_string(),
             session: SessionInfo {
-                id: "myapp_feature-auth".to_string(),
+                id: "myapp_feature-auth".into(),
                 working_directory: "/tmp/wt".to_string(),
                 command: "claude".to_string(),
                 status: kild_protocol::SessionStatus::Running,

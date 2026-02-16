@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use kild_protocol::{BranchName, SessionId};
 use serde::{Deserialize, Serialize};
 
 use crate::sessions::types::AgentStatus;
@@ -15,19 +16,25 @@ use crate::sessions::types::AgentStatus;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Event {
     /// A new kild session was created.
-    KildCreated { branch: String, session_id: String },
+    KildCreated {
+        branch: BranchName,
+        session_id: SessionId,
+    },
     /// A kild session was destroyed (worktree removed, session file deleted).
-    KildDestroyed { branch: String },
+    KildDestroyed { branch: BranchName },
     /// An additional agent terminal was opened in an existing kild.
-    KildOpened { branch: String, agent: String },
+    KildOpened { branch: BranchName, agent: String },
     /// The agent process in a kild was stopped (kild preserved).
-    KildStopped { branch: String },
+    KildStopped { branch: BranchName },
     /// A kild was completed (PR checked, branch cleaned, session destroyed).
-    KildCompleted { branch: String },
+    KildCompleted { branch: BranchName },
     /// Agent status was updated for a kild session.
-    AgentStatusUpdated { branch: String, status: AgentStatus },
+    AgentStatusUpdated {
+        branch: BranchName,
+        status: AgentStatus,
+    },
     /// PR status was refreshed for a kild session.
-    PrStatusRefreshed { branch: String },
+    PrStatusRefreshed { branch: BranchName },
     /// The session list was refreshed from disk.
     SessionsRefreshed,
 
@@ -46,8 +53,8 @@ mod tests {
     #[test]
     fn test_event_serde_roundtrip() {
         let event = Event::KildCreated {
-            branch: "my-feature".to_string(),
-            session_id: "abc-123".to_string(),
+            branch: "my-feature".into(),
+            session_id: "abc-123".into(),
         };
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: Event = serde_json::from_str(&json).unwrap();
@@ -58,28 +65,28 @@ mod tests {
     fn test_all_event_variants_serialize() {
         let events = vec![
             Event::KildCreated {
-                branch: "feature".to_string(),
-                session_id: "id-1".to_string(),
+                branch: "feature".into(),
+                session_id: "id-1".into(),
             },
             Event::KildDestroyed {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Event::KildOpened {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 agent: "claude".to_string(),
             },
             Event::KildStopped {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Event::KildCompleted {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Event::AgentStatusUpdated {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 status: AgentStatus::Working,
             },
             Event::PrStatusRefreshed {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Event::SessionsRefreshed,
             Event::ProjectAdded {
@@ -107,28 +114,28 @@ mod tests {
     fn test_event_deserialize_all_variants() {
         let events = vec![
             Event::KildCreated {
-                branch: "test".to_string(),
-                session_id: "id-2".to_string(),
+                branch: "test".into(),
+                session_id: "id-2".into(),
             },
             Event::KildDestroyed {
-                branch: "test".to_string(),
+                branch: "test".into(),
             },
             Event::KildOpened {
-                branch: "test".to_string(),
+                branch: "test".into(),
                 agent: "claude".to_string(),
             },
             Event::KildStopped {
-                branch: "test".to_string(),
+                branch: "test".into(),
             },
             Event::KildCompleted {
-                branch: "test".to_string(),
+                branch: "test".into(),
             },
             Event::AgentStatusUpdated {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 status: AgentStatus::Working,
             },
             Event::PrStatusRefreshed {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Event::SessionsRefreshed,
             Event::ProjectAdded {

@@ -84,7 +84,7 @@ pub(crate) fn handle_status_command(
     let label_width = 13; // "Port Range:  " is the longest label stem
     let mut rows: Vec<(&str, String)> = Vec::new();
 
-    rows.push(("Branch:", session.branch.clone()));
+    rows.push(("Branch:", session.branch.to_string()));
     rows.push(("Status:", format!("{:?}", session.status).to_lowercase()));
     if let Some(ref info) = status_info {
         rows.push(("Activity:", info.status.to_string()));
@@ -248,7 +248,7 @@ fn compute_overlapping_files(
         overlap_report
             .overlapping_files
             .iter()
-            .filter(|fo| fo.branches.contains(&session.branch))
+            .filter(|fo| fo.branches.iter().any(|b| b == &*session.branch))
             .map(|fo| fo.file.display().to_string())
             .collect()
     })

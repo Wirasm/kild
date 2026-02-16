@@ -113,7 +113,7 @@ impl SessionStore {
             Some(id) => self
                 .displays
                 .iter()
-                .filter(|d| d.session.project_id == id)
+                .filter(|d| &*d.session.project_id == id)
                 .collect(),
             None => self.displays.iter().collect(),
         }
@@ -135,7 +135,7 @@ impl SessionStore {
     pub fn kild_count_for_project(&self, project_id: &str) -> usize {
         self.displays
             .iter()
-            .filter(|d| d.session.project_id == project_id)
+            .filter(|d| &*d.session.project_id == project_id)
             .count()
     }
 
@@ -167,9 +167,9 @@ mod tests {
     #[test]
     fn test_process_status_from_session_no_pid() {
         let session = Session::new(
-            "test-id".to_string(),
-            "test-project".to_string(),
-            "test-branch".to_string(),
+            "test-id".into(),
+            "test-project".into(),
+            "test-branch".into(),
             PathBuf::from("/tmp/nonexistent-test-path"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -211,9 +211,9 @@ mod tests {
         )
         .unwrap();
         let session = Session::new(
-            "test-id".to_string(),
-            "test-project".to_string(),
-            "test-branch".to_string(),
+            "test-id".into(),
+            "test-project".into(),
+            "test-branch".into(),
             PathBuf::from("/tmp/nonexistent-test-path"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -279,9 +279,9 @@ mod tests {
         std::fs::write(path.join("test.txt"), "line1\nline2\nline3\n").unwrap();
 
         let session = Session::new(
-            "test".to_string(),
-            "test".to_string(),
-            "test".to_string(),
+            "test".into(),
+            "test".into(),
+            "test".into(),
             path.to_path_buf(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -351,9 +351,9 @@ mod tests {
 
         // Create a session with a PID that doesn't exist (should become Stopped)
         let session_with_dead_pid = Session::new(
-            "test-dead".to_string(),
-            "test-project".to_string(),
-            "dead-branch".to_string(),
+            "test-dead".into(),
+            "test-project".into(),
+            "dead-branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -371,9 +371,9 @@ mod tests {
 
         // Create a session with our own PID (should be Running)
         let session_with_live_pid = Session::new(
-            "test-live".to_string(),
-            "test-project".to_string(),
-            "live-branch".to_string(),
+            "test-live".into(),
+            "test-project".into(),
+            "live-branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -391,9 +391,9 @@ mod tests {
 
         // Create a session with no PID (should remain Stopped)
         let session_no_pid = Session::new(
-            "test-no-pid".to_string(),
-            "test-project".to_string(),
-            "no-pid-branch".to_string(),
+            "test-no-pid".into(),
+            "test-project".into(),
+            "no-pid-branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,

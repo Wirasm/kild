@@ -41,7 +41,7 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
     let project_id = naming::generate_project_id(repo_path);
 
     let project = ProjectInfo::new(
-        project_id.clone(),
+        project_id.to_string(),
         project_name.clone(),
         repo_path.to_path_buf(),
         remote_url.clone(),
@@ -49,7 +49,7 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
 
     info!(
         event = "core.git.project.detect_completed",
-        project_id = project_id,
+        project_id = %project_id,
         project_name = project_name,
         repo_path = %repo_path.display(),
         remote_url = remote_url.as_deref().unwrap_or("none")
@@ -100,7 +100,7 @@ pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
     let project_id = naming::generate_project_id(repo_path);
 
     let project = ProjectInfo::new(
-        project_id.clone(),
+        project_id.to_string(),
         project_name.clone(),
         repo_path.to_path_buf(),
         remote_url.clone(),
@@ -108,7 +108,7 @@ pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
 
     info!(
         event = "core.git.project.detect_at_completed",
-        project_id = project_id,
+        project_id = %project_id,
         project_name = project_name,
         repo_path = %repo_path.display(),
         remote_url = remote_url.as_deref().unwrap_or("none")
@@ -129,7 +129,7 @@ pub fn create_worktree(
     info!(
         event = "core.git.worktree.create_started",
         project_id = project.id,
-        branch = validated_branch,
+        branch = %validated_branch,
         repo_path = %project.path.display()
     );
 
@@ -142,7 +142,7 @@ pub fn create_worktree(
         error!(
             event = "core.git.worktree.create_failed",
             project_id = project.id,
-            branch = validated_branch,
+            branch = %validated_branch,
             worktree_path = %worktree_path.display(),
             error = "worktree already exists"
         );
@@ -232,7 +232,7 @@ pub fn create_worktree(
 
     let worktree_info = WorktreeInfo::new(
         worktree_path.clone(),
-        validated_branch.clone(),
+        validated_branch.to_string(),
         project.id.clone(),
     );
 
@@ -251,7 +251,7 @@ pub fn create_worktree(
         info!(
             event = "core.git.worktree.file_copy_started",
             project_id = project.id,
-            branch = validated_branch,
+            branch = %validated_branch,
             patterns = ?include_config.patterns
         );
 
@@ -261,7 +261,7 @@ pub fn create_worktree(
                     warn!(
                         event = "core.git.worktree.file_copy_completed_with_errors",
                         project_id = project.id,
-                        branch = validated_branch,
+                        branch = %validated_branch,
                         files_copied = copied_count,
                         files_failed = failed_count
                     );
@@ -269,7 +269,7 @@ pub fn create_worktree(
                     info!(
                         event = "core.git.worktree.file_copy_completed",
                         project_id = project.id,
-                        branch = validated_branch,
+                        branch = %validated_branch,
                         files_copied = copied_count
                     );
                 }
@@ -278,7 +278,7 @@ pub fn create_worktree(
                 warn!(
                     event = "core.git.worktree.file_copy_failed",
                     project_id = project.id,
-                    branch = validated_branch,
+                    branch = %validated_branch,
                     error = %e,
                     message = "File copying failed, but worktree creation succeeded"
                 );

@@ -50,7 +50,7 @@ pub fn render_dashboard(
         .iter()
         .map(|d| {
             terminal_tabs
-                .get(&d.session.id)
+                .get(&*d.session.id)
                 .map(|t| t.len())
                 .unwrap_or(0)
         })
@@ -141,12 +141,15 @@ fn render_card(
         ProcessStatus::Unknown => Status::Crashed,
     };
 
-    let branch = session.branch.clone();
+    let branch = session.branch.to_string();
     let agent = session.agent.clone();
     let note = session.note.clone();
     let created_at = session.created_at.clone();
-    let terminal_count = terminal_tabs.get(&session.id).map(|t| t.len()).unwrap_or(0);
-    let session_id = session.id.clone();
+    let terminal_count = terminal_tabs
+        .get(&*session.id)
+        .map(|t| t.len())
+        .unwrap_or(0);
+    let session_id = session.id.to_string();
 
     div()
         .id(SharedString::from(format!("dashboard-card-{}", ix)))

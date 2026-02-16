@@ -87,8 +87,8 @@ pub(crate) fn handle_create_command(
 
             info!(
                 event = "cli.create_completed",
-                session_id = session.id,
-                branch = session.branch
+                session_id = %session.id,
+                branch = %session.branch
             );
 
             Ok(())

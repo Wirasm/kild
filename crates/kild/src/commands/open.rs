@@ -68,7 +68,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             info!(
                 event = "cli.open_completed",
                 branch = branch,
-                session_id = session.id
+                session_id = %session.id
             );
             Ok(())
         }
@@ -122,22 +122,22 @@ fn handle_open_all(
 
                 info!(
                     event = "cli.open_completed",
-                    branch = s.branch,
-                    session_id = s.id
+                    branch = %s.branch,
+                    session_id = %s.id
                 );
                 let display_agent = s
                     .latest_agent()
                     .map_or(s.agent.clone(), |a| a.agent().to_string());
-                opened.push((s.branch, display_agent, s.runtime_mode.clone()));
+                opened.push((s.branch.to_string(), display_agent, s.runtime_mode.clone()));
             }
             Err(e) => {
                 error!(
                     event = "cli.open_failed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     error = %e
                 );
                 events::log_app_error(&e);
-                errors.push((session.branch, e.to_string()));
+                errors.push((session.branch.to_string(), e.to_string()));
             }
         }
     }

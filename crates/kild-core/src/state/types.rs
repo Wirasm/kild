@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use kild_protocol::BranchName;
 use serde::{Deserialize, Serialize};
 
 use crate::sessions::types::AgentStatus;
@@ -51,7 +52,7 @@ pub enum Command {
     /// Create a new kild session with a git worktree and agent.
     CreateKild {
         /// Branch name for the new kild (will be prefixed with `kild/`).
-        branch: String,
+        branch: BranchName,
         /// What agent to launch (default, specific, or bare shell).
         agent_mode: AgentMode,
         /// Optional note describing what this kild is for.
@@ -61,13 +62,13 @@ pub enum Command {
     },
     /// Destroy a kild session, removing worktree and session file.
     DestroyKild {
-        branch: String,
+        branch: BranchName,
         /// Bypass safety checks (uncommitted changes, unpushed commits).
         force: bool,
     },
     /// Open an additional agent terminal in an existing kild (does not replace the current agent).
     OpenKild {
-        branch: String,
+        branch: BranchName,
         /// What to launch: default agent, specific agent, or bare shell.
         mode: OpenMode,
         /// Runtime mode explicitly requested via CLI flags.
@@ -78,14 +79,17 @@ pub enum Command {
         resume: bool,
     },
     /// Stop the agent process in a kild without destroying it.
-    StopKild { branch: String },
+    StopKild { branch: BranchName },
     /// Complete a kild: check if PR was merged, delete remote branch if merged, destroy session.
     /// Always blocks on uncommitted changes (use `kild destroy --force` for forced removal).
-    CompleteKild { branch: String },
+    CompleteKild { branch: BranchName },
     /// Update agent status for a kild session.
-    UpdateAgentStatus { branch: String, status: AgentStatus },
+    UpdateAgentStatus {
+        branch: BranchName,
+        status: AgentStatus,
+    },
     /// Refresh PR status for a kild session from GitHub.
-    RefreshPrStatus { branch: String },
+    RefreshPrStatus { branch: BranchName },
     /// Refresh the session list from disk.
     RefreshSessions,
     /// Add a project to the project list. Name is derived from path if `None`.
@@ -117,7 +121,7 @@ mod tests {
     #[test]
     fn test_create_kild_with_bare_shell_serde() {
         let cmd = Command::CreateKild {
-            branch: "debug-session".to_string(),
+            branch: "debug-session".into(),
             agent_mode: AgentMode::BareShell,
             note: None,
             project_path: None,
@@ -130,7 +134,7 @@ mod tests {
     #[test]
     fn test_command_serde_roundtrip() {
         let cmd = Command::CreateKild {
-            branch: "my-feature".to_string(),
+            branch: "my-feature".into(),
             agent_mode: AgentMode::Agent("claude".to_string()),
             note: Some("Working on auth".to_string()),
             project_path: Some(PathBuf::from("/home/user/project")),
@@ -144,39 +148,39 @@ mod tests {
     fn test_all_command_variants_serialize() {
         let commands = vec![
             Command::CreateKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 agent_mode: AgentMode::Agent("claude".to_string()),
                 note: None,
                 project_path: None,
             },
             Command::DestroyKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 force: false,
             },
             Command::OpenKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: Some(RuntimeMode::Terminal),
                 resume: false,
             },
             Command::OpenKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
             },
             Command::StopKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Command::CompleteKild {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Command::UpdateAgentStatus {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 status: AgentStatus::Working,
             },
             Command::RefreshPrStatus {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Command::RefreshSessions,
             Command::AddProject {
@@ -204,39 +208,39 @@ mod tests {
     fn test_command_deserialize_all_variants() {
         let commands = vec![
             Command::CreateKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
                 agent_mode: AgentMode::Agent("kiro".to_string()),
                 note: Some("test note".to_string()),
                 project_path: Some(PathBuf::from("/tmp/project")),
             },
             Command::DestroyKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
                 force: true,
             },
             Command::OpenKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
                 mode: OpenMode::Agent("gemini".to_string()),
                 runtime_mode: Some(RuntimeMode::Terminal),
                 resume: false,
             },
             Command::OpenKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
                 mode: OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
             },
             Command::StopKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
             },
             Command::CompleteKild {
-                branch: "test".to_string(),
+                branch: "test".into(),
             },
             Command::UpdateAgentStatus {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
                 status: AgentStatus::Working,
             },
             Command::RefreshPrStatus {
-                branch: "feature".to_string(),
+                branch: "feature".into(),
             },
             Command::RefreshSessions,
             Command::AddProject {
@@ -259,7 +263,7 @@ mod tests {
     #[test]
     fn test_open_kild_with_resume_true_serde_roundtrip() {
         let cmd = Command::OpenKild {
-            branch: "feature-auth".to_string(),
+            branch: "feature-auth".into(),
             mode: OpenMode::DefaultAgent,
             runtime_mode: Some(RuntimeMode::Daemon),
             resume: true,

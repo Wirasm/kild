@@ -109,8 +109,8 @@ pub fn open_session(
 
     info!(
         event = "core.session.open_found",
-        session_id = session.id,
-        branch = session.branch
+        session_id = %session.id,
+        branch = %session.branch
     );
 
     // 2. Verify worktree still exists
@@ -435,7 +435,7 @@ pub fn open_session(
 
     info!(
         event = "core.session.open_completed",
-        session_id = session.id,
+        session_id = %session.id,
         agent_count = session.agent_count()
     );
 
@@ -663,9 +663,9 @@ mod tests {
         .unwrap();
 
         let session = Session::new(
-            "test-project_sid-lifecycle".to_string(),
-            "test-project".to_string(),
-            "sid-lifecycle".to_string(),
+            "test-project_sid-lifecycle".into(),
+            "test-project".into(),
+            "sid-lifecycle".into(),
             worktree_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -818,9 +818,9 @@ mod tests {
         fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
 
         let mut session = Session::new(
-            "test-project_runtime-persist".to_string(),
-            "test-project".to_string(),
-            "runtime-persist".to_string(),
+            "test-project_runtime-persist".into(),
+            "test-project".into(),
+            "runtime-persist".into(),
             worktree_dir,
             "claude".to_string(),
             SessionStatus::Active,

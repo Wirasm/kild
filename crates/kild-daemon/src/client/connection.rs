@@ -104,7 +104,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::CreateSession {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             working_directory: working_directory.to_string(),
             command: command.to_string(),
             args: args.to_vec(),
@@ -139,7 +139,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::Attach {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             rows,
             cols,
         };
@@ -154,7 +154,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::Detach {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
         };
 
         let response = self.request(&msg).await?;
@@ -172,7 +172,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::ResizePty {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             rows,
             cols,
         };
@@ -189,7 +189,7 @@ impl DaemonClient {
         let encoded = base64::engine::general_purpose::STANDARD.encode(data);
         let msg = ClientMessage::WriteStdin {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             data: encoded,
         };
 
@@ -203,7 +203,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::StopSession {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
         };
 
         let response = self.request(&msg).await?;
@@ -220,7 +220,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::DestroySession {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             force,
         };
 
@@ -237,7 +237,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::ListSessions {
             id,
-            project_id: project_id.map(String::from),
+            project_id: project_id.map(Into::into),
         };
 
         let response = self.request(&msg).await?;
@@ -257,7 +257,7 @@ impl DaemonClient {
         let id = self.next_id();
         let msg = ClientMessage::GetSession {
             id,
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
         };
 
         let response = self.request(&msg).await?;

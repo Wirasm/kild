@@ -75,14 +75,14 @@ async fn test_create_session_and_list() {
         .await
         .unwrap();
 
-    assert_eq!(session.id, "test-session");
+    assert_eq!(&*session.id, "test-session");
     assert_eq!(session.command, "/bin/sh");
     assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // List sessions
     let sessions = client.list_sessions(None).await.unwrap();
     assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].id, "test-session");
+    assert_eq!(&*sessions[0].id, "test-session");
 
     // Get specific session
     let info = client.get_session("test-session").await.unwrap();
@@ -520,7 +520,7 @@ async fn test_create_session_with_login_shell() {
         .await
         .unwrap();
 
-    assert_eq!(session.id, "shell-test");
+    assert_eq!(&*session.id, "shell-test");
     assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // Verify session is listed
@@ -578,7 +578,7 @@ async fn test_destroy_then_recreate_same_session_id() {
         )
         .await
         .unwrap();
-    assert_eq!(session.id, "reopen-test");
+    assert_eq!(&*session.id, "reopen-test");
     assert_eq!(session.status, kild_protocol::SessionStatus::Running);
 
     // Clean up

@@ -93,7 +93,7 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
                         event = "core.session.process_check_failed",
                         pid = pid,
                         agent = agent_proc.agent(),
-                        branch = &session.branch,
+                        branch = %session.branch,
                         error = %e
                     );
                     any_unknown = true;
@@ -118,7 +118,7 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
                         terminal_type = ?terminal_type,
                         window_id = window_id,
                         agent = agent_proc.agent(),
-                        branch = &session.branch,
+                        branch = %session.branch,
                         error = %e
                     );
                     any_unknown = true;
@@ -142,7 +142,7 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
                         event = "core.session.daemon_check_failed",
                         daemon_session_id = daemon_sid,
                         agent = agent_proc.agent(),
-                        branch = &session.branch,
+                        branch = %session.branch,
                         error = %e
                     );
                     any_unknown = true;
@@ -212,9 +212,9 @@ mod tests {
 
     fn make_session(worktree_path: PathBuf) -> Session {
         Session::new(
-            "test-id".to_string(),
-            "test-project".to_string(),
-            "test-branch".to_string(),
+            "test-id".into(),
+            "test-project".into(),
+            "test-branch".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,

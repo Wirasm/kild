@@ -5,8 +5,11 @@
 use crate::sessions::{errors::SessionError, types::*};
 use std::path::Path;
 
-pub fn generate_session_id(project_id: &str, branch: &str) -> String {
-    format!("{}/{}", project_id, branch)
+pub fn generate_session_id(
+    project_id: &kild_protocol::ProjectId,
+    branch: &kild_protocol::BranchName,
+) -> kild_protocol::SessionId {
+    kild_protocol::SessionId::new(format!("{}/{}", project_id, branch))
 }
 
 pub fn calculate_port_range(session_index: u32) -> (u16, u16) {
@@ -107,9 +110,9 @@ mod tests {
 
     fn create_session_with_ports(start: u16, end: u16) -> Session {
         Session::new(
-            format!("test/{}-{}", start, end),
-            "test".to_string(),
-            format!("branch-{}-{}", start, end),
+            format!("test/{}-{}", start, end).into(),
+            "test".into(),
+            format!("branch-{}-{}", start, end).into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -128,8 +131,10 @@ mod tests {
 
     #[test]
     fn test_generate_session_id() {
-        let id = generate_session_id("my-project", "feature-branch");
-        assert_eq!(id, "my-project/feature-branch");
+        let project_id: kild_protocol::ProjectId = "my-project".into();
+        let branch: kild_protocol::BranchName = "feature-branch".into();
+        let id = generate_session_id(&project_id, &branch);
+        assert_eq!(&*id, "my-project/feature-branch");
     }
 
     #[test]

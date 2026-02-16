@@ -256,7 +256,7 @@ mod tests {
             Some("a note".to_string()),
             PathBuf::from("/tmp/project"),
         );
-        assert_eq!(request.branch, "test-branch");
+        assert_eq!(&*request.branch, "test-branch");
         assert_eq!(request.agent_mode, AgentMode::Agent("claude".to_string()));
         assert_eq!(request.note, Some("a note".to_string()));
         assert_eq!(request.project_path, Some(PathBuf::from("/tmp/project")));
@@ -270,7 +270,7 @@ mod tests {
             AgentMode::Agent("claude".to_string()),
             None,
         );
-        assert_eq!(request.branch, "test-branch");
+        assert_eq!(&*request.branch, "test-branch");
         assert_eq!(request.agent_mode, AgentMode::Agent("claude".to_string()));
         assert_eq!(request.note, None);
         assert_eq!(request.project_path, None);
@@ -602,7 +602,7 @@ mod tests {
     fn test_dispatch_destroy_kild_not_found() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::DestroyKild {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
             force: false,
         });
         assert!(matches!(
@@ -615,7 +615,7 @@ mod tests {
     fn test_dispatch_stop_kild_not_found() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::StopKild {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
         });
         assert!(matches!(
             result,
@@ -627,7 +627,7 @@ mod tests {
     fn test_dispatch_complete_kild_not_found() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::CompleteKild {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
         });
         assert!(matches!(
             result,
@@ -640,7 +640,7 @@ mod tests {
         use crate::state::types::{OpenMode, RuntimeMode};
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::OpenKild {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
             mode: OpenMode::DefaultAgent,
             runtime_mode: Some(RuntimeMode::Terminal),
             resume: false,
@@ -656,7 +656,7 @@ mod tests {
         use crate::sessions::types::AgentStatus;
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::UpdateAgentStatus {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
             status: AgentStatus::Working,
         });
         assert!(matches!(
@@ -677,7 +677,7 @@ mod tests {
     fn test_dispatch_refresh_pr_status_not_found() {
         let mut store = CoreStore::new(KildConfig::default());
         let result = store.dispatch(Command::RefreshPrStatus {
-            branch: "nonexistent-branch".to_string(),
+            branch: "nonexistent-branch".into(),
         });
         assert!(matches!(
             result,

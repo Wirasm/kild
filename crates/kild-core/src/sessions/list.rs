@@ -34,7 +34,7 @@ pub fn get_session(name: &str) -> Result<Session, SessionError> {
     info!(
         event = "core.session.get_completed",
         name = name,
-        session_id = session.id
+        session_id = %session.id
     );
 
     Ok(session)
@@ -64,7 +64,7 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
         Err(e) => {
             warn!(
                 event = "core.session.daemon_status_sync_failed",
-                session_id = session.id,
+                session_id = %session.id,
                 daemon_session_id = daemon_sid,
                 error = %e,
                 "Failed to query daemon for session status"
@@ -83,7 +83,7 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
     // Daemon reports "stopped", session not found, or daemon not running — mark as Stopped.
     info!(
         event = "core.session.daemon_status_sync",
-        session_id = session.id,
+        session_id = %session.id,
         daemon_session_id = daemon_sid,
         daemon_status = ?status,
         "Syncing stale session status to Stopped"
@@ -109,7 +109,7 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
     ) {
         error!(
             event = "core.session.daemon_status_sync_save_failed",
-            session_id = session.id,
+            session_id = %session.id,
             error = %e,
             "Failed to persist synced status"
         );
@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn test_sync_daemon_skips_stopped_sessions() {
         let mut session = Session::new(
-            "test-project_sync-stopped".to_string(),
-            "test-project".to_string(),
-            "sync-stopped".to_string(),
+            "test-project_sync-stopped".into(),
+            "test-project".into(),
+            "sync-stopped".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Stopped,
@@ -187,9 +187,9 @@ mod tests {
         .unwrap();
 
         let mut session = Session::new(
-            "test-project_sync-terminal".to_string(),
-            "test-project".to_string(),
-            "sync-terminal".to_string(),
+            "test-project_sync-terminal".into(),
+            "test-project".into(),
+            "sync-terminal".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -214,9 +214,9 @@ mod tests {
     fn test_sync_daemon_skips_active_session_without_agents() {
         // Active session with no agents at all (empty agents vec)
         let mut session = Session::new(
-            "test-project_sync-no-agents".to_string(),
-            "test-project".to_string(),
-            "sync-no-agents".to_string(),
+            "test-project_sync-no-agents".into(),
+            "test-project".into(),
+            "sync-no-agents".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,

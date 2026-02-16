@@ -12,7 +12,9 @@ use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
-use kild_protocol::{ClientMessage, DaemonMessage, ErrorCode, SessionInfo, SessionStatus};
+use kild_protocol::{
+    ClientMessage, DaemonMessage, ErrorCode, SessionId, SessionInfo, SessionStatus,
+};
 use smol::Async;
 use smol::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use thiserror::Error;
@@ -247,7 +249,7 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
     let mut stream = connect_to_daemon().await?;
     let request = ClientMessage::GetSession {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
     };
     send_message(&mut stream, &request).await?;
 
@@ -295,7 +297,7 @@ pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientErro
     let mut stream = connect_to_daemon().await?;
     let request = ClientMessage::StopSession {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
     };
     send_message(&mut stream, &request).await?;
 
@@ -335,7 +337,7 @@ pub async fn create_session_async(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     let request = ClientMessage::CreateSession {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
         working_directory: working_directory.to_string(),
         command: shell,
         args: vec![],
@@ -353,9 +355,9 @@ pub async fn create_session_async(
         DaemonMessage::SessionCreated { session, .. } => {
             info!(
                 event = "ui.daemon.create_session_completed",
-                daemon_session_id = session.id
+                daemon_session_id = %session.id
             );
-            Ok(session.id)
+            Ok(session.id.into_inner())
         }
         DaemonMessage::Error { code, message, .. } => Err(DaemonClientError::DaemonError {
             code: code.to_string(),
@@ -409,7 +411,7 @@ pub async fn connect_for_attach(
     let mut reader_stream = connect_to_daemon().await?;
     let attach_request = ClientMessage::Attach {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
         rows,
         cols,
     };
@@ -459,7 +461,7 @@ pub async fn send_write_stdin(
     let encoded = base64::engine::general_purpose::STANDARD.encode(data);
     let msg = ClientMessage::WriteStdin {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
         data: encoded,
     };
     send_message(writer, &msg).await
@@ -474,7 +476,7 @@ pub async fn send_resize(
 ) -> Result<(), DaemonClientError> {
     let msg = ClientMessage::ResizePty {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
         rows,
         cols,
     };
@@ -488,7 +490,7 @@ pub async fn send_detach(
 ) -> Result<(), DaemonClientError> {
     let msg = ClientMessage::Detach {
         id: next_request_id(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
     };
     send_message(writer, &msg).await
 }
@@ -497,7 +499,7 @@ pub async fn send_detach(
 mod tests {
     use super::*;
     use base64::Engine;
-    use kild_protocol::{ClientMessage, DaemonMessage};
+    use kild_protocol::{ClientMessage, DaemonMessage, SessionId};
 
     #[test]
     fn test_next_request_id_increments() {
@@ -571,7 +573,7 @@ mod tests {
         let json = r#"{"type":"pty_output","session_id":"test","data":"aGVsbG8="}"#;
         let msg: DaemonMessage = serde_json::from_str(json).unwrap();
         if let DaemonMessage::PtyOutput { data, session_id } = msg {
-            assert_eq!(session_id, "test");
+            assert_eq!(&*session_id, "test");
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(&data)
                 .unwrap();
@@ -599,7 +601,7 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(data);
         let msg = ClientMessage::WriteStdin {
             id: "test".to_string(),
-            session_id: "sess".to_string(),
+            session_id: SessionId::new("sess"),
             data: encoded.clone(),
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -619,7 +621,7 @@ mod tests {
     fn test_get_session_message_roundtrip() {
         let msg = ClientMessage::GetSession {
             id: "ui-42".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"get_session\""));
@@ -631,7 +633,7 @@ mod tests {
     fn test_stop_session_message_roundtrip() {
         let msg = ClientMessage::StopSession {
             id: "ui-43".to_string(),
-            session_id: "myapp_feature-auth".to_string(),
+            session_id: SessionId::new("myapp_feature-auth"),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"stop_session\""));
@@ -644,7 +646,7 @@ mod tests {
         let json = r#"{"type":"session_info","id":"req-1","session":{"id":"test-sess","working_directory":"/tmp","command":"bash","status":"running","created_at":"2026-02-12T00:00:00Z"}}"#;
         let msg: DaemonMessage = serde_json::from_str(json).unwrap();
         if let DaemonMessage::SessionInfo { session, .. } = msg {
-            assert_eq!(session.id, "test-sess");
+            assert_eq!(&*session.id, "test-sess");
             assert_eq!(session.status, SessionStatus::Running);
         } else {
             panic!("expected SessionInfo");

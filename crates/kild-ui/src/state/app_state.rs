@@ -151,10 +151,10 @@ impl AppState {
     }
 
     /// Clear selection if the currently selected kild matches the given branch.
-    fn clear_selection_if_matches(&mut self, branch: &str) {
+    fn clear_selection_if_matches(&mut self, branch: &kild_core::BranchName) {
         if self
             .selected_kild()
-            .is_some_and(|s| s.session.branch == branch)
+            .is_some_and(|s| s.session.branch == *branch)
         {
             self.clear_selection();
         }
@@ -230,7 +230,7 @@ impl AppState {
     pub fn active_project_id(&self) -> Option<String> {
         self.projects
             .active_path()
-            .map(kild_core::projects::generate_project_id)
+            .map(|p| kild_core::projects::generate_project_id(p).to_string())
     }
 
     /// Get displays filtered by active project.
@@ -261,7 +261,12 @@ impl AppState {
     pub fn selected_kild(&self) -> Option<&SessionInfo> {
         let id = self.selection.id()?;
 
-        match self.sessions.displays().iter().find(|d| d.session.id == id) {
+        match self
+            .sessions
+            .displays()
+            .iter()
+            .find(|d| &*d.session.id == id)
+        {
             Some(kild) => Some(kild),
             None => {
                 tracing::debug!(
@@ -496,7 +501,7 @@ impl Default for AppState {
 mod tests {
     use super::*;
     use kild_core::sessions::types::SessionStatus;
-    use kild_core::{Event, GitStatus, ProcessStatus, Session};
+    use kild_core::{BranchName, Event, GitStatus, ProcessStatus, Session};
     use std::path::PathBuf;
 
     #[test]
@@ -594,9 +599,9 @@ mod tests {
     fn test_filtered_displays_no_active_project() {
         let make_session = |id: &str, project_id: &str| {
             Session::new(
-                id.to_string(),
-                project_id.to_string(),
-                format!("branch-{}", id),
+                id.into(),
+                project_id.into(),
+                BranchName::new(format!("branch-{}", id)),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -644,9 +649,9 @@ mod tests {
 
         let make_session = |id: &str, project_id: &str| {
             Session::new(
-                id.to_string(),
-                project_id.to_string(),
-                format!("branch-{}", id),
+                id.into(),
+                project_id.into(),
+                BranchName::new(format!("branch-{}", id)),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -706,9 +711,9 @@ mod tests {
     fn test_filtered_displays_returns_empty_when_no_matching_project() {
         let make_session = |id: &str, project_id: &str| {
             Session::new(
-                id.to_string(),
-                project_id.to_string(),
-                format!("branch-{}", id),
+                id.into(),
+                project_id.into(),
+                BranchName::new(format!("branch-{}", id)),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -750,9 +755,9 @@ mod tests {
     fn test_selected_kild_returns_none_when_kild_removed_after_refresh() {
         let make_session = |id: &str| {
             Session::new(
-                id.to_string(),
-                "test-project".to_string(),
-                format!("branch-{}", id),
+                id.into(),
+                "test-project".into(),
+                BranchName::new(format!("branch-{}", id)),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -796,9 +801,9 @@ mod tests {
     fn test_selected_kild_persists_after_refresh_when_kild_still_exists() {
         let make_session = |id: &str| {
             Session::new(
-                id.to_string(),
-                "test-project".to_string(),
-                format!("branch-{}", id),
+                id.into(),
+                "test-project".into(),
+                BranchName::new(format!("branch-{}", id)),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -838,7 +843,7 @@ mod tests {
         // Selection should persist
         let selected = state.selected_kild();
         assert!(selected.is_some());
-        assert_eq!(selected.unwrap().session.id, "test-id");
+        assert_eq!(&*selected.unwrap().session.id, "test-id");
     }
 
     #[test]
@@ -860,9 +865,9 @@ mod tests {
     fn test_destroy_should_clear_selection_when_selected_kild_destroyed() {
         let make_session = |id: &str, branch: &str| {
             Session::new(
-                id.to_string(),
-                "test-project".to_string(),
-                branch.to_string(),
+                id.into(),
+                "test-project".into(),
+                branch.into(),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -901,14 +906,14 @@ mod tests {
         let destroyed_branch = "branch-1";
         if state
             .selected_kild()
-            .is_some_and(|s| s.session.branch == destroyed_branch)
+            .is_some_and(|s| &*s.session.branch == destroyed_branch)
         {
             state.clear_selection();
         }
         state
             .sessions
             .displays_mut()
-            .retain(|d| d.session.branch != destroyed_branch);
+            .retain(|d| &*d.session.branch != destroyed_branch);
 
         // Selection should be cleared
         assert!(
@@ -921,9 +926,9 @@ mod tests {
     fn test_destroy_preserves_selection_when_different_kild_destroyed() {
         let make_session = |id: &str, branch: &str| {
             Session::new(
-                id.to_string(),
-                "test-project".to_string(),
-                branch.to_string(),
+                id.into(),
+                "test-project".into(),
+                branch.into(),
                 PathBuf::from("/tmp/test"),
                 "claude".to_string(),
                 SessionStatus::Active,
@@ -961,14 +966,14 @@ mod tests {
         let destroyed_branch = "branch-2";
         if state
             .selected_kild()
-            .is_some_and(|s| s.session.branch == destroyed_branch)
+            .is_some_and(|s| &*s.session.branch == destroyed_branch)
         {
             state.clear_selection();
         }
         state
             .sessions
             .displays_mut()
-            .retain(|d| d.session.branch != destroyed_branch);
+            .retain(|d| &*d.session.branch != destroyed_branch);
 
         // Selection of branch-1 should persist
         assert_eq!(
@@ -983,9 +988,9 @@ mod tests {
 
     fn make_session_for_event_test(id: &str, branch: &str) -> Session {
         Session::new(
-            id.to_string(),
-            "test-project".to_string(),
-            branch.to_string(),
+            id.into(),
+            "test-project".into(),
+            branch.into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1019,8 +1024,8 @@ mod tests {
         state.set_dialog(DialogState::open_create());
 
         state.apply_events(&[Event::KildCreated {
-            branch: "test-branch".to_string(),
-            session_id: "test-id".to_string(),
+            branch: "test-branch".into(),
+            session_id: "test-id".into(),
         }]);
 
         assert!(matches!(state.dialog(), DialogState::None));
@@ -1039,7 +1044,7 @@ mod tests {
         state.set_dialog(DialogState::open_confirm("branch-1".to_string(), None));
 
         state.apply_events(&[Event::KildDestroyed {
-            branch: "branch-1".to_string(),
+            branch: "branch-1".into(),
         }]);
 
         assert!(!state.has_selection());
@@ -1066,7 +1071,7 @@ mod tests {
         state.selection.select("id-1".to_string());
 
         state.apply_events(&[Event::KildDestroyed {
-            branch: "branch-2".to_string(),
+            branch: "branch-2".into(),
         }]);
 
         // Selection of branch-1 should be preserved
@@ -1087,7 +1092,7 @@ mod tests {
         state.set_dialog(DialogState::open_create());
 
         state.apply_events(&[Event::KildOpened {
-            branch: "branch-1".to_string(),
+            branch: "branch-1".into(),
             agent: "claude".to_string(),
         }]);
 
@@ -1109,7 +1114,7 @@ mod tests {
         state.set_dialog(DialogState::open_create());
 
         state.apply_events(&[Event::KildStopped {
-            branch: "branch-1".to_string(),
+            branch: "branch-1".into(),
         }]);
 
         assert!(state.dialog().is_create());
@@ -1129,7 +1134,7 @@ mod tests {
         state.selection.select("id-1".to_string());
 
         state.apply_events(&[Event::KildCompleted {
-            branch: "branch-1".to_string(),
+            branch: "branch-1".into(),
         }]);
 
         assert!(!state.has_selection());

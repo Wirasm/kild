@@ -108,8 +108,8 @@ pub fn load_sessions_from_files(
             tracing::warn!(
                 event = "core.session.load_legacy_no_agents",
                 file = %path.display(),
-                session_id = session.id,
-                branch = session.branch,
+                session_id = %session.id,
+                branch = %session.branch,
                 "Active session has no tracked agents (legacy format) — operations may be degraded"
             );
         }
@@ -150,7 +150,7 @@ pub fn find_session_by_name(
 
     // Find session by branch name (the "name" parameter refers to branch name)
     for session in sessions {
-        if session.branch == name {
+        if &*session.branch == name {
             return Ok(Some(session));
         }
     }
@@ -431,9 +431,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -478,9 +478,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/atomic".to_string(),
-            "test".to_string(),
-            "atomic".to_string(),
+            "test/atomic".into(),
+            "test".into(),
+            "atomic".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -527,9 +527,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/atomic-behavior".to_string(),
-            "test".to_string(),
-            "atomic-behavior".to_string(),
+            "test/atomic-behavior".into(),
+            "test".into(),
+            "atomic-behavior".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -579,9 +579,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/cleanup".to_string(),
-            "test".to_string(),
-            "cleanup".to_string(),
+            "test/cleanup".into(),
+            "test".into(),
+            "cleanup".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -636,9 +636,9 @@ mod tests {
         std::fs::create_dir_all(&worktree2).unwrap();
 
         let session1 = Session::new(
-            "test/branch1".to_string(),
-            "test".to_string(),
-            "branch1".to_string(),
+            "test/branch1".into(),
+            "test".into(),
+            "branch1".into(),
             worktree1,
             "claude".to_string(),
             SessionStatus::Active,
@@ -655,9 +655,9 @@ mod tests {
         );
 
         let session2 = Session::new(
-            "test/branch2".to_string(),
-            "test".to_string(),
-            "branch2".to_string(),
+            "test/branch2".into(),
+            "test".into(),
+            "branch2".into(),
             worktree2,
             "kiro".to_string(),
             SessionStatus::Stopped,
@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(skipped, 0);
 
         // Verify sessions (order might vary)
-        let ids: Vec<String> = loaded_sessions.iter().map(|s| s.id.clone()).collect();
+        let ids: Vec<String> = loaded_sessions.iter().map(|s| s.id.to_string()).collect();
         assert!(ids.contains(&"test/branch1".to_string()));
         assert!(ids.contains(&"test/branch2".to_string()));
 
@@ -716,9 +716,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/feature-branch".to_string(),
-            "test".to_string(),
-            "feature-branch".to_string(),
+            "test/feature-branch".into(),
+            "test".into(),
+            "feature-branch".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -740,7 +740,7 @@ mod tests {
         // Find by branch name
         let found = find_session_by_name(&temp_dir, "feature-branch").unwrap();
         assert!(found.is_some());
-        assert_eq!(found.unwrap().id, "test/feature-branch");
+        assert_eq!(&*found.unwrap().id, "test/feature-branch");
 
         // Try to find non-existent session
         let not_found = find_session_by_name(&temp_dir, "non-existent").unwrap();
@@ -763,9 +763,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -811,9 +811,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_path).unwrap();
 
         let valid_session = Session::new(
-            "test/valid".to_string(),
-            "test".to_string(),
-            "valid".to_string(),
+            "test/valid".into(),
+            "test".into(),
+            "valid".into(),
             worktree_path,
             "claude".to_string(),
             SessionStatus::Active,
@@ -845,7 +845,7 @@ mod tests {
         // Load sessions - should only return the valid one
         let (sessions, skipped) = load_sessions_from_files(&temp_dir).unwrap();
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].id, "test/valid");
+        assert_eq!(&*sessions[0].id, "test/valid");
         assert_eq!(skipped, 2); // invalid JSON + invalid structure
 
         // Clean up
@@ -867,9 +867,9 @@ mod tests {
         let nonexistent_worktree = temp_dir.join("worktree_that_does_not_exist");
 
         let session_missing_worktree = Session::new(
-            "test/orphaned".to_string(),
-            "test".to_string(),
-            "orphaned".to_string(),
+            "test/orphaned".into(),
+            "test".into(),
+            "orphaned".into(),
             nonexistent_worktree.clone(),
             "claude".to_string(),
             SessionStatus::Stopped,
@@ -896,8 +896,8 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(skipped, 0);
-        assert_eq!(sessions[0].id, "test/orphaned");
-        assert_eq!(sessions[0].branch, "orphaned");
+        assert_eq!(&*sessions[0].id, "test/orphaned");
+        assert_eq!(&*sessions[0].branch, "orphaned");
         assert!(!sessions[0].is_worktree_valid());
 
         // Clean up
@@ -925,9 +925,9 @@ mod tests {
 
         // Session 1: valid worktree
         let session_valid = Session::new(
-            "test/valid-session".to_string(),
-            "test".to_string(),
-            "valid-session".to_string(),
+            "test/valid-session".into(),
+            "test".into(),
+            "valid-session".into(),
             valid_worktree.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -945,9 +945,9 @@ mod tests {
 
         // Session 2: missing worktree
         let session_missing = Session::new(
-            "test/missing-session".to_string(),
-            "test".to_string(),
-            "missing-session".to_string(),
+            "test/missing-session".into(),
+            "test".into(),
+            "missing-session".into(),
             missing_worktree.clone(),
             "claude".to_string(),
             SessionStatus::Stopped,
@@ -991,11 +991,11 @@ mod tests {
         // Find each session and verify is_worktree_valid()
         let valid = sessions
             .iter()
-            .find(|s| s.branch == "valid-session")
+            .find(|s| &*s.branch == "valid-session")
             .expect("Valid session should be loaded");
         let missing = sessions
             .iter()
-            .find(|s| s.branch == "missing-session")
+            .find(|s| &*s.branch == "missing-session")
             .expect("Missing session should be loaded");
 
         assert!(
@@ -1380,9 +1380,9 @@ mod tests {
         .unwrap();
 
         let session = Session::new(
-            "proj/feat".to_string(),
-            "proj".to_string(),
-            "feat".to_string(),
+            "proj/feat".into(),
+            "proj".into(),
+            "feat".into(),
             worktree_dir,
             "claude".to_string(),
             SessionStatus::Active,
@@ -1442,9 +1442,9 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let session = Session::new(
-            "my-project/deep/nested".to_string(),
-            "my-project".to_string(),
-            "deep-nested".to_string(),
+            "my-project/deep/nested".into(),
+            "my-project".into(),
+            "deep-nested".into(),
             worktree_dir,
             "claude".to_string(),
             SessionStatus::Active,
@@ -1466,6 +1466,6 @@ mod tests {
         assert!(expected_file.exists());
 
         let loaded = load_session_from_file("deep-nested", sessions_dir).unwrap();
-        assert_eq!(loaded.id, "my-project/deep/nested");
+        assert_eq!(&*loaded.id, "my-project/deep/nested");
     }
 }

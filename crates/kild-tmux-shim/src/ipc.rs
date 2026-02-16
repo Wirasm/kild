@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use kild_paths::KildPaths;
-use kild_protocol::{ClientMessage, DaemonMessage};
+use kild_protocol::{ClientMessage, DaemonMessage, SessionId};
 use tracing::debug;
 
 use crate::errors::ShimError;
@@ -90,7 +90,7 @@ pub fn create_session(
 
     let request = ClientMessage::CreateSession {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::new(session_id),
         working_directory: working_directory.to_string(),
         command: command.to_string(),
         args: args.to_vec(),
@@ -104,7 +104,7 @@ pub fn create_session(
     let response = send_request(stream, &request, "create_session")?;
 
     let daemon_session_id = match response {
-        DaemonMessage::SessionCreated { session, .. } => session.id,
+        DaemonMessage::SessionCreated { session, .. } => session.id.into_inner(),
         _ => {
             return Err(ShimError::ipc(
                 "create_session: expected SessionCreated response",
@@ -131,7 +131,7 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
 
     let request = ClientMessage::WriteStdin {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::new(session_id),
         data: encoded,
     };
 
@@ -154,7 +154,7 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
 
     let request = ClientMessage::DestroySession {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::new(session_id),
         force,
     };
 
@@ -176,7 +176,7 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
 
     let request = ClientMessage::ReadScrollback {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::new(session_id),
     };
 
     let stream = connect()?;
@@ -213,7 +213,7 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
 
     let request = ClientMessage::ResizePty {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::new(session_id),
         rows,
         cols,
     };
@@ -475,7 +475,7 @@ mod tests {
 
         let request = ClientMessage::ReadScrollback {
             id: "test".to_string(),
-            session_id: "test-session".to_string(),
+            session_id: SessionId::new("test-session"),
         };
         let response = send_request(stream, &request, "read_scrollback").unwrap();
 

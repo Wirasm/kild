@@ -91,7 +91,7 @@ fn enrich_session_with_metrics(session: &sessions::types::Session) -> KildHealth
                             event = "core.health.daemon_status_check_failed",
                             daemon_session_id = daemon_sid,
                             agent = agent.agent(),
-                            branch = &session.branch,
+                            branch = %session.branch,
                             error = %e,
                         );
                         // Treat unexpected errors as running to avoid false Crashed

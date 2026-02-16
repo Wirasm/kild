@@ -151,7 +151,7 @@ async fn dispatch_message(
                 let resize_failed = if let Err(e) = mgr.resize_pty(&session_id, rows, cols) {
                     warn!(
                         event = "daemon.connection.resize_failed",
-                        session_id = session_id,
+                        session_id = %session_id,
                         rows = rows,
                         cols = cols,
                         error = %e,
@@ -179,7 +179,7 @@ async fn dispatch_message(
                     None => {
                         warn!(
                             event = "daemon.connection.scrollback_not_found",
-                            session_id = session_id,
+                            session_id = %session_id,
                             "Session not found during scrollback fetch",
                         );
                         Vec::new()
@@ -198,7 +198,7 @@ async fn dispatch_message(
                 if let Err(e) = write_message(&mut *w, &DaemonMessage::Ack { id }).await {
                     warn!(
                         event = "daemon.connection.ack_write_failed",
-                        session_id = session_id,
+                        session_id = %session_id,
                         client_id = client_id,
                         error = %e,
                     );
@@ -217,7 +217,7 @@ async fn dispatch_message(
                     if let Err(e) = write_message(&mut *w, &resize_warning).await {
                         warn!(
                             event = "daemon.connection.resize_warning_write_failed",
-                            session_id = session_id,
+                            session_id = %session_id,
                             client_id = client_id,
                             error = %e,
                         );
@@ -234,7 +234,7 @@ async fn dispatch_message(
                     if let Err(e) = write_message(&mut *w, &scrollback_msg).await {
                         warn!(
                             event = "daemon.connection.scrollback_write_failed",
-                            session_id = session_id,
+                            session_id = %session_id,
                             client_id = client_id,
                             error = %e,
                         );
@@ -362,7 +362,7 @@ async fn dispatch_message(
         ClientMessage::ReadScrollback { id, session_id } => {
             info!(
                 event = "daemon.connection.read_scrollback",
-                session_id = session_id
+                session_id = %session_id
             );
             let mgr = session_manager.lock().await;
             match mgr.scrollback_contents(&session_id) {
@@ -421,7 +421,7 @@ async fn stream_pty_output(
                     Ok(data) => {
                         let encoded = engine.encode(&data);
                         let msg = DaemonMessage::PtyOutput {
-                            session_id: session_id.to_string(),
+                            session_id: session_id.into(),
                             data: encoded,
                         };
                         let mut w = writer.lock().await;
@@ -436,7 +436,7 @@ async fn stream_pty_output(
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         let msg = DaemonMessage::PtyOutputDropped {
-                            session_id: session_id.to_string(),
+                            session_id: session_id.into(),
                             bytes_dropped: n as usize,
                         };
                         let mut w = writer.lock().await;

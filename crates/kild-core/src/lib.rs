@@ -31,6 +31,9 @@ pub mod sessions;
 pub mod state;
 pub mod terminal;
 
+// Re-export newtypes from kild-protocol
+pub use kild_protocol::{BranchName, ProjectId, SessionId};
+
 // Re-export commonly used types at crate root for convenience
 pub use config::KildConfig;
 pub use editor::{EditorBackend, EditorError, EditorType};

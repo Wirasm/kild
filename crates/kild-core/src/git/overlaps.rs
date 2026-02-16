@@ -88,7 +88,7 @@ pub fn collect_file_overlaps(
             Err(e) => {
                 warn!(event = "core.git.overlaps.repo_open_failed", branch = &*session.branch, error = %e);
                 errors.push((
-                    session.branch.clone(),
+                    session.branch.to_string(),
                     format!(
                         "Failed to open repository at {}: {}",
                         session.worktree_path.display(),
@@ -108,7 +108,7 @@ pub fn collect_file_overlaps(
                     branch = &*kild_branch
                 );
                 errors.push((
-                    session.branch.clone(),
+                    session.branch.to_string(),
                     format!(
                         "Branch '{}' not found (checked local and origin remote)",
                         kild_branch
@@ -126,7 +126,7 @@ pub fn collect_file_overlaps(
                     base = base_branch
                 );
                 errors.push((
-                    session.branch.clone(),
+                    session.branch.to_string(),
                     format!(
                         "Base branch '{}' not found (checked local and origin remote)",
                         base_branch
@@ -144,7 +144,7 @@ pub fn collect_file_overlaps(
                     branch = &*session.branch
                 );
                 errors.push((
-                    session.branch.clone(),
+                    session.branch.to_string(),
                     format!(
                         "No common ancestor with base branch '{}' (branch may be orphaned)",
                         base_branch
@@ -156,10 +156,10 @@ pub fn collect_file_overlaps(
 
         match get_changed_files(&repo, branch_oid, merge_base) {
             Ok(files) => {
-                files_by_branch.insert(session.branch.clone(), files);
+                files_by_branch.insert(session.branch.to_string(), files);
             }
             Err(detail) => {
-                errors.push((session.branch.clone(), detail));
+                errors.push((session.branch.to_string(), detail));
             }
         }
     }

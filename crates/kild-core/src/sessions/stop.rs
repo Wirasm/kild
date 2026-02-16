@@ -22,8 +22,8 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.stop_found",
-        session_id = session.id,
-        branch = session.branch
+        session_id = %session.id,
+        branch = %session.branch
     );
 
     // 2. Close all terminal windows and kill all processes
@@ -31,8 +31,8 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         if !session.has_agents() {
             warn!(
                 event = "core.session.stop_no_agents",
-                session_id = session.id,
-                branch = session.branch,
+                session_id = %session.id,
+                branch = %session.branch,
                 "Session has no tracked agents — skipping process/terminal cleanup"
             );
         }
@@ -160,7 +160,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
         info!(
             event = "core.session.runtime_mode_inferred",
-            session_id = session.id,
+            session_id = %session.id,
             mode = ?session.runtime_mode,
             "Inferred runtime_mode from agent metadata"
         );
@@ -179,7 +179,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.stop_completed",
-        session_id = session.id
+        session_id = %session.id
     );
 
     Ok(())
@@ -233,9 +233,9 @@ mod tests {
         .unwrap();
 
         let session = Session::new(
-            "test-project_infer-daemon".to_string(),
-            "test-project".to_string(),
-            "infer-daemon".to_string(),
+            "test-project_infer-daemon".into(),
+            "test-project".into(),
+            "infer-daemon".into(),
             worktree_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -326,9 +326,9 @@ mod tests {
         .unwrap();
 
         let session = Session::new(
-            "test-project_infer-terminal".to_string(),
-            "test-project".to_string(),
-            "infer-terminal".to_string(),
+            "test-project_infer-terminal".into(),
+            "test-project".into(),
+            "infer-terminal".into(),
             worktree_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -416,9 +416,9 @@ mod tests {
         .unwrap();
 
         let session = Session::new(
-            "test-project_preserve-mode".to_string(),
-            "test-project".to_string(),
-            "preserve-mode".to_string(),
+            "test-project_preserve-mode".into(),
+            "test-project".into(),
+            "preserve-mode".into(),
             worktree_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -496,9 +496,9 @@ mod tests {
         )
         .unwrap();
         let session = Session::new(
-            "test-project_stop-test".to_string(),
-            "test-project".to_string(),
-            "stop-test".to_string(),
+            "test-project_stop-test".into(),
+            "test-project".into(),
+            "stop-test".into(),
             worktree_dir.clone(),
             "test-agent".to_string(),
             SessionStatus::Active,
@@ -570,9 +570,9 @@ mod tests {
 
         // Create a session
         let session = Session::new(
-            "test-project_sidecar-test".to_string(),
-            "test-project".to_string(),
-            "sidecar-test".to_string(),
+            "test-project_sidecar-test".into(),
+            "test-project".into(),
+            "sidecar-test".into(),
             worktree_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,

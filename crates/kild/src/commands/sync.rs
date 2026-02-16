@@ -134,21 +134,21 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
                 println!("{}: rebased onto {}", session.branch, base_branch);
                 info!(
                     event = "cli.sync_completed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     base = base_branch
                 );
-                synced.push(session.branch.clone());
+                synced.push(session.branch.to_string());
             }
             Err(e) => {
                 eprintln!("{}: {}", session.branch, e);
                 error!(
                     event = "cli.sync_failed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     base = base_branch,
                     path = %session.worktree_path.display(),
                     error = %e
                 );
-                errors.push((session.branch.clone(), e.to_string()));
+                errors.push((session.branch.to_string(), e.to_string()));
             }
         }
     }

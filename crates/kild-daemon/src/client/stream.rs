@@ -29,7 +29,7 @@ mod tests {
     #[test]
     fn test_decode_pty_output() {
         let msg = DaemonMessage::PtyOutput {
-            session_id: "test".to_string(),
+            session_id: "test".into(),
             data: base64::engine::general_purpose::STANDARD.encode(b"hello world"),
         };
 
@@ -50,7 +50,7 @@ mod tests {
     #[test]
     fn test_decode_invalid_base64() {
         let msg = DaemonMessage::PtyOutput {
-            session_id: "test".to_string(),
+            session_id: "test".into(),
             data: "not-valid-base64!!!".to_string(),
         };
 

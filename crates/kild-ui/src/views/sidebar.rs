@@ -102,11 +102,11 @@ pub fn render_sidebar(
                     for (ix, display) in active_kilds.iter().enumerate() {
                         let session_id = display.session.id.clone();
                         let branch = display.session.branch.clone();
-                        let is_selected = selected_id.as_deref() == Some(&session_id);
-                        let session_id_for_click = session_id.clone();
+                        let is_selected = selected_id.as_deref() == Some(&*session_id);
+                        let session_id_for_click = session_id.to_string();
                         let time_meta = format_relative_time(&display.session.created_at);
 
-                        let tabs_for_session = terminal_tabs.get(&session_id);
+                        let tabs_for_session = terminal_tabs.get(&*session_id);
                         let tab_items = render_terminal_items(
                             &session_id,
                             tabs_for_session,
@@ -115,7 +115,7 @@ pub fn render_sidebar(
                             cx,
                         );
 
-                        let sid_for_add = session_id.clone();
+                        let sid_for_add = session_id.to_string();
                         active_elements.push(
                             div()
                                 .flex()
@@ -158,11 +158,11 @@ pub fn render_sidebar(
                         for (ix, display) in stopped_kilds.iter().enumerate() {
                             let session_id = display.session.id.clone();
                             let branch = display.session.branch.clone();
-                            let is_selected = selected_id.as_deref() == Some(&session_id);
-                            let session_id_for_click = session_id.clone();
+                            let is_selected = selected_id.as_deref() == Some(&*session_id);
+                            let session_id_for_click = session_id.to_string();
                             let time_meta = format_relative_time(&display.session.created_at);
 
-                            let tabs_for_session = terminal_tabs.get(&session_id);
+                            let tabs_for_session = terminal_tabs.get(&*session_id);
                             let tab_items = render_terminal_items(
                                 &session_id,
                                 tabs_for_session,
@@ -176,7 +176,7 @@ pub fn render_sidebar(
                                 _ => Status::Crashed,
                             };
 
-                            let sid_for_add = session_id.clone();
+                            let sid_for_add = session_id.to_string();
                             stopped_elements.push(
                                 div()
                                     .flex()

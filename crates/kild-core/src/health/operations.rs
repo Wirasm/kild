@@ -84,9 +84,9 @@ pub fn enrich_session_with_health(
     };
 
     KildHealth {
-        session_id: session.id.clone(),
-        project_id: session.project_id.clone(),
-        branch: session.branch.clone(),
+        session_id: session.id.to_string(),
+        project_id: session.project_id.to_string(),
+        branch: session.branch.to_string(),
         agent: session.agent.clone(),
         worktree_path: session.worktree_path.display().to_string(),
         created_at: session.created_at.clone(),
@@ -245,9 +245,9 @@ mod tests {
 
         let health = enrich_session_with_health(&session, None, false, None, None);
 
-        assert_eq!(health.session_id, session.id);
-        assert_eq!(health.project_id, session.project_id);
-        assert_eq!(health.branch, session.branch);
+        assert_eq!(health.session_id, session.id.to_string());
+        assert_eq!(health.project_id, session.project_id.to_string());
+        assert_eq!(health.branch, session.branch.to_string());
         assert_eq!(health.agent, session.agent);
         assert_eq!(health.worktree_path, "/tmp/wt");
         assert_eq!(health.created_at, session.created_at);

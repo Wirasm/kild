@@ -58,17 +58,17 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     for session in active {
         match session_ops::stop_session(&session.branch) {
             Ok(()) => {
-                info!(event = "cli.stop_completed", branch = session.branch);
-                stopped.push(session.branch);
+                info!(event = "cli.stop_completed", branch = %session.branch);
+                stopped.push(session.branch.to_string());
             }
             Err(e) => {
                 error!(
                     event = "cli.stop_failed",
-                    branch = session.branch,
+                    branch = %session.branch,
                     error = %e
                 );
                 events::log_app_error(&e);
-                errors.push((session.branch, e.to_string()));
+                errors.push((session.branch.to_string(), e.to_string()));
             }
         }
     }

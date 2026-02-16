@@ -22,7 +22,7 @@ pub(crate) fn cleanup_session_pid_files(
         // Legacy session (pre-multi-agent) — attempt session-level PID file cleanup
         warn!(
             event = "core.session.pid_cleanup_no_agents",
-            session_id = session.id,
+            session_id = %session.id,
             operation = operation,
             "Session has no tracked agents, attempting session-level PID file cleanup"
         );
@@ -31,7 +31,7 @@ pub(crate) fn cleanup_session_pid_files(
             Ok(()) => {
                 debug!(
                     event = "core.session.pid_file_cleaned",
-                    session_id = session.id,
+                    session_id = %session.id,
                     operation = operation,
                     pid_file = %pid_file.display()
                 );
@@ -39,7 +39,7 @@ pub(crate) fn cleanup_session_pid_files(
             Err(e) => {
                 debug!(
                     event = "core.session.pid_file_cleanup_failed",
-                    session_id = session.id,
+                    session_id = %session.id,
                     operation = operation,
                     pid_file = %pid_file.display(),
                     error = %e
@@ -52,7 +52,7 @@ pub(crate) fn cleanup_session_pid_files(
     for agent_proc in session.agents() {
         // Determine PID file key: use spawn_id if available, otherwise fall back to session ID
         let pid_key = if agent_proc.spawn_id().is_empty() {
-            session.id.clone() // Backward compat: old sessions without spawn_id
+            session.id.to_string() // Backward compat: old sessions without spawn_id
         } else {
             agent_proc.spawn_id().to_string()
         };
@@ -61,7 +61,7 @@ pub(crate) fn cleanup_session_pid_files(
             Ok(()) => {
                 debug!(
                     event = "core.session.pid_file_cleaned",
-                    session_id = session.id,
+                    session_id = %session.id,
                     operation = operation,
                     pid_file = %pid_file.display()
                 );
@@ -69,7 +69,7 @@ pub(crate) fn cleanup_session_pid_files(
             Err(e) => {
                 debug!(
                     event = "core.session.pid_file_cleanup_failed",
-                    session_id = session.id,
+                    session_id = %session.id,
                     operation = operation,
                     pid_file = %pid_file.display(),
                     error = %e
@@ -142,7 +142,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.destroy_found",
-        session_id = session.id,
+        session_id = %session.id,
         worktree_path = %session.worktree_path.display(),
         port_range_start = session.port_range_start,
         port_range_end = session.port_range_end,
@@ -154,7 +154,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         if !session.has_agents() {
             warn!(
                 event = "core.session.destroy_no_agents",
-                session_id = session.id,
+                session_id = %session.id,
                 branch = name,
                 "Session has no tracked agents — skipping process/terminal cleanup"
             );
@@ -286,7 +286,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 if !ui_sessions.is_empty() {
                     info!(
                         event = "core.session.destroy_ui_sessions_sweep_started",
-                        session_id = session.id,
+                        session_id = %session.id,
                         count = ui_sessions.len()
                     );
                 }
@@ -294,14 +294,14 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 for daemon_session in ui_sessions {
                     info!(
                         event = "core.session.destroy_ui_session",
-                        daemon_session_id = daemon_session.id,
+                        daemon_session_id = %daemon_session.id,
                     );
                     if let Err(e) =
                         crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
                     {
                         warn!(
                             event = "core.session.destroy_ui_session_failed",
-                            daemon_session_id = daemon_session.id,
+                            daemon_session_id = %daemon_session.id,
                             error = %e,
                         );
                         eprintln!(
@@ -315,14 +315,14 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 // Daemon not running — no UI sessions to clean up
                 debug!(
                     event = "core.session.destroy_ui_sessions_sweep_skipped",
-                    session_id = session.id,
+                    session_id = %session.id,
                     reason = "daemon_not_running"
                 );
             }
             Err(e) => {
                 warn!(
                     event = "core.session.destroy_ui_sessions_sweep_failed",
-                    session_id = session.id,
+                    session_id = %session.id,
                     error = %e,
                     "Could not query daemon for orphaned UI sessions"
                 );
@@ -373,7 +373,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                     Err(e) => {
                         error!(
                             event = "core.session.shim_registry_parse_failed",
-                            session_id = session.id,
+                            session_id = %session.id,
                             path = %panes_path.display(),
                             error = %e,
                         );
@@ -390,7 +390,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                 Err(e) => {
                     error!(
                         event = "core.session.shim_registry_read_failed",
-                        session_id = session.id,
+                        session_id = %session.id,
                         path = %panes_path.display(),
                         error = %e,
                     );
@@ -405,7 +405,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
             if let Err(e) = std::fs::remove_dir_all(&shim_dir) {
                 error!(
                     event = "core.session.shim_cleanup_failed",
-                    session_id = session.id,
+                    session_id = %session.id,
                     path = %shim_dir.display(),
                     error = %e,
                 );
@@ -417,14 +417,14 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
             } else {
                 info!(
                     event = "core.session.shim_cleanup_completed",
-                    session_id = session.id
+                    session_id = %session.id
                 );
             }
         }
     } else {
         warn!(
             event = "core.session.shim_cleanup_skipped",
-            session_id = session.id,
+            session_id = %session.id,
             "HOME not set, skipping shim cleanup"
         );
     }
@@ -454,7 +454,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.destroy_worktree_removed",
-        session_id = session.id,
+        session_id = %session.id,
         worktree_path = %session.worktree_path.display()
     );
 
@@ -476,14 +476,14 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
     info!(
         event = "core.session.port_deallocated",
-        session_id = session.id,
+        session_id = %session.id,
         port_range_start = session.port_range_start,
         port_range_end = session.port_range_end
     );
 
     info!(
         event = "core.session.destroy_completed",
-        session_id = session.id,
+        session_id = %session.id,
         name = name
     );
 

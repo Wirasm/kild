@@ -72,7 +72,7 @@ mod tests {
                 match cmd {
                     Command::CreateKild { branch, .. } => Ok(vec![Event::KildCreated {
                         branch,
-                        session_id: "test-id".to_string(),
+                        session_id: "test-id".into(),
                     }]),
                     Command::DestroyKild { branch, .. } => {
                         Ok(vec![Event::KildDestroyed { branch }])
@@ -110,56 +110,56 @@ mod tests {
         // Session commands → session events
         let events = store
             .dispatch(Command::CreateKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
                 agent_mode: crate::state::types::AgentMode::DefaultAgent,
                 note: None,
                 project_path: None,
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildCreated { branch, .. } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildCreated { branch, .. } if &**branch == "feat"));
 
         let events = store
             .dispatch(Command::DestroyKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
                 force: false,
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildDestroyed { branch } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildDestroyed { branch } if &**branch == "feat"));
 
         let events = store
             .dispatch(Command::OpenKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
                 resume: false,
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildOpened { branch, .. } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildOpened { branch, .. } if &**branch == "feat"));
 
         // Auto-detect variant (no explicit runtime mode)
         let events = store
             .dispatch(Command::OpenKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildOpened { branch, .. } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildOpened { branch, .. } if &**branch == "feat"));
 
         let events = store
             .dispatch(Command::StopKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildStopped { branch } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildStopped { branch } if &**branch == "feat"));
 
         let events = store
             .dispatch(Command::CompleteKild {
-                branch: "feat".to_string(),
+                branch: "feat".into(),
             })
             .unwrap();
-        assert!(matches!(&events[0], Event::KildCompleted { branch } if branch == "feat"));
+        assert!(matches!(&events[0], Event::KildCompleted { branch } if &**branch == "feat"));
 
         let events = store.dispatch(Command::RefreshSessions).unwrap();
         assert!(matches!(&events[0], Event::SessionsRefreshed));
@@ -197,11 +197,11 @@ mod tests {
         impl Store for CountingStore {
             type Error = String;
             fn dispatch(&mut self, cmd: Command) -> Result<Vec<Event>, String> {
-                let branch = "test".to_string();
+                let branch: kild_protocol::BranchName = "test".into();
                 match cmd {
                     Command::CreateKild { .. } => Ok(vec![Event::KildCreated {
                         branch,
-                        session_id: "id".to_string(),
+                        session_id: "id".into(),
                     }]),
                     Command::DestroyKild { .. } => Ok(vec![Event::KildDestroyed { branch }]),
                     Command::OpenKild { .. } => Ok(vec![Event::KildOpened {
@@ -233,34 +233,28 @@ mod tests {
         let mut store = CountingStore;
         let commands: Vec<Command> = vec![
             Command::CreateKild {
-                branch: "b".to_string(),
+                branch: "b".into(),
                 agent_mode: crate::state::types::AgentMode::DefaultAgent,
                 note: None,
                 project_path: None,
             },
             Command::DestroyKild {
-                branch: "b".to_string(),
+                branch: "b".into(),
                 force: false,
             },
             Command::OpenKild {
-                branch: "b".to_string(),
+                branch: "b".into(),
                 mode: crate::state::types::OpenMode::DefaultAgent,
                 runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
                 resume: false,
             },
-            Command::StopKild {
-                branch: "b".to_string(),
-            },
-            Command::CompleteKild {
-                branch: "b".to_string(),
-            },
+            Command::StopKild { branch: "b".into() },
+            Command::CompleteKild { branch: "b".into() },
             Command::UpdateAgentStatus {
-                branch: "b".to_string(),
+                branch: "b".into(),
                 status: crate::sessions::types::AgentStatus::Working,
             },
-            Command::RefreshPrStatus {
-                branch: "b".to_string(),
-            },
+            Command::RefreshPrStatus { branch: "b".into() },
             Command::RefreshSessions,
             Command::AddProject {
                 path: PathBuf::from("/tmp"),

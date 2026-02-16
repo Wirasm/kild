@@ -1,6 +1,7 @@
 pub use crate::forge::types::PrCheckResult;
 use crate::git::types::WorktreeStatus;
 use crate::terminal::types::TerminalType;
+use kild_protocol::{BranchName, ProjectId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -128,9 +129,9 @@ fn default_port_count() -> u16 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
-    pub id: String,
-    pub project_id: String,
-    pub branch: String,
+    pub id: SessionId,
+    pub project_id: ProjectId,
+    pub branch: BranchName,
     pub worktree_path: PathBuf,
     /// The agent type for this session (e.g. "claude", "kiro").
     ///
@@ -386,9 +387,9 @@ impl Session {
     /// Create a new Session.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: String,
-        project_id: String,
-        branch: String,
+        id: SessionId,
+        project_id: ProjectId,
+        branch: BranchName,
         worktree_path: PathBuf,
         agent: String,
         status: SessionStatus,
@@ -472,10 +473,11 @@ impl Session {
 
     /// Create a minimal Session for testing purposes.
     #[cfg(test)]
-    pub fn new_for_test(branch: String, worktree_path: PathBuf) -> Self {
+    pub fn new_for_test(branch: impl Into<BranchName>, worktree_path: PathBuf) -> Self {
+        let branch = branch.into();
         Self {
-            id: format!("test-{}", branch),
-            project_id: "test-project".to_string(),
+            id: SessionId::new(format!("test-{}", branch)),
+            project_id: ProjectId::new("test-project"),
             branch,
             worktree_path,
             agent: "test".to_string(),
@@ -561,14 +563,14 @@ pub struct AgentStatusInfo {
 
 #[derive(Debug, Clone)]
 pub struct ValidatedRequest {
-    pub name: String,
+    pub name: BranchName,
     pub command: String,
     pub agent: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct CreateSessionRequest {
-    pub branch: String,
+    pub branch: BranchName,
     /// What agent to launch (default from config, specific override, or bare shell).
     pub agent_mode: crate::state::types::AgentMode,
     pub note: Option<String>,
@@ -587,12 +589,12 @@ pub struct CreateSessionRequest {
 
 impl CreateSessionRequest {
     pub fn new(
-        branch: String,
+        branch: impl Into<BranchName>,
         agent_mode: crate::state::types::AgentMode,
         note: Option<String>,
     ) -> Self {
         Self {
-            branch,
+            branch: branch.into(),
             agent_mode,
             note,
             project_path: None,
@@ -604,13 +606,13 @@ impl CreateSessionRequest {
 
     /// Create a request with explicit project path (for UI usage)
     pub fn with_project_path(
-        branch: String,
+        branch: impl Into<BranchName>,
         agent_mode: crate::state::types::AgentMode,
         note: Option<String>,
         project_path: PathBuf,
     ) -> Self {
         Self {
-            branch,
+            branch: branch.into(),
             agent_mode,
             note,
             project_path: Some(project_path),
@@ -671,9 +673,9 @@ mod tests {
     #[test]
     fn test_session_creation() {
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -689,7 +691,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(session.branch, "branch");
+        assert_eq!(&*session.branch, "branch");
         assert_eq!(session.status, SessionStatus::Active);
     }
 
@@ -712,7 +714,7 @@ mod tests {
 
         let session: Session = serde_json::from_str(json_without_last_activity).unwrap();
         assert_eq!(session.last_activity, None);
-        assert_eq!(session.branch, "branch");
+        assert_eq!(&*session.branch, "branch");
     }
 
     #[test]
@@ -733,7 +735,7 @@ mod tests {
 
         let session: Session = serde_json::from_str(json_without_note).unwrap();
         assert_eq!(session.note, None);
-        assert_eq!(session.branch, "branch");
+        assert_eq!(&*session.branch, "branch");
     }
 
     #[test]
@@ -793,7 +795,7 @@ mod tests {
 
         let request =
             CreateSessionRequest::new("test-branch".to_string(), AgentMode::DefaultAgent, None);
-        assert_eq!(request.branch, "test-branch");
+        assert_eq!(&*request.branch, "test-branch");
         assert_eq!(request.agent_mode, AgentMode::DefaultAgent);
 
         let request_with_agent = CreateSessionRequest::new(
@@ -814,12 +816,12 @@ mod tests {
     #[test]
     fn test_validated_request() {
         let validated = ValidatedRequest {
-            name: "test".to_string(),
+            name: "test".into(),
             command: "echo hello".to_string(),
             agent: "claude".to_string(),
         };
 
-        assert_eq!(validated.name, "test");
+        assert_eq!(&*validated.name, "test");
         assert_eq!(validated.command, "echo hello");
     }
 
@@ -839,9 +841,9 @@ mod tests {
         )
         .unwrap();
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -904,7 +906,7 @@ mod tests {
         }"#;
 
         let session: Session = serde_json::from_str(json_without_window_id).unwrap();
-        assert_eq!(session.branch, "branch");
+        assert_eq!(&*session.branch, "branch");
         assert!(!session.has_agents());
     }
 
@@ -916,7 +918,7 @@ mod tests {
             None,
             PathBuf::from("/path/to/project"),
         );
-        assert_eq!(request.branch, "test-branch");
+        assert_eq!(&*request.branch, "test-branch");
         assert_eq!(
             request.project_path,
             Some(PathBuf::from("/path/to/project"))
@@ -942,9 +944,9 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             temp_dir.clone(),
             "claude".to_string(),
             SessionStatus::Active,
@@ -969,9 +971,9 @@ mod tests {
     #[test]
     fn test_is_worktree_valid_with_missing_path() {
         let session = Session::new(
-            "test/orphaned".to_string(),
-            "test".to_string(),
-            "orphaned".to_string(),
+            "test/orphaned".into(),
+            "test".into(),
+            "orphaned".into(),
             PathBuf::from("/nonexistent/path/that/does/not/exist"),
             "claude".to_string(),
             SessionStatus::Stopped,
@@ -1329,9 +1331,9 @@ mod tests {
     #[test]
     fn test_session_with_multiple_agents_serialization() {
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1548,15 +1550,15 @@ mod tests {
 
         let session: Session = serde_json::from_str(json).unwrap();
         assert_eq!(session.agent_session_id, None);
-        assert_eq!(session.branch, "branch");
+        assert_eq!(&*session.branch, "branch");
     }
 
     #[test]
     fn test_session_with_agent_session_id_roundtrip() {
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1586,9 +1588,9 @@ mod tests {
     #[test]
     fn test_session_agent_session_id_survives_clear_agents() {
         let mut session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1643,9 +1645,9 @@ mod tests {
         use crate::state::types::RuntimeMode;
 
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1674,9 +1676,9 @@ mod tests {
         use crate::state::types::RuntimeMode;
 
         let mut session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1782,9 +1784,9 @@ mod tests {
         use crate::state::types::RuntimeMode;
 
         let session = Session::new(
-            "proj/feature".to_string(),
-            "proj".to_string(),
-            "feature".to_string(),
+            "proj/feature".into(),
+            "proj".into(),
+            "feature".into(),
             PathBuf::from("/worktrees/feature"),
             "claude".to_string(),
             SessionStatus::Active,
@@ -1800,9 +1802,9 @@ mod tests {
             Some(RuntimeMode::Daemon),
         );
 
-        assert_eq!(session.id, "proj/feature");
-        assert_eq!(session.project_id, "proj");
-        assert_eq!(session.branch, "feature");
+        assert_eq!(&*session.id, "proj/feature");
+        assert_eq!(&*session.project_id, "proj");
+        assert_eq!(&*session.branch, "feature");
         assert_eq!(session.worktree_path, PathBuf::from("/worktrees/feature"));
         assert_eq!(session.agent, "claude");
         assert_eq!(session.status, SessionStatus::Active);
@@ -1906,9 +1908,9 @@ mod tests {
         ];
 
         let session = Session::new(
-            "test/branch".to_string(),
-            "test".to_string(),
-            "branch".to_string(),
+            "test/branch".into(),
+            "test".into(),
+            "branch".into(),
             PathBuf::from("/tmp/test"),
             "kiro".to_string(),
             SessionStatus::Active,
@@ -1966,9 +1968,9 @@ mod tests {
     #[test]
     fn test_session_new_for_test_helper() {
         let session = Session::new_for_test("my-branch".to_string(), PathBuf::from("/tmp/wt"));
-        assert_eq!(session.id, "test-my-branch");
-        assert_eq!(session.project_id, "test-project");
-        assert_eq!(session.branch, "my-branch");
+        assert_eq!(&*session.id, "test-my-branch");
+        assert_eq!(&*session.project_id, "test-project");
+        assert_eq!(&*session.branch, "my-branch");
         assert_eq!(session.agent, "test");
         assert_eq!(session.status, SessionStatus::Active);
         assert!(!session.has_agents());
