@@ -19,7 +19,7 @@ pub struct DaemonConfig {
     pub pid_path: PathBuf,
 
     /// Per-session scrollback ring buffer size in bytes.
-    /// Default: 65536 (64 KB)
+    /// Default: 262144 (256 KB)
     #[serde(default = "default_scrollback_buffer_size")]
     pub scrollback_buffer_size: usize,
 
@@ -29,7 +29,7 @@ pub struct DaemonConfig {
     pub pty_output_batch_ms: u64,
 
     /// Per-client output buffer size before dropping oldest bytes.
-    /// Default: 262144 (256 KB)
+    /// Default: 1048576 (1 MB)
     #[serde(default = "default_client_buffer_size")]
     pub client_buffer_size: usize,
 
@@ -103,7 +103,7 @@ fn default_pid_path() -> PathBuf {
 }
 
 fn default_scrollback_buffer_size() -> usize {
-    65536
+    262_144
 }
 
 fn default_pty_output_batch_ms() -> u64 {
@@ -111,7 +111,7 @@ fn default_pty_output_batch_ms() -> u64 {
 }
 
 fn default_client_buffer_size() -> usize {
-    262144
+    1_048_576
 }
 
 fn default_shutdown_timeout_secs() -> u64 {
@@ -193,9 +193,9 @@ mod tests {
     fn test_daemon_config_defaults() {
         let config = DaemonConfig::default();
         assert!(config.socket_path.ends_with("daemon.sock"));
-        assert_eq!(config.scrollback_buffer_size, 65536);
+        assert_eq!(config.scrollback_buffer_size, 262_144);
         assert_eq!(config.pty_output_batch_ms, 4);
-        assert_eq!(config.client_buffer_size, 262144);
+        assert_eq!(config.client_buffer_size, 1_048_576);
         assert_eq!(config.shutdown_timeout_secs, 5);
     }
 
@@ -248,7 +248,7 @@ default = "claude"
 "#;
         let file: ConfigFile = toml::from_str(toml).unwrap();
         // Should get all defaults when [daemon] section is missing
-        assert_eq!(file.daemon.scrollback_buffer_size, 65536);
+        assert_eq!(file.daemon.scrollback_buffer_size, 262_144);
         assert_eq!(file.daemon.shutdown_timeout_secs, 5);
     }
 

@@ -100,8 +100,11 @@ impl SessionManager {
         // Clone the reader for the background read task
         let reader = managed_pty.try_clone_reader()?;
 
-        // Create broadcast channel for output distribution
-        let (output_tx, _) = broadcast::channel(64);
+        // Create broadcast channel for output distribution.
+        // Capacity derived from client_buffer_size: each slot holds ~4KB (PTY read chunk size),
+        // so capacity = client_buffer_size / 4096, minimum 16 slots.
+        let broadcast_capacity = std::cmp::max(self.config.client_buffer_size / 4096, 16);
+        let (output_tx, _) = broadcast::channel(broadcast_capacity);
         let reader_tx = output_tx.clone();
 
         // Get shared scrollback buffer so PTY reader can feed it

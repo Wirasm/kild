@@ -22,12 +22,18 @@ impl ScrollbackBuffer {
 
     /// Append bytes to the ring buffer, evicting oldest data if full.
     pub fn push(&mut self, data: &[u8]) {
-        for &byte in data {
-            if self.buffer.len() >= self.capacity {
-                self.buffer.pop_front();
-            }
-            self.buffer.push_back(byte);
+        if data.len() >= self.capacity {
+            // Data alone fills or exceeds capacity — just keep the tail
+            self.buffer.clear();
+            let start = data.len() - self.capacity;
+            self.buffer.extend(&data[start..]);
+            return;
         }
+        let needed = (self.buffer.len() + data.len()).saturating_sub(self.capacity);
+        if needed > 0 {
+            self.buffer.drain(..needed);
+        }
+        self.buffer.extend(data);
     }
 
     /// Get all buffered bytes as a contiguous slice.

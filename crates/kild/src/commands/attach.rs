@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 use clap::ArgMatches;
+use nix::sys::signal::{SigSet, Signal};
 use nix::sys::termios;
 use tracing::{error, info, warn};
 
@@ -97,6 +98,13 @@ fn attach_to_daemon_session(
         return Err(format!("Attach failed: {}", msg).into());
     }
 
+    // Block SIGWINCH so a dedicated thread can catch it via sigwait()
+    let mut sigwinch_set = SigSet::empty();
+    sigwinch_set.add(Signal::SIGWINCH);
+    sigwinch_set
+        .thread_block()
+        .map_err(|e| format!("Failed to block SIGWINCH: {}", e))?;
+
     // Enter raw terminal mode
     let _raw_guard = enable_raw_mode()?;
 
@@ -105,6 +113,13 @@ fn attach_to_daemon_session(
     let mut write_stream = stream.try_clone()?;
     let stdin_handle = std::thread::spawn(move || {
         forward_stdin_to_daemon(&mut write_stream, &session_id_owned);
+    });
+
+    // Spawn SIGWINCH handler thread to relay terminal resizes to the daemon
+    let sigwinch_session_id = daemon_session_id.to_string();
+    let mut sigwinch_stream = stream.try_clone()?;
+    let sigwinch_handle = std::thread::spawn(move || {
+        handle_sigwinch(&sigwinch_set, &mut sigwinch_stream, &sigwinch_session_id);
     });
 
     // Main thread: read daemon output, write to stdout
@@ -118,6 +133,9 @@ fn attach_to_daemon_session(
     if let Err(e) = stdin_handle.join() {
         error!(event = "cli.attach.stdin_thread_panicked", error = ?e);
     }
+    // SIGWINCH thread will exit when the socket closes (write fails)
+    // or when the process exits. Don't block on it.
+    drop(sigwinch_handle);
     Ok(())
 }
 
@@ -210,6 +228,41 @@ fn forward_stdin_to_daemon(stream: &mut UnixStream, session_id: &str) {
     }
 }
 
+/// Waits for SIGWINCH signals and sends resize_pty messages to the daemon.
+/// Terminal resizes propagate to the PTY so TUI apps render at correct dimensions.
+fn handle_sigwinch(sigset: &SigSet, stream: &mut UnixStream, session_id: &str) {
+    loop {
+        match sigset.wait() {
+            Ok(_sig) => {
+                let (cols, rows) = terminal_size();
+                let resize_msg = serde_json::json!({
+                    "id": "resize-sigwinch",
+                    "type": "resize_pty",
+                    "session_id": session_id,
+                    "cols": cols,
+                    "rows": rows,
+                });
+                let serialized = match serde_json::to_string(&resize_msg) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!(event = "cli.attach.resize_serialize_failed", error = %e);
+                        continue;
+                    }
+                };
+                if writeln!(stream, "{}", serialized).is_err() || stream.flush().is_err() {
+                    // Connection lost — main thread will detect EOF and exit
+                    break;
+                }
+                info!(event = "cli.attach.resize_sent", cols = cols, rows = rows,);
+            }
+            Err(e) => {
+                error!(event = "cli.attach.sigwinch_wait_failed", error = %e);
+                break;
+            }
+        }
+    }
+}
+
 fn forward_daemon_to_stdout_buffered(
     mut reader: std::io::BufReader<UnixStream>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -250,7 +303,20 @@ fn forward_daemon_to_stdout_buffered(
                     stdout.flush()?;
                 }
             }
-            Some("pty_output_dropped") => {}
+            Some("pty_output_dropped") => {
+                // Reset terminal SGR state + show cursor to recover from split escape sequences
+                let _ = stdout.write_all(b"\x1b[0m\x1b[?25h");
+                let _ = stdout.flush();
+                let dropped = msg
+                    .get("bytes_dropped")
+                    .and_then(|b| b.as_u64())
+                    .unwrap_or(0);
+                warn!(event = "cli.attach.output_dropped", bytes_dropped = dropped);
+                eprintln!(
+                    "\r\n[kild] Output dropped ({} bytes lost). Display may be garbled.\r",
+                    dropped
+                );
+            }
 
             Some("session_event") => {
                 if let Some(event) = msg.get("event").and_then(|e| e.as_str()) {
