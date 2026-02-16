@@ -274,7 +274,10 @@ pub(crate) fn setup_codex_integration(agent: &str) {
 /// Creates `.opencode/plugins/kild-status.ts` in the worktree directory.
 /// The plugin listens to OpenCode events and reports agent status back to KILD
 /// via `kild agent-status --self <status> --notify`.
-/// Idempotent: skips if the file already exists.
+/// Idempotent: skips if `.opencode/plugins/kild-status.ts` already exists.
+///
+/// Public for use by `kild init-hooks` CLI command.
+/// Most consumers should use `setup_opencode_integration()` instead.
 pub fn ensure_opencode_plugin_in_worktree(worktree_path: &Path) -> Result<(), String> {
     let plugins_dir = worktree_path.join(".opencode").join("plugins");
     let plugin_path = plugins_dir.join("kild-status.ts");
@@ -296,8 +299,8 @@ export default (async ({ $ }) => {
   const updateStatus = async (status: string) => {
     try {
       await $`kild agent-status --self ${status} --notify`.quiet().nothrow()
-    } catch {
-      // Status reporting should never break the agent
+    } catch (error) {
+      console.error(`[kild-status] Failed to report ${status}:`, error)
     }
   }
 
@@ -335,34 +338,71 @@ export default (async ({ $ }) => {
 
 /// Ensure the OpenCode `.opencode/package.json` exists with the plugin dependency.
 ///
-/// Creates `.opencode/package.json` in the worktree with `@opencode-ai/plugin` dependency.
-/// Idempotent: skips if file exists and already contains the dependency.
+/// Creates `.opencode/package.json` in the worktree or merges `@opencode-ai/plugin`
+/// into an existing file's dependencies. Preserves all existing fields (name, scripts, etc.).
+/// Idempotent: skips only if file exists and `dependencies` already contains `@opencode-ai/plugin`.
+///
+/// Public for use by `kild init-hooks` CLI command.
+/// Most consumers should use `setup_opencode_integration()` instead.
+///
+/// # Errors
+/// Returns `Err` if:
+/// - `package.json` exists but contains invalid JSON syntax
+/// - `package.json` root is not an object
+/// - `dependencies` field exists but is not an object
 pub fn ensure_opencode_package_json(worktree_path: &Path) -> Result<(), String> {
     let opencode_dir = worktree_path.join(".opencode");
     let package_path = opencode_dir.join("package.json");
 
-    if package_path.exists() {
+    let mut package_json: serde_json::Value = if package_path.exists() {
         let content = std::fs::read_to_string(&package_path)
             .map_err(|e| format!("failed to read {}: {}", package_path.display(), e))?;
-        if content.contains("@opencode-ai/plugin") {
-            debug!(
-                event = "core.session.opencode_package_json_already_exists",
-                path = %package_path.display()
-            );
-            return Ok(());
-        }
+        serde_json::from_str(&content).map_err(|e| {
+            format!(
+                "failed to parse {}: {} — fix JSON syntax or remove the file to reset",
+                package_path.display(),
+                e
+            )
+        })?
+    } else {
+        serde_json::json!({
+            "name": "opencode-kild-plugins",
+            "private": true
+        })
+    };
+
+    // Check if dependency already exists
+    if let Some(serde_json::Value::Object(deps)) = package_json.get("dependencies")
+        && deps.contains_key("@opencode-ai/plugin")
+    {
+        debug!(
+            event = "core.session.opencode_package_json_already_exists",
+            path = %package_path.display()
+        );
+        return Ok(());
+    }
+
+    // Add dependency — create dependencies object if missing
+    let deps = package_json
+        .as_object_mut()
+        .ok_or("package.json root is not an object")?
+        .entry("dependencies")
+        .or_insert_with(|| serde_json::json!({}));
+
+    if let serde_json::Value::Object(deps_obj) = deps {
+        deps_obj.insert(
+            "@opencode-ai/plugin".to_string(),
+            serde_json::Value::String("latest".to_string()),
+        );
+    } else {
+        return Err(format!(
+            "\"dependencies\" field in {} is not an object",
+            package_path.display()
+        ));
     }
 
     std::fs::create_dir_all(&opencode_dir)
         .map_err(|e| format!("failed to create {}: {}", opencode_dir.display(), e))?;
-
-    let package_json = serde_json::json!({
-        "name": "opencode-kild-plugins",
-        "private": true,
-        "dependencies": {
-            "@opencode-ai/plugin": "latest"
-        }
-    });
 
     let content = serde_json::to_string_pretty(&package_json)
         .map_err(|e| format!("failed to serialize package.json: {}", e))?;
@@ -384,6 +424,15 @@ pub fn ensure_opencode_package_json(worktree_path: &Path) -> Result<(), String> 
 /// `"plugins": ["file://.opencode/plugins/kild-status.ts"]` if not already present.
 /// Respects existing plugins: appends to array, doesn't replace.
 /// Uses `serde_json` for safe JSON manipulation.
+///
+/// Public for use by `kild init-hooks` CLI command.
+/// Most consumers should use `setup_opencode_integration()` instead.
+///
+/// # Errors
+/// Returns `Err` if:
+/// - `opencode.json` exists but contains invalid JSON syntax
+/// - `opencode.json` root is not an object
+/// - `plugins` field exists but is not an array
 pub fn ensure_opencode_config(worktree_path: &Path) -> Result<(), String> {
     let config_path = worktree_path.join("opencode.json");
     let plugin_entry = "file://.opencode/plugins/kild-status.ts";
@@ -1527,6 +1576,131 @@ mod tests {
 
         // Verify the file was NOT modified
         let content = fs::read_to_string(temp_dir.join("opencode.json")).unwrap();
+        assert_eq!(
+            content, "{invalid json\n",
+            "Malformed file should not be modified"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_ensure_opencode_config_rejects_non_array_plugins_field() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kild_test_opencode_cfg_bad_plugins_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(
+            temp_dir.join("opencode.json"),
+            "{\"plugins\": \"not-an-array\"}\n",
+        )
+        .unwrap();
+
+        let result = ensure_opencode_config(&temp_dir);
+        assert!(result.is_err(), "Should reject non-array plugins field");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not an array"),
+            "Error should mention 'not an array', got: {}",
+            err
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_ensure_opencode_package_json_preserves_existing_fields() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kild_test_opencode_pkg_preserve_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(temp_dir.join(".opencode")).unwrap();
+
+        // Create existing package.json with user content
+        fs::write(
+            temp_dir.join(".opencode/package.json"),
+            r#"{
+  "name": "my-custom-name",
+  "version": "1.0.0",
+  "dependencies": {
+    "other-package": "^2.0.0"
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let result = ensure_opencode_package_json(&temp_dir);
+        assert!(
+            result.is_ok(),
+            "Should merge dependency into existing file: {:?}",
+            result
+        );
+
+        let content = fs::read_to_string(temp_dir.join(".opencode/package.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(
+            parsed["name"], "my-custom-name",
+            "Custom name should be preserved"
+        );
+        assert_eq!(parsed["version"], "1.0.0", "Version should be preserved");
+        assert_eq!(
+            parsed["scripts"]["test"], "bun test",
+            "Scripts should be preserved"
+        );
+
+        let deps = parsed["dependencies"].as_object().unwrap();
+        assert_eq!(deps.len(), 2, "Both dependencies should exist");
+        assert_eq!(
+            deps["other-package"], "^2.0.0",
+            "Existing dependency should be preserved"
+        );
+        assert_eq!(
+            deps["@opencode-ai/plugin"], "latest",
+            "New dependency should be added"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_ensure_opencode_package_json_rejects_malformed_json() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kild_test_opencode_pkg_malformed_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(temp_dir.join(".opencode")).unwrap();
+
+        fs::write(temp_dir.join(".opencode/package.json"), "{invalid json\n").unwrap();
+
+        let result = ensure_opencode_package_json(&temp_dir);
+        assert!(result.is_err(), "Should fail on malformed JSON");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("failed to parse"),
+            "Error should mention parse failure, got: {}",
+            err
+        );
+
+        // Verify the file was NOT modified
+        let content = fs::read_to_string(temp_dir.join(".opencode/package.json")).unwrap();
         assert_eq!(
             content, "{invalid json\n",
             "Malformed file should not be modified"

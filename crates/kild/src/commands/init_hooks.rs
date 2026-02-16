@@ -26,7 +26,6 @@ pub(crate) fn handle_init_hooks_command(
 fn init_opencode_hooks(no_install: bool) -> Result<(), Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
 
-    // 1. Generate plugin file
     kild_core::sessions::daemon_helpers::ensure_opencode_plugin_in_worktree(&cwd).map_err(
         |e| -> Box<dyn std::error::Error> { format!("Failed to create plugin file: {}", e).into() },
     )?;
@@ -35,7 +34,6 @@ fn init_opencode_hooks(no_install: bool) -> Result<(), Box<dyn std::error::Error
         color::aurora("✓")
     );
 
-    // 2. Generate package.json
     kild_core::sessions::daemon_helpers::ensure_opencode_package_json(&cwd).map_err(
         |e| -> Box<dyn std::error::Error> {
             format!("Failed to create package.json: {}", e).into()
@@ -43,7 +41,6 @@ fn init_opencode_hooks(no_install: bool) -> Result<(), Box<dyn std::error::Error
     )?;
     println!("  {} Created .opencode/package.json", color::aurora("✓"));
 
-    // 3. Patch opencode.json
     kild_core::sessions::daemon_helpers::ensure_opencode_config(&cwd).map_err(
         |e| -> Box<dyn std::error::Error> {
             format!("Failed to patch opencode.json: {}", e).into()
@@ -51,16 +48,32 @@ fn init_opencode_hooks(no_install: bool) -> Result<(), Box<dyn std::error::Error
     )?;
     println!("  {} Configured opencode.json", color::aurora("✓"));
 
-    // 4. Run bun install (unless --no-install)
     if !no_install {
         let opencode_dir = cwd.join(".opencode");
-        let bun_available = std::process::Command::new("bun")
+        let bun_check = std::process::Command::new("bun")
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .status();
+
+        let bun_available = match &bun_check {
+            Ok(s) if s.success() => true,
+            Ok(s) => {
+                warn!(event = "cli.init_hooks_bun_check_failed", exit_code = ?s.code());
+                eprintln!(
+                    "  {} bun --version failed (exit {}). Check your bun installation.",
+                    color::warning("⚠"),
+                    s
+                );
+                false
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                warn!(event = "cli.init_hooks_bun_check_error", error = %e);
+                eprintln!("  {} Error checking bun: {}", color::warning("⚠"), e);
+                false
+            }
+        };
 
         if bun_available {
             println!(
