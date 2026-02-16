@@ -7,7 +7,7 @@ use crate::terminal;
 use crate::terminal::types::SpawnResult;
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, setup_codex_integration,
+    build_daemon_create_request, compute_spawn_id, setup_codex_integration, spawn_attach_window,
 };
 
 /// Resolve the effective runtime mode for `open_session`.
@@ -71,11 +71,16 @@ fn capture_process_metadata(
 ///
 /// The `runtime_mode` parameter overrides the runtime mode. Pass `None` to auto-detect
 /// from the session's stored mode, then config, then Terminal default.
+///
+/// When `auto_attach` is `true` and the session runs in daemon mode, a Ghostty attach
+/// window is automatically spawned so the CLI user gets immediate visual feedback.
+/// Pass `false` for UI callers (which have their own terminal rendering).
 pub fn open_session(
     name: &str,
     mode: crate::state::types::OpenMode,
     runtime_mode: Option<crate::state::types::RuntimeMode>,
     resume: bool,
+    auto_attach: bool,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -353,9 +358,9 @@ pub fn open_session(
             });
         }
 
-        AgentProcess::new(
+        let mut agent_process = AgentProcess::new(
             agent.clone(),
-            spawn_id,
+            spawn_id.clone(),
             None,
             None,
             None,
@@ -364,7 +369,21 @@ pub fn open_session(
             agent_command.clone(),
             now.clone(),
             Some(daemon_result.daemon_session_id),
-        )?
+        )?;
+
+        // Auto-attach: spawn a Ghostty window running `kild attach <branch>`
+        if auto_attach
+            && let Some((terminal_type, window_id)) = spawn_attach_window(
+                &session.branch,
+                &spawn_id,
+                &session.worktree_path,
+                &kild_config,
+            )
+        {
+            agent_process.set_terminal_info(Some(terminal_type), window_id);
+        }
+
+        agent_process
     } else {
         setup_codex_integration(&agent);
 
@@ -452,6 +471,7 @@ mod tests {
             "non-existent",
             crate::state::types::OpenMode::DefaultAgent,
             Some(crate::state::types::RuntimeMode::Terminal),
+            false,
             false,
         );
         assert!(result.is_err());

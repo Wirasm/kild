@@ -380,6 +380,16 @@ impl AgentProcess {
     pub fn daemon_session_id(&self) -> Option<&str> {
         self.daemon_session_id.as_deref()
     }
+
+    /// Set terminal info after initial construction (e.g., for auto-attach windows).
+    pub fn set_terminal_info(
+        &mut self,
+        terminal_type: Option<TerminalType>,
+        terminal_window_id: Option<String>,
+    ) {
+        self.terminal_type = terminal_type;
+        self.terminal_window_id = terminal_window_id;
+    }
 }
 
 impl Session {
@@ -583,6 +593,11 @@ pub struct CreateSessionRequest {
     pub no_fetch: bool,
     /// Whether to launch in an external terminal or daemon-owned PTY.
     pub runtime_mode: crate::state::types::RuntimeMode,
+    /// Whether to auto-open a Ghostty attach window for daemon sessions.
+    ///
+    /// `true` for CLI callers (user expects a visible terminal window).
+    /// `false` for UI callers (UI has its own terminal rendering).
+    pub auto_attach: bool,
 }
 
 impl CreateSessionRequest {
@@ -599,10 +614,14 @@ impl CreateSessionRequest {
             base_branch: None,
             no_fetch: false,
             runtime_mode: crate::state::types::RuntimeMode::Terminal,
+            auto_attach: true,
         }
     }
 
-    /// Create a request with explicit project path (for UI usage)
+    /// Create a request with explicit project path (for UI usage).
+    ///
+    /// Sets `auto_attach` to `false` — the UI has its own terminal rendering
+    /// and doesn't need an external Ghostty window.
     pub fn with_project_path(
         branch: String,
         agent_mode: crate::state::types::AgentMode,
@@ -617,6 +636,7 @@ impl CreateSessionRequest {
             base_branch: None,
             no_fetch: false,
             runtime_mode: crate::state::types::RuntimeMode::Terminal,
+            auto_attach: false,
         }
     }
 

@@ -29,7 +29,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume) {
+    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume, true) {
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
@@ -94,8 +94,13 @@ fn handle_open_all(
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in stopped {
-        match session_ops::open_session(&session.branch, mode.clone(), runtime_mode.clone(), resume)
-        {
+        match session_ops::open_session(
+            &session.branch,
+            mode.clone(),
+            runtime_mode.clone(),
+            resume,
+            true,
+        ) {
             Ok(s) => {
                 info!(
                     event = "cli.open_completed",

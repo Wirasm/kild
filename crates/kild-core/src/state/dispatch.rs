@@ -67,7 +67,8 @@ impl Store for CoreStore {
                 runtime_mode,
                 resume,
             } => {
-                let session = session_ops::open_session(&branch, mode, runtime_mode, resume)?;
+                let session =
+                    session_ops::open_session(&branch, mode, runtime_mode, resume, false)?;
                 Ok(vec![Event::KildOpened {
                     branch,
                     agent: session.agent,
