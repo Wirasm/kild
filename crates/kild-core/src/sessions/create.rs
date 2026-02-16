@@ -198,25 +198,19 @@ pub fn create_session(
             setup_codex_integration(&validated.agent);
 
             // Terminal path: spawn in external terminal
-            // Prepend task list env vars via `env` command for agents that support it.
-            // Uses `env KEY=val command` so it works with `exec` (env is an executable).
+            // Wrap with `env` to strip nesting-detection vars and inject agent env.
             let terminal_command = {
                 let mut env_prefix: Vec<(String, String)> = Vec::new();
                 if let Some(ref tlid) = task_list_id {
                     env_prefix.extend(agents::resume::task_list_env_vars(&agent, tlid));
                 }
                 env_prefix.extend(agents::resume::codex_env_vars(&agent, &validated.name));
-
-                if env_prefix.is_empty() {
-                    validated.command.clone()
-                } else {
-                    let env_args: Vec<String> = env_prefix
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect();
-                    format!("env {} {}", env_args.join(" "), validated.command)
-                }
+                super::env_cleanup::build_env_command(&env_prefix, &validated.command)
             };
+            debug!(
+                event = "core.session.terminal_command_constructed",
+                command = %terminal_command,
+            );
             let spawn_result = terminal::handler::spawn_terminal(
                 &worktree.path,
                 &terminal_command,
