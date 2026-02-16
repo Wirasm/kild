@@ -43,6 +43,14 @@ impl Store for CoreStore {
                     }
                     None => CreateSessionRequest::new(branch, agent_mode, note),
                 };
+                // Apply config-based runtime mode. The constructors default to
+                // Terminal, but the user's config may have daemon.enabled = true.
+                // Without this, the UI always spawns external terminals.
+                let request = if self.config.is_daemon_enabled() {
+                    request.with_runtime_mode(crate::state::types::RuntimeMode::Daemon)
+                } else {
+                    request
+                };
                 let session = session_ops::create_session(request, &self.config)?;
                 Ok(vec![Event::KildCreated {
                     branch: session.branch,
@@ -266,6 +274,81 @@ mod tests {
         assert_eq!(request.agent_mode, AgentMode::Agent("claude".to_string()));
         assert_eq!(request.note, None);
         assert_eq!(request.project_path, None);
+    }
+
+    #[test]
+    fn test_create_request_defaults_to_terminal_mode() {
+        use crate::state::types::{AgentMode, RuntimeMode};
+        let request = CreateSessionRequest::new("test".to_string(), AgentMode::DefaultAgent, None);
+        assert_eq!(
+            request.runtime_mode,
+            RuntimeMode::Terminal,
+            "Constructor should default to Terminal mode"
+        );
+    }
+
+    #[test]
+    fn test_create_request_with_project_path_defaults_to_terminal_mode() {
+        use crate::state::types::{AgentMode, RuntimeMode};
+        let request = CreateSessionRequest::with_project_path(
+            "test".to_string(),
+            AgentMode::DefaultAgent,
+            None,
+            PathBuf::from("/tmp/project"),
+        );
+        assert_eq!(
+            request.runtime_mode,
+            RuntimeMode::Terminal,
+            "with_project_path should default to Terminal mode"
+        );
+    }
+
+    /// When daemon.enabled = true, dispatch should override the request's
+    /// default Terminal mode with Daemon mode.
+    #[test]
+    fn test_dispatch_create_applies_daemon_config() {
+        use crate::state::types::{AgentMode, RuntimeMode};
+
+        let mut config = KildConfig::default();
+        config.daemon.enabled = Some(true);
+
+        // Simulate what dispatch does: build request then apply config
+        let request = CreateSessionRequest::new("test".to_string(), AgentMode::DefaultAgent, None);
+        assert_eq!(request.runtime_mode, RuntimeMode::Terminal);
+
+        let request = if config.is_daemon_enabled() {
+            request.with_runtime_mode(RuntimeMode::Daemon)
+        } else {
+            request
+        };
+        assert_eq!(
+            request.runtime_mode,
+            RuntimeMode::Daemon,
+            "Dispatch should override to Daemon when config has daemon.enabled = true"
+        );
+    }
+
+    /// When daemon.enabled is not set (default false), dispatch should
+    /// leave the request's Terminal default untouched.
+    #[test]
+    fn test_dispatch_create_preserves_terminal_when_daemon_disabled() {
+        use crate::state::types::{AgentMode, RuntimeMode};
+
+        let config = KildConfig::default();
+        assert!(!config.is_daemon_enabled());
+
+        let request = CreateSessionRequest::new("test".to_string(), AgentMode::DefaultAgent, None);
+
+        let request = if config.is_daemon_enabled() {
+            request.with_runtime_mode(RuntimeMode::Daemon)
+        } else {
+            request
+        };
+        assert_eq!(
+            request.runtime_mode,
+            RuntimeMode::Terminal,
+            "Should stay Terminal when daemon is not enabled"
+        );
     }
 
     // --- Project dispatch integration tests ---
