@@ -13,7 +13,7 @@
 
 use crate::agents;
 use crate::config::types::{
-    AgentConfig, DaemonRuntimeConfig, GitConfig, HealthConfig, KildConfig, TerminalConfig,
+    AgentConfig, DaemonRuntimeConfig, GitConfig, HealthConfig, KildConfig, TerminalConfig, UiConfig,
 };
 
 use crate::config::validation::validate_config;
@@ -176,6 +176,7 @@ pub fn merge_configs(base: KildConfig, override_config: KildConfig) -> KildConfi
         },
         editor: base.editor.merge(override_config.editor),
         daemon: DaemonRuntimeConfig::merge(&base.daemon, &override_config.daemon),
+        ui: UiConfig::merge(&base.ui, &override_config.ui),
     }
 }
 

@@ -4,8 +4,8 @@
 //! Handles keyboard input and dialog state management.
 
 use gpui::{
-    Context, FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent, Render, Task, Window,
-    div, prelude::*, px,
+    Context, FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent, Render, SharedString,
+    Task, Window, div, prelude::*, px,
 };
 
 use crate::theme;
@@ -142,6 +142,38 @@ pub(crate) enum ActiveView {
     Detail,
 }
 
+/// Parsed modifier for kild index jumping (from config `[ui] nav_modifier`).
+#[derive(Debug, Clone, Copy)]
+enum NavModifier {
+    Ctrl,
+    Alt,
+    CmdShift,
+}
+
+impl NavModifier {
+    fn from_config(s: &str) -> Self {
+        match s {
+            "alt" => Self::Alt,
+            "cmd+shift" => Self::CmdShift,
+            _ => Self::Ctrl,
+        }
+    }
+
+    fn matches(&self, modifiers: &gpui::Modifiers) -> bool {
+        match self {
+            Self::Ctrl => {
+                modifiers.control && !modifiers.shift && !modifiers.alt && !modifiers.platform
+            }
+            Self::Alt => {
+                modifiers.alt && !modifiers.control && !modifiers.shift && !modifiers.platform
+            }
+            Self::CmdShift => {
+                modifiers.platform && modifiers.shift && !modifiers.control && !modifiers.alt
+            }
+        }
+    }
+}
+
 /// Main application view that composes the kild list, header, and create dialog.
 ///
 /// Owns application state and handles keyboard input for the create dialog.
@@ -178,8 +210,12 @@ pub struct MainView {
     /// Counter for generating unique daemon session IDs within this UI instance.
     #[allow(dead_code)]
     daemon_session_counter: u64,
-    /// 2x2 pane grid for Control view multi-terminal layout.
-    pane_grid: super::pane_grid::PaneGrid,
+    /// Control view workspaces: each workspace holds a 2x2 pane grid.
+    workspaces: Vec<super::pane_grid::PaneGrid>,
+    /// Index of the active workspace in the Control view.
+    active_workspace: usize,
+    /// Parsed navigation modifier from config for modifier+1-9 kild jumping.
+    nav_modifier: NavModifier,
     /// Agent team manager (owns watcher + cached team state).
     team_manager: crate::teams::TeamManager,
     /// Handle to the team watcher task. Must be stored to prevent cancellation.
@@ -354,6 +390,14 @@ impl MainView {
             }
         });
 
+        // Load UI config for nav modifier
+        let nav_modifier = NavModifier::from_config(
+            kild_core::KildConfig::load_hierarchy()
+                .map(|c| c.ui.nav_modifier().to_string())
+                .unwrap_or_else(|_| "ctrl".to_string())
+                .as_str(),
+        );
+
         let mut view = Self {
             state: AppState::new(),
             focus_handle: cx.focus_handle(),
@@ -372,7 +416,9 @@ impl MainView {
             show_add_menu: false,
             daemon_starting: false,
             daemon_session_counter: 1,
-            pane_grid: super::pane_grid::PaneGrid::new(),
+            workspaces: vec![super::pane_grid::PaneGrid::new()],
+            active_workspace: 0,
+            nav_modifier,
             team_manager: crate::teams::TeamManager::new(),
             _team_watcher_task: team_watcher_task,
         };
@@ -398,6 +444,16 @@ impl MainView {
         self.name_input = None;
     }
 
+    /// Get the active workspace's pane grid.
+    fn active_pane_grid(&self) -> &super::pane_grid::PaneGrid {
+        &self.workspaces[self.active_workspace]
+    }
+
+    /// Get the active workspace's pane grid mutably.
+    fn active_pane_grid_mut(&mut self) -> &mut super::pane_grid::PaneGrid {
+        &mut self.workspaces[self.active_workspace]
+    }
+
     fn active_terminal_view(&self) -> Option<&gpui::Entity<crate::terminal::TerminalView>> {
         self.active_terminal_id
             .as_ref()
@@ -416,7 +472,9 @@ impl MainView {
         self.terminal_tabs
             .retain(|id, _| live_ids.contains(id.as_str()));
 
-        self.pane_grid.prune(&live_ids);
+        for ws in &mut self.workspaces {
+            ws.prune(&live_ids);
+        }
 
         if self
             .active_terminal_id
@@ -1096,6 +1154,25 @@ impl MainView {
         self.on_kild_select(&prev_id, window, cx);
     }
 
+    /// Jump to kild by index (0-based) in the filtered display list.
+    fn navigate_to_kild_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let displays = self.state.filtered_displays();
+        if let Some(info) = displays.get(index) {
+            tracing::debug!(
+                event = "ui.kild.navigate_index",
+                index = index,
+                target = %info.session.id,
+            );
+            let id = info.session.id.clone();
+            self.on_kild_select(&id, window, cx);
+        }
+    }
+
     /// Navigate to the next teammate terminal tab within the current kild.
     fn navigate_next_teammate_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = &self.active_terminal_id
@@ -1193,16 +1270,16 @@ impl MainView {
         self.active_view = ActiveView::Control;
 
         // Toggle: if already in grid, remove it
-        if let Some(slot_idx) = self.pane_grid.find_slot(session_id, tab_idx) {
-            self.pane_grid.remove(slot_idx);
+        if let Some(slot_idx) = self.active_pane_grid().find_slot(session_id, tab_idx) {
+            self.active_pane_grid_mut().remove(slot_idx);
 
             // Move focus to next occupied pane or unfocus
-            if let Some(next) = self.pane_grid.next_occupied_slot() {
-                self.pane_grid.set_focus(next);
+            if let Some(next) = self.active_pane_grid().next_occupied_slot() {
+                self.active_pane_grid_mut().set_focus(next);
                 if let super::pane_grid::PaneSlot::Occupied {
                     session_id: next_sid,
                     ..
-                } = self.pane_grid.slot(next)
+                } = self.active_pane_grid().slot(next)
                 {
                     self.active_terminal_id = Some(next_sid.clone());
                 }
@@ -1269,16 +1346,16 @@ impl MainView {
         self.on_sidebar_terminal_click(session_id, tab_idx, window, cx);
     }
 
-    /// Reset the pane grid and auto-populate from current displays.
+    /// Reset workspaces to a single pane grid and auto-populate from current displays.
     fn reset_pane_grid(&mut self) {
-        self.pane_grid = super::pane_grid::PaneGrid::new();
+        self.workspaces = vec![super::pane_grid::PaneGrid::new()];
+        self.active_workspace = 0;
         let displays = self.state.filtered_displays();
         let displays_owned: Vec<kild_core::SessionInfo> = displays.into_iter().cloned().collect();
-        self.pane_grid
-            .auto_populate(&displays_owned, &self.terminal_tabs);
+        self.workspaces[0].auto_populate(&displays_owned, &self.terminal_tabs);
     }
 
-    /// Place a terminal in the pane grid. If already present, just focus it.
+    /// Place a terminal in the active workspace's pane grid. If already present, just focus it.
     /// If grid is full, replace the least-recently-focused pane.
     fn place_in_pane_grid(
         &mut self,
@@ -1288,14 +1365,14 @@ impl MainView {
         status: crate::components::Status,
     ) {
         // Already in grid? Just focus it.
-        if let Some(slot_idx) = self.pane_grid.find_slot(session_id, tab_idx) {
-            self.pane_grid.set_focus(slot_idx);
+        if let Some(slot_idx) = self.active_pane_grid().find_slot(session_id, tab_idx) {
+            self.active_pane_grid_mut().set_focus(slot_idx);
             return;
         }
 
         // Try to add to an empty slot.
         if self
-            .pane_grid
+            .active_pane_grid_mut()
             .add_terminal(session_id.to_string(), tab_idx, branch.to_string(), status)
             .is_some()
         {
@@ -1303,10 +1380,10 @@ impl MainView {
         }
 
         // Grid full — replace LRU slot.
-        let lru = self.pane_grid.least_recently_focused();
-        self.pane_grid.remove(lru);
+        let lru = self.active_pane_grid().least_recently_focused();
+        self.active_pane_grid_mut().remove(lru);
         if self
-            .pane_grid
+            .active_pane_grid_mut()
             .add_terminal(session_id.to_string(), tab_idx, branch.to_string(), status)
             .is_none()
         {
@@ -1324,17 +1401,23 @@ impl MainView {
 
     /// Handle click inside a pane to focus it.
     pub fn on_pane_focus(&mut self, slot_idx: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.pane_grid.set_focus(slot_idx);
+        self.active_pane_grid_mut().set_focus(slot_idx);
 
-        if let super::pane_grid::PaneSlot::Occupied {
+        let slot_data = if let super::pane_grid::PaneSlot::Occupied {
             session_id,
             tab_idx,
             ..
-        } = self.pane_grid.slot(slot_idx)
+        } = self.active_pane_grid().slot(slot_idx)
         {
-            self.active_terminal_id = Some(session_id.clone());
-            if let Some(tabs) = self.terminal_tabs.get_mut(session_id) {
-                tabs.set_active(*tab_idx);
+            Some((session_id.clone(), *tab_idx))
+        } else {
+            None
+        };
+
+        if let Some((sid, tidx)) = slot_data {
+            self.active_terminal_id = Some(sid.clone());
+            if let Some(tabs) = self.terminal_tabs.get_mut(&sid) {
+                tabs.set_active(tidx);
             }
             self.focus_region = FocusRegion::Terminal;
             self.focus_active_terminal(window, cx);
@@ -1344,20 +1427,20 @@ impl MainView {
 
     /// Handle maximize/restore toggle on a pane.
     pub fn on_pane_maximize(&mut self, slot_idx: usize, cx: &mut Context<Self>) {
-        self.pane_grid.toggle_maximize(slot_idx);
+        self.active_pane_grid_mut().toggle_maximize(slot_idx);
         cx.notify();
     }
 
     /// Handle close button on a pane.
     pub fn on_pane_close(&mut self, slot_idx: usize, cx: &mut Context<Self>) {
-        self.pane_grid.remove(slot_idx);
+        self.active_pane_grid_mut().remove(slot_idx);
 
         // If the closed pane was focused, move to next occupied or unfocus
-        if self.pane_grid.focused_slot() == slot_idx {
-            if let Some(next) = self.pane_grid.next_occupied_slot() {
-                self.pane_grid.set_focus(next);
+        if self.active_pane_grid().focused_slot() == slot_idx {
+            if let Some(next) = self.active_pane_grid().next_occupied_slot() {
+                self.active_pane_grid_mut().set_focus(next);
                 if let super::pane_grid::PaneSlot::Occupied { session_id, .. } =
-                    self.pane_grid.slot(next)
+                    self.active_pane_grid().slot(next)
                 {
                     self.active_terminal_id = Some(session_id.clone());
                 }
@@ -1809,15 +1892,15 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(slot_idx) = self.pane_grid.find_slot(session_id, tab_idx) {
-            self.pane_grid.remove(slot_idx);
+        if let Some(slot_idx) = self.active_pane_grid().find_slot(session_id, tab_idx) {
+            self.active_pane_grid_mut().remove(slot_idx);
 
-            if let Some(next) = self.pane_grid.next_occupied_slot() {
-                self.pane_grid.set_focus(next);
+            if let Some(next) = self.active_pane_grid().next_occupied_slot() {
+                self.active_pane_grid_mut().set_focus(next);
                 if let super::pane_grid::PaneSlot::Occupied {
                     session_id: next_sid,
                     ..
-                } = self.pane_grid.slot(next)
+                } = self.active_pane_grid().slot(next)
                 {
                     self.active_terminal_id = Some(next_sid.clone());
                 }
@@ -1881,29 +1964,48 @@ impl MainView {
         render_tab_bar(&ctx, cx)
     }
 
-    /// Render the view tab bar: [Control] [Dashboard] ... [+ Create]
+    /// Render the view tab bar: [Control 1] [Control 2] [+] [Dashboard] ...
     fn render_view_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_control = self.active_view == ActiveView::Control;
         let is_dashboard = matches!(self.active_view, ActiveView::Dashboard | ActiveView::Detail);
+        let workspace_count = self.workspaces.len();
+        let active_ws = self.active_workspace;
 
-        div()
+        let mut bar = div()
             .flex()
             .items_center()
             .px(px(theme::SPACE_3))
             .bg(theme::obsidian())
             .border_b_1()
-            .border_color(theme::border_subtle())
-            .child(
+            .border_color(theme::border_subtle());
+
+        // Workspace tabs
+        for i in 0..workspace_count {
+            let is_active_ws = is_control && i == active_ws;
+            let is_inactive_ws = is_control && i != active_ws;
+            let label = if workspace_count == 1 {
+                "Control".to_string()
+            } else {
+                format!("Control {}", i + 1)
+            };
+            let tab_id = SharedString::from(format!("view-tab-workspace-{}", i));
+
+            bar = bar.child(
                 div()
-                    .id("view-tab-control")
+                    .id(tab_id)
                     .px(px(theme::SPACE_3))
                     .py(px(theme::SPACE_2))
                     .cursor_pointer()
                     .text_size(px(theme::TEXT_XS))
                     .font_weight(FontWeight::MEDIUM)
                     .border_b_2()
-                    .when(is_control, |d| {
+                    .when(is_active_ws, |d| {
                         d.text_color(theme::text()).border_color(theme::ice())
+                    })
+                    .when(is_inactive_ws, |d| {
+                        d.text_color(theme::text_subtle())
+                            .border_color(theme::transparent())
+                            .hover(|d| d.text_color(theme::text()))
                     })
                     .when(!is_control, |d| {
                         d.text_color(theme::text_muted())
@@ -1912,57 +2014,82 @@ impl MainView {
                     })
                     .on_mouse_up(
                         gpui::MouseButton::Left,
-                        cx.listener(|view, _, window, cx| {
-                            if view.active_view != ActiveView::Control {
-                                view.active_view = ActiveView::Control;
-                                if view.active_terminal_id.is_some() {
-                                    view.focus_region = FocusRegion::Terminal;
-                                    view.focus_active_terminal(window, cx);
-                                }
-                                cx.notify();
+                        cx.listener(move |view, _, window, cx| {
+                            view.active_workspace = i;
+                            view.active_view = ActiveView::Control;
+                            if view.active_terminal_id.is_some() {
+                                view.focus_region = FocusRegion::Terminal;
+                                view.focus_active_terminal(window, cx);
                             }
+                            cx.notify();
                         }),
                     )
-                    .child("Control"),
-            )
-            .child(
-                div()
-                    .id("view-tab-dashboard")
-                    .px(px(theme::SPACE_3))
-                    .py(px(theme::SPACE_2))
-                    .cursor_pointer()
-                    .text_size(px(theme::TEXT_XS))
-                    .font_weight(FontWeight::MEDIUM)
-                    .border_b_2()
-                    .when(is_dashboard, |d| {
-                        d.text_color(theme::text()).border_color(theme::ice())
-                    })
-                    .when(!is_dashboard, |d| {
-                        d.text_color(theme::text_muted())
-                            .border_color(theme::transparent())
-                            .hover(|d| d.text_color(theme::text_subtle()))
-                    })
-                    .on_mouse_up(
-                        gpui::MouseButton::Left,
-                        cx.listener(|view, _, _, cx| {
-                            if view.active_view != ActiveView::Dashboard {
-                                view.active_view = ActiveView::Dashboard;
-                                view.focus_region = FocusRegion::Dashboard;
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .child("Dashboard"),
-            )
-            // Spacer
-            .child(div().flex_1())
+                    .child(label),
+            );
+        }
+
+        // "+" button to add workspace
+        bar = bar.child(
+            div()
+                .id("workspace-add")
+                .px(px(theme::SPACE_2))
+                .py(px(theme::SPACE_2))
+                .cursor_pointer()
+                .text_size(px(theme::TEXT_XS))
+                .text_color(theme::text_muted())
+                .hover(|d| d.text_color(theme::text()))
+                .on_mouse_up(
+                    gpui::MouseButton::Left,
+                    cx.listener(|view, _, _, cx| {
+                        view.workspaces.push(super::pane_grid::PaneGrid::new());
+                        view.active_workspace = view.workspaces.len() - 1;
+                        view.active_view = ActiveView::Control;
+                        cx.notify();
+                    }),
+                )
+                .child("+"),
+        );
+
+        // Dashboard tab
+        bar = bar.child(
+            div()
+                .id("view-tab-dashboard")
+                .px(px(theme::SPACE_3))
+                .py(px(theme::SPACE_2))
+                .cursor_pointer()
+                .text_size(px(theme::TEXT_XS))
+                .font_weight(FontWeight::MEDIUM)
+                .border_b_2()
+                .when(is_dashboard, |d| {
+                    d.text_color(theme::text()).border_color(theme::ice())
+                })
+                .when(!is_dashboard, |d| {
+                    d.text_color(theme::text_muted())
+                        .border_color(theme::transparent())
+                        .hover(|d| d.text_color(theme::text_subtle()))
+                })
+                .on_mouse_up(
+                    gpui::MouseButton::Left,
+                    cx.listener(|view, _, _, cx| {
+                        if view.active_view != ActiveView::Dashboard {
+                            view.active_view = ActiveView::Dashboard;
+                            view.focus_region = FocusRegion::Dashboard;
+                            cx.notify();
+                        }
+                    }),
+                )
+                .child("Dashboard"),
+        );
+
+        // Spacer
+        bar.child(div().flex_1())
     }
 
     /// Render the main content area based on active view.
     fn render_main_content(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         match self.active_view {
             ActiveView::Control => {
-                super::pane_grid::render_pane_grid(&self.pane_grid, &self.terminal_tabs, cx)
+                super::pane_grid::render_pane_grid(self.active_pane_grid(), &self.terminal_tabs, cx)
                     .into_any_element()
             }
             ActiveView::Dashboard => dashboard_view::render_dashboard(
@@ -2051,8 +2178,19 @@ impl MainView {
             return;
         }
 
+        // Configurable modifier + 1-9: jump to kild by index
+        if let Some(digit) = key_str
+            .parse::<usize>()
+            .ok()
+            .filter(|&d| (1..=9).contains(&d))
+            && self.nav_modifier.matches(&event.keystroke.modifiers)
+        {
+            self.navigate_to_kild_index(digit - 1, window, cx);
+            cx.notify();
+            return;
+        }
+
         // Cmd+J/K/D: kild navigation (works in both dashboard and terminal mode)
-        // Note: Cmd+1-9 index jumping deferred to #415 (configurable modifier)
         let cmd = event.keystroke.modifiers.platform;
 
         // Cmd+Shift+J/K: cycle between teammate terminals in the tab bar
@@ -2064,6 +2202,37 @@ impl MainView {
 
         if cmd && event.keystroke.modifiers.shift && key_str == "k" {
             self.navigate_prev_teammate_tab(window, cx);
+            cx.notify();
+            return;
+        }
+
+        // Cmd+Shift+[/]: cycle workspaces
+        if cmd && event.keystroke.modifiers.shift && key_str == "[" {
+            if self.workspaces.len() > 1 {
+                self.active_workspace = if self.active_workspace == 0 {
+                    self.workspaces.len() - 1
+                } else {
+                    self.active_workspace - 1
+                };
+                self.active_view = ActiveView::Control;
+                tracing::debug!(
+                    event = "ui.workspace.cycle_prev",
+                    workspace = self.active_workspace,
+                );
+            }
+            cx.notify();
+            return;
+        }
+
+        if cmd && event.keystroke.modifiers.shift && key_str == "]" {
+            if self.workspaces.len() > 1 {
+                self.active_workspace = (self.active_workspace + 1) % self.workspaces.len();
+                self.active_view = ActiveView::Control;
+                tracing::debug!(
+                    event = "ui.workspace.cycle_next",
+                    workspace = self.active_workspace,
+                );
+            }
             cx.notify();
             return;
         }
@@ -2211,7 +2380,7 @@ impl Render for MainView {
                                     .child(sidebar::render_sidebar(
                                         &self.state,
                                         &self.terminal_tabs,
-                                        &self.pane_grid,
+                                        self.active_pane_grid(),
                                         cx,
                                     ))
                                     // Main area (flex-1)

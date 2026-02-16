@@ -104,6 +104,10 @@ pub struct KildConfig {
     /// Daemon runtime configuration (whether to use daemon mode by default).
     #[serde(default)]
     pub(crate) daemon: DaemonRuntimeConfig,
+
+    /// UI configuration (keybindings, navigation).
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 impl Default for KildConfig {
@@ -117,6 +121,38 @@ impl Default for KildConfig {
             git: GitConfig::default(),
             editor: <EditorConfig as Default>::default(),
             daemon: DaemonRuntimeConfig::default(),
+            ui: UiConfig::default(),
+        }
+    }
+}
+
+/// UI configuration for the KILD native GUI.
+///
+/// Controls keybindings and navigation behavior in the GUI.
+/// Fields are `pub` because kild-ui reads them directly.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// Modifier key(s) for 1-9 kild index jumping.
+    /// Valid values: "ctrl", "alt", "cmd+shift"
+    /// Default: "ctrl"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_modifier: Option<String>,
+}
+
+impl UiConfig {
+    /// Returns the configured nav modifier, defaulting to "ctrl".
+    pub fn nav_modifier(&self) -> &str {
+        self.nav_modifier.as_deref().unwrap_or("ctrl")
+    }
+
+    /// Merge two UI configs. Override takes precedence for set fields.
+    pub fn merge(base: &Self, override_config: &Self) -> Self {
+        Self {
+            nav_modifier: override_config
+                .nav_modifier
+                .clone()
+                .or(base.nav_modifier.clone()),
         }
     }
 }

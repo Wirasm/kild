@@ -159,10 +159,11 @@ fn render_keyboard_hints(active_view: ActiveView, _cx: &mut Context<MainView>) -
 fn keyboard_hints_for_view(view: ActiveView) -> Vec<(&'static str, &'static str)> {
     match view {
         ActiveView::Control => vec![
+            ("ctrl-1", "jump"),
             ("cmd-j", "next"),
             ("cmd-k", "prev"),
+            ("cmd-shift-[", "ws"),
             ("cmd-d", "dashboard"),
-            ("ctrl-tab", "tabs"),
         ],
         ActiveView::Dashboard => vec![("cmd-j", "next"), ("cmd-k", "prev"), ("cmd-d", "control")],
         ActiveView::Detail => vec![("escape", "back"), ("cmd-d", "control")],
@@ -221,11 +222,12 @@ mod tests {
     #[test]
     fn test_keyboard_hints_control_view() {
         let hints = keyboard_hints_for_view(ActiveView::Control);
-        assert_eq!(hints.len(), 4);
-        assert_eq!(hints[0].0, "cmd-j");
-        assert_eq!(hints[2].0, "cmd-d");
-        assert_eq!(hints[2].1, "dashboard");
-        assert_eq!(hints[3].0, "ctrl-tab");
+        assert_eq!(hints.len(), 5);
+        assert_eq!(hints[0].0, "ctrl-1");
+        assert_eq!(hints[0].1, "jump");
+        assert_eq!(hints[1].0, "cmd-j");
+        assert_eq!(hints[3].0, "cmd-shift-[");
+        assert_eq!(hints[3].1, "ws");
     }
 
     #[test]
