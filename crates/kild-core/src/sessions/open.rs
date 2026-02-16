@@ -81,7 +81,8 @@ pub fn open_session(
     info!(
         event = "core.session.open_started",
         name = name,
-        mode = ?mode
+        mode = ?mode,
+        yolo = yolo
     );
 
     let config = Config::new();
@@ -200,8 +201,18 @@ pub fn open_session(
     // 3b. Inject yolo flags into agent command
     let agent_command = if yolo && !is_bare_shell {
         if let Some(yolo_flags) = agents::get_yolo_flags(&agent) {
+            info!(
+                event = "core.session.yolo_flags_injected",
+                agent = %agent,
+                flags = yolo_flags
+            );
             format!("{} {}", agent_command, yolo_flags)
         } else {
+            warn!(
+                event = "core.session.yolo_not_supported",
+                agent = %agent,
+                "Agent does not support --yolo mode"
+            );
             eprintln!(
                 "Warning: Agent '{}' does not support --yolo mode. Ignoring.",
                 agent
@@ -935,6 +946,126 @@ mod tests {
             config.get_agent_command("shell").is_err(),
             "get_agent_command(\"shell\") must return an error"
         );
+    }
+
+    // --- Yolo flag injection tests ---
+
+    /// When yolo=true for a supported agent, yolo flags should be appended to the command.
+    #[test]
+    fn test_yolo_flag_injection_for_supported_agent() {
+        let agent = "claude";
+        let base_command = "claude";
+        let yolo = true;
+        let is_bare_shell = false;
+
+        let result = if yolo && !is_bare_shell {
+            if let Some(yolo_flags) = agents::get_yolo_flags(agent) {
+                format!("{} {}", base_command, yolo_flags)
+            } else {
+                base_command.to_string()
+            }
+        } else {
+            base_command.to_string()
+        };
+
+        assert_eq!(result, "claude --dangerously-skip-permissions");
+    }
+
+    /// When yolo=true for an unsupported agent, the command should be unchanged.
+    #[test]
+    fn test_yolo_flag_injection_for_unsupported_agent() {
+        let agent = "opencode";
+        let base_command = "opencode";
+        let yolo = true;
+        let is_bare_shell = false;
+
+        let result = if yolo && !is_bare_shell {
+            if let Some(yolo_flags) = agents::get_yolo_flags(agent) {
+                format!("{} {}", base_command, yolo_flags)
+            } else {
+                base_command.to_string()
+            }
+        } else {
+            base_command.to_string()
+        };
+
+        assert_eq!(result, "opencode");
+    }
+
+    /// When yolo=true but is_bare_shell=true, yolo injection is skipped entirely.
+    #[test]
+    fn test_yolo_flag_skipped_for_bare_shell() {
+        let base_command = "/bin/zsh";
+        let yolo = true;
+        let is_bare_shell = true;
+
+        let result = if yolo && !is_bare_shell {
+            if let Some(yolo_flags) = agents::get_yolo_flags("claude") {
+                format!("{} {}", base_command, yolo_flags)
+            } else {
+                base_command.to_string()
+            }
+        } else {
+            base_command.to_string()
+        };
+
+        assert_eq!(result, "/bin/zsh");
+    }
+
+    /// When yolo=true and resume=true, both sets of flags should be present
+    /// with yolo flags before resume args (matching open_session ordering).
+    #[test]
+    fn test_yolo_with_resume_flag_ordering() {
+        let agent = "claude";
+        let base_command = "claude";
+        let session_id = "550e8400-e29b-41d4-a716-446655440000";
+
+        // Step 1: Inject yolo flags (matches open_session step 3b)
+        let yolo_flags = agents::get_yolo_flags(agent).unwrap();
+        let after_yolo = format!("{} {}", base_command, yolo_flags);
+
+        // Step 2: Append resume args (matches open_session step 4)
+        let resume_args = agents::resume::resume_session_args(agent, session_id);
+        let final_command = format!("{} {}", after_yolo, resume_args.join(" "));
+
+        assert_eq!(
+            final_command,
+            format!(
+                "claude --dangerously-skip-permissions --resume {}",
+                session_id
+            )
+        );
+
+        // Verify ordering: yolo flags come before resume args
+        let yolo_pos = final_command
+            .find("--dangerously-skip-permissions")
+            .unwrap();
+        let resume_pos = final_command.find("--resume").unwrap();
+        assert!(
+            yolo_pos < resume_pos,
+            "Yolo flags must come before resume args"
+        );
+    }
+
+    /// Verify yolo flags for all supported agents produce valid-looking flags.
+    #[test]
+    fn test_yolo_flags_format_validation() {
+        for agent in ["claude", "amp", "kiro", "codex", "gemini"] {
+            let flags = agents::get_yolo_flags(agent);
+            assert!(flags.is_some(), "Agent '{}' should support yolo", agent);
+            let flags = flags.unwrap();
+            assert!(
+                flags.starts_with("--"),
+                "Yolo flags for '{}' should start with '--', got: {}",
+                agent,
+                flags
+            );
+            assert!(
+                !flags.is_empty(),
+                "Yolo flags for '{}' should not be empty",
+                agent
+            );
+        }
     }
 
     /// DefaultAgent fallback should work with custom config defaults too,

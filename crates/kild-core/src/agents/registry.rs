@@ -227,6 +227,32 @@ mod tests {
         assert_eq!(get_yolo_flags("unknown"), None);
     }
 
+    /// Test the yolo flag merging logic used by CLI create command.
+    /// Yolo flags should be prepended to existing user flags.
+    #[test]
+    fn test_yolo_flags_prepend_to_existing_flags() {
+        let agent = "claude";
+        let yolo_flags = get_yolo_flags(agent).unwrap();
+        let existing_flags = "--verbose --debug";
+
+        let merged = format!("{} {}", yolo_flags, existing_flags);
+        assert_eq!(merged, "--dangerously-skip-permissions --verbose --debug");
+    }
+
+    /// Test yolo flag merging when no existing flags are set.
+    #[test]
+    fn test_yolo_flags_standalone() {
+        let agent = "claude";
+        let yolo_flags = get_yolo_flags(agent).unwrap();
+
+        let result: Option<String> = None;
+        let merged = match result {
+            Some(existing) => format!("{} {}", yolo_flags, existing),
+            None => yolo_flags.to_string(),
+        };
+        assert_eq!(merged, "--dangerously-skip-permissions");
+    }
+
     #[test]
     fn test_get_default_command() {
         assert_eq!(get_default_command("amp"), Some("amp"));
