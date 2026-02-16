@@ -203,7 +203,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 
 **Workspace structure:**
 - `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
-- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode). All public enums are `#[non_exhaustive]` for forward compatibility. Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
@@ -279,6 +279,8 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 ## Code Style Preferences
 
 **Prefer string literals over enums for event names.** Event names are typed as string literals directly in the tracing macros, not as enum variants. This keeps logging flexible and greppable.
+
+**Use newtypes for domain identifiers.** Session IDs, branch names, and project IDs use the `newtype_string!` macro pattern for compile-time type safety. See `kild-protocol/src/types.rs` for the macro and existing newtypes. This prevents mixing up identifiers at the type level.
 
 **No backward-compatibility shims.** When renaming or moving types, rename all usages. Never introduce type aliases, re-exports, or wrapper types solely for backward compatibility. This is a single-developer tool with no external consumers — there is nobody to keep compatible with. One name, one type, everywhere.
 
