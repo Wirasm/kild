@@ -145,10 +145,10 @@ kild open --all --no-agent
 ### Open kild in code editor
 ```bash
 # Open worktree in editor
-# Precedence: --editor flag > config default > $EDITOR > "zed"
+# Precedence: CLI flag > config > $VISUAL > $EDITOR > OS default > PATH scan
 kild code <branch>
 
-# Use specific editor (overrides config and $EDITOR)
+# Use specific editor (CLI override has highest priority)
 kild code <branch> --editor vim
 
 # Configure default editor in ~/.kild/config.toml or ./.kild/config.toml

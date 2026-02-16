@@ -73,6 +73,7 @@ cargo run -p kild -- list
 cargo run -p kild -- list --json                 # JSON object with sessions array and fleet_summary
 cargo run -p kild -- status my-branch --json     # JSON output for single kild
 cargo run -p kild -- -v list                     # Verbose mode (enable JSON logs)
+cargo run -p kild -- --no-color list             # Disable colored output (respects NO_COLOR env var)
 cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
 cargo run -p kild -- open my-branch              # Open new agent in existing kild (auto-detects runtime mode from session)
 cargo run -p kild -- open my-branch --agent kiro # Open with different agent
@@ -85,8 +86,8 @@ cargo run -p kild -- open --all                  # Open agents in all stopped ki
 cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
 cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
 cargo run -p kild -- open --all --resume         # Resume all stopped kilds with previous session context
-cargo run -p kild -- code my-branch              # Open worktree in editor (config > $EDITOR > code)
-cargo run -p kild -- code my-branch --editor vim # Override editor
+cargo run -p kild -- code my-branch              # Open worktree in editor (CLI > config > $VISUAL > $EDITOR > OS default > PATH scan)
+cargo run -p kild -- code my-branch --editor vim # Override editor (CLI flag has highest priority)
 cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
 cargo run -p kild -- hide my-branch              # Minimize/hide terminal window
 cargo run -p kild -- hide --all                  # Hide all active kild windows
@@ -205,7 +206,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
 - `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only. No tokio, no kild-core. Single source of truth for daemon wire format.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
-- `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing)
+- `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
 - `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC)
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
@@ -217,6 +218,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
 - `daemon/` - Daemon client for IPC communication (sync Unix socket client) and auto-start logic (discovers kild-daemon binary as sibling executable)
+- `editor/` - Editor backend system (Zed, VS Code, Vim, generic fallback) with registry.rs for detection and resolution chain (CLI > config > $VISUAL > $EDITOR > OS default via duti/xdg-mime > PATH scan)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
 - `config/` - Hierarchical TOML config (defaults → user → project → CLI)
