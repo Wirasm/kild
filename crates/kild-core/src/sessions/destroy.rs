@@ -751,4 +751,141 @@ mod tests {
         // Decoy directory must still exist — cleanup was never called
         assert!(decoy_dir.exists());
     }
+
+    #[test]
+    fn test_cleanup_task_list_with_nested_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let task_list_id = "tl_nested_test";
+        let task_dir = tmp.path().join(".claude").join("tasks").join(task_list_id);
+
+        // Create nested structure
+        let sub_dir = task_dir.join("subtasks");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(task_dir.join("task1.json"), r#"{"id":"1"}"#).unwrap();
+        std::fs::write(task_dir.join("task2.json"), r#"{"id":"2"}"#).unwrap();
+        std::fs::write(sub_dir.join("nested.json"), r#"{"id":"3"}"#).unwrap();
+
+        assert!(task_dir.exists());
+        assert!(sub_dir.exists());
+
+        cleanup_task_list("session-nested", task_list_id, tmp.path());
+
+        // Entire directory tree should be removed
+        assert!(!task_dir.exists());
+    }
+
+    #[test]
+    fn test_destroy_safety_info_default_does_not_block() {
+        // Default has has_remote_branch=false, so has_warnings() is true,
+        // but should_block() is false (only blocks on uncommitted changes).
+        let info = DestroySafetyInfo::default();
+        assert!(!info.should_block(), "Default should not block");
+    }
+
+    #[test]
+    fn test_destroy_safety_info_fully_clean_no_warnings() {
+        use crate::git::types::WorktreeStatus;
+
+        let info = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_uncommitted_changes: false,
+                unpushed_commit_count: 0,
+                has_remote_branch: true,
+                status_check_failed: false,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::Exists,
+        };
+        assert!(!info.should_block());
+        assert!(!info.has_warnings());
+        assert!(info.warning_messages().is_empty());
+    }
+
+    #[test]
+    fn test_has_warnings_each_condition_independently() {
+        use crate::git::types::WorktreeStatus;
+
+        // Only uncommitted changes
+        let uncommitted = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_uncommitted_changes: true,
+                has_remote_branch: true,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::Exists,
+        };
+        assert!(uncommitted.has_warnings());
+
+        // Only unpushed commits
+        let unpushed = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                unpushed_commit_count: 3,
+                has_remote_branch: true,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::Exists,
+        };
+        assert!(unpushed.has_warnings());
+
+        // Only no remote branch
+        let no_remote = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_remote_branch: false,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::Exists,
+        };
+        assert!(no_remote.has_warnings());
+
+        // Only no PR
+        let no_pr = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_remote_branch: true,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::NotFound,
+        };
+        assert!(no_pr.has_warnings());
+
+        // Only status check failed
+        let status_failed = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                status_check_failed: true,
+                has_remote_branch: true,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::Exists,
+        };
+        assert!(status_failed.has_warnings());
+    }
+
+    #[test]
+    fn test_warning_messages_severity_order() {
+        use crate::git::types::WorktreeStatus;
+
+        // Combine all warning conditions
+        let info = DestroySafetyInfo {
+            git_status: WorktreeStatus {
+                has_uncommitted_changes: true,
+                unpushed_commit_count: 2,
+                has_remote_branch: true,
+                status_check_failed: true,
+                ..Default::default()
+            },
+            pr_status: PrCheckResult::NotFound,
+        };
+
+        let msgs = info.warning_messages();
+        assert!(msgs.len() >= 3);
+
+        // Status check failure should come first (highest severity)
+        assert!(msgs[0].contains("Git status check failed"));
+
+        // Unpushed commits should follow
+        // (uncommitted is skipped when status_check_failed)
+        assert!(msgs[1].contains("unpushed"));
+
+        // No PR should be last (advisory)
+        assert!(msgs.last().unwrap().contains("No PR found"));
+    }
 }

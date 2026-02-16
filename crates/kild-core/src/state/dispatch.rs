@@ -513,4 +513,78 @@ mod tests {
         let loaded = load_projects();
         assert!(loaded.active.is_none());
     }
+
+    // --- Session command dispatch error path tests ---
+    // These verify that dispatch→handler wiring is correct for session commands.
+    // Non-existent sessions hit NotFound errors before any I/O matters.
+
+    #[test]
+    fn test_dispatch_destroy_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::DestroyKild {
+            branch: "nonexistent-branch".to_string(),
+            force: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dispatch_stop_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::StopKild {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dispatch_complete_kild_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::CompleteKild {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dispatch_open_kild_not_found() {
+        use crate::state::types::{OpenMode, RuntimeMode};
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::OpenKild {
+            branch: "nonexistent-branch".to_string(),
+            mode: OpenMode::DefaultAgent,
+            runtime_mode: Some(RuntimeMode::Terminal),
+            resume: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dispatch_update_agent_status_not_found() {
+        use crate::sessions::types::AgentStatus;
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::UpdateAgentStatus {
+            branch: "nonexistent-branch".to_string(),
+            status: AgentStatus::Working,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dispatch_refresh_sessions_succeeds() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::RefreshSessions);
+        // RefreshSessions reads from filesystem — empty is fine, should not error
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![Event::SessionsRefreshed]);
+    }
+
+    #[test]
+    fn test_dispatch_refresh_pr_status_not_found() {
+        let mut store = CoreStore::new(KildConfig::default());
+        let result = store.dispatch(Command::RefreshPrStatus {
+            branch: "nonexistent-branch".to_string(),
+        });
+        assert!(result.is_err());
+    }
 }
