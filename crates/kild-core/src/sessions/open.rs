@@ -76,6 +76,7 @@ pub fn open_session(
     mode: crate::state::types::OpenMode,
     runtime_mode: Option<crate::state::types::RuntimeMode>,
     resume: bool,
+    yolo: bool,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -195,6 +196,21 @@ pub fn open_session(
                 (agent, command)
             }
         };
+
+    // 3b. Inject yolo flags into agent command
+    let agent_command = if yolo && !is_bare_shell {
+        if let Some(yolo_flags) = agents::get_yolo_flags(&agent) {
+            format!("{} {}", agent_command, yolo_flags)
+        } else {
+            eprintln!(
+                "Warning: Agent '{}' does not support --yolo mode. Ignoring.",
+                agent
+            );
+            agent_command
+        }
+    } else {
+        agent_command
+    };
 
     // 4. Apply resume / session-id logic to agent command
     let (agent_command, new_agent_session_id) = if resume && !is_bare_shell {
@@ -452,6 +468,7 @@ mod tests {
             "non-existent",
             crate::state::types::OpenMode::DefaultAgent,
             Some(crate::state::types::RuntimeMode::Terminal),
+            false,
             false,
         );
         assert!(result.is_err());

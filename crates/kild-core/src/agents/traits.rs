@@ -23,6 +23,12 @@ pub trait AgentBackend: Send + Sync {
     /// running agent instances. Handles quirks like Claude showing version
     /// as process name.
     fn process_patterns(&self) -> Vec<String>;
+
+    /// Returns the CLI flags for "yolo mode" (full autonomy, skip all permission prompts).
+    /// Returns `None` if the agent doesn't support autonomous mode.
+    fn yolo_flags(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -60,5 +66,6 @@ mod tests {
         assert_eq!(backend.display_name(), "Mock Agent");
         assert!(backend.is_available());
         assert_eq!(backend.default_command(), "mock-cli");
+        assert_eq!(backend.yolo_flags(), None);
     }
 }

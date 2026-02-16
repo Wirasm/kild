@@ -17,10 +17,11 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let no_daemon_flag = matches.get_flag("no-daemon");
     let runtime_mode = resolve_explicit_runtime_mode(daemon_flag, no_daemon_flag);
     let resume = matches.get_flag("resume");
+    let yolo = matches.get_flag("yolo");
 
     // Check for --all flag first
     if matches.get_flag("all") {
-        return handle_open_all(mode, runtime_mode, resume);
+        return handle_open_all(mode, runtime_mode, resume, yolo);
     }
 
     // Single branch operation
@@ -30,7 +31,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume) {
+    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume, yolo) {
         Ok(session) => {
             // Auto-attach: open a terminal window for daemon sessions
             if session.runtime_mode == Some(kild_core::RuntimeMode::Daemon) {
@@ -86,6 +87,7 @@ fn handle_open_all(
     mode: kild_core::OpenMode,
     runtime_mode: Option<kild_core::RuntimeMode>,
     resume: bool,
+    yolo: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.open_all_started", mode = ?mode);
 
@@ -108,8 +110,13 @@ fn handle_open_all(
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in stopped {
-        match session_ops::open_session(&session.branch, mode.clone(), runtime_mode.clone(), resume)
-        {
+        match session_ops::open_session(
+            &session.branch,
+            mode.clone(),
+            runtime_mode.clone(),
+            resume,
+            yolo,
+        ) {
             Ok(s) => {
                 // Auto-attach: open a terminal window for daemon sessions
                 if s.runtime_mode == Some(kild_core::RuntimeMode::Daemon) {
