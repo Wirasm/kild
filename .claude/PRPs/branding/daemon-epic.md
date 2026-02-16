@@ -97,7 +97,7 @@ KILD today is a production CLI + GPUI dashboard managing parallel AI agents in e
 - [x] ~~**Terminal resize**~~ — `ResizeHandle` tracks dimensions, `resize_if_changed()` sends SIGWINCH on prepaint. Dynamic cols/rows. Resolved in Phase 2.1.
 - [x] ~~**Scrollback UI**~~ — Mouse scroll via `alacritty_terminal::grid::Scroll`, display offset tracking, "Scrollback" badge when scrolled up. Resolved in Phase 2.1.
 - [x] ~~Selection and copy/paste~~ — Cmd+C copies selection, Cmd+V pastes from clipboard. Resolved in Phase 2.1.
-- [ ] Cursor blink animation — cursor renders as static block, no blink timer
+- [x] ~~**Cursor blink animation**~~ — Cursor renders as always-visible block. Blink timer removed for performance. Resolved in PR #451.
 - [ ] Wide character rendering — spacer cells skipped correctly but no explicit width-2 glyph handling (partial)
 - [x] ~~URL detection / clickable links~~ — Cmd+Click opens URLs in browser. Resolved in Phase 2.1.
 
