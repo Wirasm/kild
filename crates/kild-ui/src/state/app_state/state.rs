@@ -470,20 +470,6 @@ impl AppState {
         }
     }
 
-    /// Create an AppState for testing with provided displays.
-    #[cfg(test)]
-    pub fn test_with_displays(displays: Vec<SessionInfo>) -> Self {
-        Self {
-            sessions: SessionStore::from_data(displays, None),
-            dialog: DialogState::None,
-            errors: OperationErrors::new(),
-            selection: SelectionState::default(),
-            projects: ProjectManager::new(),
-            startup_errors: Vec::new(),
-            loading: LoadingState::new(),
-        }
-    }
-
     /// Set the dialog state directly (for testing).
     #[cfg(test)]
     pub fn set_dialog(&mut self, dialog: DialogState) {
