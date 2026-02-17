@@ -118,6 +118,9 @@ impl IpcConnection {
         writeln!(self.stream, "{}", msg)?;
         self.stream.flush()?;
 
+        // Transient BufReader — not stored as a field because KILD's
+        // request-response protocol expects exactly one response line per send().
+        // Storing it would risk buffering extra data from the stream.
         let mut reader = BufReader::new(&self.stream);
         let mut line = String::new();
         reader.read_line(&mut line)?;
@@ -150,14 +153,17 @@ impl IpcConnection {
 
     /// Check if the connection is still usable (peer hasn't closed).
     ///
-    /// Sets a 1ms read timeout and attempts a read. For KILD's protocol,
-    /// there's no unsolicited data between request-response cycles, so:
+    /// Temporarily sets a 1ms read timeout (restored via RAII guard, even on
+    /// panic) and attempts a read. For KILD's protocol, there's no unsolicited
+    /// data between request-response cycles, so:
     /// - `TimedOut` / `WouldBlock` → no data, connection alive
     /// - `Ok(0)` → EOF, peer closed
     /// - Any other error → connection broken
     ///
     /// Returns `false` if the socket is definitely closed, `true` otherwise.
-    /// A `true` result is best-effort — the next `send()` may still fail.
+    /// A `true` result is best-effort — the connection may close between this
+    /// check and the next `send()` (TOCTOU race). Callers should handle
+    /// `send()` errors and not cache broken connections.
     pub fn is_alive(&self) -> bool {
         use std::io::Read;
 
@@ -168,13 +174,20 @@ impl IpcConnection {
             orig_timeout,
         };
 
-        let _ = self.stream.set_read_timeout(Some(Duration::from_millis(1)));
+        // Fail-closed: if we can't set the probe timeout, assume broken
+        if self
+            .stream
+            .set_read_timeout(Some(Duration::from_millis(1)))
+            .is_err()
+        {
+            return false;
+        }
 
         let mut buf = [0u8; 1];
         let mut stream_ref = &self.stream;
         match stream_ref.read(&mut buf) {
             Ok(0) => false, // EOF — peer closed
-            Ok(_) => true,  // Unexpected data but socket alive
+            Ok(_) => true,  // Unexpected data but socket alive (possible protocol violation)
             Err(ref e)
                 if e.kind() == std::io::ErrorKind::TimedOut
                     || e.kind() == std::io::ErrorKind::WouldBlock =>
@@ -387,5 +400,24 @@ mod tests {
             !conn.is_alive(),
             "Socket with closed peer should not be alive"
         );
+    }
+
+    #[test]
+    fn test_is_alive_restores_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let _listener = UnixListener::bind(&sock_path).unwrap();
+
+        let conn = IpcConnection::connect(&sock_path).unwrap();
+
+        // Default timeout is 30s from connect()
+        let before = conn.stream.read_timeout().unwrap();
+        assert_eq!(before, Some(Duration::from_secs(30)));
+
+        // is_alive() temporarily sets 1ms timeout then restores
+        assert!(conn.is_alive());
+
+        let after = conn.stream.read_timeout().unwrap();
+        assert_eq!(after, before, "is_alive() should restore original timeout");
     }
 }

@@ -84,8 +84,8 @@ async fn connect_to_daemon() -> Result<Async<UnixStream>, DaemonClientError> {
 /// Send a JSONL message on a stream without flushing.
 ///
 /// For write-heavy operations (WriteStdin, ResizePty) where the caller
-/// doesn't need an immediate response. Data reaches the kernel buffer
-/// immediately since Async<UnixStream> has no userspace buffering.
+/// doesn't need an immediate response. Callers expecting a response should
+/// use `send_message_flush()` to ensure the message reaches the peer.
 async fn send_message(
     stream: &mut Async<UnixStream>,
     msg: &ClientMessage,

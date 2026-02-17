@@ -18,6 +18,10 @@ thread_local! {
 
 /// Get a connection to the daemon, reusing a cached one if available.
 ///
+/// Uses thread-local storage to avoid lock contention. Each thread maintains
+/// its own connection — for single-threaded CLI commands, this means one
+/// connection is reused across sequential operations within the same invocation.
+///
 /// The connection is taken from the cache (exclusive ownership) and must be
 /// returned with `return_connection()` after successful use.
 fn get_connection() -> Result<IpcConnection, DaemonClientError> {
@@ -25,20 +29,29 @@ fn get_connection() -> Result<IpcConnection, DaemonClientError> {
 
     CACHED_CONNECTION.with(|cell| {
         let mut cached = cell.borrow_mut();
-        if let Some(conn) = cached.take()
-            && conn.is_alive()
-        {
-            return Ok(conn);
+        if let Some(conn) = cached.take() {
+            if conn.is_alive() {
+                debug!(event = "core.daemon.connection_reused");
+                return Ok(conn);
+            }
+            debug!(event = "core.daemon.connection_stale");
         }
-        IpcConnection::connect(&socket_path).map_err(Into::into)
+        let conn = IpcConnection::connect(&socket_path)?;
+        debug!(event = "core.daemon.connection_created");
+        Ok(conn)
     })
 }
 
 /// Return a connection to the cache for reuse by the next call.
 ///
-/// Only call this after a successful send — broken connections should be dropped.
+/// Re-validates liveness before caching to prevent storing broken connections.
 fn return_connection(conn: IpcConnection) {
+    if !conn.is_alive() {
+        debug!(event = "core.daemon.connection_dropped_on_return");
+        return;
+    }
     CACHED_CONNECTION.with(|cell| {
+        debug!(event = "core.daemon.connection_cached");
         *cell.borrow_mut() = Some(conn);
     });
 }
@@ -175,17 +188,21 @@ pub fn create_pty_session(
                 daemon_session_id: session.id.into_inner(),
             })
         }
-        Ok(_) => {
-            return_connection(conn);
-            Err(DaemonClientError::ProtocolError {
-                message: "Expected SessionCreated response".to_string(),
-            })
-        }
+        Ok(_) => Err(DaemonClientError::ProtocolError {
+            message: "Expected SessionCreated response".to_string(),
+        }),
         Err(IpcError::DaemonError { code, message }) => {
             return_connection(conn);
             Err(DaemonClientError::DaemonError { code, message })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.create_pty_session_failed",
+                request_id = request.request_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -215,7 +232,14 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
             return_connection(conn);
             Err(DaemonClientError::DaemonError { code, message })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.stop_session_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -250,7 +274,14 @@ pub fn destroy_daemon_session(
             return_connection(conn);
             Err(DaemonClientError::DaemonError { code, message })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.destroy_session_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -276,7 +307,8 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
             debug!(event = "core.daemon.ping_completed", alive = true);
             Ok(true)
         }
-        Err(_) => {
+        Err(e) => {
+            warn!(event = "core.daemon.ping_failed", error = %e);
             debug!(event = "core.daemon.ping_completed", alive = false);
             Ok(false)
         }
@@ -330,7 +362,6 @@ pub fn get_session_status(
             Ok(Some(session.status))
         }
         Ok(unexpected) => {
-            return_connection(conn);
             warn!(
                 event = "core.daemon.get_session_status_failed",
                 daemon_session_id = daemon_session_id,
@@ -388,7 +419,6 @@ pub fn get_session_info(
             Ok(Some((session.status, session.exit_code)))
         }
         Ok(unexpected) => {
-            return_connection(conn);
             warn!(
                 event = "core.daemon.get_session_info_failed",
                 daemon_session_id = daemon_session_id,
@@ -403,7 +433,14 @@ pub fn get_session_info(
             return_connection(conn);
             Ok(None)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.get_session_info_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -437,7 +474,6 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             Ok(Some(decoded))
         }
         Ok(unexpected) => {
-            return_connection(conn);
             warn!(
                 event = "core.daemon.read_scrollback_failed",
                 daemon_session_id = daemon_session_id,
@@ -452,7 +488,14 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             return_connection(conn);
             Ok(None)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.read_scrollback_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -479,17 +522,20 @@ pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonC
             );
             Ok(sessions)
         }
-        Ok(_) => {
-            return_connection(conn);
-            Err(DaemonClientError::ProtocolError {
-                message: "Expected SessionList response".to_string(),
-            })
-        }
+        Ok(_) => Err(DaemonClientError::ProtocolError {
+            message: "Expected SessionList response".to_string(),
+        }),
         Err(IpcError::DaemonError { code, message }) => {
             return_connection(conn);
             Err(DaemonClientError::DaemonError { code, message })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "core.daemon.list_sessions_failed",
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -511,7 +557,10 @@ pub fn request_shutdown() -> Result<(), DaemonClientError> {
         Err(IpcError::DaemonError { code, message }) => {
             Err(DaemonClientError::DaemonError { code, message })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(event = "core.daemon.shutdown_failed", error = %e);
+            Err(e.into())
+        }
     }
 }
 

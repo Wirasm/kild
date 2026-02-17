@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use base64::Engine;
 use kild_paths::KildPaths;
 use kild_protocol::{ClientMessage, DaemonMessage, IpcConnection, SessionId};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::errors::ShimError;
 
@@ -14,24 +14,36 @@ thread_local! {
 
 /// Get a connection to the daemon, reusing a cached one if available.
 ///
+/// Uses thread-local storage so each thread maintains its own connection.
 /// Critical for `write_stdin()` which is called per-keystroke — avoids
 /// creating a new socket connection for every key press.
 fn get_or_connect() -> Result<IpcConnection, ShimError> {
     CACHED_CONNECTION.with(|cell| {
         let mut cached = cell.borrow_mut();
-        if let Some(conn) = cached.take()
-            && conn.is_alive()
-        {
-            return Ok(conn);
+        if let Some(conn) = cached.take() {
+            if conn.is_alive() {
+                debug!(event = "shim.ipc.connection_reused");
+                return Ok(conn);
+            }
+            debug!(event = "shim.ipc.connection_stale");
         }
         let paths = KildPaths::resolve().map_err(|e| ShimError::state(e.to_string()))?;
-        IpcConnection::connect(&paths.daemon_socket()).map_err(Into::into)
+        let conn = IpcConnection::connect(&paths.daemon_socket())?;
+        debug!(event = "shim.ipc.connection_created");
+        Ok(conn)
     })
 }
 
 /// Return a connection to the cache for reuse.
+///
+/// Re-validates liveness before caching to prevent storing broken connections.
 fn return_conn(conn: IpcConnection) {
+    if !conn.is_alive() {
+        debug!(event = "shim.ipc.connection_dropped_on_return");
+        return;
+    }
     CACHED_CONNECTION.with(|cell| {
+        debug!(event = "shim.ipc.connection_cached");
         *cell.borrow_mut() = Some(conn);
     });
 }
@@ -76,13 +88,17 @@ pub fn create_session(
             );
             Ok(daemon_session_id)
         }
-        Ok(_) => {
-            return_conn(conn);
-            Err(ShimError::ipc(
-                "create_session: expected SessionCreated response",
-            ))
+        Ok(_) => Err(ShimError::ipc(
+            "create_session: expected SessionCreated response",
+        )),
+        Err(e) => {
+            warn!(
+                event = "shim.ipc.create_session_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            Err(e.into())
         }
-        Err(e) => Err(e.into()),
     }
 }
 
@@ -114,7 +130,15 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
             );
             Ok(())
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "shim.ipc.write_stdin_failed",
+                session_id = session_id,
+                bytes = data.len(),
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -141,7 +165,14 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
             );
             Ok(())
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "shim.ipc.destroy_session_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
@@ -172,13 +203,17 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
             );
             Ok(decoded)
         }
-        Ok(_) => {
-            return_conn(conn);
-            Err(ShimError::ipc(
-                "read_scrollback: expected ScrollbackContents response",
-            ))
+        Ok(_) => Err(ShimError::ipc(
+            "read_scrollback: expected ScrollbackContents response",
+        )),
+        Err(e) => {
+            warn!(
+                event = "shim.ipc.read_scrollback_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            Err(e.into())
         }
-        Err(e) => Err(e.into()),
     }
 }
 
@@ -208,7 +243,14 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
             );
             Ok(())
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            warn!(
+                event = "shim.ipc.resize_pty_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
     }
 }
 
