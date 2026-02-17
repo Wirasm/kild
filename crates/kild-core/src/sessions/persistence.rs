@@ -4,7 +4,18 @@
 
 use crate::sessions::{errors::SessionError, types::*};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Compute session directory path: `<sessions_dir>/<safe_id>/`.
+fn session_dir(sessions_dir: &Path, session_id: &str) -> PathBuf {
+    let safe_id = session_id.replace('/', "_");
+    sessions_dir.join(safe_id)
+}
+
+/// Compute session file path: `<sessions_dir>/<safe_id>/kild.json`.
+fn session_file(sessions_dir: &Path, session_id: &str) -> PathBuf {
+    session_dir(sessions_dir, session_id).join("kild.json")
+}
 
 pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError> {
     fs::create_dir_all(sessions_dir).map_err(|e| SessionError::IoError { source: e })?;
@@ -23,8 +34,107 @@ fn cleanup_temp_file(temp_file: &Path, original_error: &std::io::Error) {
     }
 }
 
+/// Migrate a session from flat file format to per-session directory format.
+///
+/// Detects old format: `<sessions_dir>/<safe_id>.json` exists as a file (not directory).
+/// Migrates by: creating `<safe_id>/` directory, moving `.json` → `kild.json`,
+/// moving `.status` → `status`, moving `.pr` → `pr`.
+///
+/// Returns `Ok(true)` if migration happened, `Ok(false)` if already new format or no file.
+fn migrate_session_if_needed(sessions_dir: &Path, safe_id: &str) -> Result<bool, SessionError> {
+    let old_json = sessions_dir.join(format!("{safe_id}.json"));
+    if !old_json.is_file() {
+        return Ok(false);
+    }
+
+    let dir = sessions_dir.join(safe_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+
+    // Move main session file (race-safe: another process may have already migrated)
+    match fs::rename(&old_json, dir.join("kild.json")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Another process already migrated this session
+            return Ok(false);
+        }
+        Err(e) => return Err(SessionError::IoError { source: e }),
+    }
+
+    // Move sidecar files (best-effort, race-safe)
+    let old_status = sessions_dir.join(format!("{safe_id}.status"));
+    if old_status.is_file() {
+        match fs::rename(&old_status, dir.join("status")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(
+                    event = "core.session.migration_sidecar_failed",
+                    safe_id = safe_id,
+                    sidecar = "status",
+                    error = %e,
+                );
+            }
+        }
+    }
+
+    let old_pr = sessions_dir.join(format!("{safe_id}.pr"));
+    if old_pr.is_file() {
+        match fs::rename(&old_pr, dir.join("pr")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(
+                    event = "core.session.migration_sidecar_failed",
+                    safe_id = safe_id,
+                    sidecar = "pr",
+                    error = %e,
+                );
+            }
+        }
+    }
+
+    // Clean up old temp files (best-effort)
+    for ext in &["json.tmp", "status.tmp", "pr.tmp"] {
+        let old_tmp = sessions_dir.join(format!("{safe_id}.{ext}"));
+        if old_tmp.is_file()
+            && let Err(e) = fs::remove_file(&old_tmp)
+        {
+            tracing::debug!(
+                event = "core.session.migration_temp_cleanup_failed",
+                safe_id = safe_id,
+                file = %old_tmp.display(),
+                error = %e,
+            );
+        }
+    }
+
+    tracing::info!(
+        event = "core.session.migrated_to_directory",
+        safe_id = safe_id,
+        session_dir = %dir.display(),
+    );
+
+    Ok(true)
+}
+
 pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<(), SessionError> {
-    let session_file = sessions_dir.join(format!("{}.json", session.id.replace('/', "_")));
+    let dir = session_dir(sessions_dir, &session.id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let file = session_file(sessions_dir, &session.id);
     let session_json = serde_json::to_string_pretty(session).map_err(|e| {
         tracing::error!(
             event = "core.session.serialization_failed",
@@ -37,7 +147,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
         }
     })?;
 
-    let temp_file = session_file.with_extension("json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
 
     // Write to temp file
     if let Err(e) = fs::write(&temp_file, &session_json) {
@@ -46,7 +156,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
     }
 
     // Rename temp file to final location
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -71,18 +181,47 @@ pub fn load_sessions_from_files(
         let entry = entry.map_err(|e| SessionError::IoError { source: e })?;
         let path = entry.path();
 
-        // Only process .json files
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+        // Determine session file path based on entry type
+        let session_file = if path.is_dir() {
+            // New format: <safe_id>/kild.json
+            let kild_json = path.join("kild.json");
+            if !kild_json.exists() {
+                continue;
+            }
+            kild_json
+        } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            // Old format: <safe_id>.json — auto-migrate
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                match migrate_session_if_needed(sessions_dir, stem) {
+                    Ok(true) => {
+                        // Migrated — load from new location
+                        sessions_dir.join(stem).join("kild.json")
+                    }
+                    Ok(false) => continue, // Shouldn't happen (we checked is_file above)
+                    Err(e) => {
+                        skipped_count += 1;
+                        tracing::warn!(
+                            event = "core.session.migration_failed",
+                            file = %path.display(),
+                            error = %e,
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                continue;
+            }
+        } else {
             continue;
-        }
+        };
 
-        let content = match fs::read_to_string(&path) {
+        let content = match fs::read_to_string(&session_file) {
             Ok(content) => content,
             Err(e) => {
                 skipped_count += 1;
                 tracing::warn!(
                     event = "core.session.load_read_error",
-                    file = %path.display(),
+                    file = %session_file.display(),
                     error = %e,
                     message = "Failed to read session file, skipping"
                 );
@@ -96,7 +235,7 @@ pub fn load_sessions_from_files(
                 skipped_count += 1;
                 tracing::warn!(
                     event = "core.session.load_invalid_json",
-                    file = %path.display(),
+                    file = %session_file.display(),
                     error = %e,
                     message = "Failed to parse session JSON, skipping"
                 );
@@ -107,7 +246,7 @@ pub fn load_sessions_from_files(
         if !session.has_agents() && session.status == super::types::SessionStatus::Active {
             tracing::warn!(
                 event = "core.session.load_legacy_no_agents",
-                file = %path.display(),
+                file = %session_file.display(),
                 session_id = %session.id,
                 branch = %session.branch,
                 "Active session has no tracked agents (legacy format) — operations may be degraded"
@@ -118,7 +257,7 @@ pub fn load_sessions_from_files(
             skipped_count += 1;
             tracing::warn!(
                 event = "core.session.load_invalid_structure",
-                file = %path.display(),
+                file = %session_file.display(),
                 worktree_path = %session.worktree_path.display(),
                 validation_error = %validation_error,
                 message = "Session file has invalid structure, skipping"
@@ -169,9 +308,13 @@ pub fn patch_session_json_field(
     field: &str,
     value: serde_json::Value,
 ) -> Result<(), SessionError> {
-    let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
-    let content =
-        fs::read_to_string(&session_file).map_err(|e| SessionError::IoError { source: e })?;
+    let safe_id = session_id.replace('/', "_");
+    let dir = session_dir(sessions_dir, session_id);
+    if !dir.join("kild.json").exists() {
+        migrate_session_if_needed(sessions_dir, &safe_id)?;
+    }
+    let file = session_file(sessions_dir, session_id);
+    let content = fs::read_to_string(&file).map_err(|e| SessionError::IoError { source: e })?;
     let mut json: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| SessionError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -189,12 +332,12 @@ pub fn patch_session_json_field(
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 
-    let temp_file = session_file.with_extension("json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
     if let Err(e) = fs::write(&temp_file, &updated) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -211,9 +354,13 @@ pub fn patch_session_json_fields(
     session_id: &str,
     fields: &[(&str, serde_json::Value)],
 ) -> Result<(), SessionError> {
-    let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
-    let content =
-        fs::read_to_string(&session_file).map_err(|e| SessionError::IoError { source: e })?;
+    let safe_id = session_id.replace('/', "_");
+    let dir = session_dir(sessions_dir, session_id);
+    if !dir.join("kild.json").exists() {
+        migrate_session_if_needed(sessions_dir, &safe_id)?;
+    }
+    let file = session_file(sessions_dir, session_id);
+    let content = fs::read_to_string(&file).map_err(|e| SessionError::IoError { source: e })?;
     let mut json: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| SessionError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -233,12 +380,12 @@ pub fn patch_session_json_fields(
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 
-    let temp_file = session_file.with_extension("json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
     if let Err(e) = fs::write(&temp_file, &updated) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -252,11 +399,20 @@ pub fn write_agent_status(
     session_id: &str,
     status_info: &super::types::AgentStatusInfo,
 ) -> Result<(), SessionError> {
-    let sidecar_file = sessions_dir.join(format!("{}.status", session_id.replace('/', "_")));
+    let dir = session_dir(sessions_dir, session_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let sidecar_file = dir.join("status");
     let content = serde_json::to_string(status_info).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
-    let temp_file = sidecar_file.with_extension("status.tmp");
+    let temp_file = dir.join("status.tmp");
     if let Err(e) = fs::write(&temp_file, &content) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
@@ -273,7 +429,7 @@ pub fn read_agent_status(
     sessions_dir: &Path,
     session_id: &str,
 ) -> Option<super::types::AgentStatusInfo> {
-    let sidecar_file = sessions_dir.join(format!("{}.status", session_id.replace('/', "_")));
+    let sidecar_file = session_dir(sessions_dir, session_id).join("status");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -301,7 +457,7 @@ pub fn read_agent_status(
 
 /// Remove agent status sidecar file. Best-effort (logs warning on failure).
 pub fn remove_agent_status_file(sessions_dir: &Path, session_id: &str) {
-    let sidecar_file = sessions_dir.join(format!("{}.status", session_id.replace('/', "_")));
+    let sidecar_file = session_dir(sessions_dir, session_id).join("status");
     if sidecar_file.exists()
         && let Err(e) = fs::remove_file(&sidecar_file)
     {
@@ -319,11 +475,20 @@ pub fn write_pr_info(
     session_id: &str,
     pr_info: &crate::forge::types::PrInfo,
 ) -> Result<(), SessionError> {
-    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    let dir = session_dir(sessions_dir, session_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let sidecar_file = dir.join("pr");
     let content = serde_json::to_string(pr_info).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
-    let temp_file = sidecar_file.with_extension("pr.tmp");
+    let temp_file = dir.join("pr.tmp");
     if let Err(e) = fs::write(&temp_file, &content) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
@@ -337,7 +502,7 @@ pub fn write_pr_info(
 
 /// Read PR info from sidecar file. Returns None if file doesn't exist or is corrupt.
 pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<crate::forge::types::PrInfo> {
-    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    let sidecar_file = session_dir(sessions_dir, session_id).join("pr");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -365,7 +530,7 @@ pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<crate::forg
 
 /// Remove PR info sidecar file. Best-effort (logs warning on failure).
 pub fn remove_pr_info_file(sessions_dir: &Path, session_id: &str) {
-    let sidecar_file = sessions_dir.join(format!("{}.pr", session_id.replace('/', "_")));
+    let sidecar_file = session_dir(sessions_dir, session_id).join("pr");
     if sidecar_file.exists()
         && let Err(e) = fs::remove_file(&sidecar_file)
     {
@@ -378,17 +543,46 @@ pub fn remove_pr_info_file(sessions_dir: &Path, session_id: &str) {
 }
 
 pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), SessionError> {
-    let session_file = sessions_dir.join(format!("{}.json", session_id.replace('/', "_")));
+    let dir = session_dir(sessions_dir, session_id);
 
-    if session_file.exists() {
-        fs::remove_file(&session_file).map_err(|e| SessionError::IoError { source: e })?;
-    } else {
-        tracing::warn!(
-            event = "core.session.remove_nonexistent_file",
+    if dir.is_dir() {
+        // Warn about unexpected files that will be removed
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !matches!(
+                    name.as_ref(),
+                    "kild.json" | "status" | "pr" | "kild.json.tmp" | "status.tmp" | "pr.tmp"
+                ) {
+                    tracing::warn!(
+                        event = "core.session.remove_unexpected_file",
+                        session_id = %session_id,
+                        file = %name,
+                        "Unexpected file in session directory will be removed"
+                    );
+                }
+            }
+        }
+        tracing::debug!(
+            event = "core.session.remove_dir_started",
             session_id = %session_id,
-            file = %session_file.display(),
-            message = "Attempted to remove session file that doesn't exist - possible state inconsistency"
+            path = %dir.display(),
         );
+        fs::remove_dir_all(&dir).map_err(|e| SessionError::IoError { source: e })?;
+    } else {
+        // Try old-format cleanup as fallback
+        let safe_id = session_id.replace('/', "_");
+        let old_file = sessions_dir.join(format!("{safe_id}.json"));
+        if old_file.is_file() {
+            fs::remove_file(&old_file).map_err(|e| SessionError::IoError { source: e })?;
+        } else {
+            tracing::warn!(
+                event = "core.session.remove_nonexistent_file",
+                session_id = %session_id,
+                "Attempted to remove session that doesn't exist"
+            );
+        }
     }
 
     Ok(())
@@ -452,8 +646,10 @@ mod tests {
         // Save session
         assert!(save_session_to_file(&session, &temp_dir).is_ok());
 
-        // Check file exists with correct name (/ replaced with _)
-        let session_file = temp_dir.join("test_branch.json");
+        // Check directory and file exist with correct name (/ replaced with _)
+        let session_dir = temp_dir.join("test_branch");
+        let session_file = session_dir.join("kild.json");
+        assert!(session_dir.is_dir());
         assert!(session_file.exists());
 
         // Verify content
@@ -500,14 +696,15 @@ mod tests {
         assert!(save_session_to_file(&session, &temp_dir).is_ok());
 
         // Verify temp file is cleaned up after successful write
-        let temp_file = temp_dir.join("test_atomic.json.tmp");
+        let session_dir = temp_dir.join("test_atomic");
+        let temp_file = session_dir.join("kild.json.tmp");
         assert!(
             !temp_file.exists(),
             "Temp file should be cleaned up after successful write"
         );
 
         // Verify final file exists
-        let session_file = temp_dir.join("test_atomic.json");
+        let session_file = session_dir.join("kild.json");
         assert!(session_file.exists(), "Final session file should exist");
 
         // Clean up
@@ -545,7 +742,9 @@ mod tests {
             None,
         );
 
-        let session_file = temp_dir.join("test_atomic-behavior.json");
+        let session_dir = temp_dir.join("test_atomic-behavior");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("kild.json");
 
         // Create existing file with different content
         std::fs::write(&session_file, "old content").unwrap();
@@ -597,8 +796,10 @@ mod tests {
             None,
         );
 
-        // Create a directory where the final file should be to force rename failure
-        let session_file = temp_dir.join("test_cleanup.json");
+        // Create a directory where kild.json should be to force rename failure
+        let session_dir = temp_dir.join("test_cleanup");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("kild.json");
         std::fs::create_dir_all(&session_file).unwrap(); // Create as directory to force rename failure
 
         // Attempt to save session - should fail due to rename failure
@@ -606,7 +807,7 @@ mod tests {
         assert!(result.is_err(), "Save should fail when rename fails");
 
         // Verify temp file is cleaned up after failure
-        let temp_file = temp_dir.join("test_cleanup.json.tmp");
+        let temp_file = session_dir.join("kild.json.tmp");
         assert!(
             !temp_file.exists(),
             "Temp file should be cleaned up after rename failure"
@@ -784,14 +985,14 @@ mod tests {
         // Save session
         save_session_to_file(&session, &temp_dir).unwrap();
 
-        let session_file = temp_dir.join("test_branch.json");
-        assert!(session_file.exists());
+        let session_dir = temp_dir.join("test_branch");
+        assert!(session_dir.is_dir());
 
-        // Remove session file
+        // Remove session directory
         remove_session_file(&temp_dir, &session.id).unwrap();
-        assert!(!session_file.exists());
+        assert!(!session_dir.exists());
 
-        // Removing non-existent file should not error
+        // Removing non-existent session should not error
         assert!(remove_session_file(&temp_dir, "non-existent").is_ok());
 
         // Clean up
@@ -830,14 +1031,16 @@ mod tests {
         );
         save_session_to_file(&valid_session, &temp_dir).unwrap();
 
-        // Create invalid JSON file
-        let invalid_json_file = temp_dir.join("invalid.json");
-        std::fs::write(&invalid_json_file, "{ invalid json }").unwrap();
+        // Create invalid JSON as directory with kild.json
+        let invalid_dir = temp_dir.join("invalid");
+        std::fs::create_dir_all(&invalid_dir).unwrap();
+        std::fs::write(invalid_dir.join("kild.json"), "{ invalid json }").unwrap();
 
-        // Create file with invalid session structure (missing required fields)
-        let invalid_structure_file = temp_dir.join("invalid_structure.json");
+        // Create directory with invalid session structure (missing required fields)
+        let invalid_structure_dir = temp_dir.join("invalid_structure");
+        std::fs::create_dir_all(&invalid_structure_dir).unwrap();
         std::fs::write(
-            &invalid_structure_file,
+            invalid_structure_dir.join("kild.json"),
             r#"{"id": "", "project_id": "test"}"#,
         )
         .unwrap();
@@ -885,7 +1088,9 @@ mod tests {
             None,
         );
 
-        let session_file = temp_dir.join("test_orphaned.json");
+        let session_dir = temp_dir.join("test_orphaned");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("kild.json");
         let json = serde_json::to_string_pretty(&session_missing_worktree).unwrap();
         std::fs::write(&session_file, json).unwrap();
 
@@ -963,16 +1168,18 @@ mod tests {
             None,
         );
 
-        // Save both sessions
-        let valid_file = temp_dir.join("test_valid-session.json");
-        let missing_file = temp_dir.join("test_missing-session.json");
+        // Save both sessions as per-session directories
+        let valid_dir = temp_dir.join("test_valid-session");
+        std::fs::create_dir_all(&valid_dir).unwrap();
         std::fs::write(
-            &valid_file,
+            valid_dir.join("kild.json"),
             serde_json::to_string_pretty(&session_valid).unwrap(),
         )
         .unwrap();
+        let missing_dir = temp_dir.join("test_missing-session");
+        std::fs::create_dir_all(&missing_dir).unwrap();
         std::fs::write(
-            &missing_file,
+            missing_dir.join("kild.json"),
             serde_json::to_string_pretty(&session_missing).unwrap(),
         )
         .unwrap();
@@ -1035,7 +1242,9 @@ mod tests {
             "agents": [],
             "future_field": "must_survive"
         });
-        let session_file = temp_dir.join("proj_my-branch.json");
+        let session_dir = temp_dir.join("proj_my-branch");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("kild.json");
         std::fs::write(&session_file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
         // Patch last_activity
@@ -1075,8 +1284,9 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Write an array instead of an object
-        let session_file = temp_dir.join("proj_branch.json");
-        std::fs::write(&session_file, "[]").unwrap();
+        let session_dir = temp_dir.join("proj_branch");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("kild.json"), "[]").unwrap();
 
         let result = patch_session_json_field(
             &temp_dir,
@@ -1116,7 +1326,9 @@ mod tests {
             "agents": [],
             "future_field": "must_survive"
         });
-        let session_file = temp_dir.join("proj_my-branch.json");
+        let session_dir = temp_dir.join("proj_my-branch");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("kild.json");
         std::fs::write(&session_file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
         // Patch both status and last_activity atomically
@@ -1168,7 +1380,7 @@ mod tests {
 
         write_agent_status(&temp_dir, "test/branch", &info).unwrap();
 
-        let sidecar_file = temp_dir.join("test_branch.status");
+        let sidecar_file = temp_dir.join("test_branch").join("status");
         assert!(sidecar_file.exists());
 
         let read_back = read_agent_status(&temp_dir, "test/branch");
@@ -1199,8 +1411,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let sidecar_file = temp_dir.join("bad_session.status");
-        std::fs::write(&sidecar_file, "not json").unwrap();
+        let session_dir = temp_dir.join("bad_session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("status"), "not json").unwrap();
 
         let result = read_agent_status(&temp_dir, "bad_session");
         assert_eq!(result, None);
@@ -1223,7 +1436,7 @@ mod tests {
         };
         write_agent_status(&temp_dir, "test/rm", &info).unwrap();
 
-        let sidecar_file = temp_dir.join("test_rm.status");
+        let sidecar_file = temp_dir.join("test_rm").join("status");
         assert!(sidecar_file.exists());
 
         remove_agent_status_file(&temp_dir, "test/rm");
@@ -1270,7 +1483,7 @@ mod tests {
 
         write_pr_info(&temp_dir, "test/branch", &info).unwrap();
 
-        let sidecar_file = temp_dir.join("test_branch.pr");
+        let sidecar_file = temp_dir.join("test_branch").join("pr");
         assert!(sidecar_file.exists());
 
         let read_back = read_pr_info(&temp_dir, "test/branch");
@@ -1301,8 +1514,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let sidecar_file = temp_dir.join("bad_session.pr");
-        std::fs::write(&sidecar_file, "not json").unwrap();
+        let session_dir = temp_dir.join("bad_session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("pr"), "not json").unwrap();
 
         let result = read_pr_info(&temp_dir, "bad_session");
         assert_eq!(result, None);
@@ -1331,7 +1545,7 @@ mod tests {
         };
         write_pr_info(&temp_dir, "test/rm", &info).unwrap();
 
-        let sidecar_file = temp_dir.join("test_rm.pr");
+        let sidecar_file = temp_dir.join("test_rm").join("pr");
         assert!(sidecar_file.exists());
 
         remove_pr_info_file(&temp_dir, "test/rm");
@@ -1462,10 +1676,301 @@ mod tests {
 
         save_session_to_file(&session, sessions_dir).unwrap();
 
-        let expected_file = sessions_dir.join("my-project_deep_nested.json");
+        let expected_dir = sessions_dir.join("my-project_deep_nested");
+        let expected_file = expected_dir.join("kild.json");
+        assert!(expected_dir.is_dir());
         assert!(expected_file.exists());
 
         let loaded = load_session_from_file("deep-nested", sessions_dir).unwrap();
         assert_eq!(&*loaded.id, "my-project/deep/nested");
+    }
+
+    // --- Migration tests ---
+
+    #[test]
+    fn test_migrate_session_with_all_sidecars() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create old-format files
+        std::fs::write(
+            sessions_dir.join("proj_branch.json"),
+            r#"{"id":"proj/branch"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sessions_dir.join("proj_branch.status"),
+            r#"{"status":"idle"}"#,
+        )
+        .unwrap();
+        std::fs::write(sessions_dir.join("proj_branch.pr"), r#"{"number":42}"#).unwrap();
+
+        let result = migrate_session_if_needed(sessions_dir, "proj_branch").unwrap();
+        assert!(result, "Should report migration happened");
+
+        // Old files should be gone
+        assert!(!sessions_dir.join("proj_branch.json").exists());
+        assert!(!sessions_dir.join("proj_branch.status").exists());
+        assert!(!sessions_dir.join("proj_branch.pr").exists());
+
+        // New files should exist
+        let session_dir = sessions_dir.join("proj_branch");
+        assert!(session_dir.is_dir());
+        assert!(session_dir.join("kild.json").exists());
+        assert!(session_dir.join("status").exists());
+        assert!(session_dir.join("pr").exists());
+
+        // Content preserved
+        let content = std::fs::read_to_string(session_dir.join("kild.json")).unwrap();
+        assert!(content.contains("proj/branch"));
+    }
+
+    #[test]
+    fn test_migrate_session_json_only() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Only the JSON file, no sidecars
+        std::fs::write(
+            sessions_dir.join("proj_branch.json"),
+            r#"{"id":"proj/branch"}"#,
+        )
+        .unwrap();
+
+        let result = migrate_session_if_needed(sessions_dir, "proj_branch").unwrap();
+        assert!(result);
+
+        let session_dir = sessions_dir.join("proj_branch");
+        assert!(session_dir.join("kild.json").exists());
+        assert!(!session_dir.join("status").exists());
+        assert!(!session_dir.join("pr").exists());
+    }
+
+    #[test]
+    fn test_migrate_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Already new format
+        let session_dir = sessions_dir.join("proj_branch");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("kild.json"), r#"{"id":"proj/branch"}"#).unwrap();
+
+        let result = migrate_session_if_needed(sessions_dir, "proj_branch").unwrap();
+        assert!(!result, "Should return false for already-migrated session");
+    }
+
+    #[test]
+    fn test_migrate_nonexistent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let result = migrate_session_if_needed(tmp.path(), "nonexistent").unwrap();
+        assert!(!result, "Should return false for non-existent session");
+    }
+
+    #[test]
+    fn test_load_sessions_auto_migrates_old_format() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create worktree directory
+        let worktree_path = sessions_dir.join("worktree");
+        std::fs::create_dir_all(&worktree_path).unwrap();
+
+        let session = Session::new(
+            "test/migrate-me".into(),
+            "test".into(),
+            "migrate-me".into(),
+            worktree_path,
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+            None,
+            None,
+            None,
+        );
+
+        // Write in OLD format
+        let old_file = sessions_dir.join("test_migrate-me.json");
+        std::fs::write(&old_file, serde_json::to_string_pretty(&session).unwrap()).unwrap();
+
+        // Load should auto-migrate and return the session
+        let (sessions, skipped) = load_sessions_from_files(sessions_dir).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(skipped, 0);
+        assert_eq!(&*sessions[0].id, "test/migrate-me");
+
+        // Old file should be gone, new dir should exist
+        assert!(!old_file.exists());
+        assert!(
+            sessions_dir
+                .join("test_migrate-me")
+                .join("kild.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn test_load_sessions_mixed_old_and_new() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create worktree directories
+        let wt1 = sessions_dir.join("wt1");
+        let wt2 = sessions_dir.join("wt2");
+        std::fs::create_dir_all(&wt1).unwrap();
+        std::fs::create_dir_all(&wt2).unwrap();
+
+        let session1 = Session::new(
+            "test/new-format".into(),
+            "test".into(),
+            "new-format".into(),
+            wt1,
+            "claude".to_string(),
+            SessionStatus::Active,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+            None,
+            None,
+            None,
+        );
+
+        let session2 = Session::new(
+            "test/old-format".into(),
+            "test".into(),
+            "old-format".into(),
+            wt2,
+            "claude".to_string(),
+            SessionStatus::Stopped,
+            "2024-01-01T00:00:00Z".to_string(),
+            0,
+            0,
+            0,
+            Some("2024-01-01T00:00:00Z".to_string()),
+            None,
+            vec![],
+            None,
+            None,
+            None,
+        );
+
+        // Save session1 in NEW format (via save_session_to_file)
+        save_session_to_file(&session1, sessions_dir).unwrap();
+
+        // Write session2 in OLD format
+        let old_file = sessions_dir.join("test_old-format.json");
+        std::fs::write(&old_file, serde_json::to_string_pretty(&session2).unwrap()).unwrap();
+
+        // Load should return both
+        let (sessions, skipped) = load_sessions_from_files(sessions_dir).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(skipped, 0);
+
+        let ids: Vec<String> = sessions.iter().map(|s| s.id.to_string()).collect();
+        assert!(ids.contains(&"test/new-format".to_string()));
+        assert!(ids.contains(&"test/old-format".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_cleans_up_temp_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create old-format files including temp files
+        std::fs::write(
+            sessions_dir.join("proj_branch.json"),
+            r#"{"id":"proj/branch"}"#,
+        )
+        .unwrap();
+        std::fs::write(sessions_dir.join("proj_branch.json.tmp"), "temp data").unwrap();
+        std::fs::write(sessions_dir.join("proj_branch.status.tmp"), "temp data").unwrap();
+
+        migrate_session_if_needed(sessions_dir, "proj_branch").unwrap();
+
+        // Temp files should be cleaned up
+        assert!(!sessions_dir.join("proj_branch.json.tmp").exists());
+        assert!(!sessions_dir.join("proj_branch.status.tmp").exists());
+    }
+
+    #[test]
+    fn test_concurrent_migration() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path().to_path_buf();
+
+        // Create old-format file
+        std::fs::write(
+            sessions_dir.join("proj_branch.json"),
+            r#"{"id":"proj/branch"}"#,
+        )
+        .unwrap();
+
+        let dir1 = sessions_dir.clone();
+        let dir2 = sessions_dir.clone();
+
+        let t1 = std::thread::spawn(move || migrate_session_if_needed(&dir1, "proj_branch"));
+        let t2 = std::thread::spawn(move || migrate_session_if_needed(&dir2, "proj_branch"));
+
+        let r1 = t1.join().unwrap();
+        let r2 = t2.join().unwrap();
+
+        // Both should succeed
+        assert!(r1.is_ok(), "Thread 1 should succeed: {:?}", r1);
+        assert!(r2.is_ok(), "Thread 2 should succeed: {:?}", r2);
+
+        // Exactly one should report migration happened
+        let migrated_count = [r1.unwrap(), r2.unwrap()].iter().filter(|&&v| v).count();
+        assert!(
+            migrated_count <= 2,
+            "At most both threads could see the old file before rename"
+        );
+
+        // Final state: new-format directory with kild.json
+        assert!(sessions_dir.join("proj_branch").join("kild.json").exists());
+        assert!(!sessions_dir.join("proj_branch.json").exists());
+    }
+
+    #[test]
+    fn test_session_dir_and_session_file_helpers() {
+        let base = std::path::Path::new("/tmp/sessions");
+
+        assert_eq!(
+            session_dir(base, "proj/branch"),
+            std::path::PathBuf::from("/tmp/sessions/proj_branch")
+        );
+        assert_eq!(
+            session_file(base, "proj/branch"),
+            std::path::PathBuf::from("/tmp/sessions/proj_branch/kild.json")
+        );
+        assert_eq!(
+            session_dir(base, "deep/nested/id"),
+            std::path::PathBuf::from("/tmp/sessions/deep_nested_id")
+        );
+    }
+
+    #[test]
+    fn test_remove_session_file_warns_unexpected_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create session dir with expected + unexpected files
+        let dir = sessions_dir.join("proj_branch");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kild.json"), r#"{"id":"proj/branch"}"#).unwrap();
+        std::fs::write(dir.join("status"), r#"{"status":"idle"}"#).unwrap();
+        std::fs::write(dir.join("unexpected.log"), "should warn").unwrap();
+
+        // Should succeed and remove everything
+        remove_session_file(sessions_dir, "proj/branch").unwrap();
+        assert!(!dir.exists());
     }
 }

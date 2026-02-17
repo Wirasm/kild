@@ -38,8 +38,8 @@ impl SessionWatcher {
             }
         };
 
-        // Watch directory non-recursively (sessions are flat .json files)
-        if let Err(e) = watcher.watch(sessions_dir, RecursiveMode::NonRecursive) {
+        // Watch directory recursively (sessions are in per-session subdirectories)
+        if let Err(e) = watcher.watch(sessions_dir, RecursiveMode::Recursive) {
             tracing::warn!(
                 event = "ui.watcher.watch_failed",
                 path = %sessions_dir.display(),
@@ -98,7 +98,7 @@ impl SessionWatcher {
         }
     }
 
-    /// Check if an event is relevant (create/modify/remove of .json files).
+    /// Check if an event is relevant (create/modify/remove of session files).
     fn is_relevant_event(event: &Event) -> bool {
         // Only care about create, modify, remove events
         let is_relevant_kind = matches!(
@@ -110,11 +110,14 @@ impl SessionWatcher {
             return false;
         }
 
-        // Only care about .json (session files) and .status (agent status sidecar files)
+        // Session files: kild.json, status sidecar, pr sidecar
+        // Also support old-format .json and .status files during migration
         event.paths.iter().any(|p| {
-            p.extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| ext == "json" || ext == "status")
+            let file_name = p.file_name().and_then(|f| f.to_str());
+            matches!(file_name, Some("kild.json" | "status" | "pr"))
+                || p.extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext == "json" || ext == "status")
         })
     }
 }
@@ -223,6 +226,72 @@ mod tests {
         assert!(
             !SessionWatcher::is_relevant_event(&event),
             "Should return false for empty paths"
+        );
+    }
+
+    #[test]
+    fn test_is_relevant_event_kild_json_filename() {
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/kild.json")],
+        );
+        assert!(
+            SessionWatcher::is_relevant_event(&event),
+            "Should return true for kild.json filename"
+        );
+    }
+
+    #[test]
+    fn test_is_relevant_event_status_filename_no_extension() {
+        let event = make_event(
+            EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content)),
+            vec![PathBuf::from("/sessions/proj_branch/status")],
+        );
+        assert!(
+            SessionWatcher::is_relevant_event(&event),
+            "Should return true for status file (no extension)"
+        );
+    }
+
+    #[test]
+    fn test_is_relevant_event_pr_filename() {
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/pr")],
+        );
+        assert!(
+            SessionWatcher::is_relevant_event(&event),
+            "Should return true for pr sidecar file"
+        );
+    }
+
+    #[test]
+    fn test_is_relevant_event_ignores_tmp_files() {
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/kild.json.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore kild.json.tmp files"
+        );
+
+        let event = make_event(
+            EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content)),
+            vec![PathBuf::from("/sessions/proj_branch/status.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore status.tmp files"
+        );
+
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/pr.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore pr.tmp files"
         );
     }
 

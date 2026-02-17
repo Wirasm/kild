@@ -598,7 +598,9 @@ mod tests {
             .expect("Failed to write status");
 
         // Verify sidecar exists
-        let sidecar_file = sessions_dir.join("test-project_sidecar-test.status");
+        let sidecar_file = sessions_dir
+            .join("test-project_sidecar-test")
+            .join("status");
         assert!(sidecar_file.exists(), "Sidecar should exist before stop");
         assert!(
             persistence::read_agent_status(&sessions_dir, &session.id).is_some(),

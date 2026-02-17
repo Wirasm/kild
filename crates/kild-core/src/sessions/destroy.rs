@@ -479,11 +479,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     // 7. Clean up PID files (best-effort, don't fail if missing)
     cleanup_session_pid_files(&session, config.kild_dir(), "destroy");
 
-    // 8. Remove sidecar files (best-effort)
-    persistence::remove_agent_status_file(&config.sessions_dir(), &session.id);
-    persistence::remove_pr_info_file(&config.sessions_dir(), &session.id);
-
-    // 9. Remove session file (automatically frees port range)
+    // 8. Remove session directory (includes kild.json, status sidecar, pr sidecar)
     persistence::remove_session_file(&config.sessions_dir(), &session.id)?;
 
     info!(

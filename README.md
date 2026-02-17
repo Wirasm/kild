@@ -349,7 +349,7 @@ auto_start = true    # Auto-start daemon when needed
 1. **Worktree Creation**: Creates a new Git worktree in `.kild/<name>` with a unique branch
 2. **File Copying**: Copies configured patterns (env files, AI context) to worktree
 3. **Agent Launch**: Launches the specified agent command in a native terminal window
-4. **Session Tracking**: Records session metadata in `~/.kild/registry.json`
+4. **Session Tracking**: Records session metadata in `~/.kild/sessions/<session>/`
 5. **Lifecycle Management**: Provides commands to monitor, stop, and clean up sessions
 
 ## Requirements

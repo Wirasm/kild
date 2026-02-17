@@ -112,6 +112,23 @@ impl KildPaths {
         self.hooks_dir().join("claude-status")
     }
 
+    pub fn session_dir(&self, session_id: &str) -> PathBuf {
+        let safe_id = session_id.replace('/', "_");
+        self.sessions_dir().join(safe_id)
+    }
+
+    pub fn session_file(&self, session_id: &str) -> PathBuf {
+        self.session_dir(session_id).join("kild.json")
+    }
+
+    pub fn session_status_file(&self, session_id: &str) -> PathBuf {
+        self.session_dir(session_id).join("status")
+    }
+
+    pub fn session_pr_file(&self, session_id: &str) -> PathBuf {
+        self.session_dir(session_id).join("pr")
+    }
+
     pub fn pid_file(&self, session_id: &str) -> PathBuf {
         let safe_id = session_id.replace('/', "-");
         self.pids_dir().join(format!("{safe_id}.pid"))
@@ -289,6 +306,78 @@ mod tests {
         assert_eq!(
             test_paths().claude_status_hook(),
             PathBuf::from("/home/user/.kild/hooks/claude-status")
+        );
+    }
+
+    #[test]
+    fn test_session_dir() {
+        assert_eq!(
+            test_paths().session_dir("proj_branch"),
+            PathBuf::from("/home/user/.kild/sessions/proj_branch")
+        );
+    }
+
+    #[test]
+    fn test_session_dir_sanitizes_slashes() {
+        assert_eq!(
+            test_paths().session_dir("project/branch"),
+            PathBuf::from("/home/user/.kild/sessions/project_branch")
+        );
+    }
+
+    #[test]
+    fn test_session_dir_multiple_slashes() {
+        assert_eq!(
+            test_paths().session_dir("a/b/c"),
+            PathBuf::from("/home/user/.kild/sessions/a_b_c")
+        );
+    }
+
+    #[test]
+    fn test_session_file() {
+        assert_eq!(
+            test_paths().session_file("proj_branch"),
+            PathBuf::from("/home/user/.kild/sessions/proj_branch/kild.json")
+        );
+    }
+
+    #[test]
+    fn test_session_file_sanitizes_slashes() {
+        assert_eq!(
+            test_paths().session_file("project/branch"),
+            PathBuf::from("/home/user/.kild/sessions/project_branch/kild.json")
+        );
+    }
+
+    #[test]
+    fn test_session_status_file() {
+        assert_eq!(
+            test_paths().session_status_file("proj_branch"),
+            PathBuf::from("/home/user/.kild/sessions/proj_branch/status")
+        );
+    }
+
+    #[test]
+    fn test_session_status_file_sanitizes_slashes() {
+        assert_eq!(
+            test_paths().session_status_file("project/branch"),
+            PathBuf::from("/home/user/.kild/sessions/project_branch/status")
+        );
+    }
+
+    #[test]
+    fn test_session_pr_file() {
+        assert_eq!(
+            test_paths().session_pr_file("proj_branch"),
+            PathBuf::from("/home/user/.kild/sessions/proj_branch/pr")
+        );
+    }
+
+    #[test]
+    fn test_session_pr_file_sanitizes_slashes() {
+        assert_eq!(
+            test_paths().session_pr_file("project/branch"),
+            PathBuf::from("/home/user/.kild/sessions/project_branch/pr")
         );
     }
 
