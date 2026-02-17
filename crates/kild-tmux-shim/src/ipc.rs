@@ -47,10 +47,11 @@ pub fn create_session(
 
     let daemon_session_id = match response {
         DaemonMessage::SessionCreated { session, .. } => session.id.into_inner(),
-        _ => {
-            return Err(ShimError::ipc(
-                "create_session: expected SessionCreated response",
-            ));
+        other => {
+            return Err(ShimError::ipc(format!(
+                "create_session for {}: expected SessionCreated, got {:?}",
+                session_id, other
+            )));
         }
     };
 
@@ -130,11 +131,17 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
     let decoded = match response {
         DaemonMessage::ScrollbackContents { data, .. } => base64::engine::general_purpose::STANDARD
             .decode(data)
-            .map_err(|e| ShimError::ipc(format!("read_scrollback: base64 decode failed: {}", e)))?,
-        _ => {
-            return Err(ShimError::ipc(
-                "read_scrollback: expected ScrollbackContents response",
-            ));
+            .map_err(|e| {
+                ShimError::ipc(format!(
+                    "read_scrollback for {}: base64 decode failed: {}",
+                    session_id, e
+                ))
+            })?,
+        other => {
+            return Err(ShimError::ipc(format!(
+                "read_scrollback for {}: expected ScrollbackContents, got {:?}",
+                session_id, other
+            )));
         }
     };
 

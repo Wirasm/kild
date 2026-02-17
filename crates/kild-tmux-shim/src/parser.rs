@@ -70,6 +70,7 @@ pub struct SetOptionArgs<'a> {
     pub scope: OptionScope,
     pub target: Option<&'a str>,
     pub key: &'a str,
+    /// Joined from positional args (allocated). E.g., `["foo", "bar"]` → `"foo bar"`.
     pub value: String,
 }
 

@@ -72,9 +72,12 @@ fn resolve_pane_id(target: Option<&str>) -> String {
 
 /// Base environment template — computed once, cloned per invocation.
 /// Only dynamic part (TMUX_PANE) is added at the call site.
-fn base_child_env() -> &'static HashMap<String, String> {
-    static ENV: OnceLock<HashMap<String, String>> = OnceLock::new();
-    ENV.get_or_init(|| {
+///
+/// Returns an error if `KildPaths::resolve()` fails (e.g. `$HOME` not set),
+/// since child processes need `~/.kild/bin` on PATH for the shim chain.
+fn base_child_env() -> Result<&'static HashMap<String, String>, ShimError> {
+    static ENV: OnceLock<Result<HashMap<String, String>, String>> = OnceLock::new();
+    let result = ENV.get_or_init(|| {
         let copy_vars = ["PATH", "HOME", "SHELL", "USER", "LANG", "TERM"];
         let mut env_vars: HashMap<String, String> = copy_vars
             .iter()
@@ -82,27 +85,19 @@ fn base_child_env() -> &'static HashMap<String, String> {
             .collect();
 
         // Ensure ~/.kild/bin is at the front of PATH so the shim stays on PATH
-        match KildPaths::resolve() {
-            Ok(paths) => {
-                let kild_bin = paths.bin_dir();
-                let current_path = env_vars.get("PATH").cloned().unwrap_or_default();
-                let kild_bin_str = kild_bin.to_string_lossy();
-                let already_present = current_path
-                    .split(':')
-                    .any(|component| component == kild_bin_str.as_ref());
-                if !already_present {
-                    env_vars.insert(
-                        "PATH".to_string(),
-                        format!("{}:{}", kild_bin_str, current_path),
-                    );
-                }
-            }
-            Err(e) => {
-                error!(
-                    event = "shim.split_window.path_resolution_failed",
-                    error = %e,
-                );
-            }
+        let paths =
+            KildPaths::resolve().map_err(|e| format!("failed to resolve KILD paths: {}", e))?;
+        let kild_bin = paths.bin_dir();
+        let current_path = env_vars.get("PATH").cloned().unwrap_or_default();
+        let kild_bin_str = kild_bin.to_string_lossy();
+        let already_present = current_path
+            .split(':')
+            .any(|component| component == kild_bin_str.as_ref());
+        if !already_present {
+            env_vars.insert(
+                "PATH".to_string(),
+                format!("{}:{}", kild_bin_str, current_path),
+            );
         }
 
         // Propagate TMUX env so child processes see themselves inside "tmux"
@@ -115,12 +110,13 @@ fn base_child_env() -> &'static HashMap<String, String> {
             env_vars.insert("KILD_SHIM_SESSION".to_string(), sid);
         }
 
-        env_vars
-    })
+        Ok(env_vars)
+    });
+    result.as_ref().map_err(|msg| ShimError::state(msg.clone()))
 }
 
-fn build_child_env() -> HashMap<String, String> {
-    base_child_env().clone()
+fn build_child_env() -> Result<HashMap<String, String>, ShimError> {
+    base_child_env().cloned()
 }
 
 fn shell_command() -> String {
@@ -155,7 +151,7 @@ fn create_pty_pane(registry: &mut PaneRegistry, window_id: &str) -> Result<Strin
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| env::var("HOME").unwrap_or_else(|_| "/".to_string()));
 
-    let mut env_vars = build_child_env();
+    let mut env_vars = build_child_env()?;
     // Set the new pane's TMUX_PANE
     env_vars.insert("TMUX_PANE".to_string(), pane_id.clone());
 

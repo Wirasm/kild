@@ -1,3 +1,14 @@
+//! # Lock Discipline
+//!
+//! The pane registry uses file-based locking to prevent races:
+//!
+//! - **Reads**: Use `load_shared()` to acquire a shared (read-only) lock.
+//!   Multiple readers can hold shared locks concurrently.
+//! - **Writes**: Use `load()` to acquire an exclusive lock, mutate the registry,
+//!   then call `save()` (which re-acquires the exclusive lock).
+//!
+//! Locks are automatically released when the `Flock` handle is dropped (RAII).
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -8,6 +19,11 @@ use nix::fcntl::{Flock, FlockArg};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::ShimError;
+
+enum LockMode {
+    Shared,
+    Exclusive,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneRegistry {
@@ -27,8 +43,8 @@ impl PaneRegistry {
         for (pane_id, pane) in &self.panes {
             if !self.windows.contains_key(&pane.window_id) {
                 return Err(ShimError::state(format!(
-                    "corrupt registry: pane {} references non-existent window {}",
-                    pane_id, pane.window_id
+                    "corrupt registry for session '{}': pane {} references non-existent window {}",
+                    self.session_name, pane_id, pane.window_id
                 )));
             }
         }
@@ -36,8 +52,8 @@ impl PaneRegistry {
             for pane_id in &window.pane_ids {
                 if !self.panes.contains_key(pane_id) {
                     return Err(ShimError::state(format!(
-                        "corrupt registry: window {} references non-existent pane {}",
-                        window_id, pane_id
+                        "corrupt registry for session '{}': window {} references non-existent pane {}",
+                        self.session_name, window_id, pane_id
                     )));
                 }
             }
@@ -99,10 +115,7 @@ fn panes_path(session_id: &str) -> Result<PathBuf, ShimError> {
 /// Uses flock to prevent race conditions when multiple tmux shim commands
 /// run concurrently (common with agent teams). Lock is automatically
 /// released when the returned Flock handle is dropped.
-///
-/// When `shared` is true, acquires a shared (read) lock that allows
-/// concurrent readers. When false, acquires an exclusive (write) lock.
-fn acquire_lock(session_id: &str, shared: bool) -> Result<Flock<fs::File>, ShimError> {
+fn acquire_lock(session_id: &str, mode: LockMode) -> Result<Flock<fs::File>, ShimError> {
     let lock = lock_path(session_id)?;
     if let Some(parent) = lock.parent() {
         fs::create_dir_all(parent).map_err(|e| ShimError::StateError {
@@ -120,16 +133,23 @@ fn acquire_lock(session_id: &str, shared: bool) -> Result<Flock<fs::File>, ShimE
         .write(true)
         .open(&lock)
         .map_err(|e| ShimError::StateError {
-            message: format!("failed to open lock file {}: {}", lock.display(), e),
+            message: format!(
+                "failed to open lock file {} for session {}: {}",
+                lock.display(),
+                session_id,
+                e
+            ),
         })?;
 
-    let arg = if shared {
-        FlockArg::LockShared
-    } else {
-        FlockArg::LockExclusive
+    let (arg, lock_type) = match mode {
+        LockMode::Shared => (FlockArg::LockShared, "shared"),
+        LockMode::Exclusive => (FlockArg::LockExclusive, "exclusive"),
     };
     Flock::lock(lock_file, arg).map_err(|(_, e)| ShimError::StateError {
-        message: format!("failed to acquire lock: {}", e),
+        message: format!(
+            "failed to acquire {} lock for session {}: {}",
+            lock_type, session_id, e
+        ),
     })
 }
 
@@ -137,7 +157,7 @@ fn acquire_lock(session_id: &str, shared: bool) -> Result<Flock<fs::File>, ShimE
 /// Multiple readers can hold shared locks concurrently.
 pub fn load_shared(session_id: &str) -> Result<PaneRegistry, ShimError> {
     let data_path = panes_path(session_id)?;
-    let _lock = acquire_lock(session_id, true)?;
+    let _lock = acquire_lock(session_id, LockMode::Shared)?;
 
     let content = fs::read_to_string(&data_path).map_err(|e| ShimError::StateError {
         message: format!("failed to read {}: {}", data_path.display(), e),
@@ -156,7 +176,7 @@ pub fn load_shared(session_id: &str) -> Result<PaneRegistry, ShimError> {
 /// Load the registry with an exclusive (write) lock.
 pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
     let data_path = panes_path(session_id)?;
-    let _lock = acquire_lock(session_id, false)?;
+    let _lock = acquire_lock(session_id, LockMode::Exclusive)?;
 
     let content = fs::read_to_string(&data_path).map_err(|e| ShimError::StateError {
         message: format!("failed to read {}: {}", data_path.display(), e),
@@ -174,7 +194,7 @@ pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
 
 pub fn save(session_id: &str, registry: &PaneRegistry) -> Result<(), ShimError> {
     let data_path = panes_path(session_id)?;
-    let _lock = acquire_lock(session_id, false)?;
+    let _lock = acquire_lock(session_id, LockMode::Exclusive)?;
 
     let content = serde_json::to_string_pretty(registry).map_err(|e| ShimError::StateError {
         message: format!("failed to serialize pane registry: {}", e),
@@ -585,13 +605,72 @@ mod tests {
 
     #[test]
     fn test_load_shared_concurrent_reads() {
+        use std::sync::Arc;
+        use std::thread;
+
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
         init_registry(&test_id, "daemon-abc-123").unwrap();
 
-        // Two concurrent shared loads should not block each other
-        let reg1 = load_shared(&test_id).unwrap();
-        let reg2 = load_shared(&test_id).unwrap();
-        assert_eq!(reg1.panes.len(), reg2.panes.len());
+        let test_id = Arc::new(test_id);
+        let mut handles = vec![];
+
+        // Spawn 5 threads to simulate concurrent agent panes
+        for _ in 0..5 {
+            let id = Arc::clone(&test_id);
+            handles.push(thread::spawn(move || load_shared(&id).unwrap()));
+        }
+
+        // All threads should complete without blocking each other
+        for handle in handles {
+            let registry = handle.join().unwrap();
+            assert_eq!(registry.panes.len(), 1);
+        }
+
+        let dir = state_dir(&test_id).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_exclusive_lock_blocks_shared_reads() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        use std::time::Duration;
+
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        init_registry(&test_id, "daemon-abc-123").unwrap();
+
+        let test_id = Arc::new(test_id);
+        let barrier = Arc::new(Barrier::new(2));
+
+        // Thread 1: Hold exclusive lock for 100ms
+        let id1 = Arc::clone(&test_id);
+        let b1 = Arc::clone(&barrier);
+        let writer = thread::spawn(move || {
+            let _lock = acquire_lock(&id1, LockMode::Exclusive).unwrap();
+            b1.wait(); // Signal that lock is held
+            thread::sleep(Duration::from_millis(100));
+            // Lock released on drop
+        });
+
+        // Thread 2: Wait for writer to hold lock, then try shared read
+        let id2 = Arc::clone(&test_id);
+        let b2 = Arc::clone(&barrier);
+        let reader = thread::spawn(move || {
+            b2.wait(); // Wait for writer to acquire lock
+            let start = std::time::Instant::now();
+            let _registry = load_shared(&id2).unwrap();
+            start.elapsed()
+        });
+
+        writer.join().unwrap();
+        let elapsed = reader.join().unwrap();
+
+        // Reader must have waited for writer to release exclusive lock
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "Shared read should have blocked on exclusive lock, but completed in {:?}",
+            elapsed
+        );
 
         let dir = state_dir(&test_id).unwrap();
         fs::remove_dir_all(&dir).ok();
