@@ -58,6 +58,18 @@ impl From<std::io::Error> for IpcError {
     }
 }
 
+/// RAII guard that restores a socket's read timeout on drop.
+struct TimeoutGuard<'a> {
+    stream: &'a UnixStream,
+    orig_timeout: Option<Duration>,
+}
+
+impl Drop for TimeoutGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self.stream.set_read_timeout(self.orig_timeout);
+    }
+}
+
 /// A synchronous JSONL connection to the KILD daemon over a Unix socket.
 #[derive(Debug)]
 pub struct IpcConnection {
@@ -150,11 +162,17 @@ impl IpcConnection {
         use std::io::Read;
 
         let orig_timeout = self.stream.read_timeout().ok().flatten();
+        // RAII guard ensures timeout is restored even on panic
+        let _guard = TimeoutGuard {
+            stream: &self.stream,
+            orig_timeout,
+        };
+
         let _ = self.stream.set_read_timeout(Some(Duration::from_millis(1)));
 
         let mut buf = [0u8; 1];
         let mut stream_ref = &self.stream;
-        let alive = match stream_ref.read(&mut buf) {
+        match stream_ref.read(&mut buf) {
             Ok(0) => false, // EOF — peer closed
             Ok(_) => true,  // Unexpected data but socket alive
             Err(ref e)
@@ -164,11 +182,7 @@ impl IpcConnection {
                 true
             }
             Err(_) => false,
-        };
-
-        // Restore original timeout
-        let _ = self.stream.set_read_timeout(orig_timeout);
-        alive
+        }
     }
 }
 
