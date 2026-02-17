@@ -3,73 +3,73 @@ use tracing::debug;
 use crate::errors::ShimError;
 
 #[derive(Debug)]
-pub enum TmuxCommand {
+pub enum TmuxCommand<'a> {
     Version,
-    SplitWindow(SplitWindowArgs),
-    SendKeys(SendKeysArgs),
-    ListPanes(ListPanesArgs),
-    KillPane(KillPaneArgs),
-    DisplayMessage(DisplayMsgArgs),
-    SelectPane(SelectPaneArgs),
-    SetOption(SetOptionArgs),
-    SelectLayout(SelectLayoutArgs),
-    ResizePane(ResizePaneArgs),
-    HasSession(HasSessionArgs),
-    NewSession(NewSessionArgs),
-    NewWindow(NewWindowArgs),
-    ListWindows(ListWindowsArgs),
-    BreakPane(BreakPaneArgs),
-    JoinPane(JoinPaneArgs),
-    CapturePane(CapturePaneArgs),
+    SplitWindow(SplitWindowArgs<'a>),
+    SendKeys(SendKeysArgs<'a>),
+    ListPanes(ListPanesArgs<'a>),
+    KillPane(KillPaneArgs<'a>),
+    DisplayMessage(DisplayMsgArgs<'a>),
+    SelectPane(SelectPaneArgs<'a>),
+    SetOption(SetOptionArgs<'a>),
+    SelectLayout(SelectLayoutArgs<'a>),
+    ResizePane(ResizePaneArgs<'a>),
+    HasSession(HasSessionArgs<'a>),
+    NewSession(NewSessionArgs<'a>),
+    NewWindow(NewWindowArgs<'a>),
+    ListWindows(ListWindowsArgs<'a>),
+    BreakPane(BreakPaneArgs<'a>),
+    JoinPane(JoinPaneArgs<'a>),
+    CapturePane(CapturePaneArgs<'a>),
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct SplitWindowArgs {
-    pub target: Option<String>,
+pub struct SplitWindowArgs<'a> {
+    pub target: Option<&'a str>,
     pub horizontal: bool,
-    pub size: Option<String>,
+    pub size: Option<&'a str>,
     pub print_info: bool,
-    pub format: Option<String>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct SendKeysArgs {
-    pub target: Option<String>,
-    pub keys: Vec<String>,
+pub struct SendKeysArgs<'a> {
+    pub target: Option<&'a str>,
+    pub keys: Vec<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct ListPanesArgs {
-    pub target: Option<String>,
-    pub format: Option<String>,
+pub struct ListPanesArgs<'a> {
+    pub target: Option<&'a str>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct KillPaneArgs {
-    pub target: Option<String>,
+pub struct KillPaneArgs<'a> {
+    pub target: Option<&'a str>,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct DisplayMsgArgs {
-    pub target: Option<String>,
+pub struct DisplayMsgArgs<'a> {
+    pub target: Option<&'a str>,
     pub print: bool,
-    pub format: Option<String>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct SelectPaneArgs {
-    pub target: Option<String>,
-    pub style: Option<String>,
-    pub title: Option<String>,
+pub struct SelectPaneArgs<'a> {
+    pub target: Option<&'a str>,
+    pub style: Option<&'a str>,
+    pub title: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct SetOptionArgs {
+pub struct SetOptionArgs<'a> {
     pub scope: OptionScope,
-    pub target: Option<String>,
-    pub key: String,
+    pub target: Option<&'a str>,
+    pub key: &'a str,
     pub value: String,
 }
 
@@ -82,78 +82,78 @@ pub enum OptionScope {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct SelectLayoutArgs {
-    pub target: Option<String>,
-    pub layout: String,
+pub struct SelectLayoutArgs<'a> {
+    pub target: Option<&'a str>,
+    pub layout: &'a str,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct ResizePaneArgs {
-    pub target: Option<String>,
-    pub width: Option<String>,
-    pub height: Option<String>,
+pub struct ResizePaneArgs<'a> {
+    pub target: Option<&'a str>,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct HasSessionArgs {
-    pub target: String,
+pub struct HasSessionArgs<'a> {
+    pub target: &'a str,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct NewSessionArgs {
+pub struct NewSessionArgs<'a> {
     pub detached: bool,
-    pub session_name: Option<String>,
-    pub window_name: Option<String>,
+    pub session_name: Option<&'a str>,
+    pub window_name: Option<&'a str>,
     pub print_info: bool,
-    pub format: Option<String>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct NewWindowArgs {
-    pub target: Option<String>,
-    pub name: Option<String>,
+pub struct NewWindowArgs<'a> {
+    pub target: Option<&'a str>,
+    pub name: Option<&'a str>,
     pub print_info: bool,
-    pub format: Option<String>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct ListWindowsArgs {
-    pub target: Option<String>,
-    pub format: Option<String>,
+pub struct ListWindowsArgs<'a> {
+    pub target: Option<&'a str>,
+    pub format: Option<&'a str>,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct BreakPaneArgs {
+pub struct BreakPaneArgs<'a> {
     pub detached: bool,
-    pub source: Option<String>,
-    pub target: Option<String>,
+    pub source: Option<&'a str>,
+    pub target: Option<&'a str>,
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct JoinPaneArgs {
+pub struct JoinPaneArgs<'a> {
     pub horizontal: bool,
-    pub source: Option<String>,
-    pub target: Option<String>,
+    pub source: Option<&'a str>,
+    pub target: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct CapturePaneArgs {
-    pub target: Option<String>,
+pub struct CapturePaneArgs<'a> {
+    pub target: Option<&'a str>,
     pub print: bool,
     /// Start line for capture: `None` = all lines, negative = last N lines
     /// (e.g. `-100` = last 100 lines), non-negative = offset from start.
     pub start_line: Option<i64>,
 }
 
-pub fn parse(args: &[String]) -> Result<TmuxCommand, ShimError> {
+pub fn parse(args: &[String]) -> Result<TmuxCommand<'_>, ShimError> {
     let mut iter = args.iter().peekable();
 
     // Strip global -L <socket> flag
-    let mut filtered: Vec<&String> = Vec::new();
+    let mut filtered: Vec<&str> = Vec::new();
     while let Some(arg) = iter.next() {
         if arg == "-L" {
             // Consume the socket name arg too
@@ -166,7 +166,7 @@ pub fn parse(args: &[String]) -> Result<TmuxCommand, ShimError> {
     let mut iter = filtered.into_iter().peekable();
 
     // Check for -V before subcommand
-    if iter.peek().map(|a| a.as_str()) == Some("-V") {
+    if iter.peek().copied() == Some("-V") {
         return Ok(TmuxCommand::Version);
     }
 
@@ -174,9 +174,9 @@ pub fn parse(args: &[String]) -> Result<TmuxCommand, ShimError> {
         .next()
         .ok_or_else(|| ShimError::parse("no subcommand provided"))?;
 
-    let remaining: Vec<&str> = iter.map(|s| s.as_str()).collect();
+    let remaining: Vec<&str> = iter.collect();
 
-    match subcmd.as_str() {
+    match subcmd {
         "split-window" | "splitw" => parse_split_window(&remaining),
         "send-keys" | "send" => parse_send_keys(&remaining),
         "list-panes" | "lsp" => parse_list_panes(&remaining),
@@ -204,7 +204,7 @@ fn take_value<'a>(args: &[&'a str], i: &mut usize) -> Result<&'a str, ShimError>
         .ok_or_else(|| ShimError::parse("expected value after flag"))
 }
 
-fn parse_split_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_split_window<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut horizontal = false;
     let mut size = None;
@@ -214,12 +214,12 @@ fn parse_split_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
             "-h" => horizontal = true,
             "-v" => horizontal = false,
-            "-l" => size = Some(take_value(args, &mut i)?.to_string()),
+            "-l" => size = Some(take_value(args, &mut i)?),
             "-P" => print_info = true,
-            "-F" => format = Some(take_value(args, &mut i)?.to_string()),
+            "-F" => format = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -234,7 +234,7 @@ fn parse_split_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_send_keys(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_send_keys<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut keys = Vec::new();
     let mut i = 0;
@@ -242,11 +242,11 @@ fn parse_send_keys(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     while i < args.len() {
         match args[i] {
             "-t" => {
-                target = Some(take_value(args, &mut i)?.to_string());
+                target = Some(take_value(args, &mut i)?);
             }
             _ => {
                 // All remaining args are keys
-                keys.extend(args[i..].iter().map(|s| s.to_string()));
+                keys.extend_from_slice(&args[i..]);
                 break;
             }
         }
@@ -256,15 +256,15 @@ fn parse_send_keys(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     Ok(TmuxCommand::SendKeys(SendKeysArgs { target, keys }))
 }
 
-fn parse_list_panes(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_list_panes<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut format = None;
     let mut i = 0;
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
-            "-F" => format = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
+            "-F" => format = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -273,13 +273,13 @@ fn parse_list_panes(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     Ok(TmuxCommand::ListPanes(ListPanesArgs { target, format }))
 }
 
-fn parse_kill_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_kill_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut i = 0;
 
     while i < args.len() {
         if args[i] == "-t" {
-            target = Some(take_value(args, &mut i)?.to_string());
+            target = Some(take_value(args, &mut i)?);
         }
         i += 1;
     }
@@ -287,7 +287,7 @@ fn parse_kill_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     Ok(TmuxCommand::KillPane(KillPaneArgs { target }))
 }
 
-fn parse_display_message(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_display_message<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut print = false;
     let mut format = None;
@@ -295,10 +295,10 @@ fn parse_display_message(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
             "-p" => print = true,
             arg if !arg.starts_with('-') => {
-                format = Some(arg.to_string());
+                format = Some(arg);
             }
             _ => {}
         }
@@ -312,7 +312,7 @@ fn parse_display_message(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_select_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_select_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut style = None;
     let mut title = None;
@@ -320,9 +320,9 @@ fn parse_select_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
-            "-P" => style = Some(take_value(args, &mut i)?.to_string()),
-            "-T" => title = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
+            "-P" => style = Some(take_value(args, &mut i)?),
+            "-T" => title = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -335,19 +335,19 @@ fn parse_select_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_set_option(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_set_option<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut scope = OptionScope::Session;
     let mut target = None;
     let mut i = 0;
-    let mut positional: Vec<String> = Vec::new();
+    let mut positional: Vec<&'a str> = Vec::new();
 
     while i < args.len() {
         match args[i] {
             "-p" => scope = OptionScope::Pane,
             "-w" => scope = OptionScope::Window,
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
             arg if !arg.starts_with('-') => {
-                positional.push(arg.to_string());
+                positional.push(arg);
             }
             _ => {}
         }
@@ -358,8 +358,8 @@ fn parse_set_option(args: &[&str]) -> Result<TmuxCommand, ShimError> {
         return Err(ShimError::parse("set-option requires key and value"));
     }
 
-    let key = positional.remove(0);
-    let value = positional.join(" ");
+    let key = positional[0];
+    let value = positional[1..].join(" ");
 
     Ok(TmuxCommand::SetOption(SetOptionArgs {
         scope,
@@ -369,16 +369,16 @@ fn parse_set_option(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_select_layout(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_select_layout<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut layout = None;
     let mut i = 0;
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
             arg if !arg.starts_with('-') => {
-                layout = Some(arg.to_string());
+                layout = Some(arg);
             }
             _ => {}
         }
@@ -393,7 +393,7 @@ fn parse_select_layout(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_resize_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_resize_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut width = None;
     let mut height = None;
@@ -401,9 +401,9 @@ fn parse_resize_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
-            "-x" => width = Some(take_value(args, &mut i)?.to_string()),
-            "-y" => height = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
+            "-x" => width = Some(take_value(args, &mut i)?),
+            "-y" => height = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -416,13 +416,13 @@ fn parse_resize_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_has_session(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_has_session<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut i = 0;
 
     while i < args.len() {
         if args[i] == "-t" {
-            target = Some(take_value(args, &mut i)?.to_string());
+            target = Some(take_value(args, &mut i)?);
         }
         i += 1;
     }
@@ -432,7 +432,7 @@ fn parse_has_session(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     Ok(TmuxCommand::HasSession(HasSessionArgs { target }))
 }
 
-fn parse_new_session(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_new_session<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut detached = false;
     let mut session_name = None;
     let mut window_name = None;
@@ -443,10 +443,10 @@ fn parse_new_session(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     while i < args.len() {
         match args[i] {
             "-d" => detached = true,
-            "-s" => session_name = Some(take_value(args, &mut i)?.to_string()),
-            "-n" => window_name = Some(take_value(args, &mut i)?.to_string()),
+            "-s" => session_name = Some(take_value(args, &mut i)?),
+            "-n" => window_name = Some(take_value(args, &mut i)?),
             "-P" => print_info = true,
-            "-F" => format = Some(take_value(args, &mut i)?.to_string()),
+            "-F" => format = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -461,7 +461,7 @@ fn parse_new_session(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_new_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_new_window<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut name = None;
     let mut print_info = false;
@@ -470,10 +470,10 @@ fn parse_new_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
-            "-n" => name = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
+            "-n" => name = Some(take_value(args, &mut i)?),
             "-P" => print_info = true,
-            "-F" => format = Some(take_value(args, &mut i)?.to_string()),
+            "-F" => format = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -487,15 +487,15 @@ fn parse_new_window(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_list_windows(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_list_windows<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut format = None;
     let mut i = 0;
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
-            "-F" => format = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
+            "-F" => format = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -504,7 +504,7 @@ fn parse_list_windows(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     Ok(TmuxCommand::ListWindows(ListWindowsArgs { target, format }))
 }
 
-fn parse_break_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_break_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut detached = false;
     let mut source = None;
     let mut target = None;
@@ -513,8 +513,8 @@ fn parse_break_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     while i < args.len() {
         match args[i] {
             "-d" => detached = true,
-            "-s" => source = Some(take_value(args, &mut i)?.to_string()),
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-s" => source = Some(take_value(args, &mut i)?),
+            "-t" => target = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -527,7 +527,7 @@ fn parse_break_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_join_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_join_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut horizontal = false;
     let mut source = None;
     let mut target = None;
@@ -536,8 +536,8 @@ fn parse_join_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     while i < args.len() {
         match args[i] {
             "-h" => horizontal = true,
-            "-s" => source = Some(take_value(args, &mut i)?.to_string()),
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-s" => source = Some(take_value(args, &mut i)?),
+            "-t" => target = Some(take_value(args, &mut i)?),
             _ => {}
         }
         i += 1;
@@ -550,7 +550,7 @@ fn parse_join_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
     }))
 }
 
-fn parse_capture_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
+fn parse_capture_pane<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError> {
     let mut target = None;
     let mut print = false;
     let mut start_line = None;
@@ -558,7 +558,7 @@ fn parse_capture_pane(args: &[&str]) -> Result<TmuxCommand, ShimError> {
 
     while i < args.len() {
         match args[i] {
-            "-t" => target = Some(take_value(args, &mut i)?.to_string()),
+            "-t" => target = Some(take_value(args, &mut i)?),
             "-p" => print = true,
             "-S" => {
                 let val = take_value(args, &mut i)?;
@@ -590,29 +590,32 @@ mod tests {
 
     #[test]
     fn test_version() {
-        let cmd = parse(&args("-V")).unwrap();
+        let a = args("-V");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::Version));
     }
 
     #[test]
     fn test_strip_socket_flag() {
-        let cmd = parse(&args("-L kild split-window -h -t %0")).unwrap();
+        let a = args("-L kild split-window -h -t %0");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::SplitWindow(_)));
-        if let TmuxCommand::SplitWindow(a) = cmd {
-            assert!(a.horizontal);
-            assert_eq!(a.target.as_deref(), Some("%0"));
+        if let TmuxCommand::SplitWindow(sw) = cmd {
+            assert!(sw.horizontal);
+            assert_eq!(sw.target, Some("%0"));
         }
     }
 
     #[test]
     fn test_split_window_defaults() {
-        let cmd = parse(&args("split-window")).unwrap();
-        if let TmuxCommand::SplitWindow(a) = cmd {
-            assert!(!a.horizontal);
-            assert!(a.target.is_none());
-            assert!(a.size.is_none());
-            assert!(!a.print_info);
-            assert!(a.format.is_none());
+        let a = args("split-window");
+        let cmd = parse(&a).unwrap();
+        if let TmuxCommand::SplitWindow(sw) = cmd {
+            assert!(!sw.horizontal);
+            assert!(sw.target.is_none());
+            assert!(sw.size.is_none());
+            assert!(!sw.print_info);
+            assert!(sw.format.is_none());
         } else {
             panic!("expected SplitWindow");
         }
@@ -623,7 +626,7 @@ mod tests {
         let a = args("send-keys -t %1 echo hello Enter");
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::SendKeys(sk) = cmd {
-            assert_eq!(sk.target.as_deref(), Some("%1"));
+            assert_eq!(sk.target, Some("%1"));
             assert_eq!(sk.keys, vec!["echo", "hello", "Enter"]);
         } else {
             panic!("expected SendKeys");
@@ -632,7 +635,8 @@ mod tests {
 
     #[test]
     fn test_send_keys_no_target() {
-        let cmd = parse(&args("send-keys ls Enter")).unwrap();
+        let a = args("send-keys ls Enter");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::SendKeys(sk) = cmd {
             assert!(sk.target.is_none());
             assert_eq!(sk.keys, vec!["ls", "Enter"]);
@@ -647,7 +651,7 @@ mod tests {
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::SetOption(so) = cmd {
             assert!(matches!(so.scope, OptionScope::Pane));
-            assert_eq!(so.target.as_deref(), Some("%0"));
+            assert_eq!(so.target, Some("%0"));
             assert_eq!(so.key, "pane-border-style");
             assert_eq!(so.value, "fg=blue");
         } else {
@@ -657,7 +661,8 @@ mod tests {
 
     #[test]
     fn test_has_session() {
-        let cmd = parse(&args("has-session -t claude-swarm")).unwrap();
+        let a = args("has-session -t claude-swarm");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::HasSession(hs) = cmd {
             assert_eq!(hs.target, "claude-swarm");
         } else {
@@ -674,8 +679,8 @@ mod tests {
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::DisplayMessage(dm) = cmd {
             assert!(dm.print);
-            assert_eq!(dm.target.as_deref(), Some("%0"));
-            assert_eq!(dm.format.as_deref(), Some("#{pane_id}"));
+            assert_eq!(dm.target, Some("%0"));
+            assert_eq!(dm.format, Some("#{pane_id}"));
         } else {
             panic!("expected DisplayMessage");
         }
@@ -697,9 +702,9 @@ mod tests {
         .collect();
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::SelectPane(sp) = cmd {
-            assert_eq!(sp.target.as_deref(), Some("%1"));
-            assert_eq!(sp.style.as_deref(), Some("bg=default,fg=blue"));
-            assert_eq!(sp.title.as_deref(), Some("researcher"));
+            assert_eq!(sp.target, Some("%1"));
+            assert_eq!(sp.style, Some("bg=default,fg=blue"));
+            assert_eq!(sp.title, Some("researcher"));
         } else {
             panic!("expected SelectPane");
         }
@@ -724,10 +729,10 @@ mod tests {
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::NewSession(ns) = cmd {
             assert!(ns.detached);
-            assert_eq!(ns.session_name.as_deref(), Some("mysess"));
-            assert_eq!(ns.window_name.as_deref(), Some("main"));
+            assert_eq!(ns.session_name, Some("mysess"));
+            assert_eq!(ns.window_name, Some("main"));
             assert!(ns.print_info);
-            assert_eq!(ns.format.as_deref(), Some("#{pane_id}"));
+            assert_eq!(ns.format, Some("#{pane_id}"));
         } else {
             panic!("expected NewSession");
         }
@@ -735,11 +740,12 @@ mod tests {
 
     #[test]
     fn test_resize_pane() {
-        let cmd = parse(&args("resize-pane -t %0 -x 30% -y 50%")).unwrap();
+        let a = args("resize-pane -t %0 -x 30% -y 50%");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ResizePane(rp) = cmd {
-            assert_eq!(rp.target.as_deref(), Some("%0"));
-            assert_eq!(rp.width.as_deref(), Some("30%"));
-            assert_eq!(rp.height.as_deref(), Some("50%"));
+            assert_eq!(rp.target, Some("%0"));
+            assert_eq!(rp.width, Some("30%"));
+            assert_eq!(rp.height, Some("50%"));
         } else {
             panic!("expected ResizePane");
         }
@@ -747,11 +753,12 @@ mod tests {
 
     #[test]
     fn test_join_pane() {
-        let cmd = parse(&args("join-pane -h -s %1 -t kild:0")).unwrap();
+        let a = args("join-pane -h -s %1 -t kild:0");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::JoinPane(jp) = cmd {
             assert!(jp.horizontal);
-            assert_eq!(jp.source.as_deref(), Some("%1"));
-            assert_eq!(jp.target.as_deref(), Some("kild:0"));
+            assert_eq!(jp.source, Some("%1"));
+            assert_eq!(jp.target, Some("kild:0"));
         } else {
             panic!("expected JoinPane");
         }
@@ -766,8 +773,8 @@ mod tests {
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::BreakPane(bp) = cmd {
             assert!(bp.detached);
-            assert_eq!(bp.source.as_deref(), Some("%1"));
-            assert_eq!(bp.target.as_deref(), Some("claude-hidden:"));
+            assert_eq!(bp.source, Some("%1"));
+            assert_eq!(bp.target, Some("claude-hidden:"));
         } else {
             panic!("expected BreakPane");
         }
@@ -775,7 +782,8 @@ mod tests {
 
     #[test]
     fn test_unknown_command() {
-        let result = parse(&args("foobar"));
+        let a = args("foobar");
+        let result = parse(&a);
         assert!(result.is_err());
     }
 
@@ -787,21 +795,24 @@ mod tests {
 
     #[test]
     fn test_alias_splitw() {
-        let cmd = parse(&args("splitw -h")).unwrap();
+        let a = args("splitw -h");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::SplitWindow(_)));
     }
 
     #[test]
     fn test_alias_send() {
-        let cmd = parse(&args("send -t %0 hello")).unwrap();
+        let a = args("send -t %0 hello");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::SendKeys(_)));
     }
 
     #[test]
     fn test_select_layout() {
-        let cmd = parse(&args("select-layout -t kild:0 main-vertical")).unwrap();
+        let a = args("select-layout -t kild:0 main-vertical");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::SelectLayout(sl) = cmd {
-            assert_eq!(sl.target.as_deref(), Some("kild:0"));
+            assert_eq!(sl.target, Some("kild:0"));
             assert_eq!(sl.layout, "main-vertical");
         } else {
             panic!("expected SelectLayout");
@@ -812,13 +823,14 @@ mod tests {
 
     #[test]
     fn test_split_window_all_flags() {
-        let cmd = parse(&args("split-window -h -t %2 -l 30% -P -F #{pane_id}")).unwrap();
-        if let TmuxCommand::SplitWindow(a) = cmd {
-            assert!(a.horizontal);
-            assert_eq!(a.target.as_deref(), Some("%2"));
-            assert_eq!(a.size.as_deref(), Some("30%"));
-            assert!(a.print_info);
-            assert_eq!(a.format.as_deref(), Some("#{pane_id}"));
+        let a = args("split-window -h -t %2 -l 30% -P -F #{pane_id}");
+        let cmd = parse(&a).unwrap();
+        if let TmuxCommand::SplitWindow(sw) = cmd {
+            assert!(sw.horizontal);
+            assert_eq!(sw.target, Some("%2"));
+            assert_eq!(sw.size, Some("30%"));
+            assert!(sw.print_info);
+            assert_eq!(sw.format, Some("#{pane_id}"));
         } else {
             panic!("expected SplitWindow");
         }
@@ -826,9 +838,10 @@ mod tests {
 
     #[test]
     fn test_split_window_vertical_explicit() {
-        let cmd = parse(&args("split-window -v")).unwrap();
-        if let TmuxCommand::SplitWindow(a) = cmd {
-            assert!(!a.horizontal);
+        let a = args("split-window -v");
+        let cmd = parse(&a).unwrap();
+        if let TmuxCommand::SplitWindow(sw) = cmd {
+            assert!(!sw.horizontal);
         } else {
             panic!("expected SplitWindow");
         }
@@ -838,7 +851,8 @@ mod tests {
 
     #[test]
     fn test_list_panes_defaults() {
-        let cmd = parse(&args("list-panes")).unwrap();
+        let a = args("list-panes");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ListPanes(lp) = cmd {
             assert!(lp.target.is_none());
             assert!(lp.format.is_none());
@@ -849,10 +863,11 @@ mod tests {
 
     #[test]
     fn test_list_panes_with_target_and_format() {
-        let cmd = parse(&args("list-panes -t kild:0 -F #{pane_id}")).unwrap();
+        let a = args("list-panes -t kild:0 -F #{pane_id}");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ListPanes(lp) = cmd {
-            assert_eq!(lp.target.as_deref(), Some("kild:0"));
-            assert_eq!(lp.format.as_deref(), Some("#{pane_id}"));
+            assert_eq!(lp.target, Some("kild:0"));
+            assert_eq!(lp.format, Some("#{pane_id}"));
         } else {
             panic!("expected ListPanes");
         }
@@ -860,7 +875,8 @@ mod tests {
 
     #[test]
     fn test_alias_lsp() {
-        let cmd = parse(&args("lsp -F #{pane_id}")).unwrap();
+        let a = args("lsp -F #{pane_id}");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::ListPanes(_)));
     }
 
@@ -868,9 +884,10 @@ mod tests {
 
     #[test]
     fn test_kill_pane_with_target() {
-        let cmd = parse(&args("kill-pane -t %3")).unwrap();
+        let a = args("kill-pane -t %3");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::KillPane(kp) = cmd {
-            assert_eq!(kp.target.as_deref(), Some("%3"));
+            assert_eq!(kp.target, Some("%3"));
         } else {
             panic!("expected KillPane");
         }
@@ -878,7 +895,8 @@ mod tests {
 
     #[test]
     fn test_kill_pane_no_target() {
-        let cmd = parse(&args("kill-pane")).unwrap();
+        let a = args("kill-pane");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::KillPane(kp) = cmd {
             assert!(kp.target.is_none());
         } else {
@@ -888,7 +906,8 @@ mod tests {
 
     #[test]
     fn test_alias_killp() {
-        let cmd = parse(&args("killp -t %1")).unwrap();
+        let a = args("killp -t %1");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::KillPane(_)));
     }
 
@@ -896,9 +915,10 @@ mod tests {
 
     #[test]
     fn test_alias_display() {
-        let cmd = parse(&args("display #{pane_id}")).unwrap();
+        let a = args("display #{pane_id}");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::DisplayMessage(dm) = cmd {
-            assert_eq!(dm.format.as_deref(), Some("#{pane_id}"));
+            assert_eq!(dm.format, Some("#{pane_id}"));
         } else {
             panic!("expected DisplayMessage");
         }
@@ -906,7 +926,8 @@ mod tests {
 
     #[test]
     fn test_display_message_no_args() {
-        let cmd = parse(&args("display-message")).unwrap();
+        let a = args("display-message");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::DisplayMessage(dm) = cmd {
             assert!(dm.target.is_none());
             assert!(!dm.print);
@@ -920,9 +941,10 @@ mod tests {
 
     #[test]
     fn test_select_pane_target_only() {
-        let cmd = parse(&args("select-pane -t %0")).unwrap();
+        let a = args("select-pane -t %0");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::SelectPane(sp) = cmd {
-            assert_eq!(sp.target.as_deref(), Some("%0"));
+            assert_eq!(sp.target, Some("%0"));
             assert!(sp.style.is_none());
             assert!(sp.title.is_none());
         } else {
@@ -932,7 +954,8 @@ mod tests {
 
     #[test]
     fn test_alias_selectp() {
-        let cmd = parse(&args("selectp -t %0")).unwrap();
+        let a = args("selectp -t %0");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::SelectPane(_)));
     }
 
@@ -967,13 +990,15 @@ mod tests {
 
     #[test]
     fn test_set_option_missing_value() {
-        let result = parse(&args("set-option only-key"));
+        let a = args("set-option only-key");
+        let result = parse(&a);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_alias_set() {
-        let cmd = parse(&args("set -p my-key my-val")).unwrap();
+        let a = args("set -p my-key my-val");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::SetOption(_)));
     }
 
@@ -981,7 +1006,8 @@ mod tests {
 
     #[test]
     fn test_alias_selectl() {
-        let cmd = parse(&args("selectl tiled")).unwrap();
+        let a = args("selectl tiled");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::SelectLayout(sl) = cmd {
             assert!(sl.target.is_none());
             assert_eq!(sl.layout, "tiled");
@@ -992,7 +1018,8 @@ mod tests {
 
     #[test]
     fn test_select_layout_missing_layout() {
-        let result = parse(&args("select-layout"));
+        let a = args("select-layout");
+        let result = parse(&a);
         assert!(result.is_err());
     }
 
@@ -1000,7 +1027,8 @@ mod tests {
 
     #[test]
     fn test_resize_pane_defaults() {
-        let cmd = parse(&args("resize-pane")).unwrap();
+        let a = args("resize-pane");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ResizePane(rp) = cmd {
             assert!(rp.target.is_none());
             assert!(rp.width.is_none());
@@ -1012,7 +1040,8 @@ mod tests {
 
     #[test]
     fn test_alias_resizep() {
-        let cmd = parse(&args("resizep -x 50%")).unwrap();
+        let a = args("resizep -x 50%");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::ResizePane(_)));
     }
 
@@ -1020,13 +1049,15 @@ mod tests {
 
     #[test]
     fn test_alias_has() {
-        let cmd = parse(&args("has -t mysess")).unwrap();
+        let a = args("has -t mysess");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::HasSession(_)));
     }
 
     #[test]
     fn test_has_session_missing_target() {
-        let result = parse(&args("has-session"));
+        let a = args("has-session");
+        let result = parse(&a);
         assert!(result.is_err());
     }
 
@@ -1034,7 +1065,8 @@ mod tests {
 
     #[test]
     fn test_new_session_defaults() {
-        let cmd = parse(&args("new-session")).unwrap();
+        let a = args("new-session");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::NewSession(ns) = cmd {
             assert!(!ns.detached);
             assert!(ns.session_name.is_none());
@@ -1048,10 +1080,11 @@ mod tests {
 
     #[test]
     fn test_alias_new() {
-        let cmd = parse(&args("new -d -s test")).unwrap();
+        let a = args("new -d -s test");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::NewSession(ns) = cmd {
             assert!(ns.detached);
-            assert_eq!(ns.session_name.as_deref(), Some("test"));
+            assert_eq!(ns.session_name, Some("test"));
         } else {
             panic!("expected NewSession");
         }
@@ -1061,7 +1094,8 @@ mod tests {
 
     #[test]
     fn test_new_window_defaults() {
-        let cmd = parse(&args("new-window")).unwrap();
+        let a = args("new-window");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::NewWindow(nw) = cmd {
             assert!(nw.target.is_none());
             assert!(nw.name.is_none());
@@ -1089,10 +1123,10 @@ mod tests {
         .collect();
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::NewWindow(nw) = cmd {
-            assert_eq!(nw.target.as_deref(), Some("kild:0"));
-            assert_eq!(nw.name.as_deref(), Some("worker"));
+            assert_eq!(nw.target, Some("kild:0"));
+            assert_eq!(nw.name, Some("worker"));
             assert!(nw.print_info);
-            assert_eq!(nw.format.as_deref(), Some("#{pane_id}"));
+            assert_eq!(nw.format, Some("#{pane_id}"));
         } else {
             panic!("expected NewWindow");
         }
@@ -1100,7 +1134,8 @@ mod tests {
 
     #[test]
     fn test_alias_neww() {
-        let cmd = parse(&args("neww -n test")).unwrap();
+        let a = args("neww -n test");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::NewWindow(_)));
     }
 
@@ -1108,7 +1143,8 @@ mod tests {
 
     #[test]
     fn test_list_windows_defaults() {
-        let cmd = parse(&args("list-windows")).unwrap();
+        let a = args("list-windows");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ListWindows(lw) = cmd {
             assert!(lw.target.is_none());
             assert!(lw.format.is_none());
@@ -1119,10 +1155,11 @@ mod tests {
 
     #[test]
     fn test_list_windows_with_target_and_format() {
-        let cmd = parse(&args("list-windows -t mysess -F #{window_name}")).unwrap();
+        let a = args("list-windows -t mysess -F #{window_name}");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::ListWindows(lw) = cmd {
-            assert_eq!(lw.target.as_deref(), Some("mysess"));
-            assert_eq!(lw.format.as_deref(), Some("#{window_name}"));
+            assert_eq!(lw.target, Some("mysess"));
+            assert_eq!(lw.format, Some("#{window_name}"));
         } else {
             panic!("expected ListWindows");
         }
@@ -1130,7 +1167,8 @@ mod tests {
 
     #[test]
     fn test_alias_lsw() {
-        let cmd = parse(&args("lsw")).unwrap();
+        let a = args("lsw");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::ListWindows(_)));
     }
 
@@ -1138,10 +1176,11 @@ mod tests {
 
     #[test]
     fn test_alias_breakp() {
-        let cmd = parse(&args("breakp -d -s %2")).unwrap();
+        let a = args("breakp -d -s %2");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::BreakPane(bp) = cmd {
             assert!(bp.detached);
-            assert_eq!(bp.source.as_deref(), Some("%2"));
+            assert_eq!(bp.source, Some("%2"));
         } else {
             panic!("expected BreakPane");
         }
@@ -1149,7 +1188,8 @@ mod tests {
 
     #[test]
     fn test_break_pane_defaults() {
-        let cmd = parse(&args("break-pane")).unwrap();
+        let a = args("break-pane");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::BreakPane(bp) = cmd {
             assert!(!bp.detached);
             assert!(bp.source.is_none());
@@ -1163,13 +1203,15 @@ mod tests {
 
     #[test]
     fn test_alias_joinp() {
-        let cmd = parse(&args("joinp -s %0 -t kild:1")).unwrap();
+        let a = args("joinp -s %0 -t kild:1");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::JoinPane(_)));
     }
 
     #[test]
     fn test_join_pane_defaults() {
-        let cmd = parse(&args("join-pane")).unwrap();
+        let a = args("join-pane");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::JoinPane(jp) = cmd {
             assert!(!jp.horizontal);
             assert!(jp.source.is_none());
@@ -1183,9 +1225,10 @@ mod tests {
 
     #[test]
     fn test_capture_pane_basic() {
-        let cmd = parse(&args("capture-pane -t %1 -p")).unwrap();
+        let a = args("capture-pane -t %1 -p");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::CapturePane(cp) = cmd {
-            assert_eq!(cp.target.as_deref(), Some("%1"));
+            assert_eq!(cp.target, Some("%1"));
             assert!(cp.print);
             assert_eq!(cp.start_line, None);
         } else {
@@ -1201,7 +1244,7 @@ mod tests {
             .collect();
         let cmd = parse(&a).unwrap();
         if let TmuxCommand::CapturePane(cp) = cmd {
-            assert_eq!(cp.target.as_deref(), Some("%1"));
+            assert_eq!(cp.target, Some("%1"));
             assert!(cp.print);
             assert_eq!(cp.start_line, Some(-100));
         } else {
@@ -1211,7 +1254,8 @@ mod tests {
 
     #[test]
     fn test_capture_pane_alias() {
-        let cmd = parse(&args("capturep -p")).unwrap();
+        let a = args("capturep -p");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::CapturePane(cp) = cmd {
             assert!(cp.print);
             assert_eq!(cp.target, None);
@@ -1222,7 +1266,8 @@ mod tests {
 
     #[test]
     fn test_capture_pane_no_flags() {
-        let cmd = parse(&args("capture-pane")).unwrap();
+        let a = args("capture-pane");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::CapturePane(cp) = cmd {
             assert!(!cp.print);
             assert_eq!(cp.target, None);
@@ -1236,15 +1281,17 @@ mod tests {
 
     #[test]
     fn test_socket_flag_with_version() {
-        let cmd = parse(&args("-L mysock -V")).unwrap();
+        let a = args("-L mysock -V");
+        let cmd = parse(&a).unwrap();
         assert!(matches!(cmd, TmuxCommand::Version));
     }
 
     #[test]
     fn test_socket_flag_preserves_remaining_args() {
-        let cmd = parse(&args("-L mysock send-keys -t %0 hello Enter")).unwrap();
+        let a = args("-L mysock send-keys -t %0 hello Enter");
+        let cmd = parse(&a).unwrap();
         if let TmuxCommand::SendKeys(sk) = cmd {
-            assert_eq!(sk.target.as_deref(), Some("%0"));
+            assert_eq!(sk.target, Some("%0"));
             assert_eq!(sk.keys, vec!["hello", "Enter"]);
         } else {
             panic!("expected SendKeys");
