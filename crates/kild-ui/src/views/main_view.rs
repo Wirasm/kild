@@ -1047,6 +1047,7 @@ impl MainView {
         else {
             return;
         };
+        let is_running = display.process_status == kild_core::ProcessStatus::Running;
         let daemon_session_id = display
             .session
             .agents()
@@ -1057,7 +1058,7 @@ impl MainView {
 
         self.show_add_menu = false;
 
-        if let Some(dsid) = daemon_session_id {
+        if is_running && let Some(dsid) = daemon_session_id {
             self.add_daemon_terminal_tab(session_id, &dsid, cx);
         } else {
             // No existing daemon session — create one on the fly
@@ -1279,7 +1280,8 @@ impl MainView {
             if matches!(
                 runtime_mode,
                 Some(kild_core::state::types::RuntimeMode::Daemon)
-            ) && let Some(ref dsid) = daemon_session_id
+            ) && display.process_status == kild_core::ProcessStatus::Running
+                && let Some(ref dsid) = daemon_session_id
             {
                 self.active_terminal_id = Some(id.clone());
                 self.focus_region = FocusRegion::Terminal;

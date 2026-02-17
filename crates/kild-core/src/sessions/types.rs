@@ -381,6 +381,14 @@ impl AgentProcess {
     pub fn daemon_session_id(&self) -> Option<&str> {
         self.daemon_session_id.as_deref()
     }
+
+    /// Update terminal attach info after spawning an attach window.
+    /// Called in a second save pass to avoid race conditions where the
+    /// attach window's `kild attach` runs before the session is persisted.
+    pub fn set_attach_info(&mut self, terminal_type: TerminalType, window_id: String) {
+        self.terminal_type = Some(terminal_type);
+        self.terminal_window_id = Some(window_id);
+    }
 }
 
 impl Session {
@@ -454,6 +462,10 @@ impl Session {
     /// The most recently opened agent (last in the vec).
     pub fn latest_agent(&self) -> Option<&AgentProcess> {
         self.agents.last()
+    }
+
+    pub fn latest_agent_mut(&mut self) -> Option<&mut AgentProcess> {
+        self.agents.last_mut()
     }
 
     /// Append an agent to this session's tracking vec.

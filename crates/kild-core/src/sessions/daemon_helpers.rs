@@ -122,6 +122,45 @@ pub fn spawn_attach_window(
     }
 }
 
+/// Spawn attach window and update session with terminal info.
+///
+/// Only runs for daemon sessions. Calls `spawn_attach_window()` and updates
+/// the session's latest agent with terminal type and window ID. Saves the
+/// updated session to disk.
+///
+/// Returns `Ok(true)` on success, `Ok(false)` if attach window fails (best-effort).
+/// Returns `Err` only if session save fails.
+pub fn spawn_and_save_attach_window(
+    session: &mut super::types::Session,
+    branch: &str,
+    kild_config: &KildConfig,
+    sessions_dir: &Path,
+) -> Result<bool, SessionError> {
+    use super::persistence;
+
+    let attach_spawn_id = session
+        .latest_agent()
+        .map(|a| a.spawn_id().to_string())
+        .unwrap_or_default();
+
+    let Some((tt, wid)) = spawn_attach_window(
+        branch,
+        &attach_spawn_id,
+        &session.worktree_path,
+        kild_config,
+    ) else {
+        return Ok(false);
+    };
+
+    let Some(agent) = session.latest_agent_mut() else {
+        return Ok(false);
+    };
+
+    agent.set_attach_info(tt, wid);
+    persistence::save_session_to_file(session, sessions_dir)?;
+    Ok(true)
+}
+
 /// Ensure the Codex notify hook script is installed at `<home>/.kild/hooks/codex-notify`.
 ///
 /// This script is called by Codex CLI's `notify` config. It reads JSON from stdin,

@@ -9,7 +9,7 @@ use crate::terminal;
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_attach_window,
+    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
 };
 
 pub fn create_session(
@@ -402,18 +402,14 @@ pub fn create_session(
                 eprintln!("Agent teams will not work in this session.");
             }
 
-            // Spawn attach window (best-effort) and capture terminal info
-            let attach_info =
-                spawn_attach_window(&validated.name, &spawn_id, &worktree.path, kild_config);
-
             AgentProcess::new(
                 validated.agent.clone(),
                 spawn_id,
                 None,
                 None,
                 None,
-                attach_info.as_ref().map(|(tt, _)| tt.clone()),
-                attach_info.map(|(_, wid)| wid),
+                None,
+                None,
                 validated.command.clone(),
                 now.clone(),
                 Some(daemon_result.daemon_session_id),
@@ -422,11 +418,11 @@ pub fn create_session(
     };
 
     // 6. Create session record
-    let session = Session::new(
+    let mut session = Session::new(
         session_id.clone(),
         project_id,
         validated.name.clone(),
-        worktree.path,
+        worktree.path.clone(),
         validated.agent.clone(),
         SessionStatus::Active,
         now.clone(),
@@ -441,8 +437,18 @@ pub fn create_session(
         Some(request.runtime_mode.clone()),
     );
 
-    // 7. Save session to file
+    // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
+
+    // 8. Spawn attach window (best-effort) and update session with terminal info
+    if request.runtime_mode == crate::state::types::RuntimeMode::Daemon {
+        spawn_and_save_attach_window(
+            &mut session,
+            &validated.name,
+            kild_config,
+            &config.sessions_dir(),
+        )?;
+    }
 
     info!(
         event = "core.session.create_completed",

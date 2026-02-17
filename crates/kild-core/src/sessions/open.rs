@@ -8,7 +8,7 @@ use crate::terminal::types::SpawnResult;
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_attach_window,
+    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
 };
 
 /// Resolve the effective runtime mode for `open_session`.
@@ -383,18 +383,14 @@ pub fn open_session(
             });
         }
 
-        // Spawn attach window (best-effort) and capture terminal info
-        let attach_info =
-            spawn_attach_window(name, &spawn_id, &session.worktree_path, &kild_config);
-
         AgentProcess::new(
             agent.clone(),
             spawn_id,
             None,
             None,
             None,
-            attach_info.as_ref().map(|(tt, _)| tt.clone()),
-            attach_info.map(|(_, wid)| wid),
+            None,
+            None,
             agent_command.clone(),
             now.clone(),
             Some(daemon_result.daemon_session_id),
@@ -465,10 +461,16 @@ pub fn open_session(
     }
 
     // Update runtime mode so future opens auto-detect correctly
+    let is_daemon = effective_runtime_mode == crate::state::types::RuntimeMode::Daemon;
     session.runtime_mode = Some(effective_runtime_mode);
 
-    // 6. Save updated session
+    // 6. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
+
+    // 7. Spawn attach window (best-effort) and update session with terminal info
+    if is_daemon {
+        spawn_and_save_attach_window(&mut session, name, &kild_config, &config.sessions_dir())?;
+    }
 
     info!(
         event = "core.session.open_completed",
