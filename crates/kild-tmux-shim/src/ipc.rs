@@ -1,5 +1,5 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use base64::Engine;
 use kild_paths::KildPaths;
@@ -8,9 +8,32 @@ use tracing::debug;
 
 use crate::errors::ShimError;
 
-fn socket_path() -> Result<PathBuf, ShimError> {
-    let paths = KildPaths::resolve().map_err(|e| ShimError::state(e.to_string()))?;
-    Ok(paths.daemon_socket())
+thread_local! {
+    static CACHED_CONNECTION: RefCell<Option<IpcConnection>> = const { RefCell::new(None) };
+}
+
+/// Get a connection to the daemon, reusing a cached one if available.
+///
+/// Critical for `write_stdin()` which is called per-keystroke — avoids
+/// creating a new socket connection for every key press.
+fn get_or_connect() -> Result<IpcConnection, ShimError> {
+    CACHED_CONNECTION.with(|cell| {
+        let mut cached = cell.borrow_mut();
+        if let Some(conn) = cached.take()
+            && conn.is_alive()
+        {
+            return Ok(conn);
+        }
+        let paths = KildPaths::resolve().map_err(|e| ShimError::state(e.to_string()))?;
+        IpcConnection::connect(&paths.daemon_socket()).map_err(Into::into)
+    })
+}
+
+/// Return a connection to the cache for reuse.
+fn return_conn(conn: IpcConnection) {
+    CACHED_CONNECTION.with(|cell| {
+        *cell.borrow_mut() = Some(conn);
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -42,25 +65,25 @@ pub fn create_session(
         use_login_shell,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path()?)?;
-    let response = conn.send(&request)?;
-
-    let daemon_session_id = match response {
-        DaemonMessage::SessionCreated { session, .. } => session.id.into_inner(),
-        other => {
-            return Err(ShimError::ipc(format!(
-                "create_session for {}: expected SessionCreated, got {:?}",
-                session_id, other
-            )));
+    let mut conn = get_or_connect()?;
+    match conn.send(&request) {
+        Ok(DaemonMessage::SessionCreated { session, .. }) => {
+            let daemon_session_id = session.id.into_inner();
+            return_conn(conn);
+            debug!(
+                event = "shim.ipc.create_session_completed",
+                daemon_session_id = daemon_session_id.as_str(),
+            );
+            Ok(daemon_session_id)
         }
-    };
-
-    debug!(
-        event = "shim.ipc.create_session_completed",
-        daemon_session_id = daemon_session_id,
-    );
-
-    Ok(daemon_session_id)
+        Ok(_) => {
+            return_conn(conn);
+            Err(ShimError::ipc(
+                "create_session: expected SessionCreated response",
+            ))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
@@ -81,14 +104,18 @@ pub fn write_stdin(session_id: &str, data: &[u8]) -> Result<(), ShimError> {
         data: encoded,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path()?)?;
-    conn.send(&request)?;
-
-    debug!(
-        event = "shim.ipc.write_stdin_completed",
-        session_id = session_id
-    );
-    Ok(())
+    let mut conn = get_or_connect()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            return_conn(conn);
+            debug!(
+                event = "shim.ipc.write_stdin_completed",
+                session_id = session_id
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
@@ -104,14 +131,18 @@ pub fn destroy_session(session_id: &str, force: bool) -> Result<(), ShimError> {
         force,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path()?)?;
-    conn.send(&request)?;
-
-    debug!(
-        event = "shim.ipc.destroy_session_completed",
-        session_id = session_id
-    );
-    Ok(())
+    let mut conn = get_or_connect()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            // Don't cache — session is being destroyed
+            debug!(
+                event = "shim.ipc.destroy_session_completed",
+                session_id = session_id
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
@@ -125,33 +156,30 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
         session_id: SessionId::new(session_id),
     };
 
-    let mut conn = IpcConnection::connect(&socket_path()?)?;
-    let response = conn.send(&request)?;
-
-    let decoded = match response {
-        DaemonMessage::ScrollbackContents { data, .. } => base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .map_err(|e| {
-                ShimError::ipc(format!(
-                    "read_scrollback for {}: base64 decode failed: {}",
-                    session_id, e
-                ))
-            })?,
-        other => {
-            return Err(ShimError::ipc(format!(
-                "read_scrollback for {}: expected ScrollbackContents, got {:?}",
-                session_id, other
-            )));
+    let mut conn = get_or_connect()?;
+    match conn.send(&request) {
+        Ok(DaemonMessage::ScrollbackContents { data, .. }) => {
+            return_conn(conn);
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|e| {
+                    ShimError::ipc(format!("read_scrollback: base64 decode failed: {}", e))
+                })?;
+            debug!(
+                event = "shim.ipc.read_scrollback_completed",
+                session_id = session_id,
+                bytes = decoded.len(),
+            );
+            Ok(decoded)
         }
-    };
-
-    debug!(
-        event = "shim.ipc.read_scrollback_completed",
-        session_id = session_id,
-        bytes = decoded.len(),
-    );
-
-    Ok(decoded)
+        Ok(_) => {
+            return_conn(conn);
+            Err(ShimError::ipc(
+                "read_scrollback: expected ScrollbackContents response",
+            ))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[allow(dead_code)]
@@ -170,25 +198,33 @@ pub fn resize_pty(session_id: &str, rows: u16, cols: u16) -> Result<(), ShimErro
         cols,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path()?)?;
-    conn.send(&request)?;
-
-    debug!(
-        event = "shim.ipc.resize_pty_completed",
-        session_id = session_id
-    );
-    Ok(())
+    let mut conn = get_or_connect()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            return_conn(conn);
+            debug!(
+                event = "shim.ipc.resize_pty_completed",
+                session_id = session_id
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn daemon_socket_path() -> std::path::PathBuf {
+        KildPaths::resolve().unwrap().daemon_socket()
+    }
+
     #[test]
     fn test_connect_daemon_not_running() {
         // With no daemon socket file, connect should return DaemonNotRunning.
         // Skip if daemon happens to be running.
-        let path = socket_path().unwrap();
+        let path = daemon_socket_path();
         if path.exists() {
             // Daemon might be running — can't reliably test DaemonNotRunning
             return;
@@ -213,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_write_stdin_daemon_not_running() {
-        let path = socket_path().unwrap();
+        let path = daemon_socket_path();
         if path.exists() {
             return;
         }
@@ -228,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_destroy_session_daemon_not_running() {
-        let path = socket_path().unwrap();
+        let path = daemon_socket_path();
         if path.exists() {
             return;
         }

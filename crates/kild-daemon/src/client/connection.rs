@@ -6,7 +6,7 @@ use tokio::net::UnixStream;
 use tracing::debug;
 
 use crate::errors::DaemonError;
-use crate::protocol::codec::{read_message, write_message};
+use crate::protocol::codec::{read_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
 use crate::types::SessionInfo;
 
@@ -56,7 +56,7 @@ impl DaemonClient {
 
     /// Send a request and read the response.
     async fn request(&mut self, msg: &ClientMessage) -> Result<DaemonMessage, DaemonError> {
-        write_message(&mut self.writer, msg).await?;
+        write_message_flush(&mut self.writer, msg).await?;
         let response: DaemonMessage = read_message(&mut self.reader)
             .await?
             .ok_or_else(|| DaemonError::ConnectionFailed("connection closed".to_string()))?;

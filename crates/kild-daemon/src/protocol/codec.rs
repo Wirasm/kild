@@ -33,7 +33,9 @@ where
 
 /// Write a single JSONL message to an async writer.
 ///
-/// Serializes the message as compact JSON followed by a newline, then flushes.
+/// Serializes the message as compact JSON followed by a newline.
+/// Does NOT flush — callers should flush explicitly when transitioning
+/// from write phase to read phase, or when a batch of writes is complete.
 pub async fn write_message<W, T>(writer: &mut W, msg: &T) -> Result<(), DaemonError>
 where
     W: AsyncWrite + Unpin,
@@ -42,6 +44,19 @@ where
     let json = serde_json::to_string(msg)?;
     writer.write_all(json.as_bytes()).await?;
     writer.write_all(b"\n").await?;
+    Ok(())
+}
+
+/// Write a single JSONL message and flush immediately.
+///
+/// Use for request-response messages where the peer is waiting for a response.
+/// For streaming (e.g. PTY output), prefer `write_message()` without flush.
+pub async fn write_message_flush<W, T>(writer: &mut W, msg: &T) -> Result<(), DaemonError>
+where
+    W: AsyncWrite + Unpin,
+    T: Serialize,
+{
+    write_message(writer, msg).await?;
     writer.flush().await?;
     Ok(())
 }
@@ -158,5 +173,33 @@ mod tests {
         } else {
             panic!("wrong variant");
         }
+    }
+
+    #[tokio::test]
+    async fn test_write_message_does_not_flush() {
+        // write_message writes data to a BufWriter but does not flush it.
+        // The data remains in the BufWriter's internal buffer.
+        let inner: Vec<u8> = Vec::new();
+        let mut buf_writer = tokio::io::BufWriter::new(inner);
+        let msg = ClientMessage::Ping {
+            id: "1".to_string(),
+        };
+        write_message(&mut buf_writer, &msg).await.unwrap();
+        // Data is buffered, not flushed to inner vec
+        assert!(!buf_writer.buffer().is_empty());
+        assert!(buf_writer.get_ref().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_write_message_flush_flushes() {
+        let inner: Vec<u8> = Vec::new();
+        let mut buf_writer = tokio::io::BufWriter::new(inner);
+        let msg = ClientMessage::Ping {
+            id: "1".to_string(),
+        };
+        write_message_flush(&mut buf_writer, &msg).await.unwrap();
+        // Data has been flushed to the inner vec
+        assert!(buf_writer.buffer().is_empty());
+        assert!(!buf_writer.get_ref().is_empty());
     }
 }

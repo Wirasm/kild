@@ -81,7 +81,11 @@ async fn connect_to_daemon() -> Result<Async<UnixStream>, DaemonClientError> {
         .map_err(DaemonClientError::Connect)
 }
 
-/// Send a JSONL message on a stream.
+/// Send a JSONL message on a stream without flushing.
+///
+/// For write-heavy operations (WriteStdin, ResizePty) where the caller
+/// doesn't need an immediate response. Data reaches the kernel buffer
+/// immediately since Async<UnixStream> has no userspace buffering.
 async fn send_message(
     stream: &mut Async<UnixStream>,
     msg: &ClientMessage,
@@ -89,6 +93,17 @@ async fn send_message(
     let json = serde_json::to_string(msg)?;
     stream.write_all(json.as_bytes()).await?;
     stream.write_all(b"\n").await?;
+    Ok(())
+}
+
+/// Send a JSONL message and flush immediately.
+///
+/// For request-response patterns where a read follows the write.
+async fn send_message_flush(
+    stream: &mut Async<UnixStream>,
+    msg: &ClientMessage,
+) -> Result<(), DaemonClientError> {
+    send_message(stream, msg).await?;
     stream.flush().await?;
     Ok(())
 }
@@ -152,11 +167,7 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
         id: next_request_id(),
     };
 
-    // Write Ping as JSONL
-    let json = serde_json::to_string(&request)?;
-    stream.write_all(json.as_bytes()).await?;
-    stream.write_all(b"\n").await?;
-    stream.flush().await?;
+    send_message_flush(&mut stream, &request).await?;
 
     // Read Ack response (hand ownership to BufReader — done writing)
     let mut reader = BufReader::new(stream);
@@ -201,7 +212,7 @@ pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError
         id: next_request_id(),
         project_id: None,
     };
-    send_message(&mut stream, &request).await?;
+    send_message_flush(&mut stream, &request).await?;
 
     let mut reader = BufReader::new(stream);
     let response = read_response(&mut reader).await?;
@@ -251,7 +262,7 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    send_message(&mut stream, &request).await?;
+    send_message_flush(&mut stream, &request).await?;
 
     let mut reader = BufReader::new(stream);
     let response = read_response(&mut reader).await?;
@@ -299,7 +310,7 @@ pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientErro
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    send_message(&mut stream, &request).await?;
+    send_message_flush(&mut stream, &request).await?;
 
     let mut reader = BufReader::new(stream);
     let response = read_response(&mut reader).await?;
@@ -346,7 +357,7 @@ pub async fn create_session_async(
         cols: 80,
         use_login_shell: true,
     };
-    send_message(&mut stream, &request).await?;
+    send_message_flush(&mut stream, &request).await?;
 
     let mut reader = BufReader::new(stream);
     let response = read_response(&mut reader).await?;
@@ -415,7 +426,7 @@ pub async fn connect_for_attach(
         rows,
         cols,
     };
-    send_message(&mut reader_stream, &attach_request).await?;
+    send_message_flush(&mut reader_stream, &attach_request).await?;
 
     let mut reader = BufReader::new(reader_stream);
     let ack = read_response(&mut reader).await?;

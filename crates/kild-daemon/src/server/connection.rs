@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use kild_core::errors::KildError;
 
-use crate::protocol::codec::{read_message, write_message};
+use crate::protocol::codec::{read_message, write_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
 use crate::session::manager::SessionManager;
 use crate::session::state::ClientId;
@@ -48,7 +48,7 @@ pub async fn handle_connection(
 
                         if let Some(response) = response {
                             let mut w = writer.lock().await;
-                            if let Err(e) = write_message(&mut *w, &response).await {
+                            if let Err(e) = write_message_flush(&mut *w, &response).await {
                                 error!(
                                     event = "daemon.connection.write_failed",
                                     client_id = client_id,
@@ -191,10 +191,11 @@ async fn dispatch_message(
 
             // Hold the writer lock for ack + scrollback + buffered drain so
             // the streaming task cannot interleave before replay is complete.
+            // Write all messages without flushing, then flush once at the end.
             {
                 let mut w = writer.lock().await;
 
-                // Send ack
+                // Send ack (no flush — batch with scrollback)
                 if let Err(e) = write_message(&mut *w, &DaemonMessage::Ack { id }).await {
                     warn!(
                         event = "daemon.connection.ack_write_failed",
@@ -205,7 +206,7 @@ async fn dispatch_message(
                     return None;
                 }
 
-                // Notify client if resize failed (non-fatal)
+                // Notify client if resize failed (non-fatal, no flush)
                 if resize_failed {
                     let resize_warning = DaemonMessage::SessionEvent {
                         event: "resize_failed".to_string(),
@@ -224,7 +225,7 @@ async fn dispatch_message(
                     }
                 }
 
-                // Send scrollback replay so attaching client has context
+                // Send scrollback replay so attaching client has context (no flush)
                 if !scrollback.is_empty() {
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&scrollback);
                     let scrollback_msg = DaemonMessage::PtyOutput {
@@ -239,6 +240,16 @@ async fn dispatch_message(
                             error = %e,
                         );
                     }
+                }
+
+                // Flush once after the entire attach batch
+                if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *w).await {
+                    warn!(
+                        event = "daemon.connection.attach_flush_failed",
+                        session_id = %session_id,
+                        client_id = client_id,
+                        error = %e,
+                    );
                 }
             }
             // Writer lock released — streaming task can now write freely.

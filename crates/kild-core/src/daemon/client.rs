@@ -3,6 +3,7 @@
 //! Delegates JSONL framing to `kild_protocol::IpcConnection`.
 //! This module provides domain-specific request helpers and error mapping.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::time::Duration;
 
@@ -10,6 +11,37 @@ use kild_protocol::{
     ClientMessage, DaemonMessage, ErrorCode, IpcConnection, IpcError, SessionId, SessionStatus,
 };
 use tracing::{debug, info, warn};
+
+thread_local! {
+    static CACHED_CONNECTION: RefCell<Option<IpcConnection>> = const { RefCell::new(None) };
+}
+
+/// Get a connection to the daemon, reusing a cached one if available.
+///
+/// The connection is taken from the cache (exclusive ownership) and must be
+/// returned with `return_connection()` after successful use.
+fn get_connection() -> Result<IpcConnection, DaemonClientError> {
+    let socket_path = crate::daemon::socket_path();
+
+    CACHED_CONNECTION.with(|cell| {
+        let mut cached = cell.borrow_mut();
+        if let Some(conn) = cached.take()
+            && conn.is_alive()
+        {
+            return Ok(conn);
+        }
+        IpcConnection::connect(&socket_path).map_err(Into::into)
+    })
+}
+
+/// Return a connection to the cache for reuse by the next call.
+///
+/// Only call this after a successful send — broken connections should be dropped.
+fn return_connection(conn: IpcConnection) {
+    CACHED_CONNECTION.with(|cell| {
+        *cell.borrow_mut() = Some(conn);
+    });
+}
 
 use crate::errors::KildError;
 
@@ -110,8 +142,6 @@ pub struct DaemonCreateRequest<'a> {
 pub fn create_pty_session(
     request: &DaemonCreateRequest<'_>,
 ) -> Result<DaemonCreateResult, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     info!(
         event = "core.daemon.create_pty_session_started",
         request_id = request.request_id,
@@ -131,32 +161,36 @@ pub fn create_pty_session(
         use_login_shell: request.use_login_shell,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path)?;
-    let response = conn.send(&msg)?;
+    let mut conn = get_connection()?;
+    let response = conn.send(&msg);
 
-    let session_id = match response {
-        DaemonMessage::SessionCreated { session, .. } => session.id,
-        _ => {
-            return Err(DaemonClientError::ProtocolError {
-                message: "Expected SessionCreated response".to_string(),
-            });
+    match response {
+        Ok(DaemonMessage::SessionCreated { session, .. }) => {
+            return_connection(conn);
+            info!(
+                event = "core.daemon.create_pty_session_completed",
+                daemon_session_id = %session.id
+            );
+            Ok(DaemonCreateResult {
+                daemon_session_id: session.id.into_inner(),
+            })
         }
-    };
-
-    info!(
-        event = "core.daemon.create_pty_session_completed",
-        daemon_session_id = %session_id
-    );
-
-    Ok(DaemonCreateResult {
-        daemon_session_id: session_id.into_inner(),
-    })
+        Ok(_) => {
+            return_connection(conn);
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected SessionCreated response".to_string(),
+            })
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Stop a daemon-managed session (kill the PTY process).
 pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     info!(
         event = "core.daemon.stop_session_started",
         daemon_session_id = daemon_session_id
@@ -167,15 +201,22 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = IpcConnection::connect(&socket_path)?;
-    conn.send(&request)?;
-
-    info!(
-        event = "core.daemon.stop_session_completed",
-        daemon_session_id = daemon_session_id
-    );
-
-    Ok(())
+    let mut conn = get_connection()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            return_connection(conn);
+            info!(
+                event = "core.daemon.stop_session_completed",
+                daemon_session_id = daemon_session_id
+            );
+            Ok(())
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Destroy a daemon-managed session (kill the PTY process and remove session state).
@@ -183,8 +224,6 @@ pub fn destroy_daemon_session(
     daemon_session_id: &str,
     force: bool,
 ) -> Result<(), DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     info!(
         event = "core.daemon.destroy_session_started",
         daemon_session_id = daemon_session_id,
@@ -197,38 +236,43 @@ pub fn destroy_daemon_session(
         force,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path)?;
-    conn.send(&request)?;
-
-    info!(
-        event = "core.daemon.destroy_session_completed",
-        daemon_session_id = daemon_session_id,
-    );
-
-    Ok(())
+    let mut conn = get_connection()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            return_connection(conn);
+            info!(
+                event = "core.daemon.destroy_session_completed",
+                daemon_session_id = daemon_session_id,
+            );
+            Ok(())
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Check if the daemon is running and responsive.
 pub fn ping_daemon() -> Result<bool, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     debug!(event = "core.daemon.ping_started");
 
     let request = ClientMessage::Ping {
         id: "ping".to_string(),
     };
 
-    let mut conn = match IpcConnection::connect(&socket_path) {
+    let mut conn = match get_connection() {
         Ok(c) => c,
-        Err(IpcError::NotRunning { .. }) => return Ok(false),
-        Err(e) => return Err(e.into()),
+        Err(DaemonClientError::NotRunning { .. }) => return Ok(false),
+        Err(e) => return Err(e),
     };
 
-    // Use a short timeout for ping
     conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
     match conn.send(&request) {
         Ok(_) => {
+            return_connection(conn);
             debug!(event = "core.daemon.ping_completed", alive = true);
             Ok(true)
         }
@@ -248,8 +292,6 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
 pub fn get_session_status(
     daemon_session_id: &str,
 ) -> Result<Option<SessionStatus>, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     debug!(
         event = "core.daemon.get_session_status_started",
         daemon_session_id = daemon_session_id
@@ -260,9 +302,9 @@ pub fn get_session_status(
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match IpcConnection::connect(&socket_path) {
+    let mut conn = match get_connection() {
         Ok(c) => c,
-        Err(IpcError::NotRunning { .. }) => {
+        Err(DaemonClientError::NotRunning { .. }) => {
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -271,15 +313,15 @@ pub fn get_session_status(
             return Ok(None);
         }
         Err(e) => {
-            return Err(e.into());
+            return Err(e);
         }
     };
 
-    // Use a short timeout for status queries
     conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
     match conn.send(&request) {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
+            return_connection(conn);
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -288,6 +330,7 @@ pub fn get_session_status(
             Ok(Some(session.status))
         }
         Ok(unexpected) => {
+            return_connection(conn);
             warn!(
                 event = "core.daemon.get_session_status_failed",
                 daemon_session_id = daemon_session_id,
@@ -299,6 +342,7 @@ pub fn get_session_status(
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
+            return_connection(conn);
             debug!(
                 event = "core.daemon.get_session_status_completed",
                 daemon_session_id = daemon_session_id,
@@ -325,26 +369,26 @@ pub fn get_session_status(
 pub fn get_session_info(
     daemon_session_id: &str,
 ) -> Result<Option<(SessionStatus, Option<i32>)>, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     let request = ClientMessage::GetSession {
         id: format!("info-{}", daemon_session_id),
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match IpcConnection::connect(&socket_path) {
+    let mut conn = match get_connection() {
         Ok(c) => c,
-        Err(IpcError::NotRunning { .. }) => return Ok(None),
-        Err(e) => return Err(e.into()),
+        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e),
     };
 
     conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
     match conn.send(&request) {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
+            return_connection(conn);
             Ok(Some((session.status, session.exit_code)))
         }
         Ok(unexpected) => {
+            return_connection(conn);
             warn!(
                 event = "core.daemon.get_session_info_failed",
                 daemon_session_id = daemon_session_id,
@@ -356,6 +400,7 @@ pub fn get_session_info(
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
+            return_connection(conn);
             Ok(None)
         }
         Err(e) => Err(e.into()),
@@ -367,23 +412,22 @@ pub fn get_session_info(
 /// Returns the raw scrollback bytes (decoded from base64), or `None` if the
 /// daemon is not running or the session is not found.
 pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     let request = ClientMessage::ReadScrollback {
         id: format!("scrollback-{}", daemon_session_id),
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match IpcConnection::connect(&socket_path) {
+    let mut conn = match get_connection() {
         Ok(c) => c,
-        Err(IpcError::NotRunning { .. }) => return Ok(None),
-        Err(e) => return Err(e.into()),
+        Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
+        Err(e) => return Err(e),
     };
 
     conn.set_read_timeout(Some(Duration::from_secs(2)))?;
 
     match conn.send(&request) {
         Ok(DaemonMessage::ScrollbackContents { data, .. }) => {
+            return_connection(conn);
             use base64::Engine;
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(data)
@@ -393,6 +437,7 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             Ok(Some(decoded))
         }
         Ok(unexpected) => {
+            return_connection(conn);
             warn!(
                 event = "core.daemon.read_scrollback_failed",
                 daemon_session_id = daemon_session_id,
@@ -404,6 +449,7 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
+            return_connection(conn);
             Ok(None)
         }
         Err(e) => Err(e.into()),
@@ -415,8 +461,6 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
 /// Returns all sessions from the daemon. The caller can filter by prefix
 /// to find sessions belonging to a specific kild (e.g., UI-created shells).
 pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     debug!(event = "core.daemon.list_sessions_started");
 
     let request = ClientMessage::ListSessions {
@@ -424,38 +468,51 @@ pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonC
         project_id: None,
     };
 
-    let mut conn = IpcConnection::connect(&socket_path)?;
-    let response = conn.send(&request)?;
+    let mut conn = get_connection()?;
 
-    match response {
-        DaemonMessage::SessionList { sessions, .. } => {
+    match conn.send(&request) {
+        Ok(DaemonMessage::SessionList { sessions, .. }) => {
+            return_connection(conn);
             debug!(
                 event = "core.daemon.list_sessions_completed",
                 count = sessions.len()
             );
             Ok(sessions)
         }
-        _ => Err(DaemonClientError::ProtocolError {
-            message: "Expected SessionList response".to_string(),
-        }),
+        Ok(_) => {
+            return_connection(conn);
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected SessionList response".to_string(),
+            })
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => Err(e.into()),
     }
 }
 
 /// Request the daemon to shut down gracefully.
 pub fn request_shutdown() -> Result<(), DaemonClientError> {
-    let socket_path = crate::daemon::socket_path();
-
     info!(event = "core.daemon.shutdown_started");
 
     let request = ClientMessage::DaemonStop {
         id: "shutdown".to_string(),
     };
 
-    let mut conn = IpcConnection::connect(&socket_path)?;
-    conn.send(&request)?;
-
-    info!(event = "core.daemon.shutdown_completed");
-    Ok(())
+    let mut conn = get_connection()?;
+    match conn.send(&request) {
+        Ok(_) => {
+            // Don't return connection — daemon is shutting down
+            info!(event = "core.daemon.shutdown_completed");
+            Ok(())
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]

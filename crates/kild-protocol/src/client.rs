@@ -135,6 +135,41 @@ impl IpcConnection {
         self.stream.set_read_timeout(timeout)?;
         Ok(())
     }
+
+    /// Check if the connection is still usable (peer hasn't closed).
+    ///
+    /// Sets a 1ms read timeout and attempts a read. For KILD's protocol,
+    /// there's no unsolicited data between request-response cycles, so:
+    /// - `TimedOut` / `WouldBlock` → no data, connection alive
+    /// - `Ok(0)` → EOF, peer closed
+    /// - Any other error → connection broken
+    ///
+    /// Returns `false` if the socket is definitely closed, `true` otherwise.
+    /// A `true` result is best-effort — the next `send()` may still fail.
+    pub fn is_alive(&self) -> bool {
+        use std::io::Read;
+
+        let orig_timeout = self.stream.read_timeout().ok().flatten();
+        let _ = self.stream.set_read_timeout(Some(Duration::from_millis(1)));
+
+        let mut buf = [0u8; 1];
+        let mut stream_ref = &self.stream;
+        let alive = match stream_ref.read(&mut buf) {
+            Ok(0) => false, // EOF — peer closed
+            Ok(_) => true,  // Unexpected data but socket alive
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                true
+            }
+            Err(_) => false,
+        };
+
+        // Restore original timeout
+        let _ = self.stream.set_read_timeout(orig_timeout);
+        alive
+    }
 }
 
 #[cfg(test)]
@@ -276,5 +311,67 @@ mod tests {
         }
 
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_connection_reuse_multiple_sends() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut writer = stream.try_clone().unwrap();
+            let mut reader = std::io::BufReader::new(stream);
+            // Handle two sequential requests on the same connection
+            for _ in 0..2 {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let response = r#"{"type":"ack","id":"1"}"#;
+                writeln!(writer, "{}", response).unwrap();
+                writer.flush().unwrap();
+            }
+        });
+
+        let mut conn = IpcConnection::connect(&sock_path).unwrap();
+        let req = ClientMessage::Ping {
+            id: "1".to_string(),
+        };
+        let r1 = conn.send(&req);
+        assert!(r1.is_ok(), "First send failed: {:?}", r1.err());
+        let r2 = conn.send(&req);
+        assert!(r2.is_ok(), "Second send failed: {:?}", r2.err());
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_is_alive_on_connected_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let _listener = UnixListener::bind(&sock_path).unwrap();
+
+        let conn = IpcConnection::connect(&sock_path).unwrap();
+        assert!(conn.is_alive(), "Connected socket should be alive");
+    }
+
+    #[test]
+    fn test_is_alive_on_closed_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
+        let conn = IpcConnection::connect(&sock_path).unwrap();
+        // Accept and immediately close the server side
+        let (server_stream, _) = listener.accept().unwrap();
+        drop(server_stream);
+
+        // Give the kernel a moment to propagate the close
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        assert!(
+            !conn.is_alive(),
+            "Socket with closed peer should not be alive"
+        );
     }
 }
