@@ -407,37 +407,22 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
         serde_json::json!({})
     };
 
-    // Check if already configured: scan all relevant hook arrays for our script path
-    if let Some(serde_json::Value::Object(hooks)) = settings.get("hooks") {
-        let already_configured = [
-            "Stop",
-            "Notification",
-            "SubagentStop",
-            "TeammateIdle",
-            "TaskCompleted",
-        ]
-        .iter()
-        .any(|event| {
-            if let Some(serde_json::Value::Array(entries)) = hooks.get(*event) {
-                entries.iter().any(|entry| {
-                    if let Some(serde_json::Value::Array(hook_list)) = entry.get("hooks") {
-                        hook_list.iter().any(|h| {
-                            h.get("command").and_then(|c| c.as_str()) == Some(&hook_path_str)
-                        })
-                    } else {
-                        false
-                    }
-                })
-            } else {
-                false
-            }
-        });
-
-        if already_configured {
-            info!(event = "core.session.claude_settings_already_configured");
-            return Ok(());
+    // Helper: check if a hook array already contains our script
+    let has_our_hook = |entries: &serde_json::Value| -> bool {
+        if let Some(arr) = entries.as_array() {
+            arr.iter().any(|entry| {
+                if let Some(serde_json::Value::Array(hook_list)) = entry.get("hooks") {
+                    hook_list
+                        .iter()
+                        .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(&hook_path_str))
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
         }
-    }
+    };
 
     // Build hook entries
     let hook_entry = serde_json::json!({
@@ -456,27 +441,46 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
         .as_object_mut()
         .ok_or("\"hooks\" field in settings.json is not an object")?;
 
+    let mut added = 0;
+
     // Stop, SubagentStop, TeammateIdle, TaskCompleted: no matcher needed
     for event in &["Stop", "SubagentStop", "TeammateIdle", "TaskCompleted"] {
         let entries = hooks_obj
             .entry(*event)
             .or_insert_with(|| serde_json::json!([]));
-        if let serde_json::Value::Array(arr) = entries {
-            arr.push(serde_json::json!({
-                "hooks": [hook_entry.clone()]
-            }));
+
+        if has_our_hook(entries) {
+            continue;
         }
+
+        let arr = entries
+            .as_array_mut()
+            .ok_or_else(|| format!("\"{event}\" field in settings.json is not an array"))?;
+        arr.push(serde_json::json!({
+            "hooks": [hook_entry.clone()]
+        }));
+        added += 1;
     }
 
     // Notification: matcher for permission_prompt and idle_prompt
     let notification_entries = hooks_obj
         .entry("Notification")
         .or_insert_with(|| serde_json::json!([]));
-    if let serde_json::Value::Array(arr) = notification_entries {
+
+    if !has_our_hook(notification_entries) {
+        let arr = notification_entries
+            .as_array_mut()
+            .ok_or("\"Notification\" field in settings.json is not an array")?;
         arr.push(serde_json::json!({
             "matcher": "permission_prompt|idle_prompt",
             "hooks": [hook_entry.clone()]
         }));
+        added += 1;
+    }
+
+    if added == 0 {
+        info!(event = "core.session.claude_settings_already_configured");
+        return Ok(());
     }
 
     // Write back
@@ -521,12 +525,14 @@ pub(crate) fn setup_claude_integration(agent: &str) {
     if let Err(msg) = ensure_claude_settings() {
         warn!(event = "core.session.claude_settings_patch_failed", error = %msg);
         eprintln!("Warning: {msg}");
-        let hook_path = KildPaths::resolve()
-            .map(|p| p.claude_status_hook().display().to_string())
-            .unwrap_or_else(|_| "<HOME>/.kild/hooks/claude-status".to_string());
-        let settings_path = dirs::home_dir()
-            .map(|h| h.join(".claude/settings.json").display().to_string())
-            .unwrap_or_else(|| "<HOME>/.claude/settings.json".to_string());
+        let hook_path = match KildPaths::resolve() {
+            Ok(p) => p.claude_status_hook().display().to_string(),
+            Err(_) => "<HOME>/.kild/hooks/claude-status".to_string(),
+        };
+        let settings_path = match dirs::home_dir() {
+            Some(h) => h.join(".claude/settings.json").display().to_string(),
+            None => "<HOME>/.claude/settings.json".to_string(),
+        };
         eprintln!("Add hooks entries referencing \"{hook_path}\" to {settings_path} manually.");
     }
 }
@@ -2301,6 +2307,178 @@ mod tests {
             content, "{invalid json\n",
             "Malformed file should not be modified"
         );
+
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_ensure_claude_settings_partial_idempotency() {
+        use std::fs;
+
+        let temp_home = std::env::temp_dir().join(format!(
+            "kild_test_claude_settings_partial_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_home);
+        let claude_dir = temp_home.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let paths = KildPaths::from_dir(temp_home.join(".kild"));
+        let hook_path_str = paths.claude_status_hook().display().to_string();
+
+        // Create settings with our hook on Stop only (partial configuration)
+        let existing = serde_json::json!({
+            "hooks": {
+                "Stop": [{
+                    "hooks": [{"type": "command", "command": hook_path_str, "timeout": 5}]
+                }]
+            }
+        });
+        fs::write(
+            claude_dir.join("settings.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let result = ensure_claude_settings_with_home(&temp_home, &paths);
+        assert!(result.is_ok(), "Should patch missing events: {:?}", result);
+
+        let content = fs::read_to_string(claude_dir.join("settings.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let hooks = parsed["hooks"].as_object().unwrap();
+
+        // Stop should NOT be duplicated
+        let stop_arr = hooks["Stop"].as_array().unwrap();
+        assert_eq!(stop_arr.len(), 1, "Stop hook should not be duplicated");
+
+        // Missing events should be added
+        for event in &[
+            "SubagentStop",
+            "TeammateIdle",
+            "TaskCompleted",
+            "Notification",
+        ] {
+            assert!(
+                hooks[*event].is_array() && !hooks[*event].as_array().unwrap().is_empty(),
+                "{event} hook should be added"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_ensure_claude_settings_rejects_non_array_event() {
+        use std::fs;
+
+        let temp_home = std::env::temp_dir().join(format!(
+            "kild_test_claude_settings_bad_type_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_home);
+        let claude_dir = temp_home.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+
+        // Create settings with a non-array event value
+        let existing = serde_json::json!({
+            "hooks": {
+                "Stop": "invalid"
+            }
+        });
+        fs::write(
+            claude_dir.join("settings.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let result = ensure_claude_settings_with_home(
+            &temp_home,
+            &KildPaths::from_dir(temp_home.join(".kild")),
+        );
+        assert!(result.is_err(), "Should fail on non-array event value");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not an array"),
+            "Error should mention type issue, got: {err}"
+        );
+
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_claude_status_hook_script_syntax() {
+        use std::fs;
+
+        let temp_home = std::env::temp_dir().join(format!(
+            "kild_test_claude_hook_syntax_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_home);
+
+        let paths = KildPaths::from_dir(temp_home.join(".kild"));
+        let result = ensure_claude_status_hook_with_paths(&paths);
+        assert!(result.is_ok());
+
+        let hook_path = paths.claude_status_hook();
+        // Validate shell syntax with sh -n (parse without executing)
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&hook_path)
+            .output()
+            .expect("sh should be available");
+        assert!(
+            output.status.success(),
+            "Hook script should have valid shell syntax: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_ensure_claude_settings_hook_structure() {
+        use std::fs;
+
+        let temp_home = std::env::temp_dir().join(format!(
+            "kild_test_claude_settings_structure_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_home);
+
+        let paths = KildPaths::from_dir(temp_home.join(".kild"));
+        let result = ensure_claude_settings_with_home(&temp_home, &paths);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(temp_home.join(".claude/settings.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Verify Stop hook entry structure (no matcher)
+        let stop_entries = parsed["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop_entries.len(), 1);
+        let stop_entry = stop_entries[0].as_object().unwrap();
+        assert!(
+            !stop_entry.contains_key("matcher"),
+            "Stop should not have matcher"
+        );
+        let stop_hooks = stop_entry["hooks"].as_array().unwrap();
+        assert_eq!(stop_hooks.len(), 1);
+        assert_eq!(stop_hooks[0]["type"], "command");
+        assert!(
+            stop_hooks[0]["command"]
+                .as_str()
+                .unwrap()
+                .ends_with("claude-status")
+        );
+        assert_eq!(stop_hooks[0]["timeout"], 5);
+
+        // Verify Notification hook entry structure (with matcher)
+        let notif_entries = parsed["hooks"]["Notification"].as_array().unwrap();
+        assert_eq!(notif_entries.len(), 1);
+        let notif_entry = notif_entries[0].as_object().unwrap();
+        assert_eq!(notif_entry["matcher"], "permission_prompt|idle_prompt");
+        let notif_hooks = notif_entry["hooks"].as_array().unwrap();
+        assert_eq!(notif_hooks.len(), 1);
+        assert_eq!(notif_hooks[0]["type"], "command");
+        assert_eq!(notif_hooks[0]["timeout"], 5);
 
         let _ = fs::remove_dir_all(&temp_home);
     }
