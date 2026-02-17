@@ -41,9 +41,15 @@ fn test_save_session_to_file() {
         "claude".to_string(),
         SessionStatus::Active,
         "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0,
+        0,
+        0,
+        0,
         Some("2024-01-01T00:00:00Z".to_string()),
-        None, vec![], None, None, None,
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     assert!(save_session_to_file(&session, &temp_dir).is_ok());
@@ -79,16 +85,25 @@ fn test_save_session_atomic_write_temp_cleanup() {
         "claude".to_string(),
         SessionStatus::Active,
         "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0,
+        0,
+        0,
+        0,
         Some("2024-01-01T00:00:00Z".to_string()),
-        None, vec![], None, None, None,
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     assert!(save_session_to_file(&session, &temp_dir).is_ok());
 
     let sess_dir = temp_dir.join("test_atomic");
     let temp_file = sess_dir.join("kild.json.tmp");
-    assert!(!temp_file.exists(), "Temp file should be cleaned up after successful write");
+    assert!(
+        !temp_file.exists(),
+        "Temp file should be cleaned up after successful write"
+    );
 
     let sess_file = sess_dir.join("kild.json");
     assert!(sess_file.exists(), "Final session file should exist");
@@ -115,9 +130,15 @@ fn test_save_session_atomic_behavior() {
         "claude".to_string(),
         SessionStatus::Active,
         "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0,
+        0,
+        0,
+        0,
         Some("2024-01-01T00:00:00Z".to_string()),
-        None, vec![], None, None, None,
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     let sess_dir = temp_dir.join("test_atomic-behavior");
@@ -156,9 +177,15 @@ fn test_save_session_temp_file_cleanup_on_failure() {
         "claude".to_string(),
         SessionStatus::Active,
         "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0,
+        0,
+        0,
+        0,
         Some("2024-01-01T00:00:00Z".to_string()),
-        None, vec![], None, None, None,
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     let sess_dir = temp_dir.join("test_cleanup");
@@ -170,7 +197,10 @@ fn test_save_session_temp_file_cleanup_on_failure() {
     assert!(result.is_err(), "Save should fail when rename fails");
 
     let temp_file = sess_dir.join("kild.json.tmp");
-    assert!(!temp_file.exists(), "Temp file should be cleaned up after rename failure");
+    assert!(
+        !temp_file.exists(),
+        "Temp file should be cleaned up after rename failure"
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -193,14 +223,40 @@ fn test_load_sessions_from_files() {
     std::fs::create_dir_all(&worktree2).unwrap();
 
     let session1 = Session::new(
-        "test/branch1".into(), "test".into(), "branch1".into(), worktree1,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/branch1".into(),
+        "test".into(),
+        "branch1".into(),
+        worktree1,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
     let session2 = Session::new(
-        "test/branch2".into(), "test".into(), "branch2".into(), worktree2,
-        "kiro".to_string(), SessionStatus::Stopped, "2024-01-02T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/branch2".into(),
+        "test".into(),
+        "branch2".into(),
+        worktree2,
+        "kiro".to_string(),
+        SessionStatus::Stopped,
+        "2024-01-02T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     save_session_to_file(&session1, &temp_dir).unwrap();
@@ -239,9 +295,22 @@ fn test_find_session_by_name() {
     std::fs::create_dir_all(&worktree_path).unwrap();
 
     let session = Session::new(
-        "test/feature-branch".into(), "test".into(), "feature-branch".into(), worktree_path,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/feature-branch".into(),
+        "test".into(),
+        "feature-branch".into(),
+        worktree_path,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     save_session_to_file(&session, &temp_dir).unwrap();
@@ -268,9 +337,22 @@ fn test_remove_session_file() {
     std::fs::create_dir_all(&worktree_path).unwrap();
 
     let session = Session::new(
-        "test/branch".into(), "test".into(), "branch".into(), worktree_path,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/branch".into(),
+        "test".into(),
+        "branch".into(),
+        worktree_path,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     save_session_to_file(&session, &temp_dir).unwrap();
@@ -298,9 +380,22 @@ fn test_load_sessions_with_invalid_files() {
     std::fs::create_dir_all(&worktree_path).unwrap();
 
     let valid_session = Session::new(
-        "test/valid".into(), "test".into(), "valid".into(), worktree_path,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/valid".into(),
+        "test".into(),
+        "valid".into(),
+        worktree_path,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
     save_session_to_file(&valid_session, &temp_dir).unwrap();
 
@@ -313,7 +408,8 @@ fn test_load_sessions_with_invalid_files() {
     std::fs::write(
         invalid_structure_dir.join("kild.json"),
         r#"{"id": "", "project_id": "test"}"#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let (sessions, skipped) = load_sessions_from_files(&temp_dir).unwrap();
     assert_eq!(sessions.len(), 1);
@@ -334,15 +430,32 @@ fn test_load_sessions_includes_missing_worktree() {
     let nonexistent_worktree = temp_dir.join("worktree_that_does_not_exist");
 
     let session_missing_worktree = Session::new(
-        "test/orphaned".into(), "test".into(), "orphaned".into(), nonexistent_worktree.clone(),
-        "claude".to_string(), SessionStatus::Stopped, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/orphaned".into(),
+        "test".into(),
+        "orphaned".into(),
+        nonexistent_worktree.clone(),
+        "claude".to_string(),
+        SessionStatus::Stopped,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     let sess_dir = temp_dir.join("test_orphaned");
     std::fs::create_dir_all(&sess_dir).unwrap();
     let sess_file = sess_dir.join("kild.json");
-    std::fs::write(&sess_file, serde_json::to_string_pretty(&session_missing_worktree).unwrap()).unwrap();
+    std::fs::write(
+        &sess_file,
+        serde_json::to_string_pretty(&session_missing_worktree).unwrap(),
+    )
+    .unwrap();
 
     assert!(sess_file.exists());
     assert!(!nonexistent_worktree.exists());
@@ -369,29 +482,69 @@ fn test_load_sessions_mixed_valid_and_missing_worktrees() {
     let missing_worktree = temp_dir.join("missing_worktree");
 
     let session_valid = Session::new(
-        "test/valid-session".into(), "test".into(), "valid-session".into(), valid_worktree.clone(),
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        3000, 3009, 10, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/valid-session".into(),
+        "test".into(),
+        "valid-session".into(),
+        valid_worktree.clone(),
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        3000,
+        3009,
+        10,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
     let session_missing = Session::new(
-        "test/missing-session".into(), "test".into(), "missing-session".into(), missing_worktree.clone(),
-        "claude".to_string(), SessionStatus::Stopped, "2024-01-01T00:00:00Z".to_string(),
-        3010, 3019, 10, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/missing-session".into(),
+        "test".into(),
+        "missing-session".into(),
+        missing_worktree.clone(),
+        "claude".to_string(),
+        SessionStatus::Stopped,
+        "2024-01-01T00:00:00Z".to_string(),
+        3010,
+        3019,
+        10,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     let valid_dir = temp_dir.join("test_valid-session");
     std::fs::create_dir_all(&valid_dir).unwrap();
-    std::fs::write(valid_dir.join("kild.json"), serde_json::to_string_pretty(&session_valid).unwrap()).unwrap();
+    std::fs::write(
+        valid_dir.join("kild.json"),
+        serde_json::to_string_pretty(&session_valid).unwrap(),
+    )
+    .unwrap();
     let missing_dir = temp_dir.join("test_missing-session");
     std::fs::create_dir_all(&missing_dir).unwrap();
-    std::fs::write(missing_dir.join("kild.json"), serde_json::to_string_pretty(&session_missing).unwrap()).unwrap();
+    std::fs::write(
+        missing_dir.join("kild.json"),
+        serde_json::to_string_pretty(&session_missing).unwrap(),
+    )
+    .unwrap();
 
     let (sessions, skipped) = load_sessions_from_files(&temp_dir).unwrap();
     assert_eq!(sessions.len(), 2);
     assert_eq!(skipped, 0);
 
-    let valid = sessions.iter().find(|s| &*s.branch == "valid-session").unwrap();
-    let missing = sessions.iter().find(|s| &*s.branch == "missing-session").unwrap();
+    let valid = sessions
+        .iter()
+        .find(|s| &*s.branch == "valid-session")
+        .unwrap();
+    let missing = sessions
+        .iter()
+        .find(|s| &*s.branch == "missing-session")
+        .unwrap();
     assert!(valid.is_worktree_valid());
     assert!(!missing.is_worktree_valid());
 
@@ -420,9 +573,12 @@ fn test_patch_session_json_field_preserves_unknown_fields() {
     std::fs::write(&sess_file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
     patch_session_json_field(
-        &temp_dir, "proj/my-branch", "last_activity",
+        &temp_dir,
+        "proj/my-branch",
+        "last_activity",
         serde_json::Value::String("2024-06-15T12:00:00Z".to_string()),
-    ).unwrap();
+    )
+    .unwrap();
 
     let content = std::fs::read_to_string(&sess_file).unwrap();
     let patched: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -446,7 +602,9 @@ fn test_patch_session_json_field_fails_on_non_object() {
     std::fs::write(sess_dir.join("kild.json"), "[]").unwrap();
 
     let result = patch_session_json_field(
-        &temp_dir, "proj/branch", "last_activity",
+        &temp_dir,
+        "proj/branch",
+        "last_activity",
         serde_json::Value::String("2024-06-15T12:00:00Z".to_string()),
     );
     assert!(result.is_err());
@@ -476,10 +634,17 @@ fn test_patch_session_json_fields_preserves_unknown_fields() {
     std::fs::write(&sess_file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
     patch_session_json_fields(
-        &temp_dir, "proj/my-branch",
-        &[("status", serde_json::json!("Stopped")),
-          ("last_activity", serde_json::Value::String("2024-06-15T12:00:00Z".to_string()))],
-    ).unwrap();
+        &temp_dir,
+        "proj/my-branch",
+        &[
+            ("status", serde_json::json!("Stopped")),
+            (
+                "last_activity",
+                serde_json::Value::String("2024-06-15T12:00:00Z".to_string()),
+            ),
+        ],
+    )
+    .unwrap();
 
     let content = std::fs::read_to_string(&sess_file).unwrap();
     let patched: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -493,7 +658,10 @@ fn test_patch_session_json_fields_preserves_unknown_fields() {
 #[test]
 fn test_write_and_read_agent_status() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = AgentStatusInfo { status: AgentStatus::Working, updated_at: "2026-02-05T12:00:00Z".to_string() };
+    let info = AgentStatusInfo {
+        status: AgentStatus::Working,
+        updated_at: "2026-02-05T12:00:00Z".to_string(),
+    };
     write_agent_status(tmp.path(), "test/branch", &info).unwrap();
     assert!(tmp.path().join("test_branch").join("status").exists());
     assert_eq!(read_agent_status(tmp.path(), "test/branch"), Some(info));
@@ -517,7 +685,10 @@ fn test_read_agent_status_corrupt_json() {
 #[test]
 fn test_remove_agent_status_file_exists() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = AgentStatusInfo { status: AgentStatus::Idle, updated_at: "2026-02-05T12:00:00Z".to_string() };
+    let info = AgentStatusInfo {
+        status: AgentStatus::Idle,
+        updated_at: "2026-02-05T12:00:00Z".to_string(),
+    };
     write_agent_status(tmp.path(), "test/rm", &info).unwrap();
     let sidecar = tmp.path().join("test_rm").join("status");
     assert!(sidecar.exists());
@@ -536,10 +707,14 @@ fn test_write_and_read_pr_info() {
     use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
     let tmp = tempfile::TempDir::new().unwrap();
     let info = PrInfo {
-        number: 42, url: "https://github.com/org/repo/pull/42".to_string(),
-        state: PrState::Open, ci_status: CiStatus::Passing,
-        ci_summary: Some("3/3 passing".to_string()), review_status: ReviewStatus::Approved,
-        review_summary: Some("1 approved".to_string()), updated_at: "2026-02-05T12:00:00Z".to_string(),
+        number: 42,
+        url: "https://github.com/org/repo/pull/42".to_string(),
+        state: PrState::Open,
+        ci_status: CiStatus::Passing,
+        ci_summary: Some("3/3 passing".to_string()),
+        review_status: ReviewStatus::Approved,
+        review_summary: Some("1 approved".to_string()),
+        updated_at: "2026-02-05T12:00:00Z".to_string(),
     };
     write_pr_info(tmp.path(), "test/branch", &info).unwrap();
     assert!(tmp.path().join("test_branch").join("pr").exists());
@@ -566,9 +741,13 @@ fn test_remove_pr_info_file_exists() {
     use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
     let tmp = tempfile::TempDir::new().unwrap();
     let info = PrInfo {
-        number: 1, url: "https://github.com/org/repo/pull/1".to_string(),
-        state: PrState::Open, ci_status: CiStatus::Unknown, ci_summary: None,
-        review_status: ReviewStatus::Unknown, review_summary: None,
+        number: 1,
+        url: "https://github.com/org/repo/pull/1".to_string(),
+        state: PrState::Open,
+        ci_status: CiStatus::Unknown,
+        ci_summary: None,
+        review_status: ReviewStatus::Unknown,
+        review_summary: None,
         updated_at: "2026-02-05T12:00:00Z".to_string(),
     };
     write_pr_info(tmp.path(), "test/rm", &info).unwrap();
@@ -595,23 +774,42 @@ fn test_save_load_roundtrip_all_fields() {
     std::fs::create_dir_all(&worktree_dir).unwrap();
 
     let agent = AgentProcess::new(
-        "claude".to_string(), "proj_feat_0".to_string(), Some(12345),
-        Some("claude-code".to_string()), Some(1705318200), Some(TerminalType::Ghostty),
-        Some("kild-feat".to_string()), "claude --session-id abc".to_string(),
-        "2024-01-15T10:30:00Z".to_string(), None,
-    ).unwrap();
+        "claude".to_string(),
+        "proj_feat_0".to_string(),
+        Some(12345),
+        Some("claude-code".to_string()),
+        Some(1705318200),
+        Some(TerminalType::Ghostty),
+        Some("kild-feat".to_string()),
+        "claude --session-id abc".to_string(),
+        "2024-01-15T10:30:00Z".to_string(),
+        None,
+    )
+    .unwrap();
 
     let session = Session::new(
-        "proj/feat".into(), "proj".into(), "feat".into(), worktree_dir,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        3000, 3009, 10, Some("2024-01-15T10:30:00Z".to_string()),
-        Some("Implementing auth".to_string()), vec![agent],
+        "proj/feat".into(),
+        "proj".into(),
+        "feat".into(),
+        worktree_dir,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        3000,
+        3009,
+        10,
+        Some("2024-01-15T10:30:00Z".to_string()),
+        Some("Implementing auth".to_string()),
+        vec![agent],
         Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
-        Some("tl_proj_feat".to_string()), Some(RuntimeMode::Daemon),
+        Some("tl_proj_feat".to_string()),
+        Some(RuntimeMode::Daemon),
     );
 
     save_session_to_file(&session, sessions_dir).unwrap();
-    let loaded = find_session_by_name(sessions_dir, "feat").unwrap().expect("session should be found");
+    let loaded = find_session_by_name(sessions_dir, "feat")
+        .unwrap()
+        .expect("session should be found");
 
     assert_eq!(loaded.id, session.id);
     assert_eq!(loaded.project_id, session.project_id);
@@ -634,9 +832,22 @@ fn test_session_id_filename_mapping() {
     std::fs::create_dir_all(&worktree_dir).unwrap();
 
     let session = Session::new(
-        "my-project/deep/nested".into(), "my-project".into(), "deep-nested".into(), worktree_dir,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, None, None, vec![], None, None, None,
+        "my-project/deep/nested".into(),
+        "my-project".into(),
+        "deep-nested".into(),
+        worktree_dir,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        None,
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     save_session_to_file(&session, sessions_dir).unwrap();
@@ -657,8 +868,16 @@ fn test_migrate_session_with_all_sidecars() {
     let tmp = tempfile::TempDir::new().unwrap();
     let sessions_dir = tmp.path();
 
-    std::fs::write(sessions_dir.join("proj_branch.json"), r#"{"id":"proj/branch"}"#).unwrap();
-    std::fs::write(sessions_dir.join("proj_branch.status"), r#"{"status":"idle"}"#).unwrap();
+    std::fs::write(
+        sessions_dir.join("proj_branch.json"),
+        r#"{"id":"proj/branch"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sessions_dir.join("proj_branch.status"),
+        r#"{"status":"idle"}"#,
+    )
+    .unwrap();
     std::fs::write(sessions_dir.join("proj_branch.pr"), r#"{"number":42}"#).unwrap();
 
     let result = migrate_session_if_needed(sessions_dir, "proj_branch").unwrap();
@@ -677,7 +896,11 @@ fn test_migrate_session_with_all_sidecars() {
 #[test]
 fn test_migrate_session_json_only() {
     let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::write(tmp.path().join("proj_branch.json"), r#"{"id":"proj/branch"}"#).unwrap();
+    std::fs::write(
+        tmp.path().join("proj_branch.json"),
+        r#"{"id":"proj/branch"}"#,
+    )
+    .unwrap();
 
     let result = migrate_session_if_needed(tmp.path(), "proj_branch").unwrap();
     assert!(result);
@@ -711,9 +934,22 @@ fn test_load_sessions_auto_migrates_old_format() {
     std::fs::create_dir_all(&worktree_path).unwrap();
 
     let session = Session::new(
-        "test/migrate-me".into(), "test".into(), "migrate-me".into(), worktree_path,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/migrate-me".into(),
+        "test".into(),
+        "migrate-me".into(),
+        worktree_path,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     let old_file = sessions_dir.join("test_migrate-me.json");
@@ -724,7 +960,12 @@ fn test_load_sessions_auto_migrates_old_format() {
     assert_eq!(skipped, 0);
     assert_eq!(&*sessions[0].id, "test/migrate-me");
     assert!(!old_file.exists());
-    assert!(sessions_dir.join("test_migrate-me").join("kild.json").exists());
+    assert!(
+        sessions_dir
+            .join("test_migrate-me")
+            .join("kild.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -738,18 +979,48 @@ fn test_load_sessions_mixed_old_and_new() {
     std::fs::create_dir_all(&wt2).unwrap();
 
     let session1 = Session::new(
-        "test/new-format".into(), "test".into(), "new-format".into(), wt1,
-        "claude".to_string(), SessionStatus::Active, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/new-format".into(),
+        "test".into(),
+        "new-format".into(),
+        wt1,
+        "claude".to_string(),
+        SessionStatus::Active,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
     let session2 = Session::new(
-        "test/old-format".into(), "test".into(), "old-format".into(), wt2,
-        "claude".to_string(), SessionStatus::Stopped, "2024-01-01T00:00:00Z".to_string(),
-        0, 0, 0, Some("2024-01-01T00:00:00Z".to_string()), None, vec![], None, None, None,
+        "test/old-format".into(),
+        "test".into(),
+        "old-format".into(),
+        wt2,
+        "claude".to_string(),
+        SessionStatus::Stopped,
+        "2024-01-01T00:00:00Z".to_string(),
+        0,
+        0,
+        0,
+        Some("2024-01-01T00:00:00Z".to_string()),
+        None,
+        vec![],
+        None,
+        None,
+        None,
     );
 
     save_session_to_file(&session1, sessions_dir).unwrap();
-    std::fs::write(sessions_dir.join("test_old-format.json"), serde_json::to_string_pretty(&session2).unwrap()).unwrap();
+    std::fs::write(
+        sessions_dir.join("test_old-format.json"),
+        serde_json::to_string_pretty(&session2).unwrap(),
+    )
+    .unwrap();
 
     let (sessions, skipped) = load_sessions_from_files(sessions_dir).unwrap();
     assert_eq!(sessions.len(), 2);
@@ -759,7 +1030,11 @@ fn test_load_sessions_mixed_old_and_new() {
 #[test]
 fn test_migrate_cleans_up_temp_files() {
     let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::write(tmp.path().join("proj_branch.json"), r#"{"id":"proj/branch"}"#).unwrap();
+    std::fs::write(
+        tmp.path().join("proj_branch.json"),
+        r#"{"id":"proj/branch"}"#,
+    )
+    .unwrap();
     std::fs::write(tmp.path().join("proj_branch.json.tmp"), "temp data").unwrap();
     std::fs::write(tmp.path().join("proj_branch.status.tmp"), "temp data").unwrap();
 
@@ -773,7 +1048,11 @@ fn test_migrate_cleans_up_temp_files() {
 fn test_concurrent_migration() {
     let tmp = tempfile::TempDir::new().unwrap();
     let sessions_dir = tmp.path().to_path_buf();
-    std::fs::write(sessions_dir.join("proj_branch.json"), r#"{"id":"proj/branch"}"#).unwrap();
+    std::fs::write(
+        sessions_dir.join("proj_branch.json"),
+        r#"{"id":"proj/branch"}"#,
+    )
+    .unwrap();
 
     let dir1 = sessions_dir.clone();
     let dir2 = sessions_dir.clone();
@@ -793,9 +1072,18 @@ fn test_concurrent_migration() {
 #[test]
 fn test_session_dir_and_session_file_helpers() {
     let base = std::path::Path::new("/tmp/sessions");
-    assert_eq!(session_dir(base, "proj/branch"), std::path::PathBuf::from("/tmp/sessions/proj_branch"));
-    assert_eq!(session_file(base, "proj/branch"), std::path::PathBuf::from("/tmp/sessions/proj_branch/kild.json"));
-    assert_eq!(session_dir(base, "deep/nested/id"), std::path::PathBuf::from("/tmp/sessions/deep_nested_id"));
+    assert_eq!(
+        session_dir(base, "proj/branch"),
+        std::path::PathBuf::from("/tmp/sessions/proj_branch")
+    );
+    assert_eq!(
+        session_file(base, "proj/branch"),
+        std::path::PathBuf::from("/tmp/sessions/proj_branch/kild.json")
+    );
+    assert_eq!(
+        session_dir(base, "deep/nested/id"),
+        std::path::PathBuf::from("/tmp/sessions/deep_nested_id")
+    );
 }
 
 #[test]

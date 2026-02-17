@@ -256,7 +256,8 @@ pub fn load_sessions_from_files(
             );
         }
 
-        if let Err(validation_error) = super::super::validation::validate_session_structure(&session)
+        if let Err(validation_error) =
+            super::super::validation::validate_session_structure(&session)
         {
             skipped_count += 1;
             tracing::warn!(

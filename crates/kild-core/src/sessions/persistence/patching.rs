@@ -6,7 +6,9 @@ use crate::sessions::errors::SessionError;
 use std::fs;
 use std::path::Path;
 
-use super::session_files::{cleanup_temp_file, migrate_session_if_needed, session_dir, session_file};
+use super::session_files::{
+    cleanup_temp_file, migrate_session_if_needed, session_dir, session_file,
+};
 
 /// Patch a single field in a session JSON file without deserializing into Session.
 ///

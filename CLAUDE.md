@@ -116,10 +116,10 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `theme.rs` - Centralized color palette, typography, and spacing constants (Tallinn Night brand system)
 - `theme_bridge.rs` - Maps Tallinn Night colors to gpui-component theme tokens
 - `components/` - Custom UI components (StatusIndicator only; Button, TextInput, Modal from gpui-component library)
-- `state/` - Type-safe state modules with encapsulated AppState facade (app_state.rs, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
+- `state/` - Type-safe state modules with encapsulated AppState facade (app_state/ for state and tests, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
-- `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items and hover actions, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints)
-- `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle, terminal_element.rs for GPUI Element, terminal_view.rs for View, colors.rs for ANSI mapping, input.rs for keystroke translation)
+- `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items and hover actions, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
+- `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle, terminal_element/ for GPUI Element implementation, terminal_view.rs for View, colors.rs for ANSI mapping, input.rs for keystroke translation)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback
 
@@ -131,24 +131,34 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `client/` - Daemon client for typed IPC operations (DaemonClient)
 
 **Key modules in kild-peek-core:**
-- `window/` - Window and monitor enumeration via macOS APIs
+- `window/` - Window and monitor enumeration via macOS APIs (handler/ contains builders.rs, find.rs, list.rs, monitors.rs, tests.rs)
 - `screenshot/` - Screenshot capture with multiple targets (window, monitor, base64 output)
 - `diff/` - Image comparison using SSIM algorithm
 - `assert/` - UI state assertions (window exists, visible, image similarity)
-- `interact/` - Native UI interaction (mouse clicks, keyboard input, key combinations, text-based clicking)
+- `interact/` - Native UI interaction (handler/ contains click.rs, helpers.rs, keyboard.rs, mouse.rs, tests.rs)
 - `element/` - Accessibility API-based element enumeration, text search, and element finding
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
 **Key modules in kild-tmux-shim:**
-- `parser.rs` - Hand-rolled tmux argument parser for ~15 subcommands + aliases
+- `parser/` - Hand-rolled tmux argument parser for ~15 subcommands + aliases (parse.rs, types.rs, tests.rs)
 - `commands.rs` - Command handlers dispatching to daemon IPC or local state
 - `state.rs` - File-based pane registry with flock concurrency control
 - `ipc.rs` - Domain-specific IPC helpers with thread-local connection pooling (delegates to kild-protocol::IpcConnection)
 - `main.rs` - Entry point, file-based logging controlled by KILD_SHIM_LOG env var
 - `errors.rs` - ShimError type
 
-**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`daemon_helpers.rs` for sessions with `handler.rs` as re-export facade, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim is a flat CLI crate with per-module files (no nested mod structure).
+**Key modules in kild (CLI):**
+- `app/` - CLI command implementations (daemon.rs, git.rs, global.rs, misc.rs, query.rs, session.rs, tests.rs)
+- `main.rs` - CLI entry point with clap argument parsing
+- `color.rs` - Tallinn Night palette output formatting
+
+**Key modules in kild-peek (CLI):**
+- `app/` - CLI app logic (assert.rs, diff.rs, elements.rs, interact.rs, list.rs, screenshot.rs, tests.rs)
+- `commands/` - Command implementations (assert.rs, diff.rs, elements.rs, interact.rs, list.rs, screenshot.rs, window_resolution.rs)
+- `main.rs` - CLI entry point
+
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types/`, `mod.rs`. Core types and submodules may be organized as directories (e.g., `sessions/types/` contains agent_process.rs, request.rs, safety.rs, session.rs, status.rs, tests.rs; `sessions/persistence/` contains patching.rs, session_files.rs, sidecar.rs, tests.rs). Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`daemon_helpers.rs` for sessions with `handler.rs` as re-export facade). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim, kild (CLI), and kild-peek (CLI) use focused modules organized by domain (parser/, app/, commands/).
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
