@@ -37,68 +37,55 @@ pub fn ensure_pid_dir(kild_dir: &Path) -> Result<PathBuf, ProcessError> {
     Ok(pid_dir)
 }
 
-/// Read PID from a PID file with retry logic
+/// Read PID from a PID file with fast polling.
 ///
-/// The PID file may not exist immediately after spawning, so we retry
-/// with exponential backoff.
-pub fn read_pid_file_with_retry(
-    pid_file: &Path,
-    max_attempts: u32,
-    initial_delay_ms: u64,
-) -> Result<Option<u32>, ProcessError> {
-    let mut delay = Duration::from_millis(initial_delay_ms);
+/// The PID file is written by `echo $$ > file && exec cmd` before the
+/// agent process starts, so it typically appears within milliseconds.
+/// Polls at 100ms intervals with a 3s timeout.
+pub fn read_pid_file_with_retry(pid_file: &Path) -> Result<Option<u32>, ProcessError> {
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const MAX_WAIT: Duration = Duration::from_secs(3);
 
-    for attempt in 1..=max_attempts {
-        debug!(
-            event = "core.pid_file.read_attempt",
-            attempt,
-            max_attempts,
-            path = %pid_file.display()
-        );
+    let start = std::time::Instant::now();
+    let mut last_error: Option<ProcessError> = None;
 
+    loop {
         match read_pid_file(pid_file) {
             Ok(Some(pid)) => {
                 debug!(
                     event = "core.pid_file.read_success",
-                    attempt,
                     pid,
+                    elapsed_ms = start.elapsed().as_millis() as u64,
                     path = %pid_file.display()
                 );
                 return Ok(Some(pid));
             }
             Ok(None) => {
-                // File doesn't exist yet, wait and retry
-                if attempt < max_attempts {
+                if start.elapsed() > MAX_WAIT {
                     debug!(
-                        event = "core.pid_file.not_found_retry",
-                        attempt,
-                        next_delay_ms = delay.as_millis()
+                        event = "core.pid_file.not_found_timeout",
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        path = %pid_file.display()
                     );
-                    std::thread::sleep(delay);
-                    delay = std::cmp::min(delay * 2, Duration::from_secs(8));
+                    return Ok(None);
                 }
             }
             Err(e) => {
-                debug!(
-                    event = "core.pid_file.read_error",
-                    attempt,
-                    error = %e
-                );
-                if attempt == max_attempts {
+                if start.elapsed() > MAX_WAIT {
                     return Err(e);
                 }
-                std::thread::sleep(delay);
-                delay = std::cmp::min(delay * 2, Duration::from_secs(8));
+                last_error = Some(e);
             }
         }
-    }
 
-    debug!(
-        event = "core.pid_file.not_found_final",
-        max_attempts,
-        path = %pid_file.display()
-    );
-    Ok(None)
+        debug!(
+            event = "core.pid_file.polling",
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            has_error = last_error.is_some(),
+            path = %pid_file.display()
+        );
+        std::thread::sleep(POLL_INTERVAL);
+    }
 }
 
 /// Read PID from a PID file (single attempt)
@@ -305,7 +292,25 @@ mod tests {
         let mut file = fs::File::create(&pid_file).unwrap();
         writeln!(file, "99999").unwrap();
 
-        let result = read_pid_file_with_retry(&pid_file, 3, 10).unwrap();
+        let result = read_pid_file_with_retry(&pid_file).unwrap();
         assert_eq!(result, Some(99999));
+    }
+
+    #[test]
+    fn test_read_pid_file_with_retry_not_found_times_out() {
+        let temp_dir = TempDir::new().unwrap();
+        let pid_file = temp_dir.path().join("never_created.pid");
+
+        let start = std::time::Instant::now();
+        let result = read_pid_file_with_retry(&pid_file).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, None);
+        // Should timeout after ~3s, not 23s
+        assert!(
+            elapsed.as_secs() < 5,
+            "Should timeout within 5s, took {:?}",
+            elapsed
+        );
     }
 }

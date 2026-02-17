@@ -1,94 +1,15 @@
 use std::path::Path;
 use tracing::{debug, info, warn};
 
-use crate::agents;
 use crate::config::KildConfig;
 use crate::process::{
-    ensure_pid_dir, find_process_by_name, get_pid_file_path, get_process_info, is_process_running,
+    ensure_pid_dir, get_pid_file_path, get_process_info, is_process_running,
     read_pid_file_with_retry, wrap_command_with_pid_capture,
 };
 use crate::terminal::{errors::TerminalError, operations, types::*};
 
-/// Process info returned from find_agent_process_with_retry
+/// Process info returned from process detection functions
 type ProcessSearchResult = Result<(Option<u32>, Option<String>, Option<u64>), TerminalError>;
-
-/// Find agent process with retry logic and exponential backoff
-fn find_agent_process_with_retry(
-    agent_name: &str,
-    command: &str,
-    config: &KildConfig,
-) -> ProcessSearchResult {
-    let max_attempts = config.terminal.max_retry_attempts;
-    let mut delay_ms = config.terminal.spawn_delay_ms;
-
-    // Resolve agent-specific process patterns once, before the retry loop
-    let agent_patterns = agents::get_all_process_patterns(agent_name);
-    let patterns_ref = if agent_patterns.is_empty() {
-        None
-    } else {
-        Some(agent_patterns.as_slice())
-    };
-
-    for attempt in 1..=max_attempts {
-        info!(
-            event = "core.terminal.searching_for_agent_process",
-            attempt, max_attempts, delay_ms, agent_name, command
-        );
-
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-
-        match find_process_by_name(agent_name, Some(command), patterns_ref) {
-            Ok(Some(info)) => {
-                let total_delay_ms = config.terminal.spawn_delay_ms * (2_u64.pow(attempt) - 1);
-                info!(
-                    event = "core.terminal.agent_process_found",
-                    attempt,
-                    total_delay_ms,
-                    pid = info.pid.as_u32(),
-                    process_name = info.name,
-                    agent_name
-                );
-                return Ok((
-                    Some(info.pid.as_u32()),
-                    Some(info.name),
-                    Some(info.start_time),
-                ));
-            }
-            Ok(None) => {
-                if attempt == max_attempts {
-                    warn!(
-                        event = "core.terminal.agent_process_not_found_final",
-                        agent_name,
-                        command,
-                        attempts = max_attempts,
-                        message = "Agent process not found after all retry attempts - session created but process tracking unavailable"
-                    );
-                } else {
-                    info!(
-                        event = "core.terminal.agent_process_not_found_retry",
-                        attempt,
-                        max_attempts,
-                        agent_name,
-                        next_delay_ms = delay_ms * 2
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(
-                    event = "core.terminal.agent_process_search_error",
-                    attempt,
-                    agent_name,
-                    error = %e
-                );
-            }
-        }
-
-        // Exponential backoff with cap: 1s, 2s, 4s, 8s, 8s
-        delay_ms = std::cmp::min(delay_ms * 2, 8000);
-    }
-
-    Ok((None, None, None))
-}
 
 /// Spawn a terminal window with the given command
 ///
@@ -209,13 +130,17 @@ pub fn spawn_terminal(
         terminal_window_id = ?terminal_window_id
     );
 
-    // Get process info - prefer PID file, fall back to process search
+    // Get process info from PID file, or skip if no PID tracking configured.
+    // Callers that pass kild_dir=None (attach windows, editor opens) don't need
+    // process tracking — skipping avoids the expensive retry loop.
     let (process_id, process_name, process_start_time) = match &pid_file_path {
-        Some(path) => read_pid_from_file_with_validation(path, config)?,
+        Some(path) => read_pid_from_file_with_validation(path)?,
         None => {
-            // Fall back to process search (legacy behavior)
-            let agent_name = operations::extract_command_name(command);
-            find_agent_process_with_retry(&agent_name, command, config)?
+            debug!(
+                event = "core.terminal.process_detection_skipped",
+                reason = "no_pid_file_configured"
+            );
+            (None, None, None)
         }
     };
 
@@ -243,17 +168,13 @@ pub fn spawn_terminal(
 }
 
 /// Read PID from file and validate the process exists
-fn read_pid_from_file_with_validation(pid_file: &Path, config: &KildConfig) -> ProcessSearchResult {
+fn read_pid_from_file_with_validation(pid_file: &Path) -> ProcessSearchResult {
     info!(
         event = "core.terminal.reading_pid_file",
         path = %pid_file.display()
     );
 
-    // Read PID with retry (file may not exist immediately after spawn)
-    let max_attempts = config.terminal.max_retry_attempts;
-    let initial_delay = config.terminal.spawn_delay_ms;
-
-    match read_pid_file_with_retry(pid_file, max_attempts, initial_delay) {
+    match read_pid_file_with_retry(pid_file) {
         Ok(Some(pid)) => {
             // Verify the process exists and get its info
             match is_process_running(pid) {
