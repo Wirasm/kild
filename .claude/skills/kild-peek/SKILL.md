@@ -193,6 +193,7 @@ Compares two images using SSIM (Structural Similarity Index).
 
 **Flags:**
 - `--threshold <0-100>` - Similarity threshold percentage (default: 95)
+- `--diff-output <path>` - Save visual diff image highlighting differences
 - `--json` - Output result as JSON
 
 **Exit codes:**
@@ -206,6 +207,9 @@ kild-peek diff "$SCRATCHPAD/before.png" "$SCRATCHPAD/after.png"
 
 # Compare with lower threshold (more lenient)
 kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --threshold 80
+
+# Save visual diff image
+kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --diff-output "$SCRATCHPAD/diff.png"
 
 # JSON output for scripting
 kild-peek diff "$SCRATCHPAD/a.png" "$SCRATCHPAD/b.png" --json
@@ -369,11 +373,13 @@ Clicks at specific coordinates or on an element identified by text.
 **Flags:**
 - `--window <title>` - Target window by title
 - `--app <name>` - Target window by app name (can combine with `--window`)
+- `--right` - Right-click (context menu). Conflicts with `--double`
+- `--double` - Double-click. Conflicts with `--right`
 - `--wait` - Wait for window to appear (polls until found or timeout)
 - `--timeout <ms>` - Timeout in milliseconds when using `--wait` (default: 30000)
 - `--json` - Output as JSON
 
-**Note:** `--at` and `--text` are mutually exclusive.
+**Note:** `--at` and `--text` are mutually exclusive. `--right` and `--double` are mutually exclusive.
 
 **Examples:**
 ```bash
@@ -389,11 +395,15 @@ kild-peek click --app Ghostty --window "Terminal" --at 150,75
 # Click element by text
 kild-peek click --app KILD --text "Create"
 
+# Right-click (context menu)
+kild-peek click --app Finder --at 100,50 --right
+kild-peek click --app Finder --text "File" --right
+
+# Double-click
+kild-peek click --app Finder --at 100,50 --double
+
 # Wait for window to appear
 kild-peek click --app KILD --text "Create" --wait
-
-# Click button by text
-kild-peek click --app Finder --text "Submit"
 
 # JSON output
 kild-peek click --app KILD --text "Open" --json
@@ -462,6 +472,94 @@ kild-peek key --app Ghostty "enter" --wait
 
 # JSON output
 kild-peek key --app TextEdit "tab" --json
+```
+
+### Drag
+```bash
+kild-peek drag [--window <title>] [--app <name>] --from <x,y> --to <x,y> [--wait] [--timeout <ms>] [--json]
+```
+
+Drags from one point to another within a window.
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name
+- `--from <x,y>` - Start coordinates relative to window top-left (required)
+- `--to <x,y>` - End coordinates relative to window top-left (required)
+- `--wait` - Wait for window to appear (polls until found or timeout)
+- `--timeout <ms>` - Timeout in milliseconds when using `--wait` (default: 30000)
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Drag from one point to another
+kild-peek drag --app Finder --from 100,100 --to 300,200
+
+# JSON output
+kild-peek drag --app Finder --from 10,20 --to 30,40 --json
+```
+
+### Scroll
+```bash
+kild-peek scroll [--window <title>] [--app <name>] [--up <lines>] [--down <lines>] [--left <lines>] [--right <lines>] [--at <x,y>] [--wait] [--timeout <ms>] [--json]
+```
+
+Scrolls within a window. Specify direction and number of lines.
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name
+- `--up <lines>` - Scroll up N lines. Conflicts with `--down`
+- `--down <lines>` - Scroll down N lines. Conflicts with `--up`
+- `--left <lines>` - Scroll left N lines. Conflicts with `--right`
+- `--right <lines>` - Scroll right N lines. Conflicts with `--left`
+- `--at <x,y>` - Position to scroll at (relative to window top-left)
+- `--wait` - Wait for window to appear (polls until found or timeout)
+- `--timeout <ms>` - Timeout in milliseconds when using `--wait` (default: 30000)
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Scroll down
+kild-peek scroll --app Finder --down 5
+
+# Scroll up
+kild-peek scroll --app Finder --up 3
+
+# Scroll horizontally
+kild-peek scroll --app Finder --left 2
+kild-peek scroll --app Finder --right 4
+
+# Scroll at specific position
+kild-peek scroll --app Finder --at 100,200 --down 5
+```
+
+### Hover
+```bash
+kild-peek hover [--window <title>] [--app <name>] [--at <x,y>] [--text <search>] [--wait] [--timeout <ms>] [--json]
+```
+
+Moves the mouse to a position or element without clicking.
+
+**Flags:**
+- `--window <title>` - Target window by title
+- `--app <name>` - Target window by app name
+- `--at <x,y>` - Coordinates to hover (relative to window top-left). Conflicts with `--text`
+- `--text <search>` - Hover over element by text content (uses Accessibility API). Conflicts with `--at`
+- `--wait` - Wait for window to appear (polls until found or timeout)
+- `--timeout <ms>` - Timeout in milliseconds when using `--wait` (default: 30000)
+- `--json` - Output as JSON
+
+**Examples:**
+```bash
+# Hover at coordinates
+kild-peek hover --app Finder --at 100,50
+
+# Hover over element by text
+kild-peek hover --app Finder --text "File"
+
+# JSON output
+kild-peek hover --app Finder --at 50,50 --json
 ```
 
 ## Workflow Examples

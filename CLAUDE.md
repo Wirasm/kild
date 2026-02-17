@@ -65,145 +65,21 @@ cargo fmt                      # Format code
 cargo fmt --check              # Check formatting
 cargo clippy --all -- -D warnings  # Lint with warnings as errors
 
-# Run
-cargo run -p kild -- create my-branch --agent claude
-cargo run -p kild -- create my-branch --agent claude --note "Working on auth feature"
-cargo run -p kild -- create my-branch --yolo           # Enable autonomous mode (skip permission prompts)
-cargo run -p kild -- create my-branch --no-agent       # Open bare terminal with $SHELL
-cargo run -p kild -- create my-branch --daemon         # Launch in daemon-owned PTY
-cargo run -p kild -- create my-branch --no-daemon      # Force external terminal (override config)
-cargo run -p kild -- list
-cargo run -p kild -- list --json                 # JSON object with sessions array and fleet_summary
-cargo run -p kild -- status my-branch --json     # JSON output for single kild
-cargo run -p kild -- -v list                     # Verbose mode (enable JSON logs)
-cargo run -p kild -- --no-color list             # Disable colored output (respects NO_COLOR env var)
-cargo run -p kild -- cd my-branch                # Print worktree path for shell integration
-cargo run -p kild -- open my-branch              # Open new agent in existing kild (auto-detects runtime mode from session)
-cargo run -p kild -- open my-branch --agent kiro # Open with different agent
-cargo run -p kild -- open my-branch --yolo       # Enable autonomous mode (skip permission prompts)
-cargo run -p kild -- open my-branch --no-agent   # Open bare terminal with $SHELL (no agent)
-cargo run -p kild -- open my-branch --resume     # Resume previous agent session (restore conversation context)
-cargo run -p kild -- open my-branch -r           # Short form of --resume
-cargo run -p kild -- open my-branch --daemon     # Override: force daemon-owned PTY
-cargo run -p kild -- open my-branch --no-daemon  # Override: force external terminal
-cargo run -p kild -- open --all                  # Open agents in all stopped kilds
-cargo run -p kild -- open --all --agent claude   # Open all stopped kilds with specific agent
-cargo run -p kild -- open --all --yolo           # Open all stopped kilds with autonomous mode enabled
-cargo run -p kild -- open --all --no-agent       # Open bare terminals in all stopped kilds
-cargo run -p kild -- open --all --resume         # Resume all stopped kilds with previous session context
-cargo run -p kild -- code my-branch              # Open worktree in editor (CLI > config > $VISUAL > $EDITOR > OS default > PATH scan)
-cargo run -p kild -- code my-branch --editor vim # Override editor (CLI flag has highest priority)
-cargo run -p kild -- focus my-branch             # Bring terminal window to foreground
-cargo run -p kild -- hide my-branch              # Minimize/hide terminal window
-cargo run -p kild -- hide --all                  # Hide all active kild windows
-cargo run -p kild -- diff my-branch              # Show git diff for worktree
-cargo run -p kild -- diff my-branch --staged     # Show only staged changes
-cargo run -p kild -- diff my-branch --stat       # Show diffstat summary
-cargo run -p kild -- commits my-branch           # Show recent commits in kild's branch
-cargo run -p kild -- commits my-branch -n 5      # Show last 5 commits
-cargo run -p kild -- stats my-branch             # Show branch health and merge readiness
-cargo run -p kild -- stats my-branch --json      # JSON output for branch health
-cargo run -p kild -- stats my-branch -b dev      # Override base branch
-cargo run -p kild -- stats --all                 # Fleet summary table (all kilds)
-cargo run -p kild -- stats --all --json          # JSON array of all kild health
-cargo run -p kild -- overlaps                    # Detect file overlaps across kilds
-cargo run -p kild -- overlaps --json             # JSON output for overlap detection
-cargo run -p kild -- overlaps -b dev             # Override base branch
-cargo run -p kild -- pr my-branch                # Show PR status for kild
-cargo run -p kild -- pr my-branch --json         # JSON output for PR status
-cargo run -p kild -- pr my-branch --refresh      # Force refresh PR data from GitHub
-cargo run -p kild -- rebase my-branch            # Rebase kild branch onto base branch
-cargo run -p kild -- rebase my-branch --base dev # Rebase onto custom base branch
-cargo run -p kild -- rebase --all                # Rebase all kilds onto base branch
-cargo run -p kild -- sync my-branch              # Fetch + rebase kild branch
-cargo run -p kild -- sync my-branch --base dev   # Fetch + rebase onto custom base
-cargo run -p kild -- sync --all                  # Fetch once + rebase all kilds
-cargo run -p kild -- agent-status my-branch working  # Report agent activity (for hooks)
-cargo run -p kild -- agent-status --self idle        # Auto-detect session from $PWD
-cargo run -p kild -- agent-status my-branch waiting --notify  # Send desktop notification for attention states
-cargo run -p kild -- daemon start                # Start daemon in background
-cargo run -p kild -- daemon start --foreground   # Start daemon in foreground (debug)
-cargo run -p kild -- daemon stop                 # Stop running daemon
-cargo run -p kild -- daemon status               # Show daemon status
-cargo run -p kild -- daemon status --json        # JSON output for daemon status
-cargo run -p kild -- attach my-branch            # Attach to daemon-managed kild (Ctrl+C to detach)
-cargo run -p kild -- stop my-branch              # Stop agent, preserve kild
-cargo run -p kild -- stop --all                  # Stop all running kilds
-cargo run -p kild -- destroy my-branch           # Destroy kild
-cargo run -p kild -- destroy my-branch --force   # Force destroy (bypass git checks)
-cargo run -p kild -- destroy --all               # Destroy all kilds (with confirmation)
-cargo run -p kild -- destroy --all --force       # Force destroy all (skip confirmation)
-cargo run -p kild -- complete my-branch          # Complete kild (check PR, cleanup)
-cargo run -p kild -- completions bash            # Generate bash completions
-cargo run -p kild -- completions zsh             # Generate zsh completions
-cargo run -p kild -- completions fish            # Generate fish completions
-cargo run -p kild -- completions powershell      # Generate powershell completions
-cargo run -p kild -- completions elvish          # Generate elvish completions
-
-# kild-peek - Native app inspection and interaction
-cargo run -p kild-peek -- list windows           # List all visible windows
-cargo run -p kild-peek -- list windows --app Ghostty  # List windows for specific app
-cargo run -p kild-peek -- list monitors          # List connected monitors
-cargo run -p kild-peek -- screenshot --window "Terminal" -o /tmp/term.png
-cargo run -p kild-peek -- screenshot --app Ghostty -o /tmp/ghostty.png
-cargo run -p kild-peek -- screenshot --app Ghostty --window "Terminal" -o /tmp/precise.png
-cargo run -p kild-peek -- screenshot --window-id 8002 -o /tmp/window.png
-cargo run -p kild-peek -- screenshot --window "Terminal" --wait -o /tmp/term.png  # Wait for window
-cargo run -p kild-peek -- screenshot --window "Terminal" --wait --timeout 5000 -o /tmp/term.png  # Custom timeout
-cargo run -p kild-peek -- screenshot --app Ghostty --crop 0,0,400,300 -o /tmp/cropped.png
-cargo run -p kild-peek -- diff img1.png img2.png --threshold 95
-cargo run -p kild-peek -- diff img1.png img2.png --diff-output /tmp/diff.png
-cargo run -p kild-peek -- elements --app Finder                  # List all UI elements
-cargo run -p kild-peek -- elements --window "Terminal" --json    # JSON output
-cargo run -p kild-peek -- elements --app Finder --tree           # Display as indented tree hierarchy
-cargo run -p kild-peek -- elements --app Finder --wait           # Wait for window to appear
-cargo run -p kild-peek -- elements --app Finder --wait --timeout 5000  # Custom timeout
-cargo run -p kild-peek -- find --app Finder --text "File"        # Find element by text
-cargo run -p kild-peek -- find --app KILD --text "Create" --json # JSON output
-cargo run -p kild-peek -- find --app Finder --text "^File$" --regex  # Find by regex pattern
-cargo run -p kild-peek -- find --app KILD --text "Create" --wait # Wait for window to appear
-cargo run -p kild-peek -- click --window "Terminal" --at 100,50  # Click at coordinates (x,y)
-cargo run -p kild-peek -- click --app Ghostty --at 200,100      # Target by app name
-cargo run -p kild-peek -- click --app Ghostty --window "Terminal" --at 150,75  # Target both
-cargo run -p kild-peek -- click --window "Terminal" --at 100,50 --json  # JSON output
-cargo run -p kild-peek -- click --app KILD --text "Create"       # Click element by text
-cargo run -p kild-peek -- click --app Finder --text "File" --json  # Click by text, JSON output
-cargo run -p kild-peek -- click --app KILD --text "Create" --wait  # Wait for window to appear
-cargo run -p kild-peek -- click --app Finder --at 100,50 --right  # Right-click (context menu)
-cargo run -p kild-peek -- click --app Finder --at 100,50 --double # Double-click
-cargo run -p kild-peek -- click --app Finder --text "File" --right  # Right-click element by text
-cargo run -p kild-peek -- drag --app Finder --from 100,100 --to 300,200  # Drag from point to point
-cargo run -p kild-peek -- drag --app Finder --from 10,20 --to 30,40 --json  # JSON output
-cargo run -p kild-peek -- scroll --app Finder --down 5            # Scroll down 5 lines
-cargo run -p kild-peek -- scroll --app Finder --up 3              # Scroll up 3 lines
-cargo run -p kild-peek -- scroll --app Finder --left 2            # Scroll left 2 lines
-cargo run -p kild-peek -- scroll --app Finder --right 4           # Scroll right 4 lines
-cargo run -p kild-peek -- scroll --app Finder --at 100,200 --down 5  # Scroll at position
-cargo run -p kild-peek -- hover --app Finder --at 100,50          # Move mouse without clicking
-cargo run -p kild-peek -- hover --app Finder --text "File"        # Hover over element by text
-cargo run -p kild-peek -- hover --app Finder --at 50,50 --json    # JSON output
-cargo run -p kild-peek -- type --window "Terminal" "hello world"  # Type text
-cargo run -p kild-peek -- type --app TextEdit "some text"         # Target by app
-cargo run -p kild-peek -- type --window "Terminal" "test" --json  # JSON output
-cargo run -p kild-peek -- type --app TextEdit "text" --wait       # Wait for window to appear
-cargo run -p kild-peek -- key --window "Terminal" "enter"         # Single key
-cargo run -p kild-peek -- key --app Ghostty "cmd+s"               # Key combo
-cargo run -p kild-peek -- key --window "Terminal" "cmd+shift+p"   # Multiple modifiers
-cargo run -p kild-peek -- key --app TextEdit "tab" --json         # JSON output
-cargo run -p kild-peek -- key --app Ghostty "enter" --wait        # Wait for window to appear
-cargo run -p kild-peek -- assert --app "KILD" --exists
-cargo run -p kild-peek -- assert --window "KILD" --visible
-cargo run -p kild-peek -- assert --window "KILD" --exists --wait  # Wait for window to appear
-cargo run -p kild-peek -- assert --window "KILD" --exists --wait --timeout 5000  # Custom timeout
-cargo run -p kild-peek -- -v list windows        # Verbose mode (enable logs)
-
-# kild-tmux-shim - tmux compatibility shim for agent teams
-cargo run -p kild-tmux-shim -- -V                # Show version (reports "tmux 3.4")
-KILD_SHIM_SESSION=<session_id> TMUX_PANE=%0 cargo run -p kild-tmux-shim -- display-message -p "#{pane_id}"  # Test shim
-KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based logging
+# Run (essential commands — full reference in /kild and /kild-peek skills)
+cargo run -p kild -- create my-branch                  # Create kild with default agent
+cargo run -p kild -- create my-branch --note "Auth"    # Create with description
+cargo run -p kild -- create my-branch --yolo           # Create with autonomous mode
+cargo run -p kild -- list                              # List all kilds
+cargo run -p kild -- list --json                       # JSON output
+cargo run -p kild -- open my-branch                    # Reopen agent in existing kild
+cargo run -p kild -- open --all                        # Open all stopped kilds
+cargo run -p kild -- open my-branch --resume           # Resume previous conversation
+cargo run -p kild -- stop my-branch                    # Stop agent, preserve kild
+cargo run -p kild -- stop --all                        # Stop all kilds
+cargo run -p kild -- complete my-branch                # Complete kild (PR cleanup)
 ```
 
-**Note**: The shim is automatically symlinked as `~/.kild/bin/tmux` when creating daemon sessions. Manual invocation is primarily for testing.
+**Full CLI reference:** Load the `/kild` skill for all commands (25+ commands including diff, stats, pr, rebase, sync, daemon, etc.). Load the `/kild-peek` skill for native app inspection commands (screenshots, UI interaction, assertions).
 
 ## Architecture
 
@@ -567,46 +443,16 @@ Override auto-detection with `[git] forge = "github"` in config. PR types (PrInf
 
 Priority (highest wins): CLI args → project config (`./.kild/config.toml`) → user config (`~/.kild/config.toml`) → defaults
 
+**All config options are documented in `.kild/config.example.toml`.** Load the `/kild` skill for help with config changes.
+
 **Array Merging:** `include_patterns.patterns` arrays are merged (deduplicated) from user and project configs. Other config values follow standard override behavior.
 
-**Daemon Runtime Config:** Control whether sessions run in daemon-owned PTYs or external terminals via `[daemon]` section:
+**Runtime mode resolution:** Sessions run in either daemon-owned PTYs or external terminals. Resolution order for both `create` and `open`: `--daemon`/`--no-daemon` flag → session's stored `runtime_mode` (open only) → config `daemon.enabled` → default (terminal). All sessions store their `runtime_mode` in the session file. Daemon sessions auto-open an attach window; use `kild attach <branch>` to reconnect.
 
-```toml
-[daemon]
-enabled = false      # Use daemon mode by default for `kild create`
-auto_start = true    # Auto-start daemon if not running
-```
+**Agent teams:** Daemon sessions inject `$TMUX` and configure the tmux shim (see "tmux Shim for Agent Teams" section) to enable Claude Code agent teams without external tmux.
 
-Runtime mode resolution for `kild create`:
-1. `--daemon` flag → Daemon mode
-2. `--no-daemon` flag → Terminal mode
-3. Config `daemon.enabled = true` → Daemon mode
-4. Default → Terminal mode
-
-All sessions store their `runtime_mode` (Terminal or Daemon) in the session file. Sessions created with `--daemon` also store `daemon_session_id` in `AgentProcess`. Daemon sessions automatically open a terminal attach window running `kild attach <branch>` for immediate visual feedback (Ctrl+C to detach). If auto-attach fails, manually run `kild attach <branch>`.
-
-Runtime mode resolution for `kild open`:
-1. `--daemon` flag → Daemon mode
-2. `--no-daemon` flag → Terminal mode
-3. Session's stored `runtime_mode` (auto-detect from creation) → Daemon or Terminal mode
-4. Config `daemon.enabled = true` → Daemon mode
-5. Default → Terminal mode
-
-When using `open --all`, each kild respects its own stored runtime mode unless overridden by explicit flags (`--daemon` or `--no-daemon`). The CLI output shows `[daemon]` or `[terminal]` labels to indicate which mode each kild reopened in
-
-**Daemon status:** The daemon runtime supports both foreground (`--foreground`) and background modes, auto-start via config, scrollback replay on attach, PTY exit notification with session state transitions, lazy status sync on `kild list`/`kild status` (daemon-managed sessions auto-update to Stopped when daemon reports exit), and `kild open` with daemon runtime mode.
-
-**Agent teams:** Daemon sessions automatically inject `$TMUX` environment variable and configure the tmux shim (see "tmux Shim for Agent Teams" section) to enable Claude Code agent teams without external tmux installation.
-
-**UI Config:** Control keyboard navigation behavior in the native GUI:
-
-```toml
-[ui]
-nav_modifier = "ctrl"    # Modifier for 1-9 kild jumping (supports "ctrl", "alt", "cmd+shift")
-```
-
-Keyboard shortcuts:
-- `<modifier>+1-9`: Jump to Nth kild in sidebar (modifier configured by `nav_modifier`)
+**UI keyboard shortcuts:**
+- `<nav_modifier>+1-9`: Jump to Nth kild in sidebar (modifier configured by `[ui] nav_modifier`, default: "ctrl")
 - `Cmd+Shift+[/]`: Cycle between Control workspaces
 - `Cmd+J/K`: Navigate next/previous kild
 - `Cmd+D`: Toggle Control/Dashboard view
