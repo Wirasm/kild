@@ -180,6 +180,18 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                     // Don't add to kill_errors — daemon cleanup failure is non-fatal.
                     // The kild session file is being removed regardless.
                 }
+
+                // Close the attach terminal window (if tracked)
+                if let (Some(terminal_type), Some(window_id)) =
+                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+                {
+                    info!(
+                        event = "core.session.destroy_close_attach_window",
+                        terminal_type = ?terminal_type,
+                        agent = agent_proc.agent(),
+                    );
+                    terminal::handler::close_terminal(terminal_type, Some(window_id));
+                }
             } else {
                 // Terminal-managed: close window + kill process
                 if let (Some(terminal_type), Some(window_id)) =

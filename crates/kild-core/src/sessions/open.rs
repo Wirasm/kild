@@ -8,7 +8,7 @@ use crate::terminal::types::SpawnResult;
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, setup_codex_integration,
-    setup_opencode_integration,
+    setup_opencode_integration, spawn_attach_window,
 };
 
 /// Resolve the effective runtime mode for `open_session`.
@@ -382,14 +382,18 @@ pub fn open_session(
             });
         }
 
+        // Spawn attach window (best-effort) and capture terminal info
+        let attach_info =
+            spawn_attach_window(name, &spawn_id, &session.worktree_path, &kild_config);
+
         AgentProcess::new(
             agent.clone(),
             spawn_id,
             None,
             None,
             None,
-            None,
-            None,
+            attach_info.as_ref().map(|(tt, _)| tt.clone()),
+            attach_info.map(|(_, wid)| wid),
             agent_command.clone(),
             now.clone(),
             Some(daemon_result.daemon_session_id),
