@@ -265,6 +265,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_is_relevant_event_ignores_tmp_files() {
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/kild.json.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore kild.json.tmp files"
+        );
+
+        let event = make_event(
+            EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content)),
+            vec![PathBuf::from("/sessions/proj_branch/status.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore status.tmp files"
+        );
+
+        let event = make_event(
+            EventKind::Create(CreateKind::File),
+            vec![PathBuf::from("/sessions/proj_branch/pr.tmp")],
+        );
+        assert!(
+            !SessionWatcher::is_relevant_event(&event),
+            "Should ignore pr.tmp files"
+        );
+    }
+
     // --- Integration tests for SessionWatcher::new ---
 
     #[test]

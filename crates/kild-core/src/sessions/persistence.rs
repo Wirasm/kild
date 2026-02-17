@@ -4,7 +4,18 @@
 
 use crate::sessions::{errors::SessionError, types::*};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Compute session directory path: `<sessions_dir>/<safe_id>/`.
+fn session_dir(sessions_dir: &Path, session_id: &str) -> PathBuf {
+    let safe_id = session_id.replace('/', "_");
+    sessions_dir.join(safe_id)
+}
+
+/// Compute session file path: `<sessions_dir>/<safe_id>/kild.json`.
+fn session_file(sessions_dir: &Path, session_id: &str) -> PathBuf {
+    session_dir(sessions_dir, session_id).join("kild.json")
+}
 
 pub fn ensure_sessions_directory(sessions_dir: &Path) -> Result<(), SessionError> {
     fs::create_dir_all(sessions_dir).map_err(|e| SessionError::IoError { source: e })?;
@@ -36,46 +47,94 @@ fn migrate_session_if_needed(sessions_dir: &Path, safe_id: &str) -> Result<bool,
         return Ok(false);
     }
 
-    let session_dir = sessions_dir.join(safe_id);
-    fs::create_dir_all(&session_dir).map_err(|e| SessionError::IoError { source: e })?;
+    let dir = sessions_dir.join(safe_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
 
-    // Move main session file
-    fs::rename(&old_json, session_dir.join("kild.json"))
-        .map_err(|e| SessionError::IoError { source: e })?;
+    // Move main session file (race-safe: another process may have already migrated)
+    match fs::rename(&old_json, dir.join("kild.json")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Another process already migrated this session
+            return Ok(false);
+        }
+        Err(e) => return Err(SessionError::IoError { source: e }),
+    }
 
-    // Move sidecar files (best-effort)
+    // Move sidecar files (best-effort, race-safe)
     let old_status = sessions_dir.join(format!("{safe_id}.status"));
     if old_status.is_file() {
-        let _ = fs::rename(&old_status, session_dir.join("status"));
+        match fs::rename(&old_status, dir.join("status")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(
+                    event = "core.session.migration_sidecar_failed",
+                    safe_id = safe_id,
+                    sidecar = "status",
+                    error = %e,
+                );
+            }
+        }
     }
 
     let old_pr = sessions_dir.join(format!("{safe_id}.pr"));
     if old_pr.is_file() {
-        let _ = fs::rename(&old_pr, session_dir.join("pr"));
+        match fs::rename(&old_pr, dir.join("pr")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(
+                    event = "core.session.migration_sidecar_failed",
+                    safe_id = safe_id,
+                    sidecar = "pr",
+                    error = %e,
+                );
+            }
+        }
     }
 
     // Clean up old temp files (best-effort)
     for ext in &["json.tmp", "status.tmp", "pr.tmp"] {
         let old_tmp = sessions_dir.join(format!("{safe_id}.{ext}"));
-        if old_tmp.is_file() {
-            let _ = fs::remove_file(&old_tmp);
+        if old_tmp.is_file()
+            && let Err(e) = fs::remove_file(&old_tmp)
+        {
+            tracing::debug!(
+                event = "core.session.migration_temp_cleanup_failed",
+                safe_id = safe_id,
+                file = %old_tmp.display(),
+                error = %e,
+            );
         }
     }
 
     tracing::info!(
         event = "core.session.migrated_to_directory",
         safe_id = safe_id,
-        session_dir = %session_dir.display(),
+        session_dir = %dir.display(),
     );
 
     Ok(true)
 }
 
 pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<(), SessionError> {
-    let safe_id = session.id.replace('/', "_");
-    let session_dir = sessions_dir.join(&safe_id);
-    fs::create_dir_all(&session_dir).map_err(|e| SessionError::IoError { source: e })?;
-    let session_file = session_dir.join("kild.json");
+    let dir = session_dir(sessions_dir, &session.id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let file = session_file(sessions_dir, &session.id);
     let session_json = serde_json::to_string_pretty(session).map_err(|e| {
         tracing::error!(
             event = "core.session.serialization_failed",
@@ -88,7 +147,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
         }
     })?;
 
-    let temp_file = session_dir.join("kild.json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
 
     // Write to temp file
     if let Err(e) = fs::write(&temp_file, &session_json) {
@@ -97,7 +156,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
     }
 
     // Rename temp file to final location
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -250,11 +309,12 @@ pub fn patch_session_json_field(
     value: serde_json::Value,
 ) -> Result<(), SessionError> {
     let safe_id = session_id.replace('/', "_");
-    migrate_session_if_needed(sessions_dir, &safe_id)?;
-    let session_dir = sessions_dir.join(&safe_id);
-    let session_file = session_dir.join("kild.json");
-    let content =
-        fs::read_to_string(&session_file).map_err(|e| SessionError::IoError { source: e })?;
+    let dir = session_dir(sessions_dir, session_id);
+    if !dir.join("kild.json").exists() {
+        migrate_session_if_needed(sessions_dir, &safe_id)?;
+    }
+    let file = session_file(sessions_dir, session_id);
+    let content = fs::read_to_string(&file).map_err(|e| SessionError::IoError { source: e })?;
     let mut json: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| SessionError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -272,12 +332,12 @@ pub fn patch_session_json_field(
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 
-    let temp_file = session_dir.join("kild.json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
     if let Err(e) = fs::write(&temp_file, &updated) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -295,11 +355,12 @@ pub fn patch_session_json_fields(
     fields: &[(&str, serde_json::Value)],
 ) -> Result<(), SessionError> {
     let safe_id = session_id.replace('/', "_");
-    migrate_session_if_needed(sessions_dir, &safe_id)?;
-    let session_dir = sessions_dir.join(&safe_id);
-    let session_file = session_dir.join("kild.json");
-    let content =
-        fs::read_to_string(&session_file).map_err(|e| SessionError::IoError { source: e })?;
+    let dir = session_dir(sessions_dir, session_id);
+    if !dir.join("kild.json").exists() {
+        migrate_session_if_needed(sessions_dir, &safe_id)?;
+    }
+    let file = session_file(sessions_dir, session_id);
+    let content = fs::read_to_string(&file).map_err(|e| SessionError::IoError { source: e })?;
     let mut json: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| SessionError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -319,12 +380,12 @@ pub fn patch_session_json_fields(
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 
-    let temp_file = session_dir.join("kild.json.tmp");
+    let temp_file = dir.join("kild.json.tmp");
     if let Err(e) = fs::write(&temp_file, &updated) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
-    if let Err(e) = fs::rename(&temp_file, &session_file) {
+    if let Err(e) = fs::rename(&temp_file, &file) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
@@ -338,14 +399,20 @@ pub fn write_agent_status(
     session_id: &str,
     status_info: &super::types::AgentStatusInfo,
 ) -> Result<(), SessionError> {
-    let safe_id = session_id.replace('/', "_");
-    let session_dir = sessions_dir.join(&safe_id);
-    fs::create_dir_all(&session_dir).map_err(|e| SessionError::IoError { source: e })?;
-    let sidecar_file = session_dir.join("status");
+    let dir = session_dir(sessions_dir, session_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let sidecar_file = dir.join("status");
     let content = serde_json::to_string(status_info).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
-    let temp_file = session_dir.join("status.tmp");
+    let temp_file = dir.join("status.tmp");
     if let Err(e) = fs::write(&temp_file, &content) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
@@ -362,8 +429,7 @@ pub fn read_agent_status(
     sessions_dir: &Path,
     session_id: &str,
 ) -> Option<super::types::AgentStatusInfo> {
-    let safe_id = session_id.replace('/', "_");
-    let sidecar_file = sessions_dir.join(&safe_id).join("status");
+    let sidecar_file = session_dir(sessions_dir, session_id).join("status");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -391,8 +457,7 @@ pub fn read_agent_status(
 
 /// Remove agent status sidecar file. Best-effort (logs warning on failure).
 pub fn remove_agent_status_file(sessions_dir: &Path, session_id: &str) {
-    let safe_id = session_id.replace('/', "_");
-    let sidecar_file = sessions_dir.join(&safe_id).join("status");
+    let sidecar_file = session_dir(sessions_dir, session_id).join("status");
     if sidecar_file.exists()
         && let Err(e) = fs::remove_file(&sidecar_file)
     {
@@ -410,14 +475,20 @@ pub fn write_pr_info(
     session_id: &str,
     pr_info: &crate::forge::types::PrInfo,
 ) -> Result<(), SessionError> {
-    let safe_id = session_id.replace('/', "_");
-    let session_dir = sessions_dir.join(&safe_id);
-    fs::create_dir_all(&session_dir).map_err(|e| SessionError::IoError { source: e })?;
-    let sidecar_file = session_dir.join("pr");
+    let dir = session_dir(sessions_dir, session_id);
+    fs::create_dir_all(&dir).map_err(|e| {
+        tracing::warn!(
+            event = "core.session.dir_create_failed",
+            path = %dir.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+    let sidecar_file = dir.join("pr");
     let content = serde_json::to_string(pr_info).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
-    let temp_file = session_dir.join("pr.tmp");
+    let temp_file = dir.join("pr.tmp");
     if let Err(e) = fs::write(&temp_file, &content) {
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
@@ -431,8 +502,7 @@ pub fn write_pr_info(
 
 /// Read PR info from sidecar file. Returns None if file doesn't exist or is corrupt.
 pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<crate::forge::types::PrInfo> {
-    let safe_id = session_id.replace('/', "_");
-    let sidecar_file = sessions_dir.join(&safe_id).join("pr");
+    let sidecar_file = session_dir(sessions_dir, session_id).join("pr");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -460,8 +530,7 @@ pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<crate::forg
 
 /// Remove PR info sidecar file. Best-effort (logs warning on failure).
 pub fn remove_pr_info_file(sessions_dir: &Path, session_id: &str) {
-    let safe_id = session_id.replace('/', "_");
-    let sidecar_file = sessions_dir.join(&safe_id).join("pr");
+    let sidecar_file = session_dir(sessions_dir, session_id).join("pr");
     if sidecar_file.exists()
         && let Err(e) = fs::remove_file(&sidecar_file)
     {
@@ -474,13 +543,36 @@ pub fn remove_pr_info_file(sessions_dir: &Path, session_id: &str) {
 }
 
 pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), SessionError> {
-    let safe_id = session_id.replace('/', "_");
-    let session_dir = sessions_dir.join(&safe_id);
+    let dir = session_dir(sessions_dir, session_id);
 
-    if session_dir.is_dir() {
-        fs::remove_dir_all(&session_dir).map_err(|e| SessionError::IoError { source: e })?;
+    if dir.is_dir() {
+        // Warn about unexpected files that will be removed
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !matches!(
+                    name.as_ref(),
+                    "kild.json" | "status" | "pr" | "kild.json.tmp" | "status.tmp" | "pr.tmp"
+                ) {
+                    tracing::warn!(
+                        event = "core.session.remove_unexpected_file",
+                        session_id = %session_id,
+                        file = %name,
+                        "Unexpected file in session directory will be removed"
+                    );
+                }
+            }
+        }
+        tracing::debug!(
+            event = "core.session.remove_dir_started",
+            session_id = %session_id,
+            path = %dir.display(),
+        );
+        fs::remove_dir_all(&dir).map_err(|e| SessionError::IoError { source: e })?;
     } else {
         // Try old-format cleanup as fallback
+        let safe_id = session_id.replace('/', "_");
         let old_file = sessions_dir.join(format!("{safe_id}.json"));
         if old_file.is_file() {
             fs::remove_file(&old_file).map_err(|e| SessionError::IoError { source: e })?;
@@ -1808,5 +1900,77 @@ mod tests {
         // Temp files should be cleaned up
         assert!(!sessions_dir.join("proj_branch.json.tmp").exists());
         assert!(!sessions_dir.join("proj_branch.status.tmp").exists());
+    }
+
+    #[test]
+    fn test_concurrent_migration() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path().to_path_buf();
+
+        // Create old-format file
+        std::fs::write(
+            sessions_dir.join("proj_branch.json"),
+            r#"{"id":"proj/branch"}"#,
+        )
+        .unwrap();
+
+        let dir1 = sessions_dir.clone();
+        let dir2 = sessions_dir.clone();
+
+        let t1 = std::thread::spawn(move || migrate_session_if_needed(&dir1, "proj_branch"));
+        let t2 = std::thread::spawn(move || migrate_session_if_needed(&dir2, "proj_branch"));
+
+        let r1 = t1.join().unwrap();
+        let r2 = t2.join().unwrap();
+
+        // Both should succeed
+        assert!(r1.is_ok(), "Thread 1 should succeed: {:?}", r1);
+        assert!(r2.is_ok(), "Thread 2 should succeed: {:?}", r2);
+
+        // Exactly one should report migration happened
+        let migrated_count = [r1.unwrap(), r2.unwrap()].iter().filter(|&&v| v).count();
+        assert!(
+            migrated_count <= 2,
+            "At most both threads could see the old file before rename"
+        );
+
+        // Final state: new-format directory with kild.json
+        assert!(sessions_dir.join("proj_branch").join("kild.json").exists());
+        assert!(!sessions_dir.join("proj_branch.json").exists());
+    }
+
+    #[test]
+    fn test_session_dir_and_session_file_helpers() {
+        let base = std::path::Path::new("/tmp/sessions");
+
+        assert_eq!(
+            session_dir(base, "proj/branch"),
+            std::path::PathBuf::from("/tmp/sessions/proj_branch")
+        );
+        assert_eq!(
+            session_file(base, "proj/branch"),
+            std::path::PathBuf::from("/tmp/sessions/proj_branch/kild.json")
+        );
+        assert_eq!(
+            session_dir(base, "deep/nested/id"),
+            std::path::PathBuf::from("/tmp/sessions/deep_nested_id")
+        );
+    }
+
+    #[test]
+    fn test_remove_session_file_warns_unexpected_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create session dir with expected + unexpected files
+        let dir = sessions_dir.join("proj_branch");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kild.json"), r#"{"id":"proj/branch"}"#).unwrap();
+        std::fs::write(dir.join("status"), r#"{"status":"idle"}"#).unwrap();
+        std::fs::write(dir.join("unexpected.log"), "should warn").unwrap();
+
+        // Should succeed and remove everything
+        remove_session_file(sessions_dir, "proj/branch").unwrap();
+        assert!(!dir.exists());
     }
 }
