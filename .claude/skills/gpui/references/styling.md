@@ -63,6 +63,43 @@ div()
     .children(items.iter().map(|i| div().child(i.name.clone())))
 ```
 
+## SharedString
+
+GPUI uses `SharedString` (reference-counted) instead of `String` for text passed to elements. Conversions:
+
+```rust
+use gpui::SharedString;
+
+SharedString::from("literal")              // &str → SharedString
+SharedString::from(format!("item-{}", i))  // String → SharedString
+"literal".into()                           // Into<SharedString>
+```
+
+Use `SharedString` for element IDs, labels, and text content passed to GPUI APIs.
+
+## ElementId
+
+Required on elements that need **interactive state** (hover, scroll position, focus):
+
+```rust
+// String ID
+div().id("my-button")
+
+// Tuple ID (for items in a list — disambiguates repeated elements)
+div().id(("list-item", index))
+
+// SharedString ID
+div().id(SharedString::from(format!("tab-{}", name)))
+```
+
+**When is `.id()` required?**
+- `.hover()` — needs ID to track hover state
+- `.on_mouse_up()` / `.on_mouse_down()` — needs ID for interaction
+- `.overflow_y_scroll()` — needs ID to track scroll position
+- Elements in lists/iterators — needs unique ID per item
+
+Without `.id()`, hover/scroll state won't persist between renders.
+
 ## Conditional Rendering
 
 ```rust

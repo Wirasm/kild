@@ -74,6 +74,64 @@ struct MyView {
 // Store in struct to keep alive
 ```
 
+## Animation / Continuous Updates
+
+### Declarative Animation
+
+```rust
+use gpui::Animation;
+
+div()
+    .with_animation(
+        "fade-in",
+        Animation::new(Duration::from_millis(300))
+            .with_easing(ease_in_out),
+        |el, progress| {
+            el.opacity(progress)
+        },
+    )
+```
+
+Available: `.repeat()` for looping, `.with_easing()` with `ease_in_out`, `ease_out_quint`, `linear`, `bounce`, `pulsating_between`.
+
+### Manual Animation (request_animation_frame)
+
+For custom frame-by-frame updates (cursor blink, live terminal):
+
+```rust
+// Request callback on next frame
+window.request_animation_frame(cx.listener(|this, _event, window, cx| {
+    this.advance_animation();
+    cx.notify();
+    // Request again for continuous animation
+    window.request_animation_frame(cx.listener(Self::on_frame));
+}));
+```
+
+### Task Cancellation
+
+Replace an in-flight task by overwriting the stored `Task`:
+
+```rust
+struct MyView {
+    search_task: Option<Task<()>>,
+}
+
+impl MyView {
+    fn on_input_changed(&mut self, query: String, cx: &mut Context<Self>) {
+        // Overwrites previous task, which drops and cancels it
+        self.search_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(200)).await;
+            let results = search(query).await;
+            let _ = this.update(cx, |view, cx| {
+                view.results = results;
+                cx.notify();
+            });
+        }));
+    }
+}
+```
+
 ## Key Rules
 
 1. **Store tasks** in struct fields to prevent cancellation (prefix `_` if not accessed)
@@ -81,3 +139,4 @@ struct MyView {
 3. **`cx.background_spawn()`** has no entity access — chain with `.then(cx.spawn(...))` for UI updates
 4. **Break loops** when `this.update()` returns `Err` (entity was dropped)
 5. **Use `cx.background_executor().timer()`** for delays, not `tokio::time::sleep`
+6. **Overwrite stored `Task`** to cancel a previous in-flight task (drop = cancel)

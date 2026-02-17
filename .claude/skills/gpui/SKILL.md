@@ -23,8 +23,10 @@ GPUI is a GPU-accelerated UI framework. This project uses `gpui = "0.2"` with `g
 | Async data fetching / timers | `cx.spawn()`, `cx.background_spawn()` | [async.md](references/async.md) |
 | Keyboard shortcuts | `actions!` macro, `KeyBinding` | [actions.md](references/actions.md) |
 | Focus management | `FocusHandle`, `Focusable` trait | [focus.md](references/focus.md) |
-| Events between components | `cx.emit()`, `cx.subscribe()`, `cx.observe()` | [events.md](references/events.md) |
+| Events between components | `EventEmitter<E>`, `cx.emit()`, `cx.subscribe()` | [events.md](references/events.md) |
 | App-wide shared state | `impl Global for T` | [globals.md](references/globals.md) |
+| Animation / continuous updates | `Animation`, `request_animation_frame` | [async.md](references/async.md) |
+| Text rendering (low-level) | `shape_line()` → `ShapedLine::paint()` | [elements.md](references/elements.md) |
 | Styling and layout | `div()` builder, flexbox, theme | [styling.md](references/styling.md) |
 | Buttons, inputs, modals | `gpui-component` library | [component-lib.md](references/component-lib.md) |
 
@@ -88,6 +90,8 @@ Button::new("create-btn")
 5. **Entity updates from background**: chain `cx.background_spawn().then(cx.spawn(...))` or use foreground `cx.spawn()`
 6. **Hitboxes in prepaint**, mouse events in paint — never the other way around
 7. **`cx.propagate()`** to let unhandled events bubble to parent
+8. **`impl EventEmitter<E> for T`** required before `cx.emit()` compiles — marker trait, no methods
+9. **`.id()` required** on elements using `.hover()`, scroll, or mouse events — without it, state resets each frame
 
 ## Reference Documentation
 

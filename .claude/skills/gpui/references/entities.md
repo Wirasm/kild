@@ -121,3 +121,29 @@ fn set_value(&mut self, new: i32, cx: &mut Context<Self>) {
     }
 }
 ```
+
+## Lifecycle Cleanup
+
+Run cleanup code when an entity is about to be dropped:
+
+```rust
+impl MyComponent {
+    fn new(cx: &mut Context<Self>) -> Self {
+        cx.on_release(|this, _, _cx| {
+            // Runs when entity is dropped
+            // Clean up resources, cancel subscriptions, etc.
+        });
+
+        Self { /* ... */ }
+    }
+}
+```
+
+Observe when *another* entity is released:
+
+```rust
+cx.observe_release(&other_entity, |this, released, cx| {
+    // `released` is &mut T of the released entity
+    this.handle_child_dropped(cx);
+}).detach();
+```

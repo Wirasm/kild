@@ -157,6 +157,58 @@ window.on_mouse_event({
 
 Event types: `MouseDownEvent`, `MouseUpEvent`, `MouseMoveEvent`, `ScrollWheelEvent`
 
+### Paint Operations
+
+Beyond `fill()` / `paint_quad()`, GPUI provides:
+
+```rust
+// Rectangles (most common)
+window.paint_quad(fill(bounds, color));
+
+// Text rendering: shape → paint
+let run = TextRun {
+    len: text.len(),
+    font: font.clone(),
+    color: text_color,
+    background_color: None,
+    underline: None,        // Option<UnderlineStyle>
+    strikethrough: None,    // Option<StrikethroughStyle>
+};
+let shaped = window.text_system().shape_line(
+    SharedString::from(text),
+    font_size,      // Pixels
+    &[run],         // &[TextRun] - one per style run
+    None,           // Optional wrap width
+);
+// shaped.width — Pixels (measured width)
+shaped.paint(origin, line_height, window, cx)?; // Returns Result
+
+// Vector paths
+window.paint_path(path, fill_color);
+
+// SVG rendering
+window.paint_svg(bounds, svg_path, color);
+
+// Images
+window.paint_image(bounds, image);
+
+// Shadows
+window.paint_shadows(bounds, shadows);
+```
+
+**Text measurement** (for grid/cell layouts):
+
+```rust
+fn measure_cell(window: &mut Window, cx: &mut App) -> (Pixels, Pixels) {
+    let shaped = window.text_system().shape_line(
+        SharedString::from("M"), font_size, &[run], None,
+    );
+    let cell_width = shaped.width;
+    let cell_height = window.line_height();
+    (cell_width, cell_height)
+}
+```
+
 ### Performance
 
 - **No allocations in paint** — pre-compute in `request_layout` or `prepaint`
