@@ -1,6 +1,5 @@
 use std::sync::{Arc, LazyLock};
 
-use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
@@ -9,8 +8,8 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use gpui::{
     App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, Font, FontWeight, GlobalElementId,
     Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Pixels, ScrollWheelEvent, SharedString, Size, Style, TextRun,
-    Window, fill, font, point, px, size,
+    MouseDownEvent, MouseMoveEvent, Pixels, SharedString, Size, Style, TextRun, Window, fill, font,
+    point, px, size,
 };
 use linkify::{LinkFinder, LinkKind};
 
@@ -131,7 +130,7 @@ impl TerminalElement {
     }
 
     /// Measure cell dimensions using a reference character.
-    fn measure_cell(window: &mut Window, _cx: &mut App) -> (Pixels, Pixels) {
+    pub(crate) fn measure_cell(window: &mut Window, _cx: &mut App) -> (Pixels, Pixels) {
         let font_size = px(theme::TEXT_BASE);
         let run = TextRun {
             len: 1,
@@ -577,8 +576,12 @@ impl Element for TerminalElement {
             }
         }
 
-        // Cursor (only when visible — blink state from TerminalView)
-        if self.cursor_visible {
+        // Cursor (only when visible and terminal has cursor enabled via DECTCEM)
+        if self.cursor_visible
+            && content
+                .mode
+                .contains(alacritty_terminal::term::TermMode::SHOW_CURSOR)
+        {
             let cursor_point = content.cursor.point;
             let cursor_line = cursor_point.line.0;
             let cursor_col = cursor_point.column.0;
@@ -796,20 +799,6 @@ impl Element for TerminalElement {
                 ));
             }
         }
-
-        // Scroll wheel handler — translates GPUI scroll events to alacritty display offset.
-        let hitbox = prepaint.hitbox.clone();
-        let term = self.term.clone();
-        let cell_height = prepaint.cell_height;
-        window.on_mouse_event::<ScrollWheelEvent>(move |event, phase, window, _cx| {
-            if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
-                let pixel_delta = event.delta.pixel_delta(cell_height);
-                let lines = scroll_delta_lines(pixel_delta.y, cell_height);
-                if lines != 0 {
-                    term.lock().scroll_display(Scroll::Delta(lines));
-                }
-            }
-        });
 
         // Mouse down handler — Cmd+click opens URL, otherwise starts selection.
         let hitbox = prepaint.hitbox.clone();

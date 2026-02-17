@@ -1,7 +1,9 @@
 use gpui::{
-    ClipboardItem, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render, Task,
-    Window, div, prelude::*, px,
+    ClipboardItem, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
+    ScrollWheelEvent, Task, Window, div, prelude::*, px,
 };
+
+use super::terminal_element::scroll_delta_lines;
 
 use super::input;
 use super::state::Terminal;
@@ -159,6 +161,24 @@ impl TerminalView {
         }
     }
 
+    fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (_, cell_height) = super::terminal_element::TerminalElement::measure_cell(window, cx);
+        let pixel_delta = event.delta.pixel_delta(cell_height);
+        let lines = scroll_delta_lines(pixel_delta.y, cell_height);
+        if lines != 0 {
+            self.terminal
+                .term()
+                .lock()
+                .scroll_display(alacritty_terminal::grid::Scroll::Delta(lines));
+            cx.notify();
+        }
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let cmd = event.keystroke.modifiers.platform;
@@ -252,6 +272,7 @@ impl Render for TerminalView {
         let mut container = div()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
             .size_full()
