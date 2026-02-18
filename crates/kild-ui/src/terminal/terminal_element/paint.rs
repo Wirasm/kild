@@ -2,7 +2,7 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{
     App, BorderStyle, Bounds, CursorStyle, DispatchPhase, Hsla, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, SharedString, TextRun, Window, fill, outline, point, px, size,
+    MouseMoveEvent, Pixels, SharedString, TextRun, Window, fill, point, px, quad, size,
 };
 
 use super::element::TerminalElement;
@@ -126,7 +126,21 @@ impl TerminalElement {
         if let Some(cursor) = &prepaint.cursor {
             match cursor.shape {
                 CursorShape::HollowBlock => {
-                    window.paint_quad(outline(cursor.bounds, cursor.color, BorderStyle::Solid));
+                    // Use 1.5px border so the hollow cursor has correct visual weight on HiDPI.
+                    // gpui::outline() hard-codes 1px which renders as a hairline on Retina displays.
+                    window.paint_quad(quad(
+                        cursor.bounds,
+                        px(0.),
+                        Hsla {
+                            h: 0.,
+                            s: 0.,
+                            l: 0.,
+                            a: 0.,
+                        },
+                        px(1.5),
+                        cursor.color,
+                        BorderStyle::Solid,
+                    ));
                 }
                 _ => {
                     window.paint_quad(fill(cursor.bounds, cursor.color));
