@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use bytes::Bytes;
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -11,31 +11,110 @@ use kild_core::errors::KildError;
 
 use crate::protocol::codec::{read_message, write_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
+use crate::server::pane_backend;
 use crate::session::manager::SessionManager;
 use crate::session::state::ClientId;
 
-/// Handle a single client connection.
+/// Route an incoming connection to the correct handler based on the first message.
 ///
-/// Reads JSONL messages from the client, dispatches them to the session manager,
-/// and sends responses back. For `attach` requests, enters streaming mode.
-pub async fn handle_connection(
+/// Reads the first line to detect the protocol:
+/// - JSON with a `"method"` key → pane backend JSON-RPC protocol
+/// - Otherwise → existing `ClientMessage` JSONL protocol
+pub async fn route_connection(
     stream: UnixStream,
     session_manager: Arc<RwLock<SessionManager>>,
     shutdown: tokio_util::sync::CancellationToken,
 ) {
-    // write() required: next_client_id takes &mut self. A shared AtomicU64 on
-    // the server struct would eliminate this per-connection write lock, but the
-    // daemon is low-connection-rate so it is not a bottleneck in practice.
+    let (reader, writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+
+    let mut first_line = String::new();
+    match reader.read_line(&mut first_line).await {
+        Ok(0) => return, // EOF before any data
+        Ok(_) => {}
+        Err(e) => {
+            warn!(
+                event = "daemon.connection.read_first_line_failed",
+                error = %e,
+            );
+            return;
+        }
+    }
+
+    let is_pane_backend = serde_json::from_str::<serde_json::Value>(first_line.trim())
+        .ok()
+        .is_some_and(|v| v.get("method").is_some());
+
+    if is_pane_backend {
+        pane_backend::handle_pane_backend_connection(
+            first_line,
+            reader,
+            writer,
+            session_manager,
+            shutdown,
+        )
+        .await;
+    } else {
+        handle_connection_with_first_line(first_line, reader, writer, session_manager, shutdown)
+            .await;
+    }
+}
+
+/// Handle a KILD protocol connection, where the first line has already been read.
+async fn handle_connection_with_first_line(
+    first_line: String,
+    mut reader: BufReader<tokio::net::unix::OwnedReadHalf>,
+    write_half: tokio::net::unix::OwnedWriteHalf,
+    session_manager: Arc<RwLock<SessionManager>>,
+    shutdown: tokio_util::sync::CancellationToken,
+) {
     let client_id = {
         let mut mgr = session_manager.write().await;
         mgr.next_client_id()
     };
 
-    debug!(event = "daemon.connection.accepted", client_id = client_id,);
+    debug!(event = "daemon.connection.accepted", client_id = client_id);
 
-    let (reader, writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
-    let writer = Arc::new(Mutex::new(writer));
+    let writer = Arc::new(Mutex::new(write_half));
+
+    // Process the first line that was already read by route_connection.
+    let first_msg: Option<ClientMessage> = {
+        let trimmed = first_line.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            match serde_json::from_str(trimmed) {
+                Ok(msg) => Some(msg),
+                Err(e) => {
+                    warn!(
+                        event = "daemon.connection.parse_error",
+                        client_id = client_id,
+                        error = %e,
+                    );
+                    None
+                }
+            }
+        }
+    };
+
+    if let Some(msg) = first_msg {
+        let response =
+            dispatch_message(msg, client_id, &session_manager, writer.clone(), &shutdown).await;
+
+        if let Some(response) = response {
+            let mut w = writer.lock().await;
+            if let Err(e) = write_message_flush(&mut *w, &response).await {
+                error!(
+                    event = "daemon.connection.write_failed",
+                    client_id = client_id,
+                    error = %e,
+                );
+                let mut mgr = session_manager.write().await;
+                mgr.detach_client_from_all(client_id);
+                return;
+            }
+        }
+    }
 
     loop {
         tokio::select! {
@@ -129,6 +208,7 @@ async fn dispatch_message(
                 rows,
                 cols,
                 use_login_shell,
+                None,
             ) {
                 Ok(session_info) => Some(DaemonMessage::SessionCreated {
                     id,

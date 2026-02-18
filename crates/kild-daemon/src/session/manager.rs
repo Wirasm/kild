@@ -53,6 +53,9 @@ impl SessionManager {
     /// Creates the PTY, spawns the command, and sets up output broadcasting.
     /// Does NOT create git worktrees — that is kild-core's responsibility.
     /// The daemon is a pure PTY manager.
+    ///
+    /// `parent_session_id` is `Some` for child sessions spawned via the pane
+    /// backend protocol, `None` for top-level leader sessions.
     #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &mut self,
@@ -64,6 +67,7 @@ impl SessionManager {
         rows: u16,
         cols: u16,
         use_login_shell: bool,
+        parent_session_id: Option<&str>,
     ) -> Result<SessionInfo, DaemonError> {
         if self.sessions.contains_key(session_id) {
             return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
@@ -84,6 +88,7 @@ impl SessionManager {
             command.to_string(),
             created_at,
             self.config.scrollback_buffer_size,
+            parent_session_id.map(|s| s.to_string()),
         );
 
         // Create the PTY and spawn the command
@@ -327,6 +332,25 @@ impl SessionManager {
             .collect()
     }
 
+    /// List sessions that are children of a given parent session.
+    pub fn list_sessions_by_parent(&self, parent_id: &str) -> Vec<SessionInfo> {
+        self.sessions
+            .values()
+            .filter(|s| s.parent_session_id() == Some(parent_id))
+            .map(|s| s.to_session_info())
+            .collect()
+    }
+
+    /// Subscribe to PTY output for a session without registering as an attached client.
+    ///
+    /// Returns `None` if the session does not exist or is not running.
+    pub fn subscribe_output_passive(
+        &self,
+        session_id: &str,
+    ) -> Option<tokio::sync::broadcast::Receiver<bytes::Bytes>> {
+        self.sessions.get(session_id)?.subscribe_output_passive()
+    }
+
     /// Get scrollback buffer contents for a session (for replay on attach).
     pub fn scrollback_contents(&self, session_id: &str) -> Option<Vec<u8>> {
         self.sessions
@@ -471,8 +495,18 @@ mod tests {
         let wd = tmpdir.path().to_str().unwrap();
 
         // Create a session running "echo hello" (exits immediately)
-        mgr.create_session("s1", wd, "echo", &["hello".to_string()], &[], 24, 80, false)
-            .unwrap();
+        mgr.create_session(
+            "s1",
+            wd,
+            "echo",
+            &["hello".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
 
         // Verify it starts as Running
         let info = mgr.get_session("s1").unwrap();
@@ -501,8 +535,18 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "echo", &["hi".to_string()], &[], 24, 80, false)
-            .unwrap();
+        mgr.create_session(
+            "s1",
+            wd,
+            "echo",
+            &["hi".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(mgr.active_pty_count(), 1);
 
@@ -519,8 +563,18 @@ mod tests {
         let wd = tmpdir.path().to_str().unwrap();
 
         // Use "sleep" to keep the session running during the test
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
-            .unwrap();
+        mgr.create_session(
+            "s1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(mgr.client_count("s1"), Some(0));
 
@@ -543,8 +597,18 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
-            .unwrap();
+        mgr.create_session(
+            "s1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
 
         // Detaching a client that was never attached should succeed without error
         let result = mgr.detach_client("s1", 42);
@@ -561,10 +625,30 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let wd = tmpdir.path().to_str().unwrap();
 
-        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
-            .unwrap();
+        mgr.create_session(
+            "s1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
 
-        let result = mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false);
+        let result = mgr.create_session(
+            "s1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        );
         assert!(result.is_err());
         match result.unwrap_err() {
             DaemonError::SessionAlreadyExists(id) => assert_eq!(id, "s1"),
@@ -581,6 +665,103 @@ mod tests {
         assert_eq!(mgr.next_client_id(), 1);
         assert_eq!(mgr.next_client_id(), 2);
         assert_eq!(mgr.next_client_id(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_by_parent_returns_empty_when_no_children() {
+        let (mut mgr, _rx) = test_manager();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let wd = tmpdir.path().to_str().unwrap();
+
+        mgr.create_session(
+            "leader",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let children = mgr.list_sessions_by_parent("leader");
+        assert!(children.is_empty());
+
+        let _ = mgr.destroy_session("leader", true);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_by_parent_returns_only_matching_children() {
+        let (mut mgr, _rx) = test_manager();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let wd = tmpdir.path().to_str().unwrap();
+
+        mgr.create_session(
+            "leader",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            None,
+        )
+        .unwrap();
+        mgr.create_session(
+            "leader_ctx_1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            Some("leader"),
+        )
+        .unwrap();
+        mgr.create_session(
+            "leader_ctx_2",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            Some("leader"),
+        )
+        .unwrap();
+        mgr.create_session(
+            "other_ctx_1",
+            wd,
+            "sleep",
+            &["10".to_string()],
+            &[],
+            24,
+            80,
+            false,
+            Some("other_leader"),
+        )
+        .unwrap();
+
+        let children = mgr.list_sessions_by_parent("leader");
+        assert_eq!(children.len(), 2);
+        let ids: Vec<&str> = children.iter().map(|s| &*s.id).collect();
+        assert!(ids.contains(&"leader_ctx_1"));
+        assert!(ids.contains(&"leader_ctx_2"));
+
+        // Other leader's children not included
+        let other_children = mgr.list_sessions_by_parent("other_leader");
+        assert_eq!(other_children.len(), 1);
+        assert_eq!(&*other_children[0].id, "other_ctx_1");
+
+        let _ = mgr.destroy_session("leader", true);
+        let _ = mgr.destroy_session("leader_ctx_1", true);
+        let _ = mgr.destroy_session("leader_ctx_2", true);
+        let _ = mgr.destroy_session("other_ctx_1", true);
     }
 
     #[test]

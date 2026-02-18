@@ -891,6 +891,20 @@ pub(super) fn build_daemon_create_request(
     // $KILD_SHIM_SESSION tells the shim where to find its state
     env_vars.push(("KILD_SHIM_SESSION".to_string(), session_id.to_string()));
 
+    // $CLAUDE_PANE_BACKEND_SOCKET: tells Claude Code to connect to KILD's daemon
+    // as its pane backend instead of using the tmux shim.
+    env_vars.push((
+        "CLAUDE_PANE_BACKEND_SOCKET".to_string(),
+        daemon_sock.display().to_string(),
+    ));
+
+    // $CLAUDE_PANE_BACKEND_SESSION_ID: allows the daemon to correlate the pane
+    // backend connection with this leader session.
+    env_vars.push((
+        "CLAUDE_PANE_BACKEND_SESSION_ID".to_string(),
+        session_id.to_string(),
+    ));
+
     // $CLAUDE_CODE_TASK_LIST_ID for task list persistence across sessions
     if let Some(tlid) = task_list_id {
         let task_env = agents::resume::task_list_env_vars(agent_name, tlid);
@@ -1261,6 +1275,49 @@ mod tests {
             branch_val,
             Some("my-feature"),
             "KILD_SESSION_BRANCH should be set for claude agent"
+        );
+    }
+
+    #[test]
+    fn test_build_daemon_request_includes_pane_backend_env_vars() {
+        let (_cmd, _args, env_vars, _) =
+            build_daemon_create_request("claude", "claude", "proj_my-branch", None, "my-branch")
+                .unwrap();
+
+        let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
+
+        assert!(
+            keys.contains(&"CLAUDE_PANE_BACKEND_SOCKET"),
+            "Should set CLAUDE_PANE_BACKEND_SOCKET, got keys: {:?}",
+            keys
+        );
+        assert!(
+            keys.contains(&"CLAUDE_PANE_BACKEND_SESSION_ID"),
+            "Should set CLAUDE_PANE_BACKEND_SESSION_ID, got keys: {:?}",
+            keys
+        );
+
+        // CLAUDE_PANE_BACKEND_SESSION_ID should contain the session_id
+        let session_id_val = env_vars
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_PANE_BACKEND_SESSION_ID")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            session_id_val,
+            Some("proj_my-branch"),
+            "CLAUDE_PANE_BACKEND_SESSION_ID should be the session_id"
+        );
+
+        // Socket path should reference the kild daemon socket
+        let socket_val = env_vars
+            .iter()
+            .find(|(k, _)| k == "CLAUDE_PANE_BACKEND_SOCKET")
+            .map(|(_, v)| v.as_str())
+            .unwrap();
+        assert!(
+            socket_val.contains(".kild") || socket_val.contains("kild"),
+            "CLAUDE_PANE_BACKEND_SOCKET should reference kild socket, got: {}",
+            socket_val
         );
     }
 

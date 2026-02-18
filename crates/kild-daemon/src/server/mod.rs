@@ -1,4 +1,5 @@
 pub mod connection;
+pub mod pane_backend;
 pub mod shutdown;
 
 use std::path::Path;
@@ -80,7 +81,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
                     Ok((stream, _addr)) => {
                         let mgr = session_manager.clone();
                         let shutdown_token = shutdown.clone();
-                        tokio::spawn(connection::handle_connection(
+                        tokio::spawn(connection::route_connection(
                             stream,
                             mgr,
                             shutdown_token,

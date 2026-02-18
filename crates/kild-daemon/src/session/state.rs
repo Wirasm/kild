@@ -52,6 +52,9 @@ pub struct DaemonSession {
     pty_pid: Option<u32>,
     /// Exit code of the PTY child process. Set when the process exits.
     exit_code: Option<i32>,
+    /// Parent session ID for child sessions spawned via the pane backend protocol.
+    /// `None` for top-level leader sessions.
+    parent_session_id: Option<String>,
 }
 
 impl DaemonSession {
@@ -62,6 +65,7 @@ impl DaemonSession {
         command: String,
         created_at: String,
         scrollback_capacity: usize,
+        parent_session_id: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -74,6 +78,7 @@ impl DaemonSession {
             attached_clients: HashSet::new(),
             pty_pid: None,
             exit_code: None,
+            parent_session_id,
         }
     }
 
@@ -118,6 +123,11 @@ impl DaemonSession {
     /// Clone the output broadcast sender (for notification after state transitions).
     pub fn output_tx(&self) -> Option<broadcast::Sender<Bytes>> {
         self.output_tx.clone()
+    }
+
+    /// Parent session ID for child sessions spawned via the pane backend protocol.
+    pub fn parent_session_id(&self) -> Option<&str> {
+        self.parent_session_id.as_deref()
     }
 
     // --- State transitions ---
@@ -187,6 +197,15 @@ impl DaemonSession {
         self.output_tx.as_ref().map(|tx| tx.subscribe())
     }
 
+    /// Subscribe to PTY output without registering as an attached client.
+    ///
+    /// For observers (e.g. pane backend connection) that want output events
+    /// but should not appear in the session's client count. Returns `None`
+    /// if the session is not running.
+    pub fn subscribe_output_passive(&self) -> Option<broadcast::Receiver<Bytes>> {
+        self.output_tx.as_ref().map(|tx| tx.subscribe())
+    }
+
     /// Get scrollback buffer contents for replay on attach.
     pub fn scrollback_contents(&self) -> Vec<u8> {
         match self.scrollback.read() {
@@ -242,6 +261,7 @@ mod tests {
             "claude".to_string(),
             "2026-02-09T14:30:00Z".to_string(),
             1024,
+            None,
         )
     }
 
@@ -402,5 +422,38 @@ mod tests {
         let session = test_session();
         let info = session.to_session_info();
         assert_eq!(info.exit_code, None);
+    }
+
+    #[test]
+    fn test_parent_session_id_defaults_to_none() {
+        let session = test_session();
+        assert_eq!(session.parent_session_id(), None);
+    }
+
+    #[test]
+    fn test_parent_session_id_stored_and_returned() {
+        let session = DaemonSession::new(
+            "myapp_feature_ctx_1".to_string(),
+            "/tmp/wt".to_string(),
+            "claude".to_string(),
+            "2026-02-09T14:30:00Z".to_string(),
+            1024,
+            Some("myapp_feature".to_string()),
+        );
+        assert_eq!(session.parent_session_id(), Some("myapp_feature"));
+    }
+
+    #[test]
+    fn test_subscribe_output_passive_none_when_not_running() {
+        let session = test_session();
+        assert!(session.subscribe_output_passive().is_none());
+    }
+
+    #[test]
+    fn test_subscribe_output_passive_some_when_running() {
+        let mut session = test_session();
+        let (tx, _) = broadcast::channel(16);
+        session.set_running(tx, None).unwrap();
+        assert!(session.subscribe_output_passive().is_some());
     }
 }
