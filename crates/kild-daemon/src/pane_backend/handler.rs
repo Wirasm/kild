@@ -326,17 +326,16 @@ async fn dispatch_request(
                 mgr.scrollback_contents(&session_id).unwrap_or_default()
             };
 
-            let data = if let Some(line_count) = params.lines {
-                let text = String::from_utf8_lossy(&scrollback);
-                let lines: Vec<&str> = text.lines().collect();
+            let full_text = String::from_utf8_lossy(&scrollback);
+            let text = if let Some(line_count) = params.lines {
+                let lines: Vec<&str> = full_text.lines().collect();
                 let tail_start = lines.len().saturating_sub(line_count);
-                lines[tail_start..].join("\n").into_bytes()
+                lines[tail_start..].join("\n")
             } else {
-                scrollback
+                full_text.into_owned()
             };
 
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-            PaneBackendResponse::ok(id, serde_json::json!({ "data": encoded }))
+            PaneBackendResponse::ok(id, serde_json::json!({ "text": text }))
         }
 
         "kill" => {

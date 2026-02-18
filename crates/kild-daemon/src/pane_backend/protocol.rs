@@ -26,6 +26,12 @@ impl PaneBackendRequest {
 #[derive(Debug, Deserialize)]
 pub struct InitializeParams {
     pub protocol_version: String,
+    /// Capabilities advertised by Claude Code (e.g. `["events"]`).
+    ///
+    /// Deserialized but not yet acted upon. Future handlers can gate behaviour
+    /// on whether a capability is present before sending unsolicited events.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     /// Optional hint identifying which daemon session is the leader.
     ///
     /// KILD injects `CLAUDE_PANE_BACKEND_SESSION_ID` into the daemon PTY env.
@@ -150,6 +156,16 @@ mod tests {
         let json = r#"{"id":"1","method":"initialize","params":{"protocol_version":"1"}}"#;
         let req: PaneBackendRequest = serde_json::from_str(json).unwrap();
         let params: InitializeParams = req.parse_params().unwrap();
+        assert_eq!(params.session_hint, None);
+        assert!(params.capabilities.is_empty());
+    }
+
+    #[test]
+    fn test_deserialize_initialize_with_capabilities() {
+        let json = r#"{"id":"1","method":"initialize","params":{"protocol_version":"1","capabilities":["events"]}}"#;
+        let req: PaneBackendRequest = serde_json::from_str(json).unwrap();
+        let params: InitializeParams = req.parse_params().unwrap();
+        assert_eq!(params.capabilities, vec!["events"]);
         assert_eq!(params.session_hint, None);
     }
 
