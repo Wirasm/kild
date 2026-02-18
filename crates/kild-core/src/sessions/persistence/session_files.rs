@@ -138,7 +138,7 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
         SessionError::IoError { source: e }
     })?;
     let file = session_file(sessions_dir, &session.id);
-    let session_json = serde_json::to_string_pretty(session).map_err(|e| {
+    let session_json = serde_json::to_string(session).map_err(|e| {
         tracing::error!(
             event = "core.session.serialization_failed",
             session_id = %session.id,
@@ -163,6 +163,9 @@ pub fn save_session_to_file(session: &Session, sessions_dir: &Path) -> Result<()
         cleanup_temp_file(&temp_file, &e);
         return Err(SessionError::IoError { source: e });
     }
+
+    // Maintain branch index for O(1) find_session_by_name lookups
+    super::index::update_branch_index(sessions_dir, &session.branch, &session.id);
 
     Ok(())
 }
@@ -193,6 +196,10 @@ pub fn load_sessions_from_files(
             }
             kild_json
         } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            // Skip index file — it is not a session file
+            if path.file_name().and_then(|s| s.to_str()) == Some(super::index::INDEX_FILE) {
+                continue;
+            }
             // Old format: <safe_id>.json — auto-migrate
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                 match migrate_session_if_needed(sessions_dir, stem) {
@@ -290,11 +297,28 @@ pub fn find_session_by_name(
     sessions_dir: &Path,
     name: &str,
 ) -> Result<Option<Session>, SessionError> {
-    let (sessions, _) = load_sessions_from_files(sessions_dir)?;
+    // Fast path: try branch index first
+    if let Some(session_id) = super::index::lookup_branch(sessions_dir, name) {
+        let file = session_file(sessions_dir, &session_id);
+        if file.exists() {
+            let content =
+                fs::read_to_string(&file).map_err(|e| SessionError::IoError { source: e })?;
+            if let Ok(session) = serde_json::from_str::<Session>(&content)
+                && &*session.branch == name
+            {
+                return Ok(Some(session));
+            }
+            // Index stale (branch renamed or session replaced) — fall through to scan
+        }
+        // Index entry exists but file is gone or stale — fall through to scan
+    }
 
-    // Find session by branch name (the "name" parameter refers to branch name)
+    // Slow path: full scan (index miss or stale)
+    let (sessions, _) = load_sessions_from_files(sessions_dir)?;
     for session in sessions {
         if &*session.branch == name {
+            // Opportunistically repair the index
+            super::index::update_branch_index(sessions_dir, name, &session.id);
             return Ok(Some(session));
         }
     }
@@ -344,6 +368,8 @@ pub fn remove_session_file(sessions_dir: &Path, session_id: &str) -> Result<(), 
             );
         }
     }
+
+    super::index::purge_session_id_from_branch_index(sessions_dir, session_id);
 
     Ok(())
 }

@@ -1098,3 +1098,98 @@ fn test_remove_session_file_warns_unexpected_files() {
     remove_session_file(tmp.path(), "proj/branch").unwrap();
     assert!(!dir.exists());
 }
+
+// --- Branch index tests ---
+
+#[test]
+fn test_branch_index_save_and_lookup() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let sessions_dir = tmp.path();
+    let worktree = tmp.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let session = Session::new_for_test("feature-auth".to_string(), worktree);
+    save_session_to_file(&session, sessions_dir).unwrap();
+
+    // Index should be populated — fast path returns the session
+    let found = find_session_by_name(sessions_dir, "feature-auth").unwrap();
+    assert!(found.is_some());
+    assert_eq!(&*found.unwrap().branch, "feature-auth");
+
+    // branch_index.json must exist
+    assert!(sessions_dir.join("branch_index.json").exists());
+}
+
+#[test]
+fn test_branch_index_remove_on_session_remove() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let sessions_dir = tmp.path();
+    let worktree = tmp.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let session = Session::new_for_test("feature-auth".to_string(), worktree);
+    save_session_to_file(&session, sessions_dir).unwrap();
+
+    // Confirm it's findable before removal
+    assert!(
+        find_session_by_name(sessions_dir, "feature-auth")
+            .unwrap()
+            .is_some()
+    );
+
+    remove_session_file(sessions_dir, &session.id).unwrap();
+
+    // Should be gone after removal
+    let found = find_session_by_name(sessions_dir, "feature-auth").unwrap();
+    assert!(found.is_none());
+}
+
+#[test]
+fn test_find_session_by_name_fallback_without_index() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let sessions_dir = tmp.path();
+    let worktree = tmp.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let session = Session::new_for_test("feature-auth".to_string(), worktree);
+
+    // Write session file directly without going through save_session_to_file
+    // so no index entry is created.
+    let safe_id = session.id.replace('/', "_");
+    let dir = sessions_dir.join(&safe_id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("kild.json"),
+        serde_json::to_string(&session).unwrap(),
+    )
+    .unwrap();
+
+    // Should still find it via full scan fallback
+    let found = find_session_by_name(sessions_dir, "feature-auth").unwrap();
+    assert!(found.is_some());
+    assert_eq!(&*found.unwrap().branch, "feature-auth");
+
+    // Index should be repaired after the fallback scan
+    assert!(sessions_dir.join("branch_index.json").exists());
+}
+
+#[test]
+fn test_save_session_compact_json() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let sessions_dir = tmp.path();
+    let worktree = tmp.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let session = Session::new_for_test("feat".to_string(), worktree);
+    save_session_to_file(&session, sessions_dir).unwrap();
+
+    let safe_id = session.id.replace('/', "_");
+    let content = std::fs::read_to_string(sessions_dir.join(safe_id).join("kild.json")).unwrap();
+
+    // Compact JSON has no newlines (single line)
+    assert_eq!(
+        content.lines().count(),
+        1,
+        "kild.json should be compact (single line)"
+    );
+}

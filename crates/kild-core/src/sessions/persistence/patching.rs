@@ -41,7 +41,7 @@ pub fn patch_session_json_field(
     })?;
     obj.insert(field.to_string(), value);
 
-    let updated = serde_json::to_string_pretty(&json).map_err(|e| SessionError::IoError {
+    let updated = serde_json::to_string(&json).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 
@@ -89,7 +89,7 @@ pub fn patch_session_json_fields(
         obj.insert((*field).to_string(), value.clone());
     }
 
-    let updated = serde_json::to_string_pretty(&json).map_err(|e| SessionError::IoError {
+    let updated = serde_json::to_string(&json).map_err(|e| SessionError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
     })?;
 

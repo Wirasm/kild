@@ -48,6 +48,24 @@ pub fn calculate_health_status(
     }
 }
 
+/// Returns the more recent of two optional RFC3339 timestamps.
+///
+/// If both are present, parses and compares; falls back to `a` on parse error.
+/// If only one is present, returns that one.
+fn most_recent_activity(a: Option<&str>, b: Option<&str>) -> Option<String> {
+    match (a, b) {
+        (None, x) | (x, None) => x.map(str::to_string),
+        (Some(ta), Some(tb)) => {
+            let ta_dt = DateTime::parse_from_rfc3339(ta).ok();
+            let tb_dt = DateTime::parse_from_rfc3339(tb).ok();
+            match (ta_dt, tb_dt) {
+                (Some(a_dt), Some(b_dt)) => Some(if a_dt >= b_dt { ta } else { tb }.to_string()),
+                _ => Some(ta.to_string()),
+            }
+        }
+    }
+}
+
 /// Enrich session with health metrics
 pub fn enrich_session_with_health(
     session: &Session,
@@ -56,9 +74,16 @@ pub fn enrich_session_with_health(
     agent_status: Option<AgentStatus>,
     agent_status_updated_at: Option<String>,
 ) -> KildHealth {
+    // Use the most recent of kild.json last_activity and sidecar updated_at.
+    // Agent hook updates only touch the sidecar; kild.json last_activity
+    // reflects lifecycle events only.
+    let effective_last_activity = most_recent_activity(
+        session.last_activity.as_deref(),
+        agent_status_updated_at.as_deref(),
+    );
     let status = calculate_health_status(
         process_running,
-        session.last_activity.as_deref(),
+        effective_last_activity.as_deref(),
         false, // TODO: Track last message sender in future
     );
 
@@ -78,7 +103,7 @@ pub fn enrich_session_with_health(
         } else {
             "Stopped".to_string()
         },
-        last_activity: session.last_activity.clone(),
+        last_activity: effective_last_activity,
         status,
         status_icon: status_icon.to_string(),
     };

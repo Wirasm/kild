@@ -2,6 +2,7 @@
 //!
 //! Handles reading/writing session data to disk with atomic operations.
 
+mod index;
 mod patching;
 mod session_files;
 mod sidecar;

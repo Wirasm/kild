@@ -12,7 +12,7 @@ pub struct AgentStatusResult {
 
 /// Update agent status for a session via sidecar file.
 ///
-/// Also updates `last_activity` on the session JSON to feed the health monitoring system.
+/// Writes `updated_at` to the status sidecar; the health system reads this directly.
 pub fn update_agent_status(
     name: &str,
     status: super::types::AgentStatus,
@@ -39,15 +39,9 @@ pub fn update_agent_status(
     };
     persistence::write_agent_status(&config.sessions_dir(), &session.id, &status_info)?;
 
-    // Update last_activity on the session (heartbeat) via field patch to preserve unknown fields.
-    // Using patch instead of full save prevents older binaries from dropping new fields
-    // (e.g., installed kild binary dropping task_list_id added by a newer version).
-    persistence::patch_session_json_field(
-        &config.sessions_dir(),
-        &session.id,
-        "last_activity",
-        serde_json::Value::String(now.clone()),
-    )?;
+    // last_activity is tracked via the sidecar's updated_at (written above).
+    // The health system reads agent_status_updated_at from the sidecar directly.
+    // Only lifecycle events (open, stop, daemon sync) update last_activity in kild.json.
 
     info!(
         event = "core.session.agent_status_update_completed",
