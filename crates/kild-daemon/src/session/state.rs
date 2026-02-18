@@ -192,9 +192,14 @@ impl DaemonSession {
         match self.scrollback.read() {
             Ok(sb) => sb.contents(),
             Err(poisoned) => {
+                // A poisoned read lock means another thread panicked while holding
+                // the write lock. Return whatever was in the buffer — partial scrollback
+                // is better than nothing for an attaching client.
                 error!(
                     event = "daemon.session.scrollback_lock_poisoned",
                     session_id = %self.id,
+                    error = %poisoned,
+                    "RwLock poisoned on read, returning partial scrollback contents",
                 );
                 poisoned.into_inner().contents()
             }

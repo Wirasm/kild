@@ -389,21 +389,22 @@ impl SessionManager {
         );
 
         // Transition session to Stopped and record exit code
-        if let Some(session) = self.sessions.get_mut(session_id) {
-            session.set_exit_code(exit_code);
-            let output_tx = session.output_tx();
-            if let Err(e) = session.set_stopped() {
-                error!(
-                    event = "daemon.session.stop_transition_failed",
-                    session_id = session_id,
-                    error = %e,
-                );
-                return None;
-            }
-            return output_tx;
+        let session = self.sessions.get_mut(session_id)?;
+
+        session.set_exit_code(exit_code);
+        let output_tx = session.output_tx();
+
+        if let Err(e) = session.set_stopped() {
+            error!(
+                event = "daemon.session.stop_transition_failed",
+                session_id = session_id,
+                error = %e,
+                "Session state transition failed — attached clients will not receive stopped notification",
+            );
+            return None;
         }
 
-        None
+        output_tx
     }
 
     /// Get client count for a session (test helper).

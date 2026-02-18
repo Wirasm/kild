@@ -472,6 +472,10 @@ async fn stream_pty_output(
                 }
             }
             _ = shutdown.cancelled() => {
+                debug!(
+                    event = "daemon.connection.stream_shutdown",
+                    session_id = session_id,
+                );
                 break;
             }
         }
