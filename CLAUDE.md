@@ -140,9 +140,9 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `window/` - Window and monitor enumeration via macOS APIs (handler/ contains builders.rs, find.rs, list.rs, monitors.rs, tests.rs)
 - `screenshot/` - Screenshot capture with multiple targets (window, monitor, base64 output)
 - `diff/` - Image comparison using SSIM algorithm
-- `assert/` - UI state assertions (window exists, visible, image similarity)
+- `assert/` - UI state assertions (window exists, visible, image similarity, element text presence)
 - `interact/` - Native UI interaction (handler/ contains click.rs, helpers.rs, keyboard.rs, mouse.rs, tests.rs)
-- `element/` - Accessibility API-based element enumeration, text search, and element finding
+- `element/` - Accessibility API-based element enumeration, text search, element finding, and wait for element to appear/disappear
 - `logging/` - Tracing initialization matching kild-core patterns
 - `events/` - App lifecycle event helpers
 
