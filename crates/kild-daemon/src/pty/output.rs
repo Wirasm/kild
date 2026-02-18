@@ -61,50 +61,6 @@ impl ScrollbackBuffer {
     }
 }
 
-/// Holds the broadcast sender for PTY output distribution and the scrollback buffer.
-pub struct PtyOutputBroadcaster {
-    /// Broadcast channel sender for live output distribution.
-    tx: broadcast::Sender<Bytes>,
-    /// Ring buffer for scrollback replay.
-    scrollback: ScrollbackBuffer,
-}
-
-impl PtyOutputBroadcaster {
-    pub fn new(scrollback_capacity: usize, broadcast_capacity: usize) -> Self {
-        let (tx, _) = broadcast::channel(broadcast_capacity);
-        Self {
-            tx,
-            scrollback: ScrollbackBuffer::new(scrollback_capacity),
-        }
-    }
-
-    /// Subscribe to receive live PTY output.
-    pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
-        self.tx.subscribe()
-    }
-
-    /// Get scrollback buffer contents for replay on attach.
-    pub fn scrollback_contents(&self) -> Vec<u8> {
-        self.scrollback.contents()
-    }
-
-    /// Feed bytes into the broadcaster: stores in scrollback and sends to subscribers.
-    pub fn feed(&mut self, data: &[u8]) {
-        self.scrollback.push(data);
-        if self.tx.send(Bytes::copy_from_slice(data)).is_err() {
-            debug!(
-                event = "daemon.pty.broadcast_no_receivers",
-                "No receivers attached, output buffered in scrollback only"
-            );
-        }
-    }
-
-    /// Number of currently subscribed receivers.
-    pub fn receiver_count(&self) -> usize {
-        self.tx.receiver_count()
-    }
-}
-
 /// Spawn a blocking task that reads from a PTY reader and feeds output
 /// to the broadcaster.
 ///
@@ -133,10 +89,9 @@ pub fn spawn_pty_reader(
                     break;
                 }
                 Ok(n) => {
-                    let data = Bytes::copy_from_slice(&buf[..n]);
                     // Feed scrollback buffer for replay on attach
                     match scrollback.write() {
-                        Ok(mut sb) => sb.push(&data),
+                        Ok(mut sb) => sb.push(&buf[..n]),
                         Err(e) => {
                             error!(
                                 event = "daemon.pty.scrollback_lock_poisoned",
@@ -146,13 +101,13 @@ pub fn spawn_pty_reader(
                             );
                             let mut sb = e.into_inner();
                             sb.clear();
-                            sb.push(&data);
+                            sb.push(&buf[..n]);
                         }
                     }
                     // broadcast::send returns Err when there are no receivers,
                     // which is normal — nobody may be attached yet. The scrollback
                     // buffer already captured the data above for replay on attach.
-                    let _ = output_tx.send(data);
+                    let _ = output_tx.send(Bytes::copy_from_slice(&buf[..n]));
                 }
                 Err(e) => {
                     error!(
@@ -232,54 +187,6 @@ mod tests {
         buf.clear();
         assert!(buf.is_empty());
         assert_eq!(buf.len(), 0);
-    }
-
-    #[test]
-    fn test_broadcaster_basic() {
-        let broadcaster = PtyOutputBroadcaster::new(1024, 16);
-        assert_eq!(broadcaster.receiver_count(), 0);
-        assert!(broadcaster.scrollback_contents().is_empty());
-    }
-
-    #[test]
-    fn test_broadcaster_feed_and_scrollback() {
-        let mut broadcaster = PtyOutputBroadcaster::new(1024, 16);
-        broadcaster.feed(b"hello ");
-        broadcaster.feed(b"world");
-        assert_eq!(broadcaster.scrollback_contents(), b"hello world");
-    }
-
-    #[test]
-    fn test_broadcaster_subscribe_and_receive() {
-        let mut broadcaster = PtyOutputBroadcaster::new(1024, 16);
-        let mut rx = broadcaster.subscribe();
-        assert_eq!(broadcaster.receiver_count(), 1);
-
-        broadcaster.feed(b"test data");
-
-        let received = rx.try_recv().unwrap();
-        assert_eq!(received.as_ref(), b"test data");
-    }
-
-    #[test]
-    fn test_broadcaster_multiple_subscribers() {
-        let mut broadcaster = PtyOutputBroadcaster::new(1024, 16);
-        let mut rx1 = broadcaster.subscribe();
-        let mut rx2 = broadcaster.subscribe();
-        assert_eq!(broadcaster.receiver_count(), 2);
-
-        broadcaster.feed(b"shared data");
-
-        assert_eq!(rx1.try_recv().unwrap().as_ref(), b"shared data");
-        assert_eq!(rx2.try_recv().unwrap().as_ref(), b"shared data");
-    }
-
-    #[test]
-    fn test_broadcaster_no_receivers_ok() {
-        let mut broadcaster = PtyOutputBroadcaster::new(1024, 16);
-        // Feed with no receivers should not panic
-        broadcaster.feed(b"no one listening");
-        assert_eq!(broadcaster.scrollback_contents(), b"no one listening");
     }
 
     #[test]
