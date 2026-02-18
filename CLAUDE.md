@@ -119,7 +119,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `state/` - Type-safe state modules with encapsulated AppState facade (app_state/ for state and tests, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
 - `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items and hover actions, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
-- `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle, terminal_element/ for GPUI Element implementation, terminal_view.rs for View, colors.rs for ANSI mapping, input.rs for keystroke translation)
+- `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle with snapshot via `sync()`/`last_content()`, types.rs for `TerminalContent` snapshot type and `IndexedCell` alias, terminal_element/ for GPUI Element implementation, terminal_view.rs for View — calls `sync()` before constructing TerminalElement to minimize FairMutex hold time during prepaint, colors.rs for ANSI mapping, input.rs for keystroke translation)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback
 

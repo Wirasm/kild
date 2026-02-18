@@ -7,7 +7,7 @@ use alacritty_terminal::event::{Event as AlacEvent, EventListener};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Config as TermConfig;
-use alacritty_terminal::term::Term;
+use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::Processor;
 use base64::Engine;
 use futures::channel::mpsc::UnboundedReceiver;
@@ -218,6 +218,9 @@ pub struct Terminal {
     exited: Arc<AtomicBool>,
     /// Current PTY dimensions (rows, cols). Compared in prepaint to detect changes.
     current_size: Arc<Mutex<(u16, u16)>>,
+    /// Last-known terminal mode flags. Updated by sync() in render().
+    /// Used by on_key_down to read APP_CURSOR without re-acquiring the lock.
+    last_mode: TermMode,
 }
 
 impl Terminal {
@@ -361,6 +364,7 @@ impl Terminal {
 
         tracing::info!(event = "ui.terminal.create_completed");
 
+        let initial_mode = *term.lock().mode();
         Ok(Self {
             term,
             pty_writer,
@@ -371,6 +375,7 @@ impl Terminal {
             error_state: Arc::new(Mutex::new(None)),
             exited: Arc::new(AtomicBool::new(false)),
             current_size,
+            last_mode: initial_mode,
         })
     }
 
@@ -584,6 +589,7 @@ impl Terminal {
             session_id = session_id
         );
 
+        let initial_mode = *term.lock().mode();
         Ok(Self {
             term,
             pty_writer,
@@ -597,6 +603,7 @@ impl Terminal {
             error_state,
             exited,
             current_size,
+            last_mode: initial_mode,
         })
     }
 
@@ -774,6 +781,22 @@ impl Terminal {
             current_size: self.current_size.clone(),
         }
     }
+
+    /// Cache current terminal mode flags into last_mode.
+    ///
+    /// Acquires FairMutex briefly to read mode(), then releases immediately.
+    /// The cell snapshot (cell iteration) is built separately in render() via
+    /// TerminalContent::from_term(), not here.
+    /// Call from TerminalView::render() before constructing TerminalElement.
+    pub fn sync(&mut self) {
+        self.last_mode = *self.term.lock().mode();
+    }
+
+    /// Last-synced terminal mode flags. Used by on_key_down() to check
+    /// APP_CURSOR without re-acquiring the lock on every keystroke.
+    pub fn last_mode(&self) -> TermMode {
+        self.last_mode
+    }
 }
 
 /// Resize implementation, determined by terminal mode (local PTY or daemon IPC).
@@ -801,7 +824,9 @@ impl ResizeHandle {
     /// Lock ordering: current_size → pty_master → term. Each lock is held
     /// only for its specific operation and released before acquiring the next,
     /// minimizing contention with the PTY reader thread and batch loop.
-    pub fn resize_if_changed(&self, rows: u16, cols: u16) -> Result<(), TerminalError> {
+    /// Returns `Ok(true)` if a resize was performed, `Ok(false)` if dimensions
+    /// were unchanged (no-op).
+    pub fn resize_if_changed(&self, rows: u16, cols: u16) -> Result<bool, TerminalError> {
         // Check + update stored size
         {
             let mut size = self.current_size.lock().map_err(|e| {
@@ -814,7 +839,7 @@ impl ResizeHandle {
                 }
             })?;
             if size.0 == rows && size.1 == cols {
-                return Ok(());
+                return Ok(false);
             }
             *size = (rows, cols);
         }
@@ -879,7 +904,7 @@ impl ResizeHandle {
             rows = rows,
             cols = cols,
         );
-        Ok(())
+        Ok(true)
     }
 }
 
