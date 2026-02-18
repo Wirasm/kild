@@ -76,6 +76,10 @@ cargo run -p kild -- open --all                        # Open all stopped kilds
 cargo run -p kild -- open my-branch --resume           # Resume previous conversation
 cargo run -p kild -- stop my-branch                    # Stop agent, preserve kild
 cargo run -p kild -- stop --all                        # Stop all kilds
+cargo run -p kild -- stop my-branch --pane %1          # Stop a single teammate pane
+cargo run -p kild -- attach my-branch --pane %1        # Attach to a specific teammate pane
+cargo run -p kild -- teammates my-branch               # List all panes (leader + teammates)
+cargo run -p kild -- teammates my-branch --json        # JSON output
 cargo run -p kild -- complete my-branch                # Complete kild (PR cleanup)
 ```
 
@@ -90,6 +94,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
 - `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC via kild-protocol::IpcConnection)
+- `crates/kild-teams` - Agent team discovery and state management library. Reads shim pane registries at `~/.kild/shim/` to enumerate leader + teammate panes and resolve their daemon session IDs. Used by CLI (`kild teammates`) and kild-ui (sidebar badge).
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
 - `crates/kild-peek-core` - Core library for native app inspection and interaction (window listing, screenshots, image comparison, assertions, UI automation)
 - `crates/kild-peek` - CLI for visual verification of native macOS applications
@@ -118,7 +123,8 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `components/` - Custom UI components (StatusIndicator only; Button, TextInput, Modal from gpui-component library)
 - `state/` - Type-safe state modules with encapsulated AppState facade (app_state/ for state and tests, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
-- `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items and hover actions, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
+- `teams/` - TeamManager for resolving teammate counts per session (used by sidebar for [N] badge display)
+- `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items, hover actions, and [N] teammate badge for active agent teams, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
 - `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle with snapshot via `sync()`/`last_content()`, types.rs for `TerminalContent` snapshot type and `IndexedCell` alias, terminal_element/ for GPUI Element implementation, terminal_view.rs for View — calls `sync()` before constructing TerminalElement to minimize FairMutex hold time during prepaint, colors.rs for ANSI mapping, input.rs for keystroke translation)
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback
@@ -148,8 +154,18 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `main.rs` - Entry point, file-based logging controlled by KILD_SHIM_LOG env var
 - `errors.rs` - ShimError type
 
+**Key modules in kild-teams:**
+- `discovery.rs` - Fallback teammate discovery from shim pane registry (leader + teammates from `panes.json`)
+- `parser.rs` - JSON parsing for shim pane registry format
+- `types.rs` - Domain types: `TeamMember`, `TeamState`, `TeamColor`, `TeamEvent`
+- `watcher.rs` - `TeamWatcher` for file-based watching of team state changes
+- `scanner.rs` - Scans all sessions for active team state
+- `mapper.rs` - Maps shim pane entries to `TeamMember` domain types
+- `errors.rs` - `TeamsError` type
+
 **Key modules in kild (CLI):**
 - `app/` - CLI command implementations (daemon.rs, git.rs, global.rs, misc.rs, project.rs, query.rs, session.rs, tests.rs)
+- `commands/` - Individual command handler modules (teammates.rs, stop.rs, attach.rs, and others)
 - `main.rs` - CLI entry point with clap argument parsing
 - `color.rs` - Tallinn Night palette output formatting
 
@@ -209,7 +225,7 @@ All events follow: `{layer}.{domain}.{action}_{state}`
 | `peek.cli` | `crates/kild-peek/` | kild-peek CLI commands |
 | `peek.core` | `crates/kild-peek-core/` | kild-peek core library |
 
-**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `notify`, `watcher`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`, `split_window`, `send_keys`, `list_panes`, `kill_pane`, `display_message`, `select_pane`, `set_option`, `select_layout`, `resize_pane`, `has_session`, `new_session`, `new_window`, `list_windows`, `break_pane`, `join_pane`, `capture_pane`, `ipc`
+**Domains:** `session`, `terminal`, `daemon`, `git`, `forge`, `cleanup`, `health`, `files`, `process`, `pid_file`, `app`, `projects`, `state`, `notify`, `watcher`, `teams`, `discovery`, `window`, `screenshot`, `diff`, `assert`, `interact`, `element`, `pty`, `protocol`, `split_window`, `send_keys`, `list_panes`, `kill_pane`, `display_message`, `select_pane`, `set_option`, `select_layout`, `resize_pane`, `has_session`, `new_session`, `new_window`, `list_windows`, `break_pane`, `join_pane`, `capture_pane`, `ipc`
 
 UI-specific domains: `terminal` (for kild-ui terminal rendering), `input` (for keystroke translation)
 
@@ -267,6 +283,18 @@ warn!(event = "core.daemon.ping_check_failed", error = %e);
 // CLI daemon operations
 info!(event = "cli.daemon.start_started", foreground = foreground);
 info!(event = "cli.attach_started", branch = branch);
+
+// Teammates CLI operations
+info!(event = "cli.teammates_started", branch = branch);
+info!(event = "cli.teammates_completed", branch = branch, count = n);
+error!(event = "cli.teammates_failed", branch = branch, error = %e);
+info!(event = "cli.stop_teammate_started", branch = branch, pane_id = pane_id);
+info!(event = "cli.stop_teammate_completed", branch = branch, pane_id = pane_id);
+error!(event = "cli.stop_teammate_failed", branch = branch, pane_id = pane_id, error = %e);
+
+// Core session teammate operations
+info!(event = "core.session.stop_teammate_started", branch = branch, pane_id = pane_id);
+info!(event = "core.session.stop_teammate_completed", branch = branch, pane_id = pane_id, daemon_session_id = id);
 
 // Claude Code status hook integration
 info!(event = "core.session.claude_status_hook_installed", path = %hook_path.display());
