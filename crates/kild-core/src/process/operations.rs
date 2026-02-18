@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
@@ -281,6 +282,26 @@ pub fn find_process_by_name(
     Ok(None)
 }
 
+/// Find all running process PIDs with a current working directory inside `dir`.
+///
+/// Returns an empty Vec if no processes are found or CWD information is unavailable.
+/// On macOS with SIP enabled, `Process::cwd()` returns `None` for most processes
+/// due to kernel security restrictions. This function is best-effort: false negatives
+/// (missing an active process) are safe — the git status check is the primary safety gate.
+pub fn find_processes_in_directory(dir: &Path) -> Vec<u32> {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, false);
+    system
+        .processes()
+        .values()
+        .filter_map(|p| {
+            p.cwd()
+                .filter(|cwd| cwd.starts_with(dir))
+                .map(|_| p.pid().as_u32())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +505,36 @@ mod tests {
 
         // Arbitrary substring matching is NOT supported
         assert!(!process_name_matches("my-kiro-daemon", "kiro"));
+    }
+
+    #[test]
+    fn test_find_processes_in_directory_does_not_panic() {
+        // Verify the function runs without panicking on real directories.
+        // Note: On macOS with SIP, sysinfo::Process::cwd() returns None for most
+        // processes due to kernel security restrictions, so the result may be empty
+        // even with active processes in the directory. This is a known platform
+        // limitation — false negatives are safe (git status is the primary safety gate).
+        let dir = std::env::temp_dir().canonicalize().unwrap();
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .current_dir(&dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn test process");
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _pids = find_processes_in_directory(&dir);
+
+        let _ = child.kill();
+        let _ = child.wait();
+        // No assertion on contents: macOS SIP prevents reading CWD of most processes
+    }
+
+    #[test]
+    fn test_find_processes_in_directory_nonexistent() {
+        let pids = find_processes_in_directory(std::path::Path::new("/nonexistent/path/xyz"));
+        assert!(pids.is_empty());
     }
 
     #[test]

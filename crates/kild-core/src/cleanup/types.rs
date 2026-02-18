@@ -30,6 +30,7 @@ pub struct CleanupSummary {
     pub orphaned_branches: Vec<String>,
     pub orphaned_worktrees: Vec<PathBuf>,
     pub stale_sessions: Vec<String>,
+    pub skipped_worktrees: Vec<(PathBuf, String)>,
     pub total_cleaned: usize,
 }
 
@@ -55,8 +56,14 @@ impl CleanupSummary {
             orphaned_branches: Vec::new(),
             orphaned_worktrees: Vec::new(),
             stale_sessions: Vec::new(),
+            skipped_worktrees: Vec::new(),
             total_cleaned: 0,
         }
+    }
+
+    pub fn add_skipped_worktree(&mut self, path: PathBuf, reason: String) {
+        self.skipped_worktrees.push((path, reason));
+        // note: does NOT increment total_cleaned
     }
 
     pub fn add_branch(&mut self, branch_name: String) {

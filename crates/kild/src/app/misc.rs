@@ -35,6 +35,13 @@ pub fn cleanup_command() -> Command {
                 .help("Clean worktrees in kild directory that have no session")
                 .action(ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .short('f')
+                .help("Remove orphaned worktrees even if they have uncommitted changes or active processes")
+                .action(ArgAction::SetTrue),
+        )
 }
 
 pub fn stats_command() -> Command {
