@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{Bounds, Font, FontWeight, Hitbox, Hsla, Pixels, font};
 
 use crate::theme;
@@ -31,6 +32,7 @@ pub(super) struct PreparedBgRegion {
 pub(super) struct PreparedCursor {
     pub(super) bounds: Bounds<Pixels>,
     pub(super) color: Hsla,
+    pub(super) shape: CursorShape,
 }
 
 /// Per-line text data for URL scanning: (line_index, line_text, col_offsets).

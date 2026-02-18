@@ -1,4 +1,5 @@
 use alacritty_terminal::term::cell::Flags as CellFlags;
+use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{App, Bounds, HitboxBehavior, Hsla, Pixels, Window, point, px, size};
 
 use super::super::colors;
@@ -400,34 +401,58 @@ impl TerminalElement {
                 .mode
                 .contains(alacritty_terminal::term::TermMode::SHOW_CURSOR)
         {
-            let cursor_point = content.cursor.point;
-            let cursor_line = cursor_point.line.0;
-            let cursor_col = cursor_point.column.0;
-            if cursor_line >= 0 && (cursor_line as usize) < rows && cursor_col < cols {
-                let cx_pos = bounds.origin.x + cursor_col as f32 * cell_width;
-                let cy_pos = bounds.origin.y + cursor_line as f32 * cell_height;
-                let cursor_color = Hsla::from(theme::terminal_cursor());
+            let cursor_shape = content.cursor.shape;
+            // Hidden cursor — nothing to render
+            if cursor_shape != CursorShape::Hidden {
+                let cursor_point = content.cursor.point;
+                let cursor_line = cursor_point.line.0;
+                let cursor_col = cursor_point.column.0;
+                if cursor_line >= 0 && (cursor_line as usize) < rows && cursor_col < cols {
+                    let cx_pos = bounds.origin.x + cursor_col as f32 * cell_width;
+                    let cy_pos = bounds.origin.y + cursor_line as f32 * cell_height;
+                    let cursor_color = Hsla::from(theme::terminal_cursor());
 
-                cursor = Some(PreparedCursor {
-                    bounds: if self.has_focus {
-                        let cursor_w = if cursor_is_wide {
-                            cell_width + cell_width
-                        } else {
-                            cell_width
-                        };
-                        Bounds::new(point(cx_pos, cy_pos), size(cursor_w, cell_height))
+                    // When unfocused, always use HollowBlock at half opacity regardless of terminal shape.
+                    let (effective_shape, effective_color) = if self.has_focus {
+                        (cursor_shape, cursor_color)
                     } else {
-                        Bounds::new(point(cx_pos, cy_pos), size(px(2.0), cell_height))
-                    },
-                    color: if self.has_focus {
-                        cursor_color
+                        (
+                            CursorShape::HollowBlock,
+                            Hsla {
+                                a: 0.5,
+                                ..cursor_color
+                            },
+                        )
+                    };
+
+                    // Cell width for block-style shapes (respects wide characters).
+                    let cursor_w = if cursor_is_wide {
+                        cell_width + cell_width
                     } else {
-                        Hsla {
-                            a: 0.5,
-                            ..cursor_color
+                        cell_width
+                    };
+
+                    let cursor_bounds = match effective_shape {
+                        CursorShape::Block | CursorShape::HollowBlock => {
+                            Bounds::new(point(cx_pos, cy_pos), size(cursor_w, cell_height))
                         }
-                    },
-                });
+                        CursorShape::Beam => {
+                            Bounds::new(point(cx_pos, cy_pos), size(px(2.0), cell_height))
+                        }
+                        CursorShape::Underline => Bounds::new(
+                            point(cx_pos, cy_pos + cell_height - px(2.0)),
+                            size(cursor_w, px(2.0)),
+                        ),
+                        // Hidden is already handled above; unreachable here.
+                        CursorShape::Hidden => unreachable!(),
+                    };
+
+                    cursor = Some(PreparedCursor {
+                        bounds: cursor_bounds,
+                        color: effective_color,
+                        shape: effective_shape,
+                    });
+                }
             }
         }
 
