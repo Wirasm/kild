@@ -50,12 +50,14 @@ cargo build --all              # Clean build
 # Build
 cargo build --all              # Build all crates
 cargo build -p kild-core       # Build specific crate
+cargo build -p kild-config     # Build config crate
 cargo build -p kild-paths      # Build paths crate
 cargo build -p kild-protocol   # Build protocol types crate
 
 # Test
 cargo test --all               # Run all tests
 cargo test -p kild-core        # Test specific crate
+cargo test -p kild-config      # Test config crate
 cargo test -p kild-paths       # Test paths crate
 cargo test -p kild-protocol    # Test protocol types crate
 cargo test test_name           # Run single test by name
@@ -90,7 +92,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 **Workspace structure:**
 - `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
 - `crates/kild-config` - TOML configuration types, loading, validation, and keybindings for ~/.kild/config.toml. Depends only on kild-paths and kild-protocol. Single source of truth for all KildConfig/Config/Keybindings types. Extracted from kild-core to enable fast incremental compilation of config-only changes.
-- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). Also provides `IpcConnection` for JSONL-over-Unix-socket client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()`. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only (tempfile for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode), domain newtypes (SessionId, BranchName, ProjectId), and serde-only domain enums (ForgeType). Also provides `IpcConnection` for JSONL-over-Unix-socket client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()`. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only (tempfile for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
 - `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
@@ -523,7 +525,7 @@ Priority (highest wins): CLI args → project config (`./.kild/config.toml`) →
 
 **All config options are documented in `.kild/config.example.toml`.** Load the `/kild` skill for help with config changes.
 
-**Keybindings** use a separate file: project (`./.kild/keybindings.toml`) overrides user (`~/.kild/keybindings.toml`). Invalid bindings warn and fall back to defaults — never block startup. See `crates/kild-core/src/config/keybindings.rs` for the full schema.
+**Keybindings** use a separate file: project (`./.kild/keybindings.toml`) overrides user (`~/.kild/keybindings.toml`). Invalid bindings warn and fall back to defaults — never block startup. See `crates/kild-config/src/keybindings.rs` for the full schema.
 
 **Array Merging:** `include_patterns.patterns` arrays are merged (deduplicated) from user and project configs. Other config values follow standard override behavior.
 
@@ -538,7 +540,7 @@ Priority (highest wins): CLI args → project config (`./.kild/config.toml`) →
 - `Cmd+D`: Toggle Control/Dashboard view
 - `Ctrl+Escape`: Move focus from terminal to sidebar
 
-All UI shortcuts are configurable via `~/.kild/keybindings.toml` (user) or `./.kild/keybindings.toml` (project). See `crates/kild-core/src/config/keybindings.rs` for all available keys and defaults.
+All UI shortcuts are configurable via `~/.kild/keybindings.toml` (user) or `./.kild/keybindings.toml` (project). See `crates/kild-config/src/keybindings.rs` for all available keys and defaults.
 
 ## Error Handling
 
