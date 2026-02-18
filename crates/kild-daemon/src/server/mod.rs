@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::net::UnixListener;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -56,7 +56,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
     // Channel for PTY exit notifications from reader tasks
     let (pty_exit_tx, mut pty_exit_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let session_manager = Arc::new(Mutex::new(SessionManager::new(config, pty_exit_tx)));
+    let session_manager = Arc::new(RwLock::new(SessionManager::new(config, pty_exit_tx)));
     let shutdown = CancellationToken::new();
 
     // Spawn signal handler
@@ -96,7 +96,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
             }
             Some(exit_event) = pty_exit_rx.recv() => {
                 // PTY process exited — transition session to Stopped
-                let mut mgr = session_manager.lock().await;
+                let mut mgr = session_manager.write().await;
                 if let Some(output_tx) = mgr.handle_pty_exit(&exit_event.session_id) {
                     // Drop the broadcast sender — stream_pty_output tasks will see
                     // RecvError::Closed and exit their streaming loops.
@@ -112,7 +112,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
 
     // Graceful shutdown: stop all sessions
     {
-        let mut mgr = session_manager.lock().await;
+        let mut mgr = session_manager.write().await;
         mgr.stop_all();
     }
 

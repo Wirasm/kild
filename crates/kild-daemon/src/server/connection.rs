@@ -4,7 +4,7 @@ use base64::Engine;
 use bytes::Bytes;
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use kild_core::errors::KildError;
@@ -20,11 +20,14 @@ use crate::session::state::ClientId;
 /// and sends responses back. For `attach` requests, enters streaming mode.
 pub async fn handle_connection(
     stream: UnixStream,
-    session_manager: Arc<Mutex<SessionManager>>,
+    session_manager: Arc<RwLock<SessionManager>>,
     shutdown: tokio_util::sync::CancellationToken,
 ) {
+    // write() required: next_client_id takes &mut self. A shared AtomicU64 on
+    // the server struct would eliminate this per-connection write lock, but the
+    // daemon is low-connection-rate so it is not a bottleneck in practice.
     let client_id = {
-        let mut mgr = session_manager.lock().await;
+        let mut mgr = session_manager.write().await;
         mgr.next_client_id()
     };
 
@@ -87,7 +90,7 @@ pub async fn handle_connection(
     }
 
     // Clean up: detach client from all sessions
-    let mut mgr = session_manager.lock().await;
+    let mut mgr = session_manager.write().await;
     mgr.detach_client_from_all(client_id);
 }
 
@@ -97,7 +100,7 @@ pub async fn handle_connection(
 async fn dispatch_message(
     msg: ClientMessage,
     client_id: ClientId,
-    session_manager: &Arc<Mutex<SessionManager>>,
+    session_manager: &Arc<RwLock<SessionManager>>,
     writer: Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>,
     shutdown: &tokio_util::sync::CancellationToken,
 ) -> Option<DaemonMessage> {
@@ -114,7 +117,7 @@ async fn dispatch_message(
             cols,
             use_login_shell,
         } => {
-            let mut mgr = session_manager.lock().await;
+            let mut mgr = session_manager.write().await;
             let env_pairs: Vec<(String, String)> = env_vars.into_iter().collect();
 
             match mgr.create_session(
@@ -146,7 +149,7 @@ async fn dispatch_message(
             cols,
         } => {
             let (rx, scrollback, resize_failed) = {
-                let mut mgr = session_manager.lock().await;
+                let mut mgr = session_manager.write().await;
 
                 // Resize to client dimensions
                 let resize_failed = if let Err(e) = mgr.resize_pty(&session_id, rows, cols) {
@@ -179,9 +182,9 @@ async fn dispatch_message(
                     Some(data) => data,
                     None => {
                         warn!(
-                            event = "daemon.connection.scrollback_not_found",
+                            event = "daemon.connection.scrollback_unavailable",
                             session_id = %session_id,
-                            "Session not found during scrollback fetch",
+                            "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
                         );
                         Vec::new()
                     }
@@ -270,7 +273,7 @@ async fn dispatch_message(
         }
 
         ClientMessage::Detach { id, session_id } => {
-            let mut mgr = session_manager.lock().await;
+            let mut mgr = session_manager.write().await;
             match mgr.detach_client(&session_id, client_id) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
@@ -287,7 +290,7 @@ async fn dispatch_message(
             rows,
             cols,
         } => {
-            let mut mgr = session_manager.lock().await;
+            let mut mgr = session_manager.write().await;
             match mgr.resize_pty(&session_id, rows, cols) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
@@ -314,7 +317,9 @@ async fn dispatch_message(
                 }
             };
 
-            let mgr = session_manager.lock().await;
+            // read() is sufficient: SessionManager::write_stdin takes &self.
+            // Actual write exclusion is handled by Arc<Mutex<Writer>> inside ManagedPty.
+            let mgr = session_manager.read().await;
             match mgr.write_stdin(&session_id, &decoded) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
@@ -326,7 +331,7 @@ async fn dispatch_message(
         }
 
         ClientMessage::StopSession { id, session_id } => {
-            let mut mgr = session_manager.lock().await;
+            let mut mgr = session_manager.write().await;
             match mgr.stop_session(&session_id) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
@@ -342,7 +347,7 @@ async fn dispatch_message(
             session_id,
             force,
         } => {
-            let mut mgr = session_manager.lock().await;
+            let mut mgr = session_manager.write().await;
             match mgr.destroy_session(&session_id, force) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
                 Err(e) => Some(DaemonMessage::Error {
@@ -354,13 +359,13 @@ async fn dispatch_message(
         }
 
         ClientMessage::ListSessions { id, project_id: _ } => {
-            let mgr = session_manager.lock().await;
+            let mgr = session_manager.read().await;
             let sessions = mgr.list_sessions();
             Some(DaemonMessage::SessionList { id, sessions })
         }
 
         ClientMessage::GetSession { id, session_id } => {
-            let mgr = session_manager.lock().await;
+            let mgr = session_manager.read().await;
             match mgr.get_session(&session_id) {
                 Some(session) => Some(DaemonMessage::SessionInfo { id, session }),
                 None => Some(DaemonMessage::Error {
@@ -376,7 +381,7 @@ async fn dispatch_message(
                 event = "daemon.connection.read_scrollback",
                 session_id = %session_id
             );
-            let mgr = session_manager.lock().await;
+            let mgr = session_manager.read().await;
             match mgr.scrollback_contents(&session_id) {
                 Some(data) => {
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&data);

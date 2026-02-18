@@ -1,14 +1,19 @@
+use std::cell::RefCell;
 use std::path::Path;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 use tracing::{debug, error};
 
 use crate::process::errors::ProcessError;
 use crate::process::types::{Pid, ProcessInfo, ProcessMetrics, ProcessStatus};
 
-// Shared system instance to prevent memory leaks
-static SYSTEM: LazyLock<Mutex<System>> = LazyLock::new(|| Mutex::new(System::new()));
+// CPU usage reporting requires a System that has seen a prior snapshot; reusing
+// the same instance per thread gives sysinfo the delta it needs for a meaningful
+// percentage. Other functions (kill_process, get_process_info, find_process_by_name,
+// find_processes_in_directory) use fresh System::new() instances deliberately —
+// they are one-shot operations that must not accumulate state across calls.
+thread_local! {
+    static SYSTEM: RefCell<System> = RefCell::new(System::new());
+}
 
 /// Check if a process with the given PID is currently running
 pub fn is_process_running(pid: u32) -> Result<bool, ProcessError> {
@@ -131,27 +136,26 @@ pub fn get_process_info(pid: u32) -> Result<ProcessInfo, ProcessError> {
 /// Get CPU and memory usage metrics for a process
 pub fn get_process_metrics(pid: u32) -> Result<ProcessMetrics, ProcessError> {
     let pid_obj = SysinfoPid::from_u32(pid);
-
-    // Use shared system instance to prevent memory leaks
-    let mut system = SYSTEM.lock().map_err(|e| {
-        error!(event = "core.process.metrics_lock_failed", pid = pid, error = %e);
-        ProcessError::SystemError {
-            message: format!("Failed to acquire process metrics lock: {e}"),
-        }
-    })?;
-    system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
-
-    match system.process(pid_obj) {
-        Some(process) => {
-            let memory_bytes = process.memory();
-
-            Ok(ProcessMetrics {
+    SYSTEM.with(|cell| {
+        let mut system = cell.try_borrow_mut().map_err(|e| {
+            error!(
+                event = "core.process.metrics_borrow_failed",
+                pid = pid,
+                error = %e,
+            );
+            ProcessError::SystemError {
+                message: format!("process metrics state already borrowed: {e}"),
+            }
+        })?;
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
+        match system.process(pid_obj) {
+            Some(process) => Ok(ProcessMetrics {
                 cpu_usage_percent: process.cpu_usage(),
-                memory_usage_bytes: memory_bytes,
-            })
+                memory_usage_bytes: process.memory(),
+            }),
+            None => Err(ProcessError::NotFound { pid }),
         }
-        None => Err(ProcessError::NotFound { pid }),
-    }
+    })
 }
 
 /// Generate multiple search patterns for better process matching.

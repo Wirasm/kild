@@ -10,7 +10,8 @@ use crate::errors::DaemonError;
 /// Handle to a live PTY session.
 pub struct ManagedPty {
     /// Master end of the PTY. Used for resize and cloning readers.
-    master: Box<dyn MasterPty + Send>,
+    /// Wrapped in Mutex for Sync: needed so SessionManager can be held in RwLock.
+    master: Mutex<Box<dyn MasterPty + Send>>,
     /// Child process handle. Used for wait/kill.
     child: Box<dyn Child + Send + Sync>,
     /// Writer to PTY stdin. Wrapped in Arc<Mutex<>> for shared mutable access
@@ -36,6 +37,11 @@ impl ManagedPty {
     /// Clone the PTY master reader for reading output in a background task.
     pub fn try_clone_reader(&self) -> Result<Box<dyn std::io::Read + Send>, DaemonError> {
         self.master
+            .lock()
+            .map_err(|e| {
+                error!(event = "daemon.pty.master_lock_failed", error = %e);
+                DaemonError::PtyError(format!("lock master: {}", e))
+            })?
             .try_clone_reader()
             .map_err(|e| DaemonError::PtyError(format!("clone reader: {}", e)))
     }
@@ -64,6 +70,11 @@ impl ManagedPty {
             pixel_height: 0,
         };
         self.master
+            .lock()
+            .map_err(|e| {
+                error!(event = "daemon.pty.master_lock_failed", error = %e);
+                DaemonError::PtyError(format!("lock master: {}", e))
+            })?
             .resize(new_size)
             .map_err(|e| DaemonError::PtyError(format!("resize: {}", e)))?;
         self.size = new_size;
@@ -197,7 +208,7 @@ impl PtyManager {
         };
 
         let managed = ManagedPty {
-            master: pair.master,
+            master: Mutex::new(pair.master),
             child,
             writer: Arc::new(Mutex::new(writer)),
             size,

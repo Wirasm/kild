@@ -14,6 +14,10 @@ use crate::types::{DaemonConfig, SessionInfo};
 ///
 /// Manages the map of `DaemonSession` instances, delegates to `PtyManager`
 /// for PTY allocation, and handles client attach/detach tracking.
+///
+/// Lock discipline: methods taking `&self` are safe to call under a read lock
+/// on the outer `RwLock<SessionManager>`; methods taking `&mut self` require a
+/// write lock.
 pub struct SessionManager {
     sessions: HashMap<String, DaemonSession>,
     pty_manager: PtyManager,
