@@ -16,9 +16,13 @@ use crate::theme;
 
 /// Custom GPUI Element that renders terminal cells as GPU draw calls.
 pub struct TerminalElement {
-    /// Owned snapshot from Terminal::sync(), used for lock-free prepaint.
+    /// Owned snapshot from render(), used for lock-free prepaint.
+    /// On resize frames, do_prepaint() overwrites this with a fresh snapshot
+    /// taken after resize_if_changed() reflowed the grid.
     pub(super) content: TerminalContent,
-    /// Arc kept for mouse event handlers in paint() that write selection state.
+    /// Arc kept for mouse event handlers registered in do_paint() that write
+    /// selection state. The handlers capture this Arc; writes happen when the
+    /// closures fire, not during do_paint() itself.
     pub(super) term: Arc<FairMutex<Term<KildListener>>>,
     pub(super) has_focus: bool,
     pub(super) resize_handle: ResizeHandle,

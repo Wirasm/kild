@@ -8,6 +8,7 @@ use super::terminal_element::scroll_delta_lines;
 use super::input;
 use super::state::Terminal;
 use super::terminal_element::{MouseState, TerminalElement};
+use super::types::TerminalContent;
 use crate::theme;
 use crate::views::main_view::keybindings::UiKeybindings;
 
@@ -242,13 +243,12 @@ impl TerminalView {
             return;
         }
 
-        // Read app cursor mode from last-synced snapshot (populated in render()).
-        // Mode is set via escape sequence processed in the batch loop before cx.notify()
-        // triggers render, so the snapshot is always up-to-date by keystroke time.
+        // Read app cursor mode from cached mode flags (populated by sync() in render()).
+        // Mode is set via escape sequence in the batch loop before cx.notify() triggers
+        // render, so the cached mode is current by keystroke time after the first render.
         let app_cursor = self
             .terminal
-            .last_content()
-            .mode
+            .last_mode()
             .contains(alacritty_terminal::term::TermMode::APP_CURSOR);
 
         match input::keystroke_to_escape(&event.keystroke, app_cursor) {
@@ -275,9 +275,11 @@ impl Focusable for TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Snapshot terminal state under a brief lock, then release before rendering.
+        // Cache mode flags for on_key_down (cheap: reads mode() only, no cell clone).
+        // Build the full cell snapshot separately — cannot borrow self.terminal twice
+        // in one expression (sync takes &mut, from_term borrows term() immutably).
         self.terminal.sync();
-        let content = self.terminal.last_content().clone();
+        let content = TerminalContent::from_term(&*self.terminal.term().lock());
         let term = self.terminal.term().clone();
         let has_focus = self.focus_handle.is_focused(window);
         let resize_handle = self.terminal.resize_handle();

@@ -3,7 +3,7 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{App, Bounds, HitboxBehavior, Hsla, Pixels, Window, point, px, size};
 
 use super::super::colors;
-use super::super::types::BatchedTextRun;
+use super::super::types::{BatchedTextRun, TerminalContent};
 use super::element::{TerminalElement, detect_urls};
 use super::types::{LineText, PrepaintState, PreparedBgRegion, PreparedCursor, PreparedLine};
 use crate::theme;
@@ -51,20 +51,26 @@ impl TerminalElement {
         }
 
         // Resize PTY and terminal grid if dimensions changed.
-        // Must happen before term.lock() so the snapshot reflects the new size.
-        if let Err(e) = self
+        match self
             .resize_handle
             .resize_if_changed(rows as u16, cols as u16)
         {
-            tracing::warn!(
-                event = "ui.terminal.resize_failed",
-                rows = rows,
-                cols = cols,
-                error = %e,
-            );
+            Ok(true) => {
+                // Grid was reflowed — re-snapshot so cell positions match the new
+                // dimensions. The snapshot built in render() predates this reflow.
+                self.content = TerminalContent::from_term(&*self.term.lock());
+            }
+            Ok(false) => {} // dimensions unchanged, existing snapshot is current
+            Err(e) => {
+                tracing::warn!(
+                    event = "ui.terminal.resize_failed",
+                    rows = rows,
+                    cols = cols,
+                    error = %e,
+                );
+            }
         }
 
-        // Use the pre-built snapshot from Terminal::sync(). Lock is not held here.
         let content = &self.content;
         let scrolled_up = content.display_offset > 0;
 
