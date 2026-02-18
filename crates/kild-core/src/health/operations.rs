@@ -50,7 +50,8 @@ pub fn calculate_health_status(
 
 /// Returns the more recent of two optional RFC3339 timestamps.
 ///
-/// If both are present, parses and compares; falls back to `a` on parse error.
+/// If both are present, parses and compares; returns whichever is valid when
+/// only one parses; falls back to `a` when neither parses.
 /// If only one is present, returns that one.
 fn most_recent_activity(a: Option<&str>, b: Option<&str>) -> Option<String> {
     match (a, b) {
@@ -60,7 +61,8 @@ fn most_recent_activity(a: Option<&str>, b: Option<&str>) -> Option<String> {
             let tb_dt = DateTime::parse_from_rfc3339(tb).ok();
             match (ta_dt, tb_dt) {
                 (Some(a_dt), Some(b_dt)) => Some(if a_dt >= b_dt { ta } else { tb }.to_string()),
-                _ => Some(ta.to_string()),
+                (None, Some(_)) => Some(tb.to_string()),
+                (Some(_), None) | (None, None) => Some(ta.to_string()),
             }
         }
     }
@@ -399,5 +401,49 @@ mod tests {
         assert_eq!(output.idle_count, 1);
         assert_eq!(output.crashed_count, 1);
         assert_eq!(output.stuck_count, 0);
+    }
+
+    // --- most_recent_activity tests ---
+
+    #[test]
+    fn test_most_recent_activity_prefers_newer_sidecar() {
+        // session.last_activity is old; sidecar updated_at is recent
+        let old = "2026-01-01T00:00:00Z";
+        let recent = "2026-02-18T12:00:00Z";
+        let result = most_recent_activity(Some(old), Some(recent));
+        assert_eq!(result.as_deref(), Some(recent));
+    }
+
+    #[test]
+    fn test_most_recent_activity_prefers_newer_last_activity() {
+        let recent = "2026-02-18T12:00:00Z";
+        let old = "2026-01-01T00:00:00Z";
+        let result = most_recent_activity(Some(recent), Some(old));
+        assert_eq!(result.as_deref(), Some(recent));
+    }
+
+    #[test]
+    fn test_most_recent_activity_b_valid_when_a_unparseable() {
+        // a is corrupt; b is a valid timestamp — b should win
+        let valid = "2026-02-18T12:00:00Z";
+        let result = most_recent_activity(Some("not-a-date"), Some(valid));
+        assert_eq!(result.as_deref(), Some(valid));
+    }
+
+    #[test]
+    fn test_most_recent_activity_none_a_returns_b() {
+        let ts = "2026-02-18T12:00:00Z";
+        assert_eq!(most_recent_activity(None, Some(ts)).as_deref(), Some(ts));
+    }
+
+    #[test]
+    fn test_most_recent_activity_none_b_returns_a() {
+        let ts = "2026-02-18T12:00:00Z";
+        assert_eq!(most_recent_activity(Some(ts), None).as_deref(), Some(ts));
+    }
+
+    #[test]
+    fn test_most_recent_activity_both_none_returns_none() {
+        assert_eq!(most_recent_activity(None, None), None);
     }
 }
