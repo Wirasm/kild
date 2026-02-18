@@ -1,7 +1,8 @@
 use alacritty_terminal::selection::{Selection, SelectionType};
+use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{
-    App, Bounds, CursorStyle, DispatchPhase, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, SharedString, TextRun, Window, fill, point, px, size,
+    App, BorderStyle, Bounds, CursorStyle, DispatchPhase, Hsla, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, SharedString, TextRun, Window, fill, outline, point, px, size,
 };
 
 use super::element::TerminalElement;
@@ -123,7 +124,14 @@ impl TerminalElement {
 
         // Layer 4: Cursor (topmost, always visible over text)
         if let Some(cursor) = &prepaint.cursor {
-            window.paint_quad(fill(cursor.bounds, cursor.color));
+            match cursor.shape {
+                CursorShape::HollowBlock => {
+                    window.paint_quad(outline(cursor.bounds, cursor.color, BorderStyle::Solid));
+                }
+                _ => {
+                    window.paint_quad(fill(cursor.bounds, cursor.color));
+                }
+            }
         }
 
         // Layer 5: Scrollback badge (when scrolled up from bottom)
