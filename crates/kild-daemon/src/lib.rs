@@ -1,6 +1,5 @@
 pub mod client;
 pub mod errors;
-pub mod pane_backend;
 pub mod pid;
 pub mod protocol;
 pub mod pty;

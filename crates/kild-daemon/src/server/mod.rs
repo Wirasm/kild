@@ -80,7 +80,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
                     Ok((stream, _addr)) => {
                         let mgr = session_manager.clone();
                         let shutdown_token = shutdown.clone();
-                        tokio::spawn(connection::route_connection(
+                        tokio::spawn(connection::handle_connection(
                             stream,
                             mgr,
                             shutdown_token,
