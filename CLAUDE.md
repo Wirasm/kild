@@ -494,6 +494,8 @@ Priority (highest wins): CLI args → project config (`./.kild/config.toml`) →
 
 **All config options are documented in `.kild/config.example.toml`.** Load the `/kild` skill for help with config changes.
 
+**Keybindings** use a separate file: project (`./.kild/keybindings.toml`) overrides user (`~/.kild/keybindings.toml`). Invalid bindings warn and fall back to defaults — never block startup. See `crates/kild-core/src/config/keybindings.rs` for the full schema.
+
 **Array Merging:** `include_patterns.patterns` arrays are merged (deduplicated) from user and project configs. Other config values follow standard override behavior.
 
 **Runtime mode resolution:** Sessions run in either daemon-owned PTYs or external terminals. Resolution order for both `create` and `open`: `--daemon`/`--no-daemon` flag → session's stored `runtime_mode` (open only) → config `daemon.enabled` → default (terminal). All sessions store their `runtime_mode` in the session file. Daemon sessions auto-open an attach window; use `kild attach <branch>` to reconnect.
@@ -501,11 +503,13 @@ Priority (highest wins): CLI args → project config (`./.kild/config.toml`) →
 **Agent teams:** Daemon sessions inject `$TMUX` and configure the tmux shim (see "tmux Shim for Agent Teams" section) to enable Claude Code agent teams without external tmux.
 
 **UI keyboard shortcuts:**
-- `<nav_modifier>+1-9`: Jump to Nth kild in sidebar (modifier configured by `[ui] nav_modifier`, default: "ctrl")
+- `<jump_modifier>+1-9`: Jump to Nth kild in sidebar (modifier configured by `[navigation] jump_modifier` in `keybindings.toml`, default: "ctrl")
 - `Cmd+Shift+[/]`: Cycle between Control workspaces
 - `Cmd+J/K`: Navigate next/previous kild
 - `Cmd+D`: Toggle Control/Dashboard view
 - `Ctrl+Escape`: Move focus from terminal to sidebar
+
+All UI shortcuts are configurable via `~/.kild/keybindings.toml` (user) or `./.kild/keybindings.toml` (project). See `crates/kild-core/src/config/keybindings.rs` for all available keys and defaults.
 
 ## Error Handling
 
