@@ -82,6 +82,10 @@ impl KildPaths {
         self.kild_dir.join("config.toml")
     }
 
+    pub fn user_keybindings(&self) -> PathBuf {
+        self.kild_dir.join("keybindings.toml")
+    }
+
     // --- Parameterized paths ---
 
     pub fn shim_session_dir(&self, session_id: &str) -> PathBuf {
@@ -139,6 +143,11 @@ impl KildPaths {
     /// Project-level config: `<project_root>/.kild/config.toml`.
     pub fn project_config(project_root: &Path) -> PathBuf {
         project_root.join(".kild").join("config.toml")
+    }
+
+    /// Project-level keybindings: `<project_root>/.kild/keybindings.toml`.
+    pub fn project_keybindings(project_root: &Path) -> PathBuf {
+        project_root.join(".kild").join("keybindings.toml")
     }
 }
 
@@ -434,6 +443,22 @@ mod tests {
         assert_eq!(
             KildPaths::project_config(Path::new("/my/project")),
             PathBuf::from("/my/project/.kild/config.toml")
+        );
+    }
+
+    #[test]
+    fn test_user_keybindings() {
+        assert_eq!(
+            test_paths().user_keybindings(),
+            PathBuf::from("/home/user/.kild/keybindings.toml")
+        );
+    }
+
+    #[test]
+    fn test_project_keybindings() {
+        assert_eq!(
+            KildPaths::project_keybindings(Path::new("/my/project")),
+            PathBuf::from("/my/project/.kild/keybindings.toml")
         );
     }
 }

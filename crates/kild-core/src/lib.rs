@@ -35,6 +35,7 @@ pub mod terminal;
 pub use kild_protocol::{BranchName, ProjectId, SessionId};
 
 // Re-export commonly used types at crate root for convenience
+pub use config::Keybindings;
 pub use config::KildConfig;
 pub use editor::{EditorBackend, EditorError, EditorType};
 pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};

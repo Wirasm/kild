@@ -218,9 +218,12 @@ impl MainView {
             return;
         }
 
-        // Ctrl+Escape: move focus from terminal to sidebar (terminal stays rendered)
-        if key_str == "escape"
-            && event.keystroke.modifiers.control
+        // focus_escape binding: move focus from terminal to sidebar (terminal stays rendered)
+        if self
+            .keybindings
+            .terminal
+            .focus_escape
+            .matches(&event.keystroke)
             && self.focus_region == FocusRegion::Terminal
         {
             self.focus_region = FocusRegion::Dashboard;
@@ -282,17 +285,19 @@ impl MainView {
             .parse::<usize>()
             .ok()
             .filter(|&d| (1..=9).contains(&d))
-            && self.nav_modifier.matches(&event.keystroke.modifiers)
+            && self
+                .keybindings
+                .navigation
+                .jump_modifier
+                .matches(&event.keystroke.modifiers)
         {
             self.navigate_to_kild_index(digit - 1, window, cx);
             cx.notify();
             return;
         }
 
-        // Cmd+J/K/D: kild navigation (works in both dashboard and terminal mode)
+        // Cmd+Shift+J/K: cycle between teammate terminals in the tab bar (not configurable)
         let cmd = event.keystroke.modifiers.platform;
-
-        // Cmd+Shift+J/K: cycle between teammate terminals in the tab bar
         if cmd && event.keystroke.modifiers.shift && key_str == "j" {
             self.navigate_next_teammate_tab(window, cx);
             cx.notify();
@@ -305,8 +310,13 @@ impl MainView {
             return;
         }
 
-        // Cmd+Shift+[/]: cycle workspaces
-        if cmd && event.keystroke.modifiers.shift && key_str == "[" {
+        // prev_workspace / next_workspace bindings: cycle workspaces
+        if self
+            .keybindings
+            .navigation
+            .prev_workspace
+            .matches(&event.keystroke)
+        {
             if self.workspaces.len() > 1 {
                 self.active_workspace = if self.active_workspace == 0 {
                     self.workspaces.len() - 1
@@ -323,7 +333,12 @@ impl MainView {
             return;
         }
 
-        if cmd && event.keystroke.modifiers.shift && key_str == "]" {
+        if self
+            .keybindings
+            .navigation
+            .next_workspace
+            .matches(&event.keystroke)
+        {
             if self.workspaces.len() > 1 {
                 self.active_workspace = (self.active_workspace + 1) % self.workspaces.len();
                 self.active_view = ActiveView::Control;
@@ -336,19 +351,34 @@ impl MainView {
             return;
         }
 
-        if cmd && key_str == "j" {
+        if self
+            .keybindings
+            .navigation
+            .next_kild
+            .matches(&event.keystroke)
+        {
             self.navigate_next_kild(window, cx);
             cx.notify();
             return;
         }
 
-        if cmd && key_str == "k" {
+        if self
+            .keybindings
+            .navigation
+            .prev_kild
+            .matches(&event.keystroke)
+        {
             self.navigate_prev_kild(window, cx);
             cx.notify();
             return;
         }
 
-        if cmd && key_str == "d" {
+        if self
+            .keybindings
+            .navigation
+            .toggle_view
+            .matches(&event.keystroke)
+        {
             self.toggle_view(window, cx);
             return;
         }
@@ -499,7 +529,7 @@ impl Render for MainView {
                             .child(status_bar::render_status_bar(
                                 &self.state,
                                 self.active_view,
-                                self.nav_modifier.hint_prefix(),
+                                &self.keybindings,
                                 cx,
                             )),
                     ),

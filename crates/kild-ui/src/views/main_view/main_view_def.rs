@@ -1,13 +1,13 @@
 //! MainView struct definition and core initialization.
 
 use gpui::{Context, FocusHandle, Task};
-use tracing::warn;
 
 use crate::state::AppState;
 use crate::watcher::SessionWatcher;
 
 use super::super::terminal_tabs::TerminalTabs;
-use super::types::{ActiveView, FocusRegion, NavModifier};
+use super::keybindings::UiKeybindings;
+use super::types::{ActiveView, FocusRegion};
 
 /// Main application view that composes the kild list, header, and create dialog.
 ///
@@ -53,8 +53,8 @@ pub struct MainView {
     pub(super) workspaces: Vec<super::super::pane_grid::PaneGrid>,
     /// Index of the active workspace in the Control view.
     pub(super) active_workspace: usize,
-    /// Parsed navigation modifier from config for modifier+1-9 kild jumping.
-    pub(super) nav_modifier: NavModifier,
+    /// Parsed keybindings from `~/.kild/keybindings.toml` (or defaults).
+    pub(super) keybindings: UiKeybindings,
     /// Agent team manager (owns watcher + cached team state).
     pub(super) team_manager: crate::teams::TeamManager,
     /// Handle to the team watcher task. Must be stored to prevent cancellation.
@@ -229,17 +229,10 @@ impl MainView {
             }
         });
 
-        // Load UI config for nav modifier
-        let nav_modifier = match kild_core::KildConfig::load_hierarchy() {
-            Ok(config) => NavModifier::from_config(config.ui.nav_modifier()),
-            Err(e) => {
-                warn!(
-                    event = "ui.config.load_failed",
-                    error = %e,
-                    "Failed to load config, using default keybindings (ctrl+1-9)"
-                );
-                NavModifier::Ctrl
-            }
+        // Load keybindings from hierarchy (~/.kild/keybindings.toml → ./.kild/keybindings.toml)
+        let keybindings = {
+            let raw = kild_core::Keybindings::load_hierarchy();
+            UiKeybindings::from_config(&raw)
         };
 
         let mut view = Self {
@@ -262,7 +255,7 @@ impl MainView {
             daemon_session_counter: 1,
             workspaces: vec![super::super::pane_grid::PaneGrid::new()],
             active_workspace: 0,
-            nav_modifier,
+            keybindings,
             team_manager: crate::teams::TeamManager::new(),
             _team_watcher_task: team_watcher_task,
         };

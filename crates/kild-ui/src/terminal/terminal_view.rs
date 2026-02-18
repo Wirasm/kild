@@ -9,6 +9,7 @@ use super::input;
 use super::state::Terminal;
 use super::terminal_element::{MouseState, TerminalElement};
 use crate::theme;
+use crate::views::main_view::keybindings::UiKeybindings;
 
 /// GPUI View wrapping TerminalElement with focus management and keyboard routing.
 ///
@@ -24,6 +25,8 @@ pub struct TerminalView {
     /// Mouse state passed to TerminalElement on each render.
     /// TerminalElement is reconstructed every frame -- do not cache instances.
     mouse_state: MouseState,
+    /// Parsed keybindings for routing keys between PTY and MainView.
+    keybindings: UiKeybindings,
 }
 
 impl TerminalView {
@@ -74,6 +77,7 @@ impl TerminalView {
                 position: None,
                 cmd_held: false,
             },
+            keybindings: UiKeybindings::from_config(&kild_core::Keybindings::load_hierarchy()),
         }
     }
 
@@ -118,6 +122,7 @@ impl TerminalView {
                 position: None,
                 cmd_held: false,
             },
+            keybindings: UiKeybindings::from_config(&kild_core::Keybindings::load_hierarchy()),
         }
     }
 
@@ -188,8 +193,10 @@ impl TerminalView {
             return;
         }
 
-        // Cmd+J/K/D: reserved for kild navigation — propagate to MainView
-        if cmd && matches!(key, "j" | "k" | "d") {
+        // Nav shortcuts: propagate to MainView instead of sending to the PTY.
+        // Includes focus_escape so Ctrl+Escape reaches MainView rather than
+        // being encoded as \x1b.
+        if self.keybindings.matches_any_nav_shortcut(&event.keystroke) {
             cx.propagate();
             return;
         }
@@ -202,8 +209,8 @@ impl TerminalView {
             cmd = cmd,
         );
 
-        // Cmd+C: copy selection to clipboard and clear it, or send Ctrl+C (SIGINT) if no selection
-        if cmd && key == "c" {
+        // Copy: copy selection or send SIGINT
+        if self.keybindings.terminal.copy.matches(&event.keystroke) {
             let text = self.terminal.term().lock().selection_to_string();
             if let Some(text) = text {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -217,8 +224,8 @@ impl TerminalView {
             return;
         }
 
-        // Cmd+V: paste clipboard to PTY stdin
-        if cmd && key == "v" {
+        // Paste: paste clipboard to PTY stdin
+        if self.keybindings.terminal.paste.matches(&event.keystroke) {
             if let Some(clipboard) = cx.read_from_clipboard()
                 && let Some(text) = clipboard.text()
                 && let Err(e) = self.terminal.write_to_pty(text.as_bytes())

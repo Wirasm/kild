@@ -41,18 +41,29 @@
 //! ```
 
 pub mod defaults;
+pub mod keybindings;
 pub mod loading;
 pub mod types;
 pub mod validation;
 
 // Public API exports
+pub use keybindings::Keybindings;
 pub use types::{
     AgentConfig, AgentSettings, Config, EditorConfig, GitConfig, HealthConfig, KildConfig,
-    TerminalConfig, UiConfig, VALID_NAV_MODIFIERS,
+    TerminalConfig, UiConfig,
 };
 pub use validation::{VALID_TERMINALS, validate_config};
 
 // Convenience methods delegating to submodule functions
+impl Keybindings {
+    /// Load keybindings from the user/project hierarchy.
+    ///
+    /// Never returns an error — parse failures warn and fall back to defaults.
+    pub fn load_hierarchy() -> Self {
+        keybindings::load_hierarchy()
+    }
+}
+
 impl KildConfig {
     /// Load configuration from the hierarchy of config files.
     ///

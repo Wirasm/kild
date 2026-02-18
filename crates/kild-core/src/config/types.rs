@@ -26,9 +26,6 @@
 //! [health]
 //! idle_threshold_minutes = 10
 //! history_enabled = true
-//!
-//! [ui]
-//! nav_modifier = "ctrl"
 //! ```
 
 use crate::files::types::IncludeConfig;
@@ -129,37 +126,18 @@ impl Default for KildConfig {
     }
 }
 
-/// Valid values for the `nav_modifier` configuration option.
-pub const VALID_NAV_MODIFIERS: [&str; 3] = ["ctrl", "alt", "cmd+shift"];
-
 /// UI configuration for the KILD native GUI.
 ///
-/// Controls keybindings and navigation behavior in the GUI.
-/// Fields are `pub` because kild-ui reads them directly.
+/// Keyboard shortcuts have moved to `keybindings.toml` (see `Keybindings`).
+/// This section is kept for forward extension.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct UiConfig {
-    /// Modifier key(s) for 1-9 kild index jumping.
-    /// Valid values: "ctrl", "alt", "cmd+shift"
-    /// Default: "ctrl"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nav_modifier: Option<String>,
-}
+pub struct UiConfig {}
 
 impl UiConfig {
-    /// Returns the configured nav modifier, defaulting to "ctrl".
-    pub fn nav_modifier(&self) -> &str {
-        self.nav_modifier.as_deref().unwrap_or("ctrl")
-    }
-
     /// Merge two UI configs. Override takes precedence for set fields.
-    pub fn merge(base: &Self, override_config: &Self) -> Self {
-        Self {
-            nav_modifier: override_config
-                .nav_modifier
-                .clone()
-                .or(base.nav_modifier.clone()),
-        }
+    pub fn merge(_base: &Self, _override_config: &Self) -> Self {
+        Self {}
     }
 }
 
@@ -593,76 +571,22 @@ default = "code"
     // --- UiConfig tests ---
 
     #[test]
-    fn test_ui_config_nav_modifier_defaults_to_ctrl() {
+    fn test_ui_config_serialization_round_trips() {
         let config = UiConfig::default();
-        assert_eq!(config.nav_modifier(), "ctrl");
+        let toml_str = toml::to_string(&config).unwrap();
+        let _parsed: UiConfig = toml::from_str(&toml_str).unwrap();
     }
 
     #[test]
-    fn test_ui_config_nav_modifier_returns_set_value() {
-        let config = UiConfig {
-            nav_modifier: Some("alt".to_string()),
-        };
-        assert_eq!(config.nav_modifier(), "alt");
-    }
-
-    #[test]
-    fn test_ui_config_merge_override_wins() {
-        let base = UiConfig {
-            nav_modifier: Some("ctrl".to_string()),
-        };
-        let override_config = UiConfig {
-            nav_modifier: Some("alt".to_string()),
-        };
-        let merged = UiConfig::merge(&base, &override_config);
-        assert_eq!(merged.nav_modifier(), "alt");
-    }
-
-    #[test]
-    fn test_ui_config_merge_preserves_base_when_override_none() {
-        let base = UiConfig {
-            nav_modifier: Some("cmd+shift".to_string()),
-        };
-        let override_config = UiConfig { nav_modifier: None };
-        let merged = UiConfig::merge(&base, &override_config);
-        assert_eq!(merged.nav_modifier(), "cmd+shift");
-    }
-
-    #[test]
-    fn test_ui_config_merge_both_none() {
+    fn test_ui_config_merge_returns_self() {
         let base = UiConfig::default();
         let override_config = UiConfig::default();
-        let merged = UiConfig::merge(&base, &override_config);
-        assert_eq!(merged.nav_modifier(), "ctrl");
+        let _merged = UiConfig::merge(&base, &override_config);
     }
 
     #[test]
-    fn test_ui_config_serialization() {
-        let config = UiConfig {
-            nav_modifier: Some("alt".to_string()),
-        };
-        let toml_str = toml::to_string(&config).unwrap();
-        assert!(toml_str.contains("nav_modifier = \"alt\""));
-
-        let parsed: UiConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.nav_modifier(), "alt");
-    }
-
-    #[test]
-    fn test_ui_config_from_toml() {
-        let config: KildConfig = toml::from_str(
-            r#"
-[ui]
-nav_modifier = "alt"
-"#,
-        )
-        .unwrap();
-        assert_eq!(config.ui.nav_modifier(), "alt");
-    }
-
-    #[test]
-    fn test_ui_config_defaults_when_missing() {
+    fn test_ui_config_from_empty_toml() {
         let config: KildConfig = toml::from_str("").unwrap();
-        assert_eq!(config.ui.nav_modifier(), "ctrl");
+        let _ = config.ui; // UiConfig is empty but must deserialize
     }
 }

@@ -10,6 +10,7 @@ use gpui_component::kbd::Kbd;
 
 use crate::state::AppState;
 use crate::theme;
+use crate::views::main_view::keybindings::UiKeybindings;
 use crate::views::main_view::{ActiveView, MainView};
 use kild_core::{GitStatus, ProcessStatus};
 
@@ -26,7 +27,7 @@ struct Alert {
 pub fn render_status_bar(
     state: &AppState,
     active_view: ActiveView,
-    nav_hint_prefix: &str,
+    keybindings: &UiKeybindings,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     div()
@@ -39,7 +40,7 @@ pub fn render_status_bar(
         .border_t_1()
         .border_color(theme::border_subtle())
         .child(render_alerts(state, cx))
-        .child(render_keyboard_hints(active_view, nav_hint_prefix, cx))
+        .child(render_keyboard_hints(active_view, keybindings, cx))
         .into_any_element()
 }
 
@@ -133,10 +134,10 @@ fn compute_alerts(state: &AppState) -> Vec<Alert> {
 /// Render view-aware keyboard shortcut hints.
 fn render_keyboard_hints(
     active_view: ActiveView,
-    nav_hint_prefix: &str,
+    keybindings: &UiKeybindings,
     _cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let hints = keyboard_hints_for_view(active_view, nav_hint_prefix);
+    let hints = keyboard_hints_for_view(active_view, keybindings);
 
     div()
         .flex()
@@ -161,23 +162,29 @@ fn render_keyboard_hints(
 }
 
 /// Return the keyboard hints appropriate for the given view.
-fn keyboard_hints_for_view(view: ActiveView, nav_hint_prefix: &str) -> Vec<(String, &'static str)> {
+fn keyboard_hints_for_view(
+    view: ActiveView,
+    keybindings: &UiKeybindings,
+) -> Vec<(String, &'static str)> {
     match view {
         ActiveView::Control => vec![
-            (format!("{}-1", nav_hint_prefix), "jump"),
-            ("cmd-j".to_string(), "next"),
-            ("cmd-k".to_string(), "prev"),
-            ("cmd-shift-[".to_string(), "ws"),
-            ("cmd-d".to_string(), "dashboard"),
+            (
+                format!("{}-1", keybindings.navigation.jump_modifier.hint_prefix()),
+                "jump",
+            ),
+            (keybindings.navigation.next_kild.hint_str(), "next"),
+            (keybindings.navigation.prev_kild.hint_str(), "prev"),
+            (keybindings.navigation.prev_workspace.hint_str(), "ws"),
+            (keybindings.navigation.toggle_view.hint_str(), "dashboard"),
         ],
         ActiveView::Dashboard => vec![
-            ("cmd-j".to_string(), "next"),
-            ("cmd-k".to_string(), "prev"),
-            ("cmd-d".to_string(), "control"),
+            (keybindings.navigation.next_kild.hint_str(), "next"),
+            (keybindings.navigation.prev_kild.hint_str(), "prev"),
+            (keybindings.navigation.toggle_view.hint_str(), "control"),
         ],
         ActiveView::Detail => vec![
             ("escape".to_string(), "back"),
-            ("cmd-d".to_string(), "control"),
+            (keybindings.navigation.toggle_view.hint_str(), "control"),
         ],
     }
 }
@@ -185,8 +192,25 @@ fn keyboard_hints_for_view(view: ActiveView, nav_hint_prefix: &str) -> Vec<(Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::main_view::keybindings::{ParsedJumpModifier, UiKeybindings};
     use kild_core::Session;
     use kild_core::sessions::SessionInfo;
+
+    fn default_kb() -> UiKeybindings {
+        UiKeybindings::default_bindings()
+    }
+
+    fn alt_jump_kb() -> UiKeybindings {
+        let mut raw = kild_core::Keybindings::default();
+        raw.navigation.jump_modifier = Some("alt".to_string());
+        UiKeybindings::from_config(&raw)
+    }
+
+    fn cmd_shift_jump_kb() -> UiKeybindings {
+        let mut raw = kild_core::Keybindings::default();
+        raw.navigation.jump_modifier = Some("cmd+shift".to_string());
+        UiKeybindings::from_config(&raw)
+    }
 
     #[test]
     fn test_compute_alerts_empty_state() {
@@ -233,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_keyboard_hints_control_view() {
-        let hints = keyboard_hints_for_view(ActiveView::Control, "ctrl");
+        let hints = keyboard_hints_for_view(ActiveView::Control, &default_kb());
         assert_eq!(hints.len(), 5);
         assert_eq!(hints[0].0, "ctrl-1");
         assert_eq!(hints[0].1, "jump");
@@ -244,21 +268,21 @@ mod tests {
 
     #[test]
     fn test_keyboard_hints_control_view_alt_modifier() {
-        let hints = keyboard_hints_for_view(ActiveView::Control, "alt");
+        let hints = keyboard_hints_for_view(ActiveView::Control, &alt_jump_kb());
         assert_eq!(hints[0].0, "alt-1");
         assert_eq!(hints[0].1, "jump");
     }
 
     #[test]
     fn test_keyboard_hints_control_view_cmd_shift_modifier() {
-        let hints = keyboard_hints_for_view(ActiveView::Control, "cmd-shift");
+        let hints = keyboard_hints_for_view(ActiveView::Control, &cmd_shift_jump_kb());
         assert_eq!(hints[0].0, "cmd-shift-1");
         assert_eq!(hints[0].1, "jump");
     }
 
     #[test]
     fn test_keyboard_hints_dashboard_view() {
-        let hints = keyboard_hints_for_view(ActiveView::Dashboard, "ctrl");
+        let hints = keyboard_hints_for_view(ActiveView::Dashboard, &default_kb());
         assert_eq!(hints.len(), 3);
         assert_eq!(hints[2].0, "cmd-d");
         assert_eq!(hints[2].1, "control");
@@ -266,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_keyboard_hints_detail_view() {
-        let hints = keyboard_hints_for_view(ActiveView::Detail, "ctrl");
+        let hints = keyboard_hints_for_view(ActiveView::Detail, &default_kb());
         assert_eq!(hints.len(), 2);
         assert_eq!(hints[0].0, "escape");
         assert_eq!(hints[0].1, "back");
@@ -274,20 +298,20 @@ mod tests {
 
     #[test]
     fn test_all_keystroke_hints_parse() {
+        let kb_variants = [default_kb(), alt_jump_kb(), cmd_shift_jump_kb()];
         let views = [
             ActiveView::Control,
             ActiveView::Dashboard,
             ActiveView::Detail,
         ];
-        for nav_prefix in ["ctrl", "alt", "cmd-shift"] {
+        for kb in &kb_variants {
             for view in views {
-                for (keystroke_str, _label) in keyboard_hints_for_view(view, nav_prefix) {
+                for (keystroke_str, _label) in keyboard_hints_for_view(view, kb) {
                     assert!(
                         Keystroke::parse(&keystroke_str).is_ok(),
-                        "Invalid keystroke '{}' in {:?} with prefix '{}'",
+                        "Invalid keystroke '{}' in {:?}",
                         keystroke_str,
                         view,
-                        nav_prefix,
                     );
                 }
             }

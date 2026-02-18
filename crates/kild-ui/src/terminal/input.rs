@@ -18,13 +18,8 @@ pub fn keystroke_to_escape(keystroke: &Keystroke, app_cursor_mode: bool) -> Opti
         return None;
     }
 
-    // Cmd+J/K/D: reserved for kild navigation (handled by MainView)
-    let cmd = keystroke.modifiers.platform;
-    if cmd && matches!(key, "j" | "k" | "d") {
-        return None;
-    }
-
     // Cmd+nav: macOS line-level shortcuts
+    let cmd = keystroke.modifiers.platform;
     if cmd {
         return match key {
             "backspace" => Some(vec![0x15]), // Ctrl+U: delete to beginning of line

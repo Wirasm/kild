@@ -4,6 +4,7 @@
 //! Handles keyboard input and dialog state management.
 
 mod dialog_handlers;
+pub(crate) mod keybindings;
 mod kild_handlers;
 mod main_view_def;
 mod navigation;
