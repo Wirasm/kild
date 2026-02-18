@@ -17,8 +17,9 @@ impl MainView {
         match crate::terminal::state::Terminal::new(Some(worktree), cx) {
             Ok(terminal) => {
                 let kb = self.keybindings.clone();
-                let view =
-                    cx.new(|cx| crate::terminal::TerminalView::from_terminal(terminal, kb, window, cx));
+                let view = cx.new(|cx| {
+                    crate::terminal::TerminalView::from_terminal(terminal, kb, window, cx)
+                });
                 let tabs = self
                     .terminal_tabs
                     .entry(session_id.to_string())
