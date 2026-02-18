@@ -13,10 +13,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use kild_protocol::{
-    ClientMessage, DaemonMessage, ErrorCode, SessionId, SessionInfo, SessionStatus,
+    AsyncIpcClient, ClientMessage, DaemonMessage, ErrorCode, IpcError, SessionId, SessionInfo,
+    SessionStatus,
 };
 use smol::Async;
-use smol::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use smol::io::{BufReader, split};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -37,14 +38,17 @@ pub enum DaemonClientError {
     Serialize(#[from] serde_json::Error),
 
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
 
+    #[allow(dead_code)]
     #[error("daemon closed connection (EOF)")]
     ConnectionClosed,
 
+    #[allow(dead_code)]
     #[error("daemon sent empty response")]
     EmptyResponse,
 
+    #[allow(dead_code)]
     #[error("invalid JSON from daemon: {source}: {json}")]
     InvalidJson {
         source: serde_json::Error,
@@ -63,12 +67,38 @@ pub enum DaemonClientError {
 
     #[error("base64 decode failed: {0}")]
     Base64Decode(#[from] base64::DecodeError),
+
+    #[error("protocol error: {0}")]
+    Protocol(String),
 }
 
-/// Connect to the daemon socket, returning an async stream.
-///
-/// Shared connection logic for all IPC operations.
-async fn connect_to_daemon() -> Result<Async<UnixStream>, DaemonClientError> {
+impl From<IpcError> for DaemonClientError {
+    fn from(e: IpcError) -> Self {
+        match e {
+            IpcError::NotRunning { path } => {
+                DaemonClientError::Connect(std::io::Error::new(std::io::ErrorKind::NotFound, path))
+            }
+            IpcError::ConnectionFailed(io) => DaemonClientError::Connect(io),
+            IpcError::DaemonError { code, message } => DaemonClientError::DaemonError {
+                code: code.to_string(),
+                message,
+            },
+            IpcError::ProtocolError { message } => DaemonClientError::Protocol(message),
+            IpcError::Io(io) => DaemonClientError::Io(io),
+            _ => DaemonClientError::Io(std::io::Error::other(e.to_string())),
+        }
+    }
+}
+
+/// Reader half type for an attached daemon connection.
+type UiReader = BufReader<smol::io::ReadHalf<Async<UnixStream>>>;
+/// Writer half type for an attached daemon connection.
+type UiWriter = smol::io::WriteHalf<Async<UnixStream>>;
+/// Full async IPC client backed by a split Unix stream.
+type UiClient = AsyncIpcClient<UiReader, UiWriter>;
+
+/// Connect to the daemon socket, returning an `AsyncIpcClient`.
+async fn connect() -> Result<UiClient, DaemonClientError> {
     let socket_path = kild_core::daemon::socket_path();
     if !socket_path.exists() {
         return Err(DaemonClientError::Connect(std::io::Error::new(
@@ -76,55 +106,11 @@ async fn connect_to_daemon() -> Result<Async<UnixStream>, DaemonClientError> {
             "daemon socket not found",
         )));
     }
-    Async::<UnixStream>::connect(&socket_path)
+    let stream = Async::<UnixStream>::connect(&socket_path)
         .await
-        .map_err(DaemonClientError::Connect)
-}
-
-/// Send a JSONL message on a stream without flushing.
-///
-/// For write-heavy operations (WriteStdin, ResizePty) where the caller
-/// doesn't need an immediate response. Callers expecting a response should
-/// use `send_message_flush()` to ensure the message reaches the peer.
-async fn send_message(
-    stream: &mut Async<UnixStream>,
-    msg: &ClientMessage,
-) -> Result<(), DaemonClientError> {
-    let json = serde_json::to_string(msg)?;
-    stream.write_all(json.as_bytes()).await?;
-    stream.write_all(b"\n").await?;
-    Ok(())
-}
-
-/// Send a JSONL message and flush immediately.
-///
-/// For request-response patterns where a read follows the write.
-async fn send_message_flush(
-    stream: &mut Async<UnixStream>,
-    msg: &ClientMessage,
-) -> Result<(), DaemonClientError> {
-    send_message(stream, msg).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
-/// Read one JSONL line and parse as DaemonMessage.
-async fn read_response(
-    reader: &mut BufReader<Async<UnixStream>>,
-) -> Result<DaemonMessage, DaemonClientError> {
-    let mut line = String::new();
-    let bytes_read = reader.read_line(&mut line).await?;
-    if bytes_read == 0 {
-        return Err(DaemonClientError::ConnectionClosed);
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Err(DaemonClientError::EmptyResponse);
-    }
-    serde_json::from_str(trimmed).map_err(|e| DaemonClientError::InvalidJson {
-        source: e,
-        json: trimmed.to_string(),
-    })
+        .map_err(DaemonClientError::Connect)?;
+    let (r, w) = split(stream);
+    Ok(AsyncIpcClient::new(BufReader::new(r), w))
 }
 
 /// Async ping to the kild daemon via smol.
@@ -145,7 +131,7 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
         return Ok(false);
     }
 
-    let mut stream = match Async::<UnixStream>::connect(&socket_path).await {
+    let stream = match Async::<UnixStream>::connect(&socket_path).await {
         Ok(s) => s,
         Err(e) => {
             if e.kind() == std::io::ErrorKind::ConnectionRefused {
@@ -155,36 +141,18 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
                 );
                 return Ok(false);
             }
-            error!(
-                event = "ui.daemon.ping_failed",
-                error = %e,
-            );
+            error!(event = "ui.daemon.ping_failed", error = %e);
             return Err(DaemonClientError::Connect(e));
         }
     };
 
+    let (r, w) = split(stream);
+    let mut client = AsyncIpcClient::new(BufReader::new(r), w);
+
     let request = ClientMessage::Ping {
         id: next_request_id(),
     };
-
-    send_message_flush(&mut stream, &request).await?;
-
-    // Read Ack response (hand ownership to BufReader — done writing)
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    let bytes_read = reader.read_line(&mut line).await?;
-    if bytes_read == 0 {
-        return Err(DaemonClientError::ConnectionClosed);
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Err(DaemonClientError::EmptyResponse);
-    }
-    let response: DaemonMessage =
-        serde_json::from_str(trimmed).map_err(|e| DaemonClientError::InvalidJson {
-            source: e,
-            json: trimmed.to_string(),
-        })?;
+    let response = client.send(&request).await?;
 
     match response {
         DaemonMessage::Ack { .. } => {
@@ -207,15 +175,12 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
 pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError> {
     debug!(event = "ui.daemon.list_sessions_started");
 
-    let mut stream = connect_to_daemon().await?;
+    let mut client = connect().await?;
     let request = ClientMessage::ListSessions {
         id: next_request_id(),
         project_id: None,
     };
-    send_message_flush(&mut stream, &request).await?;
-
-    let mut reader = BufReader::new(stream);
-    let response = read_response(&mut reader).await?;
+    let response = client.send(&request).await?;
 
     match response {
         DaemonMessage::SessionList { sessions, .. } => {
@@ -225,10 +190,6 @@ pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError
             );
             Ok(sessions)
         }
-        DaemonMessage::Error { code, message, .. } => Err(DaemonClientError::DaemonError {
-            code: code.to_string(),
-            message,
-        }),
         other => Err(DaemonClientError::UnexpectedResponse(other)),
     }
 }
@@ -257,15 +218,12 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
         session_id = session_id
     );
 
-    let mut stream = connect_to_daemon().await?;
+    let mut client = connect().await?;
     let request = ClientMessage::GetSession {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    send_message_flush(&mut stream, &request).await?;
-
-    let mut reader = BufReader::new(stream);
-    let response = read_response(&mut reader).await?;
+    let response = client.send(&request).await?;
 
     match response {
         DaemonMessage::SessionInfo { session, .. } => {
@@ -276,6 +234,9 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
             );
             Ok(Some(session))
         }
+        // DaemonMessage::Error with SessionNotFound is converted to IpcError::DaemonError
+        // by AsyncIpcClient::send(), but we match the raw ErrorCode here as a fallback
+        // for any path that bypasses the client.
         DaemonMessage::Error {
             code: ErrorCode::SessionNotFound,
             ..
@@ -287,10 +248,6 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
             );
             Ok(None)
         }
-        DaemonMessage::Error { code, message, .. } => Err(DaemonClientError::DaemonError {
-            code: code.to_string(),
-            message,
-        }),
         other => Err(DaemonClientError::UnexpectedResponse(other)),
     }
 }
@@ -305,15 +262,12 @@ pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientErro
         session_id = session_id
     );
 
-    let mut stream = connect_to_daemon().await?;
+    let mut client = connect().await?;
     let request = ClientMessage::StopSession {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    send_message_flush(&mut stream, &request).await?;
-
-    let mut reader = BufReader::new(stream);
-    let response = read_response(&mut reader).await?;
+    let response = client.send(&request).await?;
 
     match response {
         DaemonMessage::Ack { .. } => {
@@ -323,10 +277,6 @@ pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientErro
             );
             Ok(())
         }
-        DaemonMessage::Error { code, message, .. } => Err(DaemonClientError::DaemonError {
-            code: code.to_string(),
-            message,
-        }),
         other => Err(DaemonClientError::UnexpectedResponse(other)),
     }
 }
@@ -344,7 +294,7 @@ pub async fn create_session_async(
         working_directory = working_directory
     );
 
-    let mut stream = connect_to_daemon().await?;
+    let mut client = connect().await?;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     let request = ClientMessage::CreateSession {
         id: next_request_id(),
@@ -357,10 +307,7 @@ pub async fn create_session_async(
         cols: 80,
         use_login_shell: true,
     };
-    send_message_flush(&mut stream, &request).await?;
-
-    let mut reader = BufReader::new(stream);
-    let response = read_response(&mut reader).await?;
+    let response = client.send(&request).await?;
 
     match response {
         DaemonMessage::SessionCreated { session, .. } => {
@@ -370,24 +317,20 @@ pub async fn create_session_async(
             );
             Ok(session.id.into_inner())
         }
-        DaemonMessage::Error { code, message, .. } => Err(DaemonClientError::DaemonError {
-            code: code.to_string(),
-            message,
-        }),
         other => Err(DaemonClientError::UnexpectedResponse(other)),
     }
 }
 
 /// Two-connection handle for attached daemon session.
 ///
-/// - `reader`: receives streaming PtyOutput messages after Attach
-/// - `writer`: sends WriteStdin, ResizePty, Detach commands
+/// - reader: receives streaming PtyOutput messages after Attach
+/// - writer: sends WriteStdin, ResizePty, Detach commands
 ///
 /// Fields are private to enforce invariants established during construction
 /// (reader is attached, session_id matches the attached session).
 pub struct DaemonConnection {
-    reader: BufReader<Async<UnixStream>>,
-    writer: Async<UnixStream>,
+    reader: UiReader,
+    writer: UiWriter,
     session_id: String,
 }
 
@@ -399,7 +342,7 @@ impl DaemonConnection {
     }
 
     /// Consume the connection, returning its parts for use in reader/writer tasks.
-    pub fn into_parts(self) -> (BufReader<Async<UnixStream>>, Async<UnixStream>, String) {
+    pub fn into_parts(self) -> (UiReader, UiWriter, String) {
         (self.reader, self.writer, self.session_id)
     }
 }
@@ -419,17 +362,14 @@ pub async fn connect_for_attach(
     );
 
     // Connection 1: reader — send Attach, read Ack, then stream PtyOutput
-    let mut reader_stream = connect_to_daemon().await?;
+    let mut read_client = connect().await?;
     let attach_request = ClientMessage::Attach {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
         rows,
         cols,
     };
-    send_message_flush(&mut reader_stream, &attach_request).await?;
-
-    let mut reader = BufReader::new(reader_stream);
-    let ack = read_response(&mut reader).await?;
+    let ack = read_client.send(&attach_request).await?;
     match ack {
         DaemonMessage::Ack { .. } => {
             info!(
@@ -437,19 +377,19 @@ pub async fn connect_for_attach(
                 session_id = session_id
             );
         }
-        DaemonMessage::Error { code, message, .. } => {
-            return Err(DaemonClientError::DaemonError {
-                code: code.to_string(),
-                message,
-            });
-        }
         other => {
             return Err(DaemonClientError::UnexpectedResponse(other));
         }
     }
 
+    // Extract the reader half; discard the unused writer half of the read connection.
+    let (reader, _) = read_client.into_parts();
+
     // Connection 2: writer — held open for WriteStdin/ResizePty/Detach
-    let writer = connect_to_daemon().await?;
+    let write_stream = Async::<UnixStream>::connect(&kild_core::daemon::socket_path())
+        .await
+        .map_err(DaemonClientError::Connect)?;
+    let (_, writer) = split(write_stream);
 
     info!(
         event = "ui.daemon.attach_completed",
@@ -465,7 +405,7 @@ pub async fn connect_for_attach(
 
 /// Send WriteStdin IPC message (base64-encoded data).
 pub async fn send_write_stdin(
-    writer: &mut Async<UnixStream>,
+    writer: &mut UiWriter,
     session_id: &str,
     data: &[u8],
 ) -> Result<(), DaemonClientError> {
@@ -475,12 +415,14 @@ pub async fn send_write_stdin(
         session_id: SessionId::from(session_id),
         data: encoded,
     };
-    send_message(writer, &msg).await
+    kild_protocol::async_client::write_jsonl(writer, &msg)
+        .await
+        .map_err(Into::into)
 }
 
 /// Send ResizePty IPC message.
 pub async fn send_resize(
-    writer: &mut Async<UnixStream>,
+    writer: &mut UiWriter,
     session_id: &str,
     rows: u16,
     cols: u16,
@@ -491,19 +433,20 @@ pub async fn send_resize(
         rows,
         cols,
     };
-    send_message(writer, &msg).await
+    kild_protocol::async_client::write_jsonl(writer, &msg)
+        .await
+        .map_err(Into::into)
 }
 
 /// Send Detach IPC message.
-pub async fn send_detach(
-    writer: &mut Async<UnixStream>,
-    session_id: &str,
-) -> Result<(), DaemonClientError> {
+pub async fn send_detach(writer: &mut UiWriter, session_id: &str) -> Result<(), DaemonClientError> {
     let msg = ClientMessage::Detach {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    send_message(writer, &msg).await
+    kild_protocol::async_client::write_jsonl(writer, &msg)
+        .await
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -662,5 +605,33 @@ mod tests {
         } else {
             panic!("expected SessionInfo");
         }
+    }
+
+    #[test]
+    fn test_from_ipc_error_not_running() {
+        let e = IpcError::NotRunning {
+            path: "/tmp/kild.sock".to_string(),
+        };
+        let ce: DaemonClientError = e.into();
+        assert!(matches!(ce, DaemonClientError::Connect(_)));
+    }
+
+    #[test]
+    fn test_from_ipc_error_daemon_error() {
+        let e = IpcError::DaemonError {
+            code: ErrorCode::SessionNotFound,
+            message: "no such session".to_string(),
+        };
+        let ce: DaemonClientError = e.into();
+        assert!(matches!(ce, DaemonClientError::DaemonError { .. }));
+    }
+
+    #[test]
+    fn test_from_ipc_error_protocol() {
+        let e = IpcError::ProtocolError {
+            message: "bad json".to_string(),
+        };
+        let ce: DaemonClientError = e.into();
+        assert!(matches!(ce, DaemonClientError::Protocol(_)));
     }
 }
