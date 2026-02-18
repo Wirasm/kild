@@ -16,6 +16,52 @@ fn git2_error(e: git2::Error) -> GitError {
     GitError::Git2Error { source: e }
 }
 
+/// Calls `repo.worktree()` with retry on `git2::ErrorCode::Exists`.
+///
+/// libgit2's `git_worktree_add()` creates `.git/worktrees/` with a non-atomic
+/// mkdir. When two `kild create` processes run concurrently, the second fails
+/// with `Exists(-4)` because the first just created the directory. A retry
+/// always succeeds since the directory now exists and libgit2 proceeds normally.
+///
+/// Only retries when the admin entry (`.git/worktrees/<name>`) does not yet
+/// exist — meaning the `Exists` error is from the parent dir race, not a genuine
+/// duplicate worktree name. If the admin entry already exists, the error is
+/// propagated immediately without burning retry budget.
+fn add_git_worktree_with_retry(
+    repo: &Repository,
+    name: &str,
+    path: &std::path::Path,
+    opts: &WorktreeAddOptions<'_>,
+) -> Result<(), GitError> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
+    let mut attempt = 0;
+    loop {
+        match repo.worktree(name, path, Some(opts)) {
+            Ok(_) => return Ok(()),
+            Err(e) if e.code() == git2::ErrorCode::Exists && attempt < MAX_RETRIES => {
+                // Distinguish the transient parent-dir race from a genuine duplicate
+                // admin entry. If `.git/worktrees/<name>` already exists, the error
+                // is permanent — retrying would not help.
+                let admin_exists = repo.path().join("worktrees").join(name).exists();
+                if admin_exists {
+                    return Err(git2_error(e));
+                }
+                attempt += 1;
+                warn!(
+                    event = "core.git.worktree.create_retry",
+                    attempt = attempt,
+                    error = %e,
+                    "Retrying worktree creation after concurrent mkdir race"
+                );
+                std::thread::sleep(RETRY_DELAY);
+            }
+            Err(e) => return Err(git2_error(e)),
+        }
+    }
+}
+
 pub fn detect_project() -> Result<ProjectInfo, GitError> {
     info!(event = "core.git.project.detect_started");
 
@@ -227,8 +273,7 @@ pub fn create_worktree(
     let mut opts = WorktreeAddOptions::new();
     opts.reference(Some(&reference));
 
-    repo.worktree(&worktree_name, &worktree_path, Some(&opts))
-        .map_err(git2_error)?;
+    add_git_worktree_with_retry(&repo, &worktree_name, &worktree_path, &opts)?;
 
     let worktree_info = WorktreeInfo::new(
         worktree_path.clone(),
@@ -739,5 +784,62 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_concurrent_worktree_creation_different_branches() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let temp_dir = create_temp_test_dir("kild_test_concurrent");
+        init_test_repo(&temp_dir);
+        let base_dir = create_temp_test_dir("kild_test_concurrent_base");
+
+        let temp_dir = Arc::new(temp_dir);
+        let base_dir = Arc::new(base_dir);
+        let barrier = Arc::new(Barrier::new(2));
+
+        let handles: Vec<_> = ["branch-a", "branch-b"]
+            .iter()
+            .map(|branch| {
+                let temp_dir = Arc::clone(&temp_dir);
+                let base_dir = Arc::clone(&base_dir);
+                let barrier = Arc::clone(&barrier);
+                let branch = branch.to_string();
+
+                thread::spawn(move || {
+                    let project = ProjectInfo::new(
+                        "test-id".to_string(),
+                        "test-project".to_string(),
+                        (*temp_dir).clone(),
+                        None,
+                    );
+                    let git_config = GitConfig {
+                        fetch_before_create: Some(false),
+                        ..GitConfig::default()
+                    };
+
+                    // Synchronize both threads to start create_worktree simultaneously.
+                    // This exercises concurrent in-process creates of different branches.
+                    // The inter-process race (two separate OS processes) is not reproducible
+                    // in a unit test without subprocess spawning, but this covers the same
+                    // libgit2 non-atomic mkdir path since both threads call mkdir(2) directly.
+                    barrier.wait();
+
+                    create_worktree(&base_dir, &project, &branch, None, &git_config)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        assert!(
+            results.iter().all(|r| r.is_ok()),
+            "Both concurrent worktree creations should succeed, got: {:?}",
+            results.iter().filter(|r| r.is_err()).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir.as_ref());
+        let _ = std::fs::remove_dir_all(base_dir.as_ref());
     }
 }
