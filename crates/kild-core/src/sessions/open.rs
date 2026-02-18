@@ -329,15 +329,26 @@ pub fn open_session(
                 }
             })?;
 
-        // Early exit detection: wait briefly, then verify PTY is still alive.
+        // Early exit detection: poll with exponential backoff until Running or Stopped.
         // Fast-failing processes (bad resume session, missing binary, env issues)
-        // typically exit within 200ms of spawn.
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // typically exit within 50ms of spawn. Exit early on Running confirmation.
+        let maybe_early_exit: Option<Option<i32>> = {
+            let mut result = None;
+            for delay_ms in [50u64, 100, 200] {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                match crate::daemon::client::get_session_info(&daemon_result.daemon_session_id) {
+                    Ok(Some((kild_protocol::SessionStatus::Stopped, exit_code))) => {
+                        result = Some(exit_code);
+                        break;
+                    }
+                    Ok(Some((kild_protocol::SessionStatus::Running, _))) => break, // confirmed alive
+                    _ => {} // Creating or IPC error — keep polling
+                }
+            }
+            result
+        };
 
-        if let Ok(Some((status, exit_code))) =
-            crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
-            && status == kild_protocol::SessionStatus::Stopped
-        {
+        if let Some(exit_code) = maybe_early_exit {
             let scrollback_tail =
                 match crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id) {
                     Ok(Some(bytes)) => {

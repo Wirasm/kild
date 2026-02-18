@@ -43,6 +43,7 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), DaemonAutoStartE
     let socket = socket_path();
     let timeout = std::time::Duration::from_secs(5);
     let start = std::time::Instant::now();
+    let mut delay_ms = 50u64;
 
     loop {
         // Check if daemon process crashed before socket was ready
@@ -100,7 +101,8 @@ pub fn ensure_daemon_running(config: &KildConfig) -> Result<(), DaemonAutoStartE
                 });
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        delay_ms = (delay_ms * 2).min(500);
     }
 }
 
