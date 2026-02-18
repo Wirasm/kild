@@ -66,7 +66,9 @@ pub fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::
 
 pub fn handle_wait_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let target = parse_interaction_target(matches)?;
-    let text = matches.get_one::<String>("text").unwrap();
+    let text = matches
+        .get_one::<String>("text")
+        .ok_or("--text is required")?;
     let until_gone = matches.get_flag("until-gone");
     let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
     let json_output = matches.get_flag("json");
@@ -88,14 +90,14 @@ pub fn handle_wait_command(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else if until_gone {
-                println!("Element \"{}\" is gone ({}ms)", text, result.elapsed_ms);
+                println!("Element \"{}\" is gone ({}ms)", text, result.elapsed_ms());
             } else {
-                println!("Element \"{}\" appeared ({}ms)", text, result.elapsed_ms);
+                println!("Element \"{}\" appeared ({}ms)", text, result.elapsed_ms());
             }
             info!(
                 event = "peek.cli.wait_completed",
                 text = text.as_str(),
-                elapsed_ms = result.elapsed_ms
+                elapsed_ms = result.elapsed_ms()
             );
             Ok(())
         }

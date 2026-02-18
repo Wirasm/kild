@@ -194,6 +194,7 @@ pub struct WaitRequest {
 
 impl WaitRequest {
     pub fn new(target: InteractionTarget, text: impl Into<String>, timeout_ms: u64) -> Self {
+        debug_assert!(timeout_ms > 0, "timeout_ms must be > 0");
         Self {
             target,
             text: text.into(),
@@ -227,16 +228,14 @@ impl WaitRequest {
 /// Result of a wait operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaitResult {
-    pub success: bool,
-    pub text: String,
-    pub until_gone: bool,
-    pub elapsed_ms: u64,
+    text: String,
+    until_gone: bool,
+    elapsed_ms: u64,
 }
 
 impl WaitResult {
     pub fn appeared(text: impl Into<String>, elapsed_ms: u64) -> Self {
         Self {
-            success: true,
             text: text.into(),
             until_gone: false,
             elapsed_ms,
@@ -245,11 +244,22 @@ impl WaitResult {
 
     pub fn gone(text: impl Into<String>, elapsed_ms: u64) -> Self {
         Self {
-            success: true,
             text: text.into(),
             until_gone: true,
             elapsed_ms,
         }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn until_gone(&self) -> bool {
+        self.until_gone
+    }
+
+    pub fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms
     }
 }
 
@@ -697,5 +707,48 @@ mod tests {
         );
         // Empty string matches everything (contains("") is always true)
         assert!(elem.matches_text(""));
+    }
+
+    #[test]
+    fn test_wait_request_new() {
+        let req = WaitRequest::new(
+            InteractionTarget::App {
+                app: "Finder".to_string(),
+            },
+            "Submit",
+            5000,
+        );
+        assert_eq!(req.text(), "Submit");
+        assert_eq!(req.timeout_ms(), 5000);
+        assert!(!req.until_gone());
+    }
+
+    #[test]
+    fn test_wait_request_with_until_gone() {
+        let req = WaitRequest::new(
+            InteractionTarget::Window {
+                title: "KILD".to_string(),
+            },
+            "Loading...",
+            3000,
+        )
+        .with_until_gone();
+        assert!(req.until_gone());
+    }
+
+    #[test]
+    fn test_wait_result_appeared() {
+        let result = WaitResult::appeared("Submit", 150);
+        assert_eq!(result.text(), "Submit");
+        assert!(!result.until_gone());
+        assert_eq!(result.elapsed_ms(), 150);
+    }
+
+    #[test]
+    fn test_wait_result_gone() {
+        let result = WaitResult::gone("Loading...", 200);
+        assert_eq!(result.text(), "Loading...");
+        assert!(result.until_gone());
+        assert_eq!(result.elapsed_ms(), 200);
     }
 }

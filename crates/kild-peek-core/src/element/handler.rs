@@ -235,6 +235,21 @@ pub fn wait_for_element(request: &WaitRequest) -> Result<WaitResult, ElementErro
     let timeout = Duration::from_millis(request.timeout_ms());
 
     loop {
+        if start.elapsed() >= timeout {
+            let timeout_error = if request.until_gone() {
+                ElementError::WaitTimeoutElementStillExists {
+                    text: request.text().to_string(),
+                    timeout_ms: request.timeout_ms(),
+                }
+            } else {
+                ElementError::WaitTimeoutElementNotFound {
+                    text: request.text().to_string(),
+                    timeout_ms: request.timeout_ms(),
+                }
+            };
+            return Err(timeout_error);
+        }
+
         let found = match list_elements(&ElementsRequest::new(request.target().clone())) {
             Ok(result) => result
                 .elements()
@@ -250,17 +265,19 @@ pub fn wait_for_element(request: &WaitRequest) -> Result<WaitResult, ElementErro
                     false
                 } else {
                     // Window not yet available — keep polling
-                    if start.elapsed() >= timeout {
-                        return Err(ElementError::WaitTimeoutElementNotFound {
-                            text: request.text().to_string(),
-                            timeout_ms: request.timeout_ms(),
-                        });
-                    }
                     thread::sleep(ELEMENT_POLL_INTERVAL);
                     continue;
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                warn!(
+                    event = "peek.core.element.wait_error",
+                    text = request.text(),
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    error = %e
+                );
+                return Err(e);
+            }
         };
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -278,21 +295,6 @@ pub fn wait_for_element(request: &WaitRequest) -> Result<WaitResult, ElementErro
                 elapsed_ms = elapsed_ms
             );
             return Ok(result);
-        }
-
-        if start.elapsed() >= timeout {
-            let timeout_error = if request.until_gone() {
-                ElementError::WaitTimeoutElementStillExists {
-                    text: request.text().to_string(),
-                    timeout_ms: request.timeout_ms(),
-                }
-            } else {
-                ElementError::WaitTimeoutElementNotFound {
-                    text: request.text().to_string(),
-                    timeout_ms: request.timeout_ms(),
-                }
-            };
-            return Err(timeout_error);
         }
 
         thread::sleep(ELEMENT_POLL_INTERVAL);
@@ -575,48 +577,40 @@ mod tests {
     }
 
     #[test]
-    fn test_wait_request_new() {
-        let req = WaitRequest::new(
-            InteractionTarget::App {
-                app: "Finder".to_string(),
+    fn test_wait_for_element_timeout_immediately() {
+        let request = WaitRequest::new(
+            InteractionTarget::Window {
+                title: "NONEXISTENT_WINDOW_WAIT_TEST_XYZ".to_string(),
             },
-            "Submit",
-            5000,
+            "some text",
+            1, // 1ms timeout — expires after first poll
         );
-        assert_eq!(req.text(), "Submit");
-        assert_eq!(req.timeout_ms(), 5000);
-        assert!(!req.until_gone());
+        let result = wait_for_element(&request);
+        match result {
+            Err(ElementError::WaitTimeoutElementNotFound { .. }) => {}
+            Err(ElementError::AccessibilityPermissionDenied) => {}
+            other => panic!(
+                "Expected WaitTimeoutElementNotFound or AccessibilityPermissionDenied, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]
-    fn test_wait_request_with_until_gone() {
-        let req = WaitRequest::new(
+    #[ignore]
+    fn test_wait_for_element_until_gone_window_not_found_is_success() {
+        // Window doesn't exist = element is gone = success for until_gone
+        // Requires accessibility permissions to run
+        let request = WaitRequest::new(
             InteractionTarget::Window {
-                title: "KILD".to_string(),
+                title: "NONEXISTENT_WINDOW_WAIT_TEST_XYZ".to_string(),
             },
-            "Loading...",
-            3000,
+            "some text",
+            5000,
         )
         .with_until_gone();
-        assert!(req.until_gone());
-    }
-
-    #[test]
-    fn test_wait_result_appeared() {
-        let result = WaitResult::appeared("Submit", 150);
-        assert!(result.success);
-        assert_eq!(result.text, "Submit");
-        assert!(!result.until_gone);
-        assert_eq!(result.elapsed_ms, 150);
-    }
-
-    #[test]
-    fn test_wait_result_gone() {
-        let result = WaitResult::gone("Loading...", 200);
-        assert!(result.success);
-        assert_eq!(result.text, "Loading...");
-        assert!(result.until_gone);
-        assert_eq!(result.elapsed_ms, 200);
+        let result = wait_for_element(&request).expect("Should succeed when window not found");
+        assert!(result.until_gone());
     }
 
     // Integration tests requiring accessibility permissions

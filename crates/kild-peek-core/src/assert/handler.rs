@@ -1,9 +1,10 @@
 use tracing::{info, warn};
 
 use super::errors::AssertError;
-use super::types::{Assertion, AssertionResult, ElementQuery};
+use super::types::{Assertion, AssertionResult};
 use crate::diff::{DiffRequest, compare_images};
 use crate::element::{ElementsRequest, list_elements};
+use crate::errors::PeekError;
 use crate::interact::InteractionTarget;
 use crate::window::{find_window_by_title, list_windows};
 
@@ -14,10 +15,9 @@ pub fn run_assertion(assertion: &Assertion) -> Result<AssertionResult, AssertErr
     let result = match assertion {
         Assertion::WindowExists { title } => assert_window_exists(title),
         Assertion::WindowVisible { title } => assert_window_visible(title),
-        Assertion::ElementExists {
-            window_title,
-            query,
-        } => assert_element_exists(window_title, query),
+        Assertion::ElementExists { window_title, text } => {
+            assert_element_exists(window_title, text)
+        }
         Assertion::ImageSimilar {
             image_path,
             baseline_path,
@@ -126,10 +126,7 @@ fn assert_window_visible(title: &str) -> Result<AssertionResult, AssertError> {
     }
 }
 
-fn assert_element_exists(
-    window_title: &str,
-    query: &ElementQuery,
-) -> Result<AssertionResult, AssertError> {
+fn assert_element_exists(window_title: &str, text: &str) -> Result<AssertionResult, AssertError> {
     let request = ElementsRequest::new(InteractionTarget::Window {
         title: window_title.to_string(),
     });
@@ -137,6 +134,12 @@ fn assert_element_exists(
     let result = match list_elements(&request) {
         Ok(r) => r,
         Err(e) => {
+            warn!(
+                event = "peek.core.assert.list_elements_failed",
+                window = window_title,
+                error_code = e.error_code(),
+                error = %e
+            );
             return Ok(AssertionResult::fail(format!(
                 "Could not list elements in window '{}': {}",
                 window_title, e
@@ -148,7 +151,7 @@ fn assert_element_exists(
         }
     };
 
-    let search_text = query.title.as_deref().unwrap_or("");
+    let search_text = text;
     let element_count = result.count();
 
     let found = if search_text.is_empty() {
@@ -250,11 +253,19 @@ mod tests {
 
     #[test]
     fn test_assert_element_exists_not_found() {
-        let query =
-            crate::assert::types::ElementQuery::new().with_title("DEFINITELY_NOT_THERE_XYZ");
-        let assertion = Assertion::element_exists("NONEXISTENT_WINDOW_12345_UNIQUE", query);
+        let assertion = Assertion::element_exists(
+            "NONEXISTENT_WINDOW_12345_UNIQUE",
+            "DEFINITELY_NOT_THERE_XYZ",
+        );
         let result = run_assertion(&assertion).unwrap();
         // Either window-not-found fail or element-not-found fail — both are failures
+        assert!(!result.passed);
+    }
+
+    #[test]
+    fn test_assert_element_exists_empty_text_nonexistent_window() {
+        let assertion = Assertion::element_exists("NONEXISTENT_WINDOW_12345_UNIQUE", "");
+        let result = run_assertion(&assertion).unwrap();
         assert!(!result.passed);
     }
 }

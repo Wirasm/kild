@@ -1,47 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Query parameters for finding UI elements (used in assertions)
-#[derive(Debug, Clone, Default)]
-pub struct ElementQuery {
-    /// Filter by accessibility role
-    pub role: Option<String>,
-    /// Filter by title (partial match)
-    pub title: Option<String>,
-    /// Filter by label (partial match)
-    pub label: Option<String>,
-}
-
-impl ElementQuery {
-    /// Create a new empty query
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Filter by role
-    pub fn with_role(mut self, role: impl Into<String>) -> Self {
-        self.role = Some(role.into());
-        self
-    }
-
-    /// Filter by title
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
-
-    /// Filter by label
-    pub fn with_label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
-    /// Check if query has any filters
-    pub fn has_filters(&self) -> bool {
-        self.role.is_some() || self.title.is_some() || self.label.is_some()
-    }
-}
-
 /// Types of assertions that can be performed
 #[derive(Debug, Clone)]
 pub enum Assertion {
@@ -49,11 +8,8 @@ pub enum Assertion {
     WindowExists { title: String },
     /// Assert that a window with the given title is visible (not minimized)
     WindowVisible { title: String },
-    /// Assert that a UI element matching the query exists in a window
-    ElementExists {
-        window_title: String,
-        query: ElementQuery,
-    },
+    /// Assert that a UI element with the given text exists in a window
+    ElementExists { window_title: String, text: String },
     /// Assert that a screenshot is similar to a baseline image
     ImageSimilar {
         image_path: PathBuf,
@@ -78,10 +34,10 @@ impl Assertion {
     }
 
     /// Create an element exists assertion
-    pub fn element_exists(window_title: impl Into<String>, query: ElementQuery) -> Self {
+    pub fn element_exists(window_title: impl Into<String>, text: impl Into<String>) -> Self {
         Assertion::ElementExists {
             window_title: window_title.into(),
-            query,
+            text: text.into(),
         }
     }
 
@@ -140,25 +96,6 @@ impl AssertionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_element_query_builder() {
-        let query = ElementQuery::new()
-            .with_role("button")
-            .with_title("Submit")
-            .with_label("submit-btn");
-
-        assert_eq!(query.role, Some("button".to_string()));
-        assert_eq!(query.title, Some("Submit".to_string()));
-        assert_eq!(query.label, Some("submit-btn".to_string()));
-        assert!(query.has_filters());
-    }
-
-    #[test]
-    fn test_element_query_empty() {
-        let query = ElementQuery::new();
-        assert!(!query.has_filters());
-    }
 
     #[test]
     fn test_assertion_window_exists() {

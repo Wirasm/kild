@@ -4,4 +4,4 @@ mod types;
 
 pub use errors::AssertError;
 pub use handler::run_assertion;
-pub use types::{Assertion, AssertionResult, ElementQuery};
+pub use types::{Assertion, AssertionResult};
