@@ -38,7 +38,10 @@ impl ManagedPty {
     pub fn try_clone_reader(&self) -> Result<Box<dyn std::io::Read + Send>, DaemonError> {
         self.master
             .lock()
-            .map_err(|e| DaemonError::PtyError(format!("lock master: {}", e)))?
+            .map_err(|e| {
+                error!(event = "daemon.pty.master_lock_failed", error = %e);
+                DaemonError::PtyError(format!("lock master: {}", e))
+            })?
             .try_clone_reader()
             .map_err(|e| DaemonError::PtyError(format!("clone reader: {}", e)))
     }
@@ -68,7 +71,10 @@ impl ManagedPty {
         };
         self.master
             .lock()
-            .map_err(|e| DaemonError::PtyError(format!("lock master: {}", e)))?
+            .map_err(|e| {
+                error!(event = "daemon.pty.master_lock_failed", error = %e);
+                DaemonError::PtyError(format!("lock master: {}", e))
+            })?
             .resize(new_size)
             .map_err(|e| DaemonError::PtyError(format!("resize: {}", e)))?;
         self.size = new_size;

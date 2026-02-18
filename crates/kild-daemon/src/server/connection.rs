@@ -23,6 +23,9 @@ pub async fn handle_connection(
     session_manager: Arc<RwLock<SessionManager>>,
     shutdown: tokio_util::sync::CancellationToken,
 ) {
+    // write() required: next_client_id takes &mut self. A shared AtomicU64 on
+    // the server struct would eliminate this per-connection write lock, but the
+    // daemon is low-connection-rate so it is not a bottleneck in practice.
     let client_id = {
         let mut mgr = session_manager.write().await;
         mgr.next_client_id()
@@ -179,9 +182,9 @@ async fn dispatch_message(
                     Some(data) => data,
                     None => {
                         warn!(
-                            event = "daemon.connection.scrollback_not_found",
+                            event = "daemon.connection.scrollback_unavailable",
                             session_id = %session_id,
-                            "Session not found during scrollback fetch",
+                            "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
                         );
                         Vec::new()
                     }
@@ -314,6 +317,8 @@ async fn dispatch_message(
                 }
             };
 
+            // read() is sufficient: SessionManager::write_stdin takes &self.
+            // Actual write exclusion is handled by Arc<Mutex<Writer>> inside ManagedPty.
             let mgr = session_manager.read().await;
             match mgr.write_stdin(&session_id, &decoded) {
                 Ok(()) => Some(DaemonMessage::Ack { id }),
