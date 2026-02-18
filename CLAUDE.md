@@ -89,6 +89,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Workspace structure:**
 - `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
+- `crates/kild-config` - TOML configuration types, loading, validation, and keybindings for ~/.kild/config.toml. Depends only on kild-paths and kild-protocol. Single source of truth for all KildConfig/Config/Keybindings types. Extracted from kild-core to enable fast incremental compilation of config-only changes.
 - `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode) and domain newtypes (SessionId, BranchName, ProjectId). Also provides `IpcConnection` for JSONL-over-Unix-socket client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()`. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json only (tempfile for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
@@ -107,7 +108,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `editor/` - Editor backend system (Zed, VS Code, Vim, generic fallback) with registry.rs for detection and resolution chain (CLI > config > $VISUAL > $EDITOR > OS default via duti/xdg-mime > PATH scan)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
-- `config/` - Hierarchical TOML config (defaults → user → project → CLI)
+- `config/` - REMOVED (moved to kild-config crate). kild-core re-exports all types from kild-config.
 - `projects/` - Project management (types, validation, persistence, manager)
 - `cleanup/` - Orphaned resource cleanup with multiple strategies
 - `health/` - Session health monitoring

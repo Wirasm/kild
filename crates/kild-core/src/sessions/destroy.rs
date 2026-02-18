@@ -1,12 +1,12 @@
 use kild_paths::KildPaths;
 use tracing::{debug, error, info, warn};
 
-use crate::config::Config;
 use crate::git;
 use crate::git::get_worktree_status;
 use crate::process::{delete_pid_file, get_pid_file_path};
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
+use kild_config::Config;
 
 /// Clean up PID files for a session (best-effort).
 ///
@@ -608,7 +608,7 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
 
     // 3. Check if PR exists (best-effort, requires forge CLI)
     // Skip PR check for repos without a remote to avoid false "No PR found" warnings
-    let forge_override = crate::config::KildConfig::load_hierarchy()
+    let forge_override = kild_config::KildConfig::load_hierarchy()
         .inspect_err(|e| {
             debug!(
                 event = "core.session.config_load_failed",

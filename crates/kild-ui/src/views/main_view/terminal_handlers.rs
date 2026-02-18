@@ -384,7 +384,7 @@ impl MainView {
             let result = cx
                 .background_executor()
                 .spawn(async {
-                    let config = match kild_core::config::KildConfig::load_hierarchy() {
+                    let config = match kild_config::KildConfig::load_hierarchy() {
                         Ok(cfg) => cfg,
                         Err(e) => {
                             tracing::warn!(
@@ -392,7 +392,7 @@ impl MainView {
                                 error = %e,
                                 "Using default config"
                             );
-                            kild_core::config::KildConfig::default()
+                            kild_config::KildConfig::default()
                         }
                     };
                     kild_core::daemon::autostart::ensure_daemon_running(&config)

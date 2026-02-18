@@ -64,7 +64,7 @@ pub struct MainView {
 impl MainView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         // Get sessions directory for file watcher
-        let config = kild_core::config::Config::new();
+        let config = kild_config::Config::new();
         let sessions_dir = config.sessions_dir();
 
         // Ensure sessions directory exists (create if needed for watcher)

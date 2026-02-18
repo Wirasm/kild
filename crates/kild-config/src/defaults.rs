@@ -3,8 +3,8 @@
 //! This module contains all `Default` implementations and helper functions
 //! for providing default values in serde deserialization.
 
-use crate::agents;
-use crate::config::types::{AgentConfig, Config, HealthConfig};
+use crate::agent_data;
+use crate::types::{AgentConfig, Config, HealthConfig};
 use kild_paths::KildPaths;
 use std::path::PathBuf;
 use tracing::warn;
@@ -13,7 +13,7 @@ use tracing::warn;
 ///
 /// Used by serde `#[serde(default = "...")]` attribute.
 pub fn default_agent() -> String {
-    agents::default_agent_name().to_string()
+    agent_data::default_agent_name().to_string()
 }
 
 impl Default for AgentConfig {
@@ -122,7 +122,7 @@ impl HealthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::KildConfig;
+    use crate::types::KildConfig;
 
     #[test]
     fn test_config_default() {

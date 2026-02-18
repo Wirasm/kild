@@ -12,7 +12,7 @@ use std::path::Path;
 ///
 /// Returns `None` if the directory cannot be read.
 pub fn count_session_files() -> Option<usize> {
-    let config = crate::config::Config::new();
+    let config = kild_config::Config::new();
     count_session_files_in_dir(&config.sessions_dir())
 }
 

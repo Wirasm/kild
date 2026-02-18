@@ -63,7 +63,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
         // Fetch from GitHub and write sidecar
         let fetched = session_ops::fetch_pr_info(&session.worktree_path, &kild_branch);
         if let Some(ref info) = fetched {
-            let config = kild_core::config::Config::new();
+            let config = kild_config::Config::new();
             if let Err(e) = kild_core::sessions::persistence::write_pr_info(
                 &config.sessions_dir(),
                 &session.id,

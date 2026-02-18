@@ -1,7 +1,7 @@
 use tracing::{error, info, warn};
 
-use crate::config::KildConfig;
 use crate::daemon::{client, socket_path};
+use kild_config::KildConfig;
 
 use super::errors::DaemonAutoStartError;
 

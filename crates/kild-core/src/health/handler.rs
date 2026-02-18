@@ -8,7 +8,7 @@ use tracing::{info, warn};
 /// Get health status for all sessions in current project
 pub fn get_health_all_sessions() -> Result<HealthOutput, HealthError> {
     // Load config and apply thresholds (warn on errors, use defaults)
-    match crate::config::KildConfig::load_hierarchy() {
+    match kild_config::KildConfig::load_hierarchy() {
         Ok(config) => {
             operations::set_idle_threshold_minutes(config.health.idle_threshold_minutes());
         }

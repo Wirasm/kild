@@ -10,6 +10,7 @@ name = "kild"
 path = "src/main.rs"
 
 [dependencies]
+kild-config.workspace = true
 kild-core.workspace = true
 kild-protocol.workspace = true
 kild-teams.workspace = true

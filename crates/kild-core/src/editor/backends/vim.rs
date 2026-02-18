@@ -2,11 +2,11 @@ use std::path::Path;
 
 use tracing::{error, info};
 
-use crate::config::KildConfig;
 use crate::editor::errors::EditorError;
 use crate::editor::traits::EditorBackend;
 use crate::terminal::common::escape::shell_escape;
 use crate::terminal::handler as terminal_ops;
+use kild_config::KildConfig;
 
 pub struct VimBackend;
 

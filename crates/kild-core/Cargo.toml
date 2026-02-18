@@ -23,6 +23,7 @@ tempfile.workspace = true
 uuid.workspace = true
 which.workspace = true
 base64.workspace = true
+kild-config.workspace = true
 kild-paths.workspace = true
 kild-protocol.workspace = true
 

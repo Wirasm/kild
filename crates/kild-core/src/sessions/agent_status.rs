@@ -1,7 +1,7 @@
 use tracing::info;
 
-use crate::config::Config;
 use crate::sessions::{errors::SessionError, persistence, types::*};
+use kild_config::Config;
 
 /// Result of a successful agent status update.
 pub struct AgentStatusResult {

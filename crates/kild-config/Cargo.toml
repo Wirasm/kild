@@ -1,0 +1,20 @@
+[package]
+name = "kild-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TOML configuration types, loading, validation, and keybindings for KILD"
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+toml.workspace = true
+glob.workspace = true
+kild-paths.workspace = true
+kild-protocol.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+temp-env.workspace = true

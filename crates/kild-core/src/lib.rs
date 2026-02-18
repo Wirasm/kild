@@ -13,7 +13,6 @@
 
 pub mod agents;
 pub mod cleanup;
-pub mod config;
 pub mod daemon;
 pub mod editor;
 pub mod errors;
@@ -34,9 +33,7 @@ pub mod terminal;
 // Re-export newtypes from kild-protocol
 pub use kild_protocol::{BranchName, ProjectId, SessionId};
 
-// Re-export commonly used types at crate root for convenience
-pub use config::Keybindings;
-pub use config::KildConfig;
+// Re-export config types from kild-config
 pub use editor::{EditorBackend, EditorError, EditorType};
 pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
@@ -44,6 +41,12 @@ pub use git::types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,
     FileOverlap, GitStats, MergeReadiness, OverlapReport, UncommittedDetails, WorktreeStatus,
 };
+pub use kild_config::ConfigError;
+pub use kild_config::{
+    AgentConfig, AgentSettings, Config, DaemonRuntimeConfig, EditorConfig, GitConfig, HealthConfig,
+    Keybindings, KildConfig, TerminalConfig, UiConfig, VALID_TERMINALS,
+};
+pub use kild_config::{CopyOptions, IncludeConfig, PatternRule};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::agent_status::AgentStatusResult;
 pub use sessions::info::SessionInfo;

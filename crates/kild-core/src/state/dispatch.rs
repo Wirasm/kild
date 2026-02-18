@@ -1,6 +1,5 @@
 use tracing::{debug, error, info};
 
-use crate::config::KildConfig;
 use crate::projects::{Project, load_projects, save_projects};
 use crate::sessions::handler as session_ops;
 use crate::sessions::types::CreateSessionRequest;
@@ -8,6 +7,7 @@ use crate::state::errors::DispatchError;
 use crate::state::events::Event;
 use crate::state::store::Store;
 use crate::state::types::Command;
+use kild_config::KildConfig;
 
 /// Default Store implementation that routes commands to kild-core handlers.
 ///
@@ -94,7 +94,7 @@ impl Store for CoreStore {
                     && let Some(pr_info) =
                         session_ops::fetch_pr_info(&session.worktree_path, &kild_branch)
                 {
-                    let config = crate::config::Config::new();
+                    let config = kild_config::Config::new();
                     crate::sessions::persistence::write_pr_info(
                         &config.sessions_dir(),
                         &session.id,

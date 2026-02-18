@@ -2,41 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Supported forge (code hosting platform) types.
-///
-/// Each variant represents a known code forge that can host
-/// git repositories and provide PR/MR functionality.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ForgeType {
-    GitHub,
-}
-
-impl ForgeType {
-    /// Get the canonical string name for this forge type.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ForgeType::GitHub => "github",
-        }
-    }
-}
-
-impl std::fmt::Display for ForgeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl std::str::FromStr for ForgeType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "github" => Ok(ForgeType::GitHub),
-            _ => Err(format!("Unknown forge '{}'. Supported: github", s)),
-        }
-    }
-}
+pub use kild_protocol::ForgeType;
 
 /// Result of checking if a PR exists for a branch.
 ///

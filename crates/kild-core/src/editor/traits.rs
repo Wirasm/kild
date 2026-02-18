@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::config::KildConfig;
+use kild_config::KildConfig;
 
 use super::errors::EditorError;
 

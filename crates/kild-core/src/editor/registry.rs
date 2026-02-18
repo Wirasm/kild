@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use tracing::{debug, info, warn};
 
-use crate::config::KildConfig;
+use kild_config::KildConfig;
 
 use super::backends::{GenericBackend, VSCodeBackend, VimBackend, ZedBackend};
 use super::errors::EditorError;

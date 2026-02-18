@@ -1,7 +1,7 @@
 use tracing::{error, info, warn};
 
-use crate::config::Config;
 use crate::sessions::{errors::SessionError, persistence, types::*};
+use kild_config::Config;
 
 pub fn list_sessions() -> Result<Vec<Session>, SessionError> {
     info!(event = "core.session.list_started");

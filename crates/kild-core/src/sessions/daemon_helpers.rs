@@ -4,10 +4,10 @@ use kild_paths::KildPaths;
 use tracing::{debug, info, warn};
 
 use crate::agents;
-use crate::config::KildConfig;
 use crate::sessions::errors::SessionError;
 use crate::terminal;
 use crate::terminal::types::TerminalType;
+use kild_config::KildConfig;
 
 /// Compute a unique spawn ID for a given session and spawn index.
 ///

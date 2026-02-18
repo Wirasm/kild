@@ -1,12 +1,12 @@
 use std::path::Path;
 use tracing::{debug, info, warn};
 
-use crate::config::KildConfig;
 use crate::process::{
     ensure_pid_dir, get_pid_file_path, get_process_info, is_process_running,
     read_pid_file_with_retry, wrap_command_with_pid_capture,
 };
 use crate::terminal::{errors::TerminalError, operations, types::*};
+use kild_config::KildConfig;
 
 /// Process info returned from process detection functions
 type ProcessSearchResult = Result<(Option<u32>, Option<String>, Option<u64>), TerminalError>;

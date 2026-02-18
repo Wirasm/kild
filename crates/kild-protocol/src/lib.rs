@@ -7,4 +7,4 @@ mod types;
 #[cfg(unix)]
 pub use client::{IpcConnection, IpcError};
 pub use messages::{ClientMessage, DaemonMessage, ErrorCode};
-pub use types::{BranchName, ProjectId, SessionId, SessionInfo, SessionStatus};
+pub use types::{BranchName, ForgeType, ProjectId, SessionId, SessionInfo, SessionStatus};

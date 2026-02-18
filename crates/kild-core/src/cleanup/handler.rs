@@ -2,9 +2,9 @@ use git2::{BranchType, Repository};
 use tracing::{error, info, warn};
 
 use crate::cleanup::{errors::CleanupError, operations, types::*};
-use crate::config::Config;
 use crate::git;
 use crate::sessions;
+use kild_config::Config;
 
 pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     info!(event = "core.cleanup.scan_started");

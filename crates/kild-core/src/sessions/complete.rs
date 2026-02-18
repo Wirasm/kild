@@ -2,9 +2,9 @@ use std::path::Path;
 
 use tracing::{debug, error, info, warn};
 
-use crate::config::Config;
 use crate::git;
 use crate::sessions::{errors::SessionError, persistence, types::*};
+use kild_config::Config;
 
 /// Completes a kild by checking PR status, optionally deleting remote branch, and destroying the session.
 ///
@@ -31,7 +31,7 @@ pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
     info!(event = "core.session.complete_started", name = name);
 
     let config = Config::new();
-    let forge_override = crate::config::KildConfig::load_hierarchy()
+    let forge_override = kild_config::KildConfig::load_hierarchy()
         .ok()
         .and_then(|c| c.git.forge());
 
@@ -182,7 +182,7 @@ pub fn complete_session(name: &str) -> Result<CompleteResult, SessionError> {
 ///
 /// Returns `None` if no forge detected, CLI unavailable, no PR, or fetch error.
 pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge::types::PrInfo> {
-    let forge_override = crate::config::KildConfig::load_hierarchy()
+    let forge_override = kild_config::KildConfig::load_hierarchy()
         .ok()
         .and_then(|c| c.git.forge());
 

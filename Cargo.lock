@@ -3394,6 +3394,7 @@ dependencies = [
  "base64",
  "clap",
  "clap_complete",
+ "kild-config",
  "kild-core",
  "kild-protocol",
  "kild-teams",
@@ -3404,6 +3405,22 @@ dependencies = [
  "tempfile",
  "tracing",
  "unicode-width 0.2.2",
+]
+
+[[package]]
+name = "kild-config"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "kild-paths",
+ "kild-protocol",
+ "serde",
+ "serde_json",
+ "temp-env",
+ "tempfile",
+ "thiserror 2.0.17",
+ "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]
@@ -3418,6 +3435,7 @@ dependencies = [
  "git2",
  "glob",
  "ignore",
+ "kild-config",
  "kild-paths",
  "kild-protocol",
  "serde",
@@ -3546,6 +3564,7 @@ dependencies = [
  "futures",
  "gpui",
  "gpui-component",
+ "kild-config",
  "kild-core",
  "kild-protocol",
  "kild-teams",

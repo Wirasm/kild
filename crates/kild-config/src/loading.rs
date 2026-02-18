@@ -11,13 +11,12 @@
 //! 3. **Project config** - `./.kild/config.toml` (project-specific overrides)
 //! 4. **CLI arguments** - Command-line flags (highest priority)
 
-use crate::agents;
-use crate::config::types::{
+use crate::agent_data;
+use crate::include_config::IncludeConfig;
+use crate::types::{
     AgentConfig, DaemonRuntimeConfig, GitConfig, HealthConfig, KildConfig, TerminalConfig, UiConfig,
 };
-
-use crate::config::validation::validate_config;
-use crate::files::types::IncludeConfig;
+use crate::validation::validate_config;
 use std::fs;
 use std::path::PathBuf;
 
@@ -220,13 +219,13 @@ fn resolve_base_command(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let base = agent_specific
         .or(global)
-        .or_else(|| agents::get_default_command(agent_name))
+        .or_else(|| agent_data::get_default_command(agent_name))
         .ok_or_else(|| {
             format!(
                 "No command found for agent '{}'. Configure a startup_command in your config file \
                 or use a known agent ({}).",
                 agent_name,
-                agents::supported_agents_string()
+                agent_data::supported_agents_string()
             )
         })?;
 
@@ -244,7 +243,7 @@ fn build_command(base: &str, flags: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::AgentSettings;
+    use crate::types::AgentSettings;
     use std::env;
     use std::fs;
 
@@ -688,8 +687,6 @@ patterns = ["custom.txt"]
 
     #[test]
     fn test_include_patterns_empty_array_merges_with_base() {
-        // Document behavior: empty array in override does NOT clear base patterns
-        // This is intentional - to disable patterns entirely, set enabled = false
         let user_config: KildConfig = toml::from_str(
             r#"
 [include_patterns]

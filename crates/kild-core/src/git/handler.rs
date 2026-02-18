@@ -2,10 +2,10 @@ use git2::{BranchType, Repository, WorktreeAddOptions};
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
-use crate::config::KildConfig;
-use crate::config::types::GitConfig;
 use crate::files;
 use crate::git::{errors::GitError, naming, types::*, validation};
+use kild_config::GitConfig;
+use kild_config::KildConfig;
 
 // Helper function to reduce boilerplate
 fn io_error(e: std::io::Error) -> GitError {
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_resolve_base_commit_falls_back_to_head() {
-        use crate::config::types::GitConfig;
+        use kild_config::GitConfig;
 
         let temp_dir = create_temp_test_dir("kild_test_resolve_base");
         init_test_repo(&temp_dir);
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn test_resolve_base_commit_uses_remote_ref_when_present() {
-        use crate::config::types::GitConfig;
+        use kild_config::GitConfig;
 
         let temp_dir = create_temp_test_dir("kild_test_resolve_remote");
         init_test_repo(&temp_dir);

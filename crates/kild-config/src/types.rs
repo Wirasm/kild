@@ -28,9 +28,9 @@
 //! history_enabled = true
 //! ```
 
-use crate::files::types::IncludeConfig;
-use crate::forge::ForgeType;
+use crate::include_config::IncludeConfig;
 use kild_paths::KildPaths;
+use kild_protocol::ForgeType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -103,7 +103,7 @@ pub struct KildConfig {
 
     /// Daemon runtime configuration (whether to use daemon mode by default).
     #[serde(default)]
-    pub(crate) daemon: DaemonRuntimeConfig,
+    pub daemon: DaemonRuntimeConfig,
 
     /// UI configuration (keybindings, navigation).
     #[serde(default)]
@@ -144,38 +144,36 @@ impl UiConfig {
 /// Daemon runtime configuration.
 ///
 /// Controls whether the daemon is the default runtime for new sessions
-/// and auto-start behavior. This struct is crate-internal; the CLI accesses
-/// these values via `KildConfig::is_daemon_enabled()` and
-/// `KildConfig::daemon_auto_start()`.
+/// and auto-start behavior.
 ///
 /// Fields are `Option<bool>` to support proper config hierarchy merging:
 /// only explicitly-set values override lower-priority configs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub(crate) struct DaemonRuntimeConfig {
+pub struct DaemonRuntimeConfig {
     /// Whether daemon mode is the default for new sessions.
     /// When true, `kild create` uses daemon unless `--no-daemon` is passed.
     /// Default: false
-    pub(crate) enabled: Option<bool>,
+    pub enabled: Option<bool>,
 
     /// Auto-start the daemon if not running when daemon mode is requested.
     /// Default: true
-    pub(crate) auto_start: Option<bool>,
+    pub auto_start: Option<bool>,
 }
 
 impl DaemonRuntimeConfig {
     /// Whether daemon mode is the default for new sessions. Default: false.
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.enabled.unwrap_or(false)
     }
 
     /// Whether to auto-start the daemon if not running. Default: true.
-    pub(crate) fn auto_start(&self) -> bool {
+    pub fn auto_start(&self) -> bool {
         self.auto_start.unwrap_or(true)
     }
 
     /// Merge two daemon runtime configs. Override takes precedence for set fields.
-    pub(crate) fn merge(base: &Self, override_config: &Self) -> Self {
+    pub fn merge(base: &Self, override_config: &Self) -> Self {
         Self {
             enabled: override_config.enabled.or(base.enabled),
             auto_start: override_config.auto_start.or(base.auto_start),
@@ -538,7 +536,7 @@ default = "code"
         assert!(!config.editor.terminal());
     }
 
-    // --- EditorConfig resolve_editor / build_command tests ---
+    // --- EditorConfig resolve_editor tests ---
 
     #[test]
     fn test_resolve_editor_cli_override() {

@@ -2,9 +2,9 @@ use tracing::{error, info, warn};
 
 use kild_paths::KildPaths;
 
-use crate::config::Config;
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
+use kild_config::Config;
 
 /// Stops the agent process in a kild without destroying the kild.
 ///

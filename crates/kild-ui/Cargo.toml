@@ -10,6 +10,7 @@ name = "kild-ui"
 path = "src/main.rs"
 
 [dependencies]
+kild-config.workspace = true
 kild-core.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true

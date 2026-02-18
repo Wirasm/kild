@@ -1,10 +1,10 @@
 use tracing::{debug, error, info, warn};
 
 use crate::agents;
-use crate::config::{Config, KildConfig};
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
 use crate::terminal::types::SpawnResult;
+use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, setup_claude_integration,
@@ -18,7 +18,7 @@ use super::daemon_helpers::{
 fn resolve_effective_runtime_mode(
     explicit: Option<crate::state::types::RuntimeMode>,
     from_session: Option<crate::state::types::RuntimeMode>,
-    config: &crate::config::KildConfig,
+    config: &kild_config::KildConfig,
 ) -> (crate::state::types::RuntimeMode, &'static str) {
     if let Some(mode) = explicit {
         return (mode, "explicit");
@@ -766,7 +766,7 @@ mod tests {
     fn test_resolve_runtime_mode_explicit_wins() {
         use crate::state::types::RuntimeMode;
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         let (mode, source) = resolve_effective_runtime_mode(
             Some(RuntimeMode::Daemon),
             Some(RuntimeMode::Terminal),
@@ -780,7 +780,7 @@ mod tests {
     fn test_resolve_runtime_mode_session_when_no_explicit() {
         use crate::state::types::RuntimeMode;
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         let (mode, source) =
             resolve_effective_runtime_mode(None, Some(RuntimeMode::Daemon), &config);
         assert_eq!(mode, RuntimeMode::Daemon);
@@ -791,7 +791,7 @@ mod tests {
     fn test_resolve_runtime_mode_config_when_daemon_enabled() {
         use crate::state::types::RuntimeMode;
 
-        let mut config = crate::config::KildConfig::default();
+        let mut config = kild_config::KildConfig::default();
         config.daemon.enabled = Some(true);
         let (mode, source) = resolve_effective_runtime_mode(None, None, &config);
         assert_eq!(mode, RuntimeMode::Daemon);
@@ -802,7 +802,7 @@ mod tests {
     fn test_resolve_runtime_mode_default_terminal() {
         use crate::state::types::RuntimeMode;
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         let (mode, source) = resolve_effective_runtime_mode(None, None, &config);
         assert_eq!(mode, RuntimeMode::Terminal);
         assert_eq!(source, "default");
@@ -814,7 +814,7 @@ mod tests {
     fn test_resolve_runtime_mode_none_explicit_with_daemon_session() {
         use crate::state::types::RuntimeMode;
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         // Simulates open --all (no flags): explicit=None, session has Daemon
         let (mode, source) =
             resolve_effective_runtime_mode(None, Some(RuntimeMode::Daemon), &config);
@@ -833,7 +833,7 @@ mod tests {
     fn test_resolve_runtime_mode_explicit_overrides_session_in_open_all() {
         use crate::state::types::RuntimeMode;
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         // open --all --daemon: explicit=Daemon should override session=Terminal
         let (mode, source) = resolve_effective_runtime_mode(
             Some(RuntimeMode::Daemon),
@@ -915,7 +915,7 @@ mod tests {
     /// should fall back to the config default agent, not try to use "shell".
     #[test]
     fn test_default_agent_fallback_for_shell_sessions() {
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         let session_agent = "shell";
 
         // Replicate the DefaultAgent branch logic from open_session
@@ -965,7 +965,7 @@ mod tests {
             "\"shell\" must not have a default command"
         );
 
-        let config = crate::config::KildConfig::default();
+        let config = kild_config::KildConfig::default();
         assert!(
             config.get_agent_command("shell").is_err(),
             "get_agent_command(\"shell\") must return an error"
@@ -1096,7 +1096,7 @@ mod tests {
     /// not just the hardcoded "claude".
     #[test]
     fn test_default_agent_fallback_uses_config_not_hardcoded() {
-        let mut config = crate::config::KildConfig::default();
+        let mut config = kild_config::KildConfig::default();
         config.agent.default = "gemini".to_string();
 
         let session_agent = "shell";

@@ -1,7 +1,7 @@
 use tracing::{error, warn};
 
+use kild_config::KildConfig;
 use kild_core::Session;
-use kild_core::config::KildConfig;
 use kild_core::errors::KildError;
 use kild_core::terminal::types::TerminalType;
 use kild_core::{events, session_ops};

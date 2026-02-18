@@ -3,9 +3,9 @@ use std::process::Command;
 
 use tracing::{error, info};
 
-use crate::config::KildConfig;
 use crate::editor::errors::EditorError;
 use crate::editor::traits::EditorBackend;
+use kild_config::KildConfig;
 
 pub struct ZedBackend;
 

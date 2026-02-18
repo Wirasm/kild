@@ -2,10 +2,10 @@ use kild_paths::KildPaths;
 use tracing::{debug, error, info, warn};
 
 use crate::agents;
-use crate::config::{Config, KildConfig};
 use crate::git;
 use crate::sessions::{errors::SessionError, persistence, ports, types::*, validation};
 use crate::terminal;
+use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_claude_integration,
