@@ -453,9 +453,12 @@ fn cleanup_orphaned_worktrees(
         // Safety checks only apply when the directory exists.
         // If the directory is already gone, removal is safe (nothing to lose).
         if worktree_path.exists() {
-            // Check 1: uncommitted changes via git status
+            // Check 1: uncommitted changes via git status.
+            // get_worktree_status returns Ok(status) with has_uncommitted_changes=true AND
+            // status_check_failed=true when the internal check fails (conservative fallback).
+            // Distinguish these cases so the skip reason shown to the user is accurate.
             match git::get_worktree_status(worktree_path) {
-                Ok(status) if status.has_uncommitted_changes => {
+                Ok(status) if status.has_uncommitted_changes && !status.status_check_failed => {
                     if force {
                         warn!(
                             event = "core.cleanup.worktree_unsafe_skip_overridden",
@@ -475,8 +478,30 @@ fn cleanup_orphaned_worktrees(
                         continue;
                     }
                 }
+                Ok(status) if status.status_check_failed => {
+                    // Conservative: internal git status check failed; treat same as Err
+                    if force {
+                        warn!(
+                            event = "core.cleanup.worktree_status_check_failed",
+                            worktree_path = %worktree_path.display(),
+                            "Cannot verify git status, removing anyway (--force)"
+                        );
+                    } else {
+                        warn!(
+                            event = "core.cleanup.worktree_delete_skipped",
+                            worktree_path = %worktree_path.display(),
+                            reason = "status_check_failed",
+                            "Skipping orphaned worktree: cannot verify git status"
+                        );
+                        skipped_worktrees.push((
+                            worktree_path.clone(),
+                            "cannot verify git status".to_string(),
+                        ));
+                        continue;
+                    }
+                }
                 Err(e) => {
-                    // Conservative: if we can't check, skip unless forced
+                    // Conservative: Repository::open() failed entirely; skip unless forced
                     if force {
                         warn!(
                             event = "core.cleanup.worktree_status_check_failed",

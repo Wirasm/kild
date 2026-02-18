@@ -40,7 +40,8 @@ pub fn cleanup_command() -> Command {
                 .long("force")
                 .short('f')
                 .help("Remove orphaned worktrees even if they have uncommitted changes or active processes")
-                .action(ArgAction::SetTrue),
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["no-pid", "stopped", "older-than"]),
         )
 }
 
