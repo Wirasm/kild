@@ -64,11 +64,9 @@ impl TerminalElement {
             );
         }
 
-        // FairMutex (alacritty_terminal::sync) does not poison — it's not
-        // std::sync::Mutex. lock() will always succeed (may block, never Err).
-        let term = self.term.lock();
-        let scrolled_up = term.grid().display_offset() > 0;
-        let content = term.renderable_content();
+        // Use the pre-built snapshot from Terminal::sync(). Lock is not held here.
+        let content = &self.content;
+        let scrolled_up = content.display_offset > 0;
 
         let terminal_bg = Hsla::from(theme::terminal_background());
         let terminal_fg = Hsla::from(theme::terminal_foreground());
@@ -128,7 +126,7 @@ impl TerminalElement {
             }
         };
 
-        for indexed in content.display_iter {
+        for indexed in &content.cells {
             let line_idx = indexed.point.line.0;
             let col = indexed.point.column.0;
             let cell = &indexed.cell;

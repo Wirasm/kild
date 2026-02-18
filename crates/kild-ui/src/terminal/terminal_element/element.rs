@@ -10,11 +10,15 @@ use gpui::{
 use linkify::{LinkFinder, LinkKind};
 
 use super::super::state::{KildListener, ResizeHandle};
+use super::super::types::TerminalContent;
 use super::types::{FONT_NORMAL, LineText, MouseState, PrepaintState, PreparedUrlRegion};
 use crate::theme;
 
 /// Custom GPUI Element that renders terminal cells as GPU draw calls.
 pub struct TerminalElement {
+    /// Owned snapshot from Terminal::sync(), used for lock-free prepaint.
+    pub(super) content: TerminalContent,
+    /// Arc kept for mouse event handlers in paint() that write selection state.
     pub(super) term: Arc<FairMutex<Term<KildListener>>>,
     pub(super) has_focus: bool,
     pub(super) resize_handle: ResizeHandle,
@@ -24,6 +28,7 @@ pub struct TerminalElement {
 
 impl TerminalElement {
     pub fn new(
+        content: TerminalContent,
         term: Arc<FairMutex<Term<KildListener>>>,
         has_focus: bool,
         resize_handle: ResizeHandle,
@@ -31,6 +36,7 @@ impl TerminalElement {
         mouse_state: MouseState,
     ) -> Self {
         Self {
+            content,
             term,
             has_focus,
             resize_handle,

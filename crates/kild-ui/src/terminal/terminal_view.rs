@@ -242,15 +242,14 @@ impl TerminalView {
             return;
         }
 
-        // Check app cursor mode from terminal state.
-        // Must query on every keystroke since apps can change mode anytime.
-        let app_cursor = {
-            let term = self.terminal.term().lock();
-            let content = term.renderable_content();
-            content
-                .mode
-                .contains(alacritty_terminal::term::TermMode::APP_CURSOR)
-        };
+        // Read app cursor mode from last-synced snapshot (populated in render()).
+        // Mode is set via escape sequence processed in the batch loop before cx.notify()
+        // triggers render, so the snapshot is always up-to-date by keystroke time.
+        let app_cursor = self
+            .terminal
+            .last_content()
+            .mode
+            .contains(alacritty_terminal::term::TermMode::APP_CURSOR);
 
         match input::keystroke_to_escape(&event.keystroke, app_cursor) {
             Some(bytes) => {
@@ -276,6 +275,9 @@ impl Focusable for TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Snapshot terminal state under a brief lock, then release before rendering.
+        self.terminal.sync();
+        let content = self.terminal.last_content().clone();
         let term = self.terminal.term().clone();
         let has_focus = self.focus_handle.is_focused(window);
         let resize_handle = self.terminal.resize_handle();
@@ -307,6 +309,7 @@ impl Render for TerminalView {
         }
 
         container.child(TerminalElement::new(
+            content,
             term,
             has_focus,
             resize_handle,

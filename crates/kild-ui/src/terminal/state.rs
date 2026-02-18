@@ -16,6 +16,7 @@ use kild_protocol::DaemonMessage;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use super::errors::TerminalError;
+use super::types::TerminalContent;
 use crate::daemon_client::{self, DaemonConnection};
 
 /// Resolve the working directory for a new terminal.
@@ -218,6 +219,9 @@ pub struct Terminal {
     exited: Arc<AtomicBool>,
     /// Current PTY dimensions (rows, cols). Compared in prepaint to detect changes.
     current_size: Arc<Mutex<(u16, u16)>>,
+    /// Last-known terminal display snapshot. Updated by sync() before each render.
+    /// Used by TerminalElement for lock-free rendering.
+    last_content: TerminalContent,
 }
 
 impl Terminal {
@@ -371,6 +375,7 @@ impl Terminal {
             error_state: Arc::new(Mutex::new(None)),
             exited: Arc::new(AtomicBool::new(false)),
             current_size,
+            last_content: TerminalContent::empty(),
         })
     }
 
@@ -597,6 +602,7 @@ impl Terminal {
             error_state,
             exited,
             current_size,
+            last_content: TerminalContent::empty(),
         })
     }
 
@@ -773,6 +779,19 @@ impl Terminal {
             resize_impl,
             current_size: self.current_size.clone(),
         }
+    }
+
+    /// Snapshot current terminal display state into last_content.
+    /// Acquires FairMutex briefly (tight clone loop), then releases.
+    /// Call from TerminalView::render() before constructing TerminalElement.
+    pub fn sync(&mut self) {
+        let term = self.term.lock();
+        self.last_content = TerminalContent::from_term(&*term);
+    }
+
+    /// Reference to the most recently synced terminal content snapshot.
+    pub fn last_content(&self) -> &TerminalContent {
+        &self.last_content
     }
 }
 
