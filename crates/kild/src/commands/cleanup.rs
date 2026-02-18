@@ -23,7 +23,9 @@ pub(crate) fn handle_cleanup_command(
         cleanup::CleanupStrategy::All
     };
 
-    match cleanup::cleanup_all_with_strategy(strategy) {
+    let force = sub_matches.get_flag("force");
+
+    match cleanup::cleanup_all_with_strategy(strategy, force) {
         Ok(summary) => {
             println!("Cleanup complete.");
 
@@ -54,6 +56,17 @@ pub(crate) fn handle_cleanup_command(
                 println!("  Total: {} resources cleaned", summary.total_cleaned);
             } else {
                 println!("  No orphaned resources found.");
+            }
+
+            if !summary.skipped_worktrees.is_empty() {
+                eprintln!(
+                    "  Worktrees skipped (unsafe to remove): {}",
+                    summary.skipped_worktrees.len()
+                );
+                for (path, reason) in &summary.skipped_worktrees {
+                    eprintln!("    - {} ({})", shorten_home_path(path), reason);
+                }
+                eprintln!("  Use --force to remove skipped worktrees (changes will be lost).");
             }
 
             info!(
