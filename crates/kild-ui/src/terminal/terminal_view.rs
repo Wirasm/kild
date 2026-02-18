@@ -37,6 +37,7 @@ impl TerminalView {
     /// batching task via `cx.spawn()` so it can notify GPUI to repaint.
     pub fn from_terminal(
         mut terminal: Terminal,
+        keybindings: UiKeybindings,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -77,7 +78,7 @@ impl TerminalView {
                 position: None,
                 cmd_held: false,
             },
-            keybindings: UiKeybindings::from_config(&kild_core::Keybindings::load_hierarchy()),
+            keybindings,
         }
     }
 
@@ -86,7 +87,11 @@ impl TerminalView {
     /// Used when creating terminals from async contexts (daemon attach) where
     /// `&mut Window` is not available. Focus is applied later by the caller
     /// via `focus_active_terminal()`.
-    pub fn from_terminal_unfocused(mut terminal: Terminal, cx: &mut Context<Self>) -> Self {
+    pub fn from_terminal_unfocused(
+        mut terminal: Terminal,
+        keybindings: UiKeybindings,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
 
         let (byte_rx, event_rx) = terminal.take_channels().expect(
@@ -122,7 +127,7 @@ impl TerminalView {
                 position: None,
                 cmd_held: false,
             },
-            keybindings: UiKeybindings::from_config(&kild_core::Keybindings::load_hierarchy()),
+            keybindings,
         }
     }
 

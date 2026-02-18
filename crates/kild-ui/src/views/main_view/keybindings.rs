@@ -17,6 +17,7 @@ use tracing::warn;
 /// Real events have `key_char: Some(...)` while parsed keystrokes have
 /// `key_char: None`, so direct `==` always fails. This type compares only the
 /// fields that matter: `key`, `control`, `alt`, `shift`, `platform`.
+#[derive(Clone)]
 pub(crate) struct ParsedKeybinding {
     key: String,
     control: bool,
@@ -165,6 +166,7 @@ impl ParsedJumpModifier {
 }
 
 /// Parsed terminal keybindings.
+#[derive(Clone)]
 pub(crate) struct UiTerminalKeybindings {
     pub(crate) focus_escape: ParsedKeybinding,
     pub(crate) copy: ParsedKeybinding,
@@ -172,6 +174,7 @@ pub(crate) struct UiTerminalKeybindings {
 }
 
 /// Parsed navigation keybindings.
+#[derive(Clone)]
 pub(crate) struct UiNavigationKeybindings {
     pub(crate) next_kild: ParsedKeybinding,
     pub(crate) prev_kild: ParsedKeybinding,
@@ -182,6 +185,7 @@ pub(crate) struct UiNavigationKeybindings {
 }
 
 /// All parsed UI keybindings, ready for use in `on_key_down` handlers.
+#[derive(Clone)]
 pub(crate) struct UiKeybindings {
     pub(crate) terminal: UiTerminalKeybindings,
     pub(crate) navigation: UiNavigationKeybindings,
@@ -234,6 +238,16 @@ impl UiKeybindings {
     ///
     /// Includes `focus_escape` so `Ctrl+Escape` explicitly propagates instead of
     /// being written as `\x1b` to the terminal process.
+    ///
+    /// # Maintenance note
+    ///
+    /// This list must be kept in sync with all `ParsedKeybinding` fields in
+    /// `UiNavigationKeybindings` plus terminal bindings that must not reach the PTY.
+    /// If you add a new navigation binding, add it here too — the compiler won't
+    /// remind you, and a missing entry silently passes keystrokes to the PTY.
+    ///
+    /// Note: jump-modifier shortcuts (modifier+1-9) use a separate digit-check path
+    /// in rendering.rs and are not listed here.
     pub(crate) fn matches_any_nav_shortcut(&self, keystroke: &Keystroke) -> bool {
         self.navigation.next_kild.matches(keystroke)
             || self.navigation.prev_kild.matches(keystroke)
@@ -486,6 +500,23 @@ mod tests {
                 .next_kild
                 .matches(&make_keystroke("j", cmd_mods()))
         );
+    }
+
+    #[test]
+    fn test_matches_any_nav_shortcut_respects_custom_binding() {
+        // When next_kild is remapped to alt+j:
+        // - alt+j must be intercepted (not sent to PTY)
+        // - cmd+j must pass through (no longer a nav shortcut)
+        let mut raw = kild_core::Keybindings::default();
+        raw.navigation.next_kild = Some("alt+j".to_string());
+        let kb = UiKeybindings::from_config(&raw);
+
+        let alt_mods = Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        assert!(kb.matches_any_nav_shortcut(&make_keystroke("j", alt_mods)));
+        assert!(!kb.matches_any_nav_shortcut(&make_keystroke("j", cmd_mods())));
     }
 
     #[test]

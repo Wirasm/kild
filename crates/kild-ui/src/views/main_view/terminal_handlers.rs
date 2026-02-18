@@ -16,8 +16,9 @@ impl MainView {
     ) -> bool {
         match crate::terminal::state::Terminal::new(Some(worktree), cx) {
             Ok(terminal) => {
+                let kb = self.keybindings.clone();
                 let view =
-                    cx.new(|cx| crate::terminal::TerminalView::from_terminal(terminal, window, cx));
+                    cx.new(|cx| crate::terminal::TerminalView::from_terminal(terminal, kb, window, cx));
                 let tabs = self
                     .terminal_tabs
                     .entry(session_id.to_string())
@@ -109,10 +110,11 @@ impl MainView {
 
             if let Err(e) = this.update(cx, |view, cx| {
                 let daemon_id_clone = daemon_id.clone();
+                let kb = view.keybindings.clone();
                 match crate::terminal::state::Terminal::from_daemon(daemon_id.clone(), conn, cx) {
                     Ok(terminal) => {
                         let entity = cx.new(|cx| {
-                            crate::terminal::TerminalView::from_terminal_unfocused(terminal, cx)
+                            crate::terminal::TerminalView::from_terminal_unfocused(terminal, kb, cx)
                         });
                         let tabs = view
                             .terminal_tabs
@@ -229,10 +231,11 @@ impl MainView {
             if let Err(e) = this.update(cx, |view, cx| {
                 let daemon_id_clone = daemon_id.clone();
                 let name = teammate_name.clone();
+                let kb = view.keybindings.clone();
                 match crate::terminal::state::Terminal::from_daemon(daemon_id, conn, cx) {
                     Ok(terminal) => {
                         let entity = cx.new(|cx| {
-                            crate::terminal::TerminalView::from_terminal_unfocused(terminal, cx)
+                            crate::terminal::TerminalView::from_terminal_unfocused(terminal, kb, cx)
                         });
                         let tabs = view.terminal_tabs.entry(kild_id.clone()).or_default();
                         tabs.push_teammate(entity, name, color, daemon_id_clone);
