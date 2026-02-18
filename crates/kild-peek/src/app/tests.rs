@@ -1441,3 +1441,104 @@ fn test_cli_find_regex_with_json() {
     assert!(find_matches.get_flag("regex"));
     assert!(find_matches.get_flag("json"));
 }
+
+#[test]
+fn test_cli_wait_basic() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild-peek",
+        "wait",
+        "--window",
+        "KILD",
+        "--text",
+        "Branch name",
+    ]);
+    assert!(matches.is_ok());
+    let matches = matches.unwrap();
+    let wait_matches = matches.subcommand_matches("wait").unwrap();
+    assert_eq!(
+        wait_matches.get_one::<String>("text").unwrap(),
+        "Branch name"
+    );
+    assert!(!wait_matches.get_flag("until-gone"));
+    assert_eq!(*wait_matches.get_one::<u64>("timeout").unwrap(), 30000);
+}
+
+#[test]
+fn test_cli_wait_until_gone() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild-peek",
+        "wait",
+        "--app",
+        "KILD",
+        "--text",
+        "Loading...",
+        "--until-gone",
+    ]);
+    assert!(matches.is_ok());
+    let matches = matches.unwrap();
+    let wait_matches = matches.subcommand_matches("wait").unwrap();
+    assert!(wait_matches.get_flag("until-gone"));
+}
+
+#[test]
+fn test_cli_wait_with_timeout() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild-peek",
+        "wait",
+        "--window",
+        "KILD",
+        "--text",
+        "Success",
+        "--timeout",
+        "5000",
+    ]);
+    assert!(matches.is_ok());
+    let matches = matches.unwrap();
+    let wait_matches = matches.subcommand_matches("wait").unwrap();
+    assert_eq!(*wait_matches.get_one::<u64>("timeout").unwrap(), 5000);
+}
+
+#[test]
+fn test_cli_wait_requires_text() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec!["kild-peek", "wait", "--window", "KILD"]);
+    assert!(matches.is_err());
+}
+
+#[test]
+fn test_cli_assert_contains_text() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild-peek",
+        "assert",
+        "--window",
+        "KILD",
+        "--contains-text",
+        "test-branch",
+    ]);
+    assert!(matches.is_ok());
+    let matches = matches.unwrap();
+    let assert_matches = matches.subcommand_matches("assert").unwrap();
+    assert_eq!(
+        assert_matches.get_one::<String>("contains-text").unwrap(),
+        "test-branch"
+    );
+}
+
+#[test]
+fn test_cli_assert_contains_text_conflicts_with_exists() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild-peek",
+        "assert",
+        "--window",
+        "KILD",
+        "--contains-text",
+        "x",
+        "--exists",
+    ]);
+    assert!(matches.is_err());
+}

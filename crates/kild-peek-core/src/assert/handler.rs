@@ -1,7 +1,7 @@
 use tracing::{info, warn};
 
 use super::errors::AssertError;
-use super::types::{Assertion, AssertionResult};
+use super::types::{Assertion, AssertionResult, ElementQuery};
 use crate::diff::{DiffRequest, compare_images};
 use crate::window::{find_window_by_title, list_windows};
 
@@ -13,15 +13,9 @@ pub fn run_assertion(assertion: &Assertion) -> Result<AssertionResult, AssertErr
         Assertion::WindowExists { title } => assert_window_exists(title),
         Assertion::WindowVisible { title } => assert_window_visible(title),
         Assertion::ElementExists {
-            window_title: _,
-            query: _,
-        } => {
-            // Element inspection requires accessibility APIs which we're deferring
-            // For now, return a failed assertion result explaining the limitation
-            Ok(AssertionResult::fail(
-                "Element assertions require accessibility APIs (not yet implemented)",
-            ))
-        }
+            window_title,
+            query,
+        } => assert_element_exists(window_title, query),
         Assertion::ImageSimilar {
             image_path,
             baseline_path,
@@ -130,6 +124,67 @@ fn assert_window_visible(title: &str) -> Result<AssertionResult, AssertError> {
     }
 }
 
+fn assert_element_exists(
+    window_title: &str,
+    query: &ElementQuery,
+) -> Result<AssertionResult, AssertError> {
+    use crate::element::{ElementsRequest, list_elements};
+    use crate::interact::InteractionTarget;
+
+    let request = ElementsRequest::new(InteractionTarget::Window {
+        title: window_title.to_string(),
+    });
+
+    let result = match list_elements(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(AssertionResult::fail(format!(
+                "Could not list elements in window '{}': {}",
+                window_title, e
+            ))
+            .with_details(serde_json::json!({
+                "window": window_title,
+                "error": e.to_string(),
+            })));
+        }
+    };
+
+    let search_text = query.title.as_deref().unwrap_or("");
+
+    let found = if search_text.is_empty() {
+        !result.elements().is_empty()
+    } else {
+        result
+            .elements()
+            .iter()
+            .any(|e| e.matches_text(search_text))
+    };
+
+    if found {
+        Ok(AssertionResult::pass(format!(
+            "Element with text '{}' found in window '{}'",
+            search_text, window_title
+        ))
+        .with_details(serde_json::json!({
+            "window": window_title,
+            "text": search_text,
+            "element_count": result.count(),
+        })))
+    } else {
+        Ok(AssertionResult::fail(format!(
+            "No element with text '{}' found in window '{}' ({} elements checked)",
+            search_text,
+            window_title,
+            result.count()
+        ))
+        .with_details(serde_json::json!({
+            "window": window_title,
+            "text": search_text,
+            "element_count": result.count(),
+        })))
+    }
+}
+
 fn assert_image_similar(
     image_path: &std::path::Path,
     baseline_path: &std::path::Path,
@@ -193,5 +248,15 @@ mod tests {
             Assertion::image_similar("/nonexistent/image.png", "/nonexistent/baseline.png", 0.95);
         let result = run_assertion(&assertion);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_assert_element_exists_not_found() {
+        let query =
+            crate::assert::types::ElementQuery::new().with_title("DEFINITELY_NOT_THERE_XYZ");
+        let assertion = Assertion::element_exists("NONEXISTENT_WINDOW_12345_UNIQUE", query);
+        let result = run_assertion(&assertion).unwrap();
+        // Either window-not-found fail or element-not-found fail — both are failures
+        assert!(!result.passed);
     }
 }

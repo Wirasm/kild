@@ -42,4 +42,7 @@ pub use interact::{
 };
 
 // Re-export element types
-pub use element::{ElementError, ElementInfo, ElementsRequest, ElementsResult, FindRequest};
+pub use element::{
+    ElementError, ElementInfo, ElementsRequest, ElementsResult, FindRequest, WaitRequest,
+    WaitResult,
+};

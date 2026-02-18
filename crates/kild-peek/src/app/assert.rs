@@ -20,20 +20,26 @@ pub fn subcommand() -> Command {
                 .long("exists")
                 .help("Assert window exists")
                 .action(ArgAction::SetTrue)
-                .conflicts_with_all(["visible", "similar"]),
+                .conflicts_with_all(["visible", "similar", "contains-text"]),
         )
         .arg(
             Arg::new("visible")
                 .long("visible")
                 .help("Assert window is visible (not minimized)")
                 .action(ArgAction::SetTrue)
-                .conflicts_with_all(["exists", "similar"]),
+                .conflicts_with_all(["exists", "similar", "contains-text"]),
         )
         .arg(
             Arg::new("similar")
                 .long("similar")
                 .help("Assert screenshot is similar to baseline image path")
-                .conflicts_with_all(["exists", "visible"]),
+                .conflicts_with_all(["exists", "visible", "contains-text"]),
+        )
+        .arg(
+            Arg::new("contains-text")
+                .long("contains-text")
+                .help("Assert window contains a UI element with this text (Accessibility API)")
+                .conflicts_with_all(["exists", "visible", "similar"]),
         )
         .arg(
             Arg::new("threshold")

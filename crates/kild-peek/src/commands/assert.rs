@@ -1,5 +1,5 @@
 use clap::ArgMatches;
-use kild_peek_core::assert::{Assertion, AssertionResult, run_assertion};
+use kild_peek_core::assert::{Assertion, AssertionResult, ElementQuery, run_assertion};
 use kild_peek_core::events;
 use kild_peek_core::screenshot::{CaptureRequest, capture, save_to_file};
 use tracing::{error, info};
@@ -67,8 +67,18 @@ pub fn handle_assert_command(matches: &ArgMatches) -> Result<(), Box<dyn std::er
             wait_flag,
             timeout_ms,
         )?
+    } else if let Some(text) = matches.get_one::<String>("contains-text") {
+        if resolved_title.is_empty() {
+            return Err("--window or --app is required with --contains-text".into());
+        }
+        Assertion::element_exists(
+            &resolved_title,
+            ElementQuery::new().with_title(text.clone()),
+        )
     } else {
-        return Err("One of --exists, --visible, or --similar must be specified".into());
+        return Err(
+            "One of --exists, --visible, --similar, or --contains-text must be specified".into(),
+        );
     };
 
     info!(event = "peek.cli.assert_started", assertion = ?assertion);

@@ -1,5 +1,7 @@
 use clap::ArgMatches;
-use kild_peek_core::element::{ElementsRequest, FindRequest, find_element, list_elements};
+use kild_peek_core::element::{
+    ElementsRequest, FindRequest, WaitRequest, find_element, list_elements, wait_for_element,
+};
 use kild_peek_core::events;
 use tracing::{error, info};
 
@@ -56,6 +58,50 @@ pub fn handle_elements_command(matches: &ArgMatches) -> Result<(), Box<dyn std::
         Err(e) => {
             eprintln!("Elements listing failed: {}", e);
             error!(event = "peek.cli.elements_failed", error = %e);
+            events::log_app_error(&e);
+            Err(e.into())
+        }
+    }
+}
+
+pub fn handle_wait_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let target = parse_interaction_target(matches)?;
+    let text = matches.get_one::<String>("text").unwrap();
+    let until_gone = matches.get_flag("until-gone");
+    let timeout_ms = *matches.get_one::<u64>("timeout").unwrap_or(&30000);
+    let json_output = matches.get_flag("json");
+
+    info!(
+        event = "peek.cli.wait_started",
+        text = text.as_str(),
+        until_gone = until_gone,
+        timeout_ms = timeout_ms
+    );
+
+    let mut request = WaitRequest::new(target, text, timeout_ms);
+    if until_gone {
+        request = request.with_until_gone();
+    }
+
+    match wait_for_element(&request) {
+        Ok(result) => {
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if until_gone {
+                println!("Element \"{}\" is gone ({}ms)", text, result.elapsed_ms);
+            } else {
+                println!("Element \"{}\" appeared ({}ms)", text, result.elapsed_ms);
+            }
+            info!(
+                event = "peek.cli.wait_completed",
+                text = text.as_str(),
+                elapsed_ms = result.elapsed_ms
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Wait failed: {}", e);
+            error!(event = "peek.cli.wait_failed", error = %e);
             events::log_app_error(&e);
             Err(e.into())
         }

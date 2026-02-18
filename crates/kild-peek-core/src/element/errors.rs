@@ -46,6 +46,12 @@ pub enum ElementError {
 
     #[error("Invalid regex pattern '{pattern}': {reason}")]
     InvalidRegex { pattern: String, reason: String },
+
+    #[error("Element with text '{text}' not found after {timeout_ms}ms")]
+    WaitTimeoutElementNotFound { text: String, timeout_ms: u64 },
+
+    #[error("Element with text '{text}' still exists after {timeout_ms}ms")]
+    WaitTimeoutElementStillExists { text: String, timeout_ms: u64 },
 }
 
 impl PeekError for ElementError {
@@ -66,6 +72,10 @@ impl PeekError for ElementError {
                 "ELEMENT_WAIT_TIMEOUT_BY_APP_AND_TITLE"
             }
             ElementError::InvalidRegex { .. } => "ELEMENT_INVALID_REGEX",
+            ElementError::WaitTimeoutElementNotFound { .. } => "ELEMENT_WAIT_TIMEOUT_NOT_FOUND",
+            ElementError::WaitTimeoutElementStillExists { .. } => {
+                "ELEMENT_WAIT_TIMEOUT_STILL_EXISTS"
+            }
         }
     }
 
@@ -84,6 +94,8 @@ impl PeekError for ElementError {
                 | ElementError::WaitTimeoutByApp { .. }
                 | ElementError::WaitTimeoutByAppAndTitle { .. }
                 | ElementError::InvalidRegex { .. }
+                | ElementError::WaitTimeoutElementNotFound { .. }
+                | ElementError::WaitTimeoutElementStillExists { .. }
         )
     }
 }
@@ -265,6 +277,34 @@ mod tests {
         };
         assert_eq!(error.to_string(), "No element found with text: ''");
         assert_eq!(error.error_code(), "ELEMENT_NOT_FOUND");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_element_not_found_error() {
+        let error = ElementError::WaitTimeoutElementNotFound {
+            text: "Submit".to_string(),
+            timeout_ms: 5000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Element with text 'Submit' not found after 5000ms"
+        );
+        assert_eq!(error.error_code(), "ELEMENT_WAIT_TIMEOUT_NOT_FOUND");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn test_wait_timeout_element_still_exists_error() {
+        let error = ElementError::WaitTimeoutElementStillExists {
+            text: "Loading...".to_string(),
+            timeout_ms: 3000,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Element with text 'Loading...' still exists after 3000ms"
+        );
+        assert_eq!(error.error_code(), "ELEMENT_WAIT_TIMEOUT_STILL_EXISTS");
         assert!(error.is_user_error());
     }
 }

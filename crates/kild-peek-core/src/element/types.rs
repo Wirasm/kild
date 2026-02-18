@@ -183,6 +183,76 @@ impl FindRequest {
     }
 }
 
+/// Request to wait for an element to appear or disappear
+#[derive(Debug, Clone)]
+pub struct WaitRequest {
+    target: InteractionTarget,
+    text: String,
+    until_gone: bool,
+    timeout_ms: u64,
+}
+
+impl WaitRequest {
+    pub fn new(target: InteractionTarget, text: impl Into<String>, timeout_ms: u64) -> Self {
+        Self {
+            target,
+            text: text.into(),
+            until_gone: false,
+            timeout_ms,
+        }
+    }
+
+    pub fn with_until_gone(mut self) -> Self {
+        self.until_gone = true;
+        self
+    }
+
+    pub fn target(&self) -> &InteractionTarget {
+        &self.target
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn until_gone(&self) -> bool {
+        self.until_gone
+    }
+
+    pub fn timeout_ms(&self) -> u64 {
+        self.timeout_ms
+    }
+}
+
+/// Result of a wait operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitResult {
+    pub success: bool,
+    pub text: String,
+    pub until_gone: bool,
+    pub elapsed_ms: u64,
+}
+
+impl WaitResult {
+    pub fn appeared(text: impl Into<String>, elapsed_ms: u64) -> Self {
+        Self {
+            success: true,
+            text: text.into(),
+            until_gone: false,
+            elapsed_ms,
+        }
+    }
+
+    pub fn gone(text: impl Into<String>, elapsed_ms: u64) -> Self {
+        Self {
+            success: true,
+            text: text.into(),
+            until_gone: true,
+            elapsed_ms,
+        }
+    }
+}
+
 /// Result of listing elements
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementsResult {

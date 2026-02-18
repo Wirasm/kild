@@ -20,6 +20,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("diff", sub_matches)) => diff::handle_diff_command(sub_matches),
         Some(("elements", sub_matches)) => elements::handle_elements_command(sub_matches),
         Some(("find", sub_matches)) => elements::handle_find_command(sub_matches),
+        Some(("wait", sub_matches)) => elements::handle_wait_command(sub_matches),
         Some(("click", sub_matches)) => interact::handle_click_command(sub_matches),
         Some(("drag", sub_matches)) => interact::handle_drag_command(sub_matches),
         Some(("scroll", sub_matches)) => interact::handle_scroll_command(sub_matches),

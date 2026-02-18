@@ -34,6 +34,7 @@ pub fn build_cli() -> Command {
         .subcommand(diff::subcommand())
         .subcommand(elements::subcommand())
         .subcommand(elements::find_subcommand())
+        .subcommand(elements::wait_subcommand())
         .subcommand(interact::click_subcommand())
         .subcommand(interact::type_subcommand())
         .subcommand(interact::key_subcommand())
