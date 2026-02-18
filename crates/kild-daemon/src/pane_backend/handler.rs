@@ -7,11 +7,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::errors::DaemonError;
-use crate::protocol::codec::{read_message, write_message_flush};
-use crate::protocol::pane_backend::{
-    CaptureParams, ContextMap, InitializeParams, KillParams, PaneBackendEvent, PaneBackendRequest,
+use crate::pane_backend::context::ContextMap;
+use crate::pane_backend::protocol::{
+    CaptureParams, InitializeParams, KillParams, PaneBackendEvent, PaneBackendRequest,
     PaneBackendResponse, SpawnAgentParams, WriteParams,
 };
+use crate::protocol::codec::{read_message, write_message_flush};
 use crate::session::manager::SessionManager;
 
 /// Handle a pane backend connection using the `CustomPaneBackend` JSON-RPC protocol.

@@ -1,5 +1,4 @@
 pub mod connection;
-pub mod pane_backend;
 pub mod shutdown;
 
 use std::path::Path;

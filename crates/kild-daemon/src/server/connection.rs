@@ -9,9 +9,9 @@ use tracing::{debug, error, info, warn};
 
 use kild_core::errors::KildError;
 
+use crate::pane_backend;
 use crate::protocol::codec::{read_message, write_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
-use crate::server::pane_backend;
 use crate::session::manager::SessionManager;
 use crate::session::state::ClientId;
 
