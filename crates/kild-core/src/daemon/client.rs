@@ -12,6 +12,10 @@ use kild_protocol::{
 };
 use tracing::{debug, info, warn};
 
+// Intentionally duplicated from kild-tmux-shim/src/ipc.rs (see #517).
+// Cannot consolidate: kild-protocol is kept lean (no tracing dep), and
+// kild-core is too heavy to add as a shim dependency.
+// If liveness or timeout logic changes, update both files.
 thread_local! {
     static CACHED_CONNECTION: RefCell<Option<IpcConnection>> = const { RefCell::new(None) };
 }

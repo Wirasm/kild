@@ -8,6 +8,10 @@ use tracing::{debug, warn};
 
 use crate::errors::ShimError;
 
+// Intentionally duplicated from kild-core/src/daemon/client.rs (see #517).
+// Cannot consolidate: kild-protocol is kept lean (no tracing dep), and
+// kild-core is too heavy to add as a shim dependency.
+// If liveness or timeout logic changes, update both files.
 thread_local! {
     static CACHED_CONNECTION: RefCell<Option<IpcConnection>> = const { RefCell::new(None) };
 }
