@@ -231,6 +231,27 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Prefer borrowed types for function arguments.** Use `&str` over `&String`, `&[T]` over `&Vec<T>`, `&Path` over `&PathBuf`. This accepts more input types via deref coercion and avoids unnecessary indirection.
 
+## Code Naming Contract
+
+Apply these naming rules for all code changes unless a subsystem has a stronger existing pattern.
+
+- Use Rust standard casing: modules/files `snake_case`, types/traits/enums `PascalCase`, functions/variables `snake_case`, constants/statics `SCREAMING_SNAKE_CASE`.
+- Name types and modules by domain role, not implementation detail — e.g. `GhForgeBackend`, `GhosttyTerminalBackend` over vague names like `Manager` or `Helper`.
+- Keep trait implementer naming explicit and predictable: `<Name>Backend`, `<Name>Agent`, `<Name>Channel`.
+- Keep factory registration keys stable, lowercase, and user-facing (e.g. `"ghostty"`, `"claude"`, `"github"`). Avoid alias sprawl.
+- Name tests by behavior/outcome: `<subject>_<expected_behavior>`. Keep fixture identifiers KILD-native (`kild_branch`, `kild_session`, `kild_project`).
+
+## Architecture Boundary Contract
+
+Keep the trait/factory architecture stable under growth.
+
+- Extend capabilities by adding trait implementations + factory wiring first; avoid cross-module rewrites for isolated features.
+- Keep dependency direction inward to contracts: concrete implementations depend on trait/config/util layers, not on each other.
+- Avoid cross-subsystem coupling — e.g. terminal backend code must not import session internals, agent code must not mutate forge policy directly.
+- Keep module responsibilities single-purpose: session lifecycle in `sessions/`, terminal abstraction in `terminal/`, agent backends in `agents/`, git ops in `git/`, forge ops in `forge/`.
+- Introduce new shared abstractions only after repeated use (rule of three), with at least one real caller in current scope.
+- Treat config/schema keys as public contract: document defaults, compatibility impact, and rollback path for any changes.
+
 ## Structured Logging
 
 JSON output via tracing-subscriber. Silent by default — use `-v/--verbose` to emit `info` and above. `RUST_LOG` alone does not override quiet mode.
