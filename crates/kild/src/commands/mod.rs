@@ -22,6 +22,7 @@ mod focus;
 mod health;
 mod hide;
 mod init_hooks;
+mod inject;
 mod list;
 mod open;
 mod overlaps;
@@ -32,7 +33,6 @@ mod stats;
 mod status;
 mod stop;
 mod sync;
-mod inject;
 mod teammates;
 
 pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {

@@ -3508,8 +3508,10 @@ name = "kild"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chrono",
  "clap",
  "clap_complete",
+ "dirs 5.0.1",
  "kild-config",
  "kild-core",
  "kild-protocol",
