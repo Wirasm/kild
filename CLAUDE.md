@@ -8,15 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Single-Developer Tool:** No multi-tenant complexity. Optimize for the solo developer managing parallel AI workflows.
 
-**KISS:** Keep it simple and easily understandable over complex and "clever". First principles thinking.
-
-**YAGNI:** Justify every line of code against the problem it solves. Is it needed?
-
-**DRY:** Don't Repeat Yourself. Every piece of knowledge should have a single, authoritative representation. Extract shared logic rather than copy-pasting.
-
 **Type Safety (CRITICAL):** Rust's type system is a feature, not an obstacle. Use it fully.
-
-**No Silent Failures:** This is a developer tool. Developers need to know when something fails. Never swallow errors, never hide failures behind fallbacks without logging, never leave things "behind the curtain". If config is wrong, say so. If an operation fails, surface it. Explicit failure is better than silent misbehavior.
 
 ## Codebase Realities
 
