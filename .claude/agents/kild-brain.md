@@ -124,9 +124,25 @@ gh issue view <number> --json body,title,labels
 
 ## Decision Protocol
 
+### After injecting a task — stop and wait
+
+After calling `kild inject <branch> "..."`, **stop**. Do not poll. Do not sleep. Do not run `kild list` in a loop.
+
+The worker's claude-status hook fires automatically when it finishes (Stop event). That hook writes to your inbox (`~/.claude/teams/honryu/inboxes/honryu.json`). You will receive the event as a new message within ~1 second of the worker going idle — no polling needed.
+
+```
+kild inject <branch> "task"   →  you stop, wait
+                                  worker executes...
+                                  worker goes idle → hook fires → inbox written
+                                  you receive "[EVENT] <branch> Stop: <summary>"
+                                  you act
+```
+
+A single `kild list --json` right after inject is fine to confirm the session started. After that: **just wait**.
+
 ### When a worker event arrives
 
-Events are injected as messages like:
+Events arrive as injected messages like:
 `[EVENT] feature-auth Stop: I've completed the JWT implementation. Tests pass. PR opened.`
 
 Response protocol:
