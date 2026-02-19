@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use bytes::Bytes;
-use tokio::io::BufReader;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
@@ -16,13 +15,18 @@ use crate::session::state::ClientId;
 
 /// Handle a single client connection.
 ///
+/// Generic over `S` so it works with both Unix streams and TLS-wrapped TCP
+/// streams. The only requirement is that `S: AsyncRead + AsyncWrite + Send + Unpin + 'static`.
+///
 /// Reads JSONL messages from the client, dispatches them to the session manager,
 /// and sends responses back. For `attach` requests, enters streaming mode.
-pub async fn handle_connection(
-    stream: UnixStream,
+pub async fn handle_connection<S>(
+    stream: S,
     session_manager: Arc<RwLock<SessionManager>>,
     shutdown: tokio_util::sync::CancellationToken,
-) {
+) where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     // write() required: next_client_id takes &mut self. A shared AtomicU64 on
     // the server struct would eliminate this per-connection write lock, but the
     // daemon is low-connection-rate so it is not a bottleneck in practice.
@@ -33,7 +37,9 @@ pub async fn handle_connection(
 
     debug!(event = "daemon.connection.accepted", client_id = client_id,);
 
-    let (reader, writer) = stream.into_split();
+    // tokio::io::split() works for any AsyncRead+AsyncWrite, including TLS streams.
+    // (Previously used stream.into_split() which is UnixStream-specific.)
+    let (reader, writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     let writer = Arc::new(Mutex::new(writer));
 
@@ -97,13 +103,16 @@ pub async fn handle_connection(
 /// Dispatch a client message to the session manager and return a response.
 ///
 /// Returns `None` for messages that don't generate a direct response (handled inline).
-async fn dispatch_message(
+async fn dispatch_message<W>(
     msg: ClientMessage,
     client_id: ClientId,
     session_manager: &Arc<RwLock<SessionManager>>,
-    writer: Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>,
+    writer: Arc<Mutex<W>>,
     shutdown: &tokio_util::sync::CancellationToken,
-) -> Option<DaemonMessage> {
+) -> Option<DaemonMessage>
+where
+    W: AsyncWrite + Send + Unpin + 'static,
+{
     let msg_id = msg.id().to_string();
     match msg {
         ClientMessage::CreateSession {
@@ -247,7 +256,7 @@ async fn dispatch_message(
                 }
 
                 // Flush once after the entire attach batch
-                if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *w).await {
+                if let Err(e) = w.flush().await {
                     warn!(
                         event = "daemon.connection.attach_flush_failed",
                         session_id = %session_id,
@@ -423,12 +432,14 @@ async fn dispatch_message(
 }
 
 /// Stream PTY output to a client until detach, shutdown, or channel close.
-async fn stream_pty_output(
+async fn stream_pty_output<W>(
     mut rx: tokio::sync::broadcast::Receiver<Bytes>,
     session_id: &str,
-    writer: Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>,
+    writer: Arc<Mutex<W>>,
     shutdown: tokio_util::sync::CancellationToken,
-) {
+) where
+    W: AsyncWrite + Send + Unpin + 'static,
+{
     let engine = base64::engine::general_purpose::STANDARD;
 
     loop {

@@ -110,12 +110,12 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Workspace structure:**
 
-- `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths). Single source of truth for KILD filesystem layout.
+- `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths including `tls_cert_path()` and `tls_key_path()` for daemon TLS certs). Single source of truth for KILD filesystem layout.
 - `crates/kild-config` - TOML configuration types, loading, validation, and keybindings for ~/.kild/config.toml. Depends only on kild-paths and kild-protocol. Single source of truth for all KildConfig/Config/Keybindings types. Extracted from kild-core to enable fast incremental compilation of config-only changes.
-- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode), domain newtypes (SessionId, BranchName, ProjectId), and serde-only domain enums (ForgeType). Also provides `IpcConnection` for JSONL-over-Unix-socket client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()`, and `AsyncIpcClient<R, W>` — a generic async JSONL client over any `AsyncBufRead + AsyncWrite` pair used by kild-ui. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json, futures (tempfile, smol for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
+- `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode), domain newtypes (SessionId, BranchName, ProjectId), and serde-only domain enums (ForgeType). Also provides `IpcConnection` for JSONL-over-Unix-socket-or-TCP/TLS client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()` and TLS variant via `connect_tls()`, and `AsyncIpcClient<R, W>` — a generic async JSONL client over any `AsyncBufRead + AsyncWrite` pair used by kild-ui. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json, futures (tempfile, smol for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
 - `crates/kild` - Thin CLI that consumes kild-core (clap for arg parsing, color.rs for Tallinn Night palette output)
-- `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol.
+- `crates/kild-daemon` - Standalone daemon binary for PTY management (async tokio server, JSONL IPC protocol, portable-pty integration). CLI spawns this as subprocess. Wire types re-exported from kild-protocol. Optionally binds a TLS-wrapped TCP listener (`bind_tcp`) alongside the Unix socket for remote access; self-signed cert auto-generated at `~/.kild/certs/` on first start.
 - `crates/kild-tmux-shim` - tmux-compatible shim binary for agent team support (CLI that intercepts tmux commands, routes to daemon IPC via kild-protocol::IpcConnection)
 - `crates/kild-teams` - Agent team discovery and state management library. Reads shim pane registries at `~/.kild/shim/` to enumerate leader + teammate panes and resolve their daemon session IDs. Used by CLI (`kild teammates`) and kild-ui (sidebar badge).
 - `crates/kild-ui` - GPUI-based native GUI with multi-project support
@@ -127,7 +127,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
-- `daemon/` - Daemon client for IPC communication with thread-local connection pooling (delegates to kild-protocol::IpcConnection) and auto-start logic (discovers kild-daemon binary as sibling executable)
+- `daemon/` - Daemon client for IPC communication with thread-local connection pooling (delegates to kild-protocol::IpcConnection) and auto-start logic (discovers kild-daemon binary as sibling executable). `tofu.rs` implements SHA-256 TOFU fingerprint verification for remote TCP/TLS connections. `mod.rs` exposes `set_remote_override()` for `--remote` CLI flag to route connections via TCP/TLS without touching handler signatures.
 - `editor/` - Editor backend system (Zed, VS Code, Vim, generic fallback) with registry.rs for detection and resolution chain (CLI > config > $VISUAL > $EDITOR > OS default via duti/xdg-mime > PATH scan)
 - `git/` - Git worktree operations via git2
 - `forge/` - Forge backend system (GitHub, future: GitLab, Bitbucket, Gitea) for PR operations
@@ -151,6 +151,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `teams/` - TeamManager for resolving teammate counts per session (used by sidebar for [N] badge display)
 - `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items, hover actions, and [N] teammate badge for active agent teams, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
 - `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle with snapshot via `sync()`/`last_content()`, types.rs for `TerminalContent` snapshot type and `IndexedCell` alias, terminal_element/ for GPUI Element implementation, terminal_view.rs for View — calls `sync()` before constructing TerminalElement to minimize FairMutex hold time during prepaint, colors.rs for ANSI mapping, input.rs for keystroke translation)
+- `daemon_client.rs` - Async daemon IPC client for GPUI. `ErasedUiClient` type erasure unifies Unix socket and TCP/TLS transports; `connect_for_config()` reads config to choose the right transport.
 - `watcher.rs` - File system watcher for instant UI updates on session changes
 - `refresh.rs` - Background refresh logic with hybrid file watching + slow poll fallback
 
@@ -159,7 +160,8 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `protocol/` - JSONL IPC protocol (ClientMessage, DaemonMessage, codec with flush/no-flush variants)
 - `pty/` - PTY lifecycle management (PtyManager, ManagedPty via portable-pty, output broadcasting)
 - `session/` - Daemon session state machine (SessionManager, DaemonSession, SessionState enum)
-- `server/` - Unix socket server (async connection handling, message dispatch, signal-based shutdown)
+- `server/` - Unix socket server with optional TCP/TLS listener (async connection handling, message dispatch, signal-based shutdown; `handle_connection<S>` is generic over stream type)
+- `tls.rs` - TLS cert generation and loading (self-signed cert auto-generated at `~/.kild/certs/` on first `bind_tcp` start)
 - `client/` - Daemon client for typed IPC operations (DaemonClient)
 
 **Key modules in kild-peek-core:**
@@ -194,7 +196,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Key modules in kild (CLI):**
 
-- `app/` - CLI command implementations (daemon.rs, git.rs, global.rs, misc.rs, project.rs, query.rs, session.rs, tests.rs)
+- `app/` - CLI command implementations (daemon.rs, git.rs, global.rs, misc.rs, project.rs, query.rs, session.rs, tests.rs). `global.rs` parses `--remote`/`--remote-fingerprint` flags and calls `set_remote_override()` to route all IPC over TCP/TLS for that invocation.
 - `commands/` - Individual command handler modules (teammates.rs, stop.rs, attach.rs, and others)
 - `main.rs` - CLI entry point with clap argument parsing
 - `color.rs` - Tallinn Night palette output formatting

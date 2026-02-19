@@ -159,6 +159,16 @@ pub struct DaemonRuntimeConfig {
     /// Auto-start the daemon if not running when daemon mode is requested.
     /// Default: true
     pub auto_start: Option<bool>,
+
+    /// Remote daemon address. If set, CLI and UI connect via TCP/TLS instead of Unix socket.
+    /// Format: "host:port" — e.g. "build-server:7432"
+    pub remote_host: Option<String>,
+
+    /// SHA-256 fingerprint of the remote daemon's TLS certificate.
+    /// Required when remote_host is set. Obtain from daemon host:
+    ///   openssl x509 -in ~/.kild/certs/daemon.crt -fingerprint -sha256 -noout
+    /// Format: "sha256:<lowercase hex>" — 64 hex chars after "sha256:"
+    pub remote_cert_fingerprint: Option<String>,
 }
 
 impl DaemonRuntimeConfig {
@@ -172,11 +182,34 @@ impl DaemonRuntimeConfig {
         self.auto_start.unwrap_or(true)
     }
 
+    /// Validate the remote connection fields are consistent.
+    ///
+    /// Returns an error if `remote_host` is set without `remote_cert_fingerprint`.
+    /// Both must be present to establish a verified TLS connection.
+    pub fn validate_remote(&self) -> Result<(), String> {
+        if self.remote_host.is_some() && self.remote_cert_fingerprint.is_none() {
+            return Err(
+                "daemon.remote_host is set but daemon.remote_cert_fingerprint is missing — \
+                 pass --remote-fingerprint or set daemon.remote_cert_fingerprint in config"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// Merge two daemon runtime configs. Override takes precedence for set fields.
     pub fn merge(base: &Self, override_config: &Self) -> Self {
         Self {
             enabled: override_config.enabled.or(base.enabled),
             auto_start: override_config.auto_start.or(base.auto_start),
+            remote_host: override_config
+                .remote_host
+                .clone()
+                .or(base.remote_host.clone()),
+            remote_cert_fingerprint: override_config
+                .remote_cert_fingerprint
+                .clone()
+                .or(base.remote_cert_fingerprint.clone()),
         }
     }
 }
@@ -564,6 +597,55 @@ default = "code"
         let result = config.resolve_editor(None);
         // Result is either $EDITOR value or "code" fallback
         assert!(!result.is_empty());
+    }
+
+    // --- DaemonRuntimeConfig tests ---
+
+    #[test]
+    fn test_daemon_runtime_config_remote_host_from_toml() {
+        let config: KildConfig = toml::from_str(
+            r#"
+[daemon]
+remote_host = "build-server:7432"
+remote_cert_fingerprint = "sha256:abc123"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.daemon.remote_host,
+            Some("build-server:7432".to_string())
+        );
+        assert_eq!(
+            config.daemon.remote_cert_fingerprint,
+            Some("sha256:abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_daemon_runtime_config_remote_fields_default_none() {
+        let config: KildConfig = toml::from_str("").unwrap();
+        assert!(config.daemon.remote_host.is_none());
+        assert!(config.daemon.remote_cert_fingerprint.is_none());
+    }
+
+    #[test]
+    fn test_daemon_runtime_config_merge_remote_fields() {
+        let base = DaemonRuntimeConfig {
+            remote_host: Some("base-host:7432".to_string()),
+            remote_cert_fingerprint: Some("sha256:base".to_string()),
+            ..Default::default()
+        };
+        let override_config = DaemonRuntimeConfig {
+            remote_host: Some("override-host:7432".to_string()),
+            ..Default::default()
+        };
+        let merged = DaemonRuntimeConfig::merge(&base, &override_config);
+        assert_eq!(merged.remote_host, Some("override-host:7432".to_string()));
+        // fingerprint falls through from base when not set in override
+        assert_eq!(
+            merged.remote_cert_fingerprint,
+            Some("sha256:base".to_string())
+        );
     }
 
     // --- UiConfig tests ---

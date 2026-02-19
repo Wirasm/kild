@@ -70,6 +70,14 @@ impl KildPaths {
         self.kild_dir.join("daemon.sock")
     }
 
+    pub fn tls_cert_path(&self) -> PathBuf {
+        self.kild_dir.join("certs").join("daemon.crt")
+    }
+
+    pub fn tls_key_path(&self) -> PathBuf {
+        self.kild_dir.join("certs").join("daemon.key")
+    }
+
     pub fn daemon_pid_file(&self) -> PathBuf {
         self.kild_dir.join("daemon.pid")
     }
@@ -235,6 +243,22 @@ mod tests {
         assert_eq!(
             test_paths().daemon_socket(),
             PathBuf::from("/home/user/.kild/daemon.sock")
+        );
+    }
+
+    #[test]
+    fn test_tls_cert_path() {
+        assert_eq!(
+            test_paths().tls_cert_path(),
+            PathBuf::from("/home/user/.kild/certs/daemon.crt")
+        );
+    }
+
+    #[test]
+    fn test_tls_key_path() {
+        assert_eq!(
+            test_paths().tls_key_path(),
+            PathBuf::from("/home/user/.kild/certs/daemon.key")
         );
     }
 

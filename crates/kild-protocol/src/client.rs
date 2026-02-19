@@ -1,8 +1,9 @@
-//! Shared synchronous JSONL-over-Unix-socket IPC client.
+//! Shared synchronous JSONL IPC client for Unix socket and TCP+TLS transports.
 //!
 //! Provides `IpcConnection` for connecting to the KILD daemon and sending
 //! typed `ClientMessage`/`DaemonMessage` requests. Used by both `kild-core`
-//! and `kild-tmux-shim` to avoid duplicating JSONL framing logic.
+//! (Unix + TCP/TLS) and `kild-tmux-shim` (Unix only) to avoid duplicating
+//! JSONL framing logic. TCP/TLS support requires the `tcp` Cargo feature.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -25,6 +26,9 @@ pub enum IpcError {
     ProtocolError { message: String },
     /// Other I/O error.
     Io(std::io::Error),
+    /// TLS configuration or handshake error (only when `tcp` feature is enabled).
+    #[cfg(feature = "tcp")]
+    TlsConfig(String),
 }
 
 impl std::fmt::Display for IpcError {
@@ -39,6 +43,8 @@ impl std::fmt::Display for IpcError {
             }
             IpcError::ProtocolError { message } => write!(f, "Protocol error: {}", message),
             IpcError::Io(e) => write!(f, "IO error: {}", e),
+            #[cfg(feature = "tcp")]
+            IpcError::TlsConfig(msg) => write!(f, "TLS configuration error: {}", msg),
         }
     }
 }
@@ -58,7 +64,14 @@ impl From<std::io::Error> for IpcError {
     }
 }
 
-/// RAII guard that restores a socket's read timeout on drop.
+/// Internal stream type — Unix socket or TLS-wrapped TCP socket.
+enum IpcStream {
+    Unix(UnixStream),
+    #[cfg(feature = "tcp")]
+    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>>),
+}
+
+/// RAII guard that restores a Unix socket's read timeout on drop.
 struct TimeoutGuard<'a> {
     stream: &'a UnixStream,
     orig_timeout: Option<Duration>,
@@ -70,14 +83,27 @@ impl Drop for TimeoutGuard<'_> {
     }
 }
 
-/// A synchronous JSONL connection to the KILD daemon over a Unix socket.
+/// A synchronous JSONL connection to the KILD daemon.
+///
+/// Supports both Unix socket (local) and TCP+TLS (remote) transports.
+/// The `tcp` Cargo feature must be enabled for TLS support.
 #[derive(Debug)]
 pub struct IpcConnection {
-    stream: UnixStream,
+    stream: IpcStream,
+}
+
+impl std::fmt::Debug for IpcStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpcStream::Unix(s) => write!(f, "IpcStream::Unix({:?})", s),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(_) => write!(f, "IpcStream::Tls(...)"),
+        }
+    }
 }
 
 impl IpcConnection {
-    /// Connect to the daemon at the given socket path.
+    /// Connect to the daemon at the given Unix socket path.
     ///
     /// Checks that the socket file exists, connects, and configures timeouts
     /// (30s read, 5s write). Returns `IpcError::NotRunning` if the socket
@@ -102,7 +128,53 @@ impl IpcConnection {
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
-        Ok(Self { stream })
+        Ok(Self {
+            stream: IpcStream::Unix(stream),
+        })
+    }
+
+    /// Connect to a remote daemon at `addr` (host:port) via TCP+TLS.
+    ///
+    /// The `verifier` is a TOFU fingerprint verifier that rejects connections
+    /// if the server cert doesn't match the pinned fingerprint.
+    ///
+    /// No connection caching for TLS — probing a `StreamOwned` with a 1ms read
+    /// timeout can corrupt the TLS state machine. CLI callers create a fresh
+    /// connection per invocation; the cost is acceptable.
+    #[cfg(feature = "tcp")]
+    pub fn connect_tls(
+        addr: &str,
+        verifier: std::sync::Arc<dyn rustls::client::danger::ServerCertVerifier>,
+    ) -> Result<Self, IpcError> {
+        use std::net::TcpStream;
+        use std::sync::Arc;
+
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|e| IpcError::TlsConfig(e.to_string()))?
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth();
+
+        let host = addr.split(':').next().unwrap_or(addr);
+        let server_name = rustls::pki_types::ServerName::try_from(host.to_owned())
+            .map_err(|e| IpcError::TlsConfig(e.to_string()))?;
+
+        let tcp_stream = TcpStream::connect(addr).map_err(IpcError::ConnectionFailed)?;
+        tcp_stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .map_err(IpcError::Io)?;
+        tcp_stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .map_err(IpcError::Io)?;
+
+        let conn = rustls::ClientConnection::new(std::sync::Arc::new(config), server_name)
+            .map_err(|e| IpcError::TlsConfig(e.to_string()))?;
+
+        Ok(Self {
+            stream: IpcStream::Tls(Box::new(rustls::StreamOwned::new(conn, tcp_stream))),
+        })
     }
 
     /// Send a typed request and read one typed response.
@@ -115,15 +187,30 @@ impl IpcConnection {
             message: e.to_string(),
         })?;
 
-        writeln!(self.stream, "{}", msg)?;
-        self.stream.flush()?;
-
-        // Transient BufReader — not stored as a field because KILD's
-        // request-response protocol expects exactly one response line per send().
-        // Storing it would risk buffering extra data from the stream.
-        let mut reader = BufReader::new(&self.stream);
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
+        let line = match &mut self.stream {
+            IpcStream::Unix(s) => {
+                writeln!(s, "{}", msg)?;
+                s.flush()?;
+                // Transient BufReader — not stored as a field because KILD's
+                // request-response protocol expects exactly one response line per send().
+                // Storing it would risk buffering extra data from the stream.
+                let mut reader = BufReader::new(&*s);
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+                line
+            }
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(s) => {
+                // StreamOwned implements Read + Write; needs &mut for both.
+                writeln!(s, "{}", msg)?;
+                s.flush()?;
+                // Transient BufReader over &mut StreamOwned for the read half.
+                let mut reader = BufReader::new(s.by_ref());
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+                line
+            }
+        };
 
         if line.is_empty() {
             return Err(IpcError::ProtocolError {
@@ -147,44 +234,49 @@ impl IpcConnection {
     ///
     /// Callers like `ping_daemon()` use shorter timeouts than the default 30s.
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<(), IpcError> {
-        self.stream.set_read_timeout(timeout)?;
-        Ok(())
+        match &self.stream {
+            IpcStream::Unix(s) => Ok(s.set_read_timeout(timeout)?),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(s) => Ok(s.get_ref().set_read_timeout(timeout)?),
+        }
     }
 
     /// Check if the connection is still usable (peer hasn't closed).
     ///
-    /// Temporarily sets a 1ms read timeout (restored via RAII guard, even on
-    /// panic) and attempts a read. For KILD's protocol, there's no unsolicited
-    /// data between request-response cycles, so:
-    /// - `TimedOut` / `WouldBlock` → no data, connection alive
-    /// - `Ok(0)` → EOF, peer closed
-    /// - Any other error → connection broken
+    /// For Unix streams: temporarily sets a 1ms read timeout (restored via RAII
+    /// guard, even on panic) and attempts a read. Returns `false` if the peer
+    /// has definitely closed, `true` otherwise.
     ///
-    /// Returns `false` if the socket is definitely closed, `true` otherwise.
-    /// A `true` result is best-effort — the connection may close between this
-    /// check and the next `send()` (TOCTOU race). Callers should handle
-    /// `send()` errors and not cache broken connections.
+    /// For TLS streams: always returns `false` regardless of actual socket state.
+    /// A 1ms read probe on a `StreamOwned<ClientConnection, TcpStream>` can
+    /// corrupt the TLS state machine. TLS connections are never cached — callers
+    /// create fresh connections per request. `false` here means "do not cache",
+    /// not "definitely closed".
     pub fn is_alive(&self) -> bool {
+        match &self.stream {
+            IpcStream::Unix(s) => Self::is_unix_alive(s),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(_) => false,
+        }
+    }
+
+    fn is_unix_alive(s: &UnixStream) -> bool {
         use std::io::Read;
 
-        let orig_timeout = self.stream.read_timeout().ok().flatten();
+        let orig_timeout = s.read_timeout().ok().flatten();
         // RAII guard ensures timeout is restored even on panic
         let _guard = TimeoutGuard {
-            stream: &self.stream,
+            stream: s,
             orig_timeout,
         };
 
         // Fail-closed: if we can't set the probe timeout, assume broken
-        if self
-            .stream
-            .set_read_timeout(Some(Duration::from_millis(1)))
-            .is_err()
-        {
+        if s.set_read_timeout(Some(Duration::from_millis(1))).is_err() {
             return false;
         }
 
         let mut buf = [0u8; 1];
-        let mut stream_ref = &self.stream;
+        let mut stream_ref = s;
         match stream_ref.read(&mut buf) {
             Ok(0) => false, // EOF — peer closed
             Ok(_) => true,  // Unexpected data but socket alive (possible protocol violation)
@@ -411,13 +503,21 @@ mod tests {
         let conn = IpcConnection::connect(&sock_path).unwrap();
 
         // Default timeout is 30s from connect()
-        let before = conn.stream.read_timeout().unwrap();
+        let before = match &conn.stream {
+            IpcStream::Unix(s) => s.read_timeout().unwrap(),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(_) => unreachable!(),
+        };
         assert_eq!(before, Some(Duration::from_secs(30)));
 
         // is_alive() temporarily sets 1ms timeout then restores
         assert!(conn.is_alive());
 
-        let after = conn.stream.read_timeout().unwrap();
+        let after = match &conn.stream {
+            IpcStream::Unix(s) => s.read_timeout().unwrap(),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(_) => unreachable!(),
+        };
         assert_eq!(after, before, "is_alive() should restore original timeout");
     }
 }

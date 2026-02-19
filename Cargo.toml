@@ -55,6 +55,20 @@ smol = "2"
 nix = { version = "0.29", features = ["signal", "process", "term", "ioctl"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
+# TLS — opt-in TCP transport for remote daemon access
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+tokio-rustls = "0.26"
+futures-rustls = "0.26"
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+rcgen = "0.14"
+# ring is lighter than aws-lc-rs; explicit choice to keep compile times manageable
+ring = "0.17"
+
+# For TOFU fingerprint comparison
+sha2 = "0.10"
+hex = "0.4"
+
 # Internal workspace dependencies
 kild-config = { path = "crates/kild-config" }
 kild-core = { path = "crates/kild-core" }

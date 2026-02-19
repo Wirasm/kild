@@ -48,6 +48,17 @@ chrono.workspace = true
 # Cancellation token for graceful shutdown
 tokio-util.workspace = true
 
+# TLS server support
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
+rcgen.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+kild-core.workspace = true
+kild-protocol = { workspace = true, features = ["tcp"] }
+rustls.workspace = true
+rustls-pki-types.workspace = true

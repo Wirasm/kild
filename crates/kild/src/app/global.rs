@@ -20,6 +20,20 @@ pub fn root_command() -> Command {
                 .action(ArgAction::SetTrue)
                 .global(true),
         )
+        .arg(
+            Arg::new("remote")
+                .long("remote")
+                .value_name("HOST:PORT")
+                .help("Connect to a remote daemon instead of the local socket")
+                .global(true),
+        )
+        .arg(
+            Arg::new("remote-fingerprint")
+                .long("remote-fingerprint")
+                .value_name("FINGERPRINT")
+                .help("Expected SHA-256 fingerprint of the remote daemon's TLS cert (sha256:<hex>)")
+                .global(true),
+        )
         .subcommand_required(true)
         .arg_required_else_help(true)
 }

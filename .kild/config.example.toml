@@ -164,3 +164,31 @@ auto_start = true
 # pty_output_batch_ms = 4               # PTY output batching interval (ms)
 # client_buffer_size = 1048576          # Per-client broadcast buffer (default: 1 MB)
 # shutdown_timeout_secs = 5             # Wait for agents to exit on shutdown
+
+# ---------------------------------------------------------------------------
+# TCP/TLS — remote daemon access (server-side config)
+# Set these on the machine running kild-daemon.
+# ---------------------------------------------------------------------------
+
+# Bind a TLS-wrapped TCP listener in addition to the Unix socket.
+# Enables CLI and UI on other machines to connect without SSH socket forwarding.
+# bind_tcp = "0.0.0.0:7432"
+
+# TLS certificate/key paths. Auto-generated at ~/.kild/certs/ on first start
+# if not specified. Only needed to override the auto-generated cert location.
+# tls_cert_path = "~/.kild/certs/daemon.crt"
+# tls_key_path  = "~/.kild/certs/daemon.key"
+
+# ---------------------------------------------------------------------------
+# Remote daemon connection (client-side config)
+# Set these on the machine running kild CLI / kild-ui.
+# ---------------------------------------------------------------------------
+
+# Connect to a remote daemon instead of the local Unix socket.
+# Format: "host:port" — must match bind_tcp on the server.
+# remote_host = "build-server:7432"
+
+# SHA-256 fingerprint of the remote daemon's TLS certificate (required when
+# remote_host is set). Obtain from the server after first daemon start:
+#   openssl x509 -in ~/.kild/certs/daemon.crt -fingerprint -sha256 -noout
+# remote_cert_fingerprint = "sha256:aabbcc..."

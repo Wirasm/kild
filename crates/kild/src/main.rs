@@ -18,6 +18,14 @@ fn main() {
     let quiet = !verbose;
     init_logging(quiet);
 
+    // Apply --remote override before any IPC operations.
+    if let Some(remote) = matches.get_one::<String>("remote") {
+        let fingerprint = matches
+            .get_one::<String>("remote-fingerprint")
+            .map(|s| s.as_str());
+        kild_core::daemon::set_remote_override(remote, fingerprint);
+    }
+
     if let Err(e) = commands::run_command(&matches) {
         // Error already printed to user via eprintln! in command handlers.
         // In verbose mode, JSON logs were also emitted.

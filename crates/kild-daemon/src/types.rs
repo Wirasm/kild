@@ -37,6 +37,21 @@ pub struct DaemonConfig {
     /// Default: 5
     #[serde(default = "default_shutdown_timeout_secs")]
     pub shutdown_timeout_secs: u64,
+
+    /// TCP listener address. None = Unix socket only.
+    /// Example: "0.0.0.0:7432"
+    #[serde(default)]
+    pub bind_tcp: Option<std::net::SocketAddr>,
+
+    /// Path to TLS certificate PEM file.
+    /// Auto-generated at ~/.kild/certs/daemon.crt if None and bind_tcp is set.
+    #[serde(default)]
+    pub tls_cert_path: Option<PathBuf>,
+
+    /// Path to TLS private key PEM file.
+    /// Auto-generated at ~/.kild/certs/daemon.key if None and bind_tcp is set.
+    #[serde(default)]
+    pub tls_key_path: Option<PathBuf>,
 }
 
 impl DaemonConfig {
@@ -64,6 +79,20 @@ impl DaemonConfig {
                 "shutdown_timeout_secs must be > 0".to_string(),
             ));
         }
+        // Validate TLS cert/key paths: must be specified together or not at all.
+        match (&self.tls_cert_path, &self.tls_key_path) {
+            (Some(_), None) => {
+                return Err(crate::errors::DaemonError::ConfigInvalid(
+                    "tls_cert_path is set but tls_key_path is missing".to_string(),
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(crate::errors::DaemonError::ConfigInvalid(
+                    "tls_key_path is set but tls_cert_path is missing".to_string(),
+                ));
+            }
+            _ => {}
+        }
         Ok(())
     }
 }
@@ -77,6 +106,9 @@ impl Default for DaemonConfig {
             pty_output_batch_ms: default_pty_output_batch_ms(),
             client_buffer_size: default_client_buffer_size(),
             shutdown_timeout_secs: default_shutdown_timeout_secs(),
+            bind_tcp: None,
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 }
@@ -300,5 +332,48 @@ default = "claude"
         config.shutdown_timeout_secs = 0;
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("shutdown_timeout_secs"));
+    }
+
+    #[test]
+    fn test_daemon_config_tcp_fields_default_none() {
+        let config = DaemonConfig::default();
+        assert!(config.bind_tcp.is_none());
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
+    }
+
+    #[test]
+    fn test_daemon_config_bind_tcp_from_toml() {
+        let toml = r#"
+[daemon]
+bind_tcp = "0.0.0.0:7432"
+"#;
+        let file: ConfigFile = toml::from_str(toml).unwrap();
+        let addr = file.daemon.bind_tcp.unwrap();
+        assert_eq!(addr.port(), 7432);
+    }
+
+    #[test]
+    fn test_validate_cert_without_key_fails() {
+        let mut config = DaemonConfig::default();
+        config.tls_cert_path = Some(std::path::PathBuf::from("/tmp/daemon.crt"));
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("tls_cert_path"));
+    }
+
+    #[test]
+    fn test_validate_key_without_cert_fails() {
+        let mut config = DaemonConfig::default();
+        config.tls_key_path = Some(std::path::PathBuf::from("/tmp/daemon.key"));
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("tls_key_path"));
+    }
+
+    #[test]
+    fn test_validate_cert_and_key_together_ok() {
+        let mut config = DaemonConfig::default();
+        config.tls_cert_path = Some(std::path::PathBuf::from("/tmp/daemon.crt"));
+        config.tls_key_path = Some(std::path::PathBuf::from("/tmp/daemon.key"));
+        assert!(config.validate().is_ok());
     }
 }

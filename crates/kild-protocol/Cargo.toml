@@ -5,10 +5,21 @@ edition.workspace = true
 license.workspace = true
 description = "Shared IPC protocol types for KILD daemon communication"
 
+[features]
+default = []
+# Enable TCP/TLS transport in IpcConnection.
+# kild-tmux-shim opts out (never uses TCP); kild-core opts in.
+tcp = ["dep:rustls", "dep:rustls-pki-types", "dep:sha2"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true
+
+# TCP feature deps — optional
+rustls = { workspace = true, optional = true }
+rustls-pki-types = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

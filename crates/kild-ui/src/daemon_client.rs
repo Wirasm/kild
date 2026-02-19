@@ -7,17 +7,26 @@
 //! - `stop_session_async()` — stop a running daemon session
 //! - `connect_for_attach()` — two-connection attach for streaming PTY output
 //! - `send_write_stdin()` / `send_resize()` / `send_detach()` — write operations
+//!
+//! Transport routing: when `remote_host` is set in config (or via KILD remote
+//! override), connections use TCP+TLS instead of the local Unix socket. Both
+//! paths are unified under `ErasedUiClient` via type erasure.
 
 use std::os::unix::net::UnixStream;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
+use futures::io::BufReader;
+use futures_rustls::TlsConnector;
+use kild_config::KildConfig;
 use kild_protocol::{
     AsyncIpcClient, ClientMessage, DaemonMessage, ErrorCode, IpcError, SessionId, SessionInfo,
     SessionStatus,
 };
 use smol::Async;
-use smol::io::{BufReader, split};
+use smol::io::split;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -74,15 +83,19 @@ impl From<IpcError> for DaemonClientError {
     }
 }
 
-/// Reader half type for an attached daemon connection.
-type UiReader = BufReader<smol::io::ReadHalf<Async<UnixStream>>>;
-/// Writer half type for an attached daemon connection.
-type UiWriter = smol::io::WriteHalf<Async<UnixStream>>;
-/// Full async IPC client backed by a split Unix stream.
-type UiClient = AsyncIpcClient<UiReader, UiWriter>;
+/// Type-erased reader: boxes any `AsyncBufRead + Send + Unpin`.
+///
+/// Unifies Unix and TCP/TLS halves under a single type so both transport paths
+/// share one `AsyncIpcClient` type. One allocation per connection — acceptable
+/// for IPC.
+type DynReader = Box<dyn futures::io::AsyncBufRead + Send + Unpin>;
+/// Type-erased writer: boxes any `AsyncWrite + Send + Unpin`.
+type DynWriter = Box<dyn futures::io::AsyncWrite + Send + Unpin>;
+/// Unified async IPC client for both Unix socket and TCP/TLS connections.
+type ErasedUiClient = AsyncIpcClient<DynReader, DynWriter>;
 
-/// Connect to the daemon socket, returning an `AsyncIpcClient`.
-async fn connect() -> Result<UiClient, DaemonClientError> {
+/// Connect to the daemon Unix socket, returning an `ErasedUiClient`.
+async fn connect() -> Result<ErasedUiClient, DaemonClientError> {
     let socket_path = kild_core::daemon::socket_path();
     if !socket_path.exists() {
         return Err(DaemonClientError::Connect(std::io::Error::new(
@@ -94,7 +107,94 @@ async fn connect() -> Result<UiClient, DaemonClientError> {
         .await
         .map_err(DaemonClientError::Connect)?;
     let (r, w) = split(stream);
-    Ok(AsyncIpcClient::new(BufReader::new(r), w))
+    Ok(AsyncIpcClient::new(
+        Box::new(BufReader::new(r)) as DynReader,
+        Box::new(w) as DynWriter,
+    ))
+}
+
+/// Connect to a remote daemon via TCP+TLS, returning an `ErasedUiClient`.
+///
+/// Uses `futures_rustls` (not tokio-rustls) because the rest of the UI async
+/// path uses the `futures::io` trait family. Box-pins the TLS stream so
+/// `futures::io::split()` halves satisfy `'static`.
+async fn connect_tcp(
+    addr: &str,
+    fingerprint: [u8; 32],
+) -> Result<ErasedUiClient, DaemonClientError> {
+    let stream = smol::net::TcpStream::connect(addr)
+        .await
+        .map_err(DaemonClientError::Connect)?;
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier = kild_core::daemon::tofu::TofuVerifier::new(fingerprint);
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| DaemonClientError::Protocol(e.to_string()))?
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_no_client_auth();
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let host = addr.split(':').next().unwrap_or(addr);
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_owned())
+        .map_err(|e| DaemonClientError::Protocol(e.to_string()))?;
+
+    let tls_stream = connector
+        .connect(server_name, stream)
+        .await
+        .map_err(DaemonClientError::Connect)?;
+
+    // Box::pin extends the lifetime so split halves satisfy 'static.
+    // futures_rustls::client::TlsStream: Unpin after Box::pin.
+    let pinned: Pin<Box<futures_rustls::client::TlsStream<smol::net::TcpStream>>> =
+        Box::pin(tls_stream);
+    let (r, w) = split(pinned);
+    Ok(AsyncIpcClient::new(
+        Box::new(BufReader::new(r)) as DynReader,
+        Box::new(w) as DynWriter,
+    ))
+}
+
+/// Connect to the daemon using Unix socket or TCP/TLS based on config.
+///
+/// Routing priority (highest wins):
+/// 1. `remote_host` in `~/.kild/config.toml`
+/// 2. Local Unix socket (default)
+///
+/// Note: the `--remote` CLI override is not checked here because kild-ui is a
+/// separate binary where `set_remote_override()` is never called. The UI reads
+/// remote config exclusively from the config file.
+async fn connect_for_config() -> Result<ErasedUiClient, DaemonClientError> {
+    // Check config file
+    let config = match KildConfig::load_hierarchy() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                event = "ui.daemon.config_load_failed",
+                error = %e,
+                "Failed to load config; falling back to defaults. \
+                 Remote daemon settings will not be applied."
+            );
+            KildConfig::default()
+        }
+    };
+    if let Some(ref remote_host) = config.daemon.remote_host {
+        let fp_str = config
+            .daemon
+            .remote_cert_fingerprint
+            .as_deref()
+            .ok_or_else(|| {
+                DaemonClientError::Protocol(
+                    "remote_host is set but remote_cert_fingerprint is missing".to_string(),
+                )
+            })?;
+        let fingerprint = kild_core::daemon::tofu::parse_fingerprint(fp_str)
+            .map_err(DaemonClientError::Protocol)?;
+        return connect_tcp(remote_host, fingerprint).await;
+    }
+
+    connect().await
 }
 
 /// Async ping to the kild daemon via smol.
@@ -103,35 +203,22 @@ async fn connect() -> Result<UiClient, DaemonClientError> {
 /// is not running (socket missing or connection refused), `Err` for
 /// unexpected failures.
 pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
-    let socket_path = kild_core::daemon::socket_path();
-
     debug!(event = "ui.daemon.ping_started");
 
-    if !socket_path.exists() {
-        info!(
-            event = "ui.daemon.ping_completed",
-            result = "socket_missing"
-        );
-        return Ok(false);
-    }
-
-    let stream = match Async::<UnixStream>::connect(&socket_path).await {
-        Ok(s) => s,
+    let mut client = match connect_for_config().await {
+        Ok(c) => c,
+        Err(DaemonClientError::Connect(e))
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.kind() == std::io::ErrorKind::ConnectionRefused =>
+        {
+            info!(event = "ui.daemon.ping_completed", result = "not_reachable");
+            return Ok(false);
+        }
         Err(e) => {
-            if e.kind() == std::io::ErrorKind::ConnectionRefused {
-                info!(
-                    event = "ui.daemon.ping_completed",
-                    result = "connection_refused"
-                );
-                return Ok(false);
-            }
             error!(event = "ui.daemon.ping_failed", error = %e);
-            return Err(DaemonClientError::Connect(e));
+            return Err(e);
         }
     };
-
-    let (r, w) = split(stream);
-    let mut client = AsyncIpcClient::new(BufReader::new(r), w);
 
     let request = ClientMessage::Ping {
         id: next_request_id(),
@@ -159,7 +246,7 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
 pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError> {
     debug!(event = "ui.daemon.list_sessions_started");
 
-    let mut client = connect().await?;
+    let mut client = connect_for_config().await?;
     let request = ClientMessage::ListSessions {
         id: next_request_id(),
         project_id: None,
@@ -202,7 +289,7 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
         session_id = session_id
     );
 
-    let mut client = connect().await?;
+    let mut client = connect_for_config().await?;
     let request = ClientMessage::GetSession {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
@@ -248,7 +335,7 @@ pub async fn stop_session_async(session_id: &str) -> Result<(), DaemonClientErro
         session_id = session_id
     );
 
-    let mut client = connect().await?;
+    let mut client = connect_for_config().await?;
     let request = ClientMessage::StopSession {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
@@ -280,7 +367,7 @@ pub async fn create_session_async(
         working_directory = working_directory
     );
 
-    let mut client = connect().await?;
+    let mut client = connect_for_config().await?;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     let request = ClientMessage::CreateSession {
         id: next_request_id(),
@@ -315,8 +402,8 @@ pub async fn create_session_async(
 /// Fields are private to enforce invariants established during construction
 /// (reader is attached, session_id matches the attached session).
 pub struct DaemonConnection {
-    reader: UiReader,
-    writer: UiWriter,
+    reader: DynReader,
+    writer: DynWriter,
     session_id: String,
 }
 
@@ -328,7 +415,7 @@ impl DaemonConnection {
     }
 
     /// Consume the connection, returning its parts for use in reader/writer tasks.
-    pub fn into_parts(self) -> (UiReader, UiWriter, String) {
+    pub fn into_parts(self) -> (DynReader, DynWriter, String) {
         (self.reader, self.writer, self.session_id)
     }
 }
@@ -348,7 +435,7 @@ pub async fn connect_for_attach(
     );
 
     // Connection 1: reader — send Attach, read Ack, then stream PtyOutput
-    let mut read_client = connect().await?;
+    let mut read_client = connect_for_config().await?;
     let attach_request = ClientMessage::Attach {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
@@ -375,10 +462,8 @@ pub async fn connect_for_attach(
     // No protocol handshake is sent on this connection: the daemon dispatches
     // WriteStdin/ResizePty/Detach by session_id from each message's payload,
     // not by connection-level attachment state.
-    let write_stream = Async::<UnixStream>::connect(&kild_core::daemon::socket_path())
-        .await
-        .map_err(DaemonClientError::Connect)?;
-    let (_, writer) = split(write_stream);
+    let write_client = connect_for_config().await?;
+    let (_, writer) = write_client.into_parts();
 
     info!(
         event = "ui.daemon.attach_completed",
@@ -394,7 +479,7 @@ pub async fn connect_for_attach(
 
 /// Send WriteStdin IPC message (base64-encoded data).
 pub async fn send_write_stdin(
-    writer: &mut UiWriter,
+    writer: &mut DynWriter,
     session_id: &str,
     data: &[u8],
 ) -> Result<(), DaemonClientError> {
@@ -411,7 +496,7 @@ pub async fn send_write_stdin(
 
 /// Send ResizePty IPC message.
 pub async fn send_resize(
-    writer: &mut UiWriter,
+    writer: &mut DynWriter,
     session_id: &str,
     rows: u16,
     cols: u16,
@@ -431,7 +516,10 @@ pub async fn send_resize(
 ///
 /// Flushes after writing to ensure the daemon receives the detach before the
 /// writer is dropped — without flush a buffered Detach would be silently lost.
-pub async fn send_detach(writer: &mut UiWriter, session_id: &str) -> Result<(), DaemonClientError> {
+pub async fn send_detach(
+    writer: &mut DynWriter,
+    session_id: &str,
+) -> Result<(), DaemonClientError> {
     let msg = ClientMessage::Detach {
         id: next_request_id(),
         session_id: SessionId::from(session_id),

@@ -49,6 +49,9 @@ pub enum DaemonError {
 
     #[error("session error: {0}")]
     Session(#[from] kild_core::sessions::errors::SessionError),
+
+    #[error("TLS configuration error: {0}")]
+    TlsConfig(String),
 }
 
 impl KildError for DaemonError {
@@ -69,6 +72,7 @@ impl KildError for DaemonError {
             DaemonError::Serde(_) => "serialization_error",
             DaemonError::Base64Decode(_) => "base64_decode_error",
             DaemonError::Session(_) => "session_error",
+            DaemonError::TlsConfig(_) => "tls_config_error",
         }
     }
 

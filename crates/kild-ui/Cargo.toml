@@ -34,6 +34,10 @@ kild-protocol.workspace = true
 kild-teams.workspace = true
 base64.workspace = true
 
+# TLS for remote daemon TCP connection
+futures-rustls.workspace = true
+rustls.workspace = true
+
 # core-text is macOS-only; pinned to fix gpui font-kit conflict
 [target.'cfg(target_os = "macos")'.dependencies]
 core-text.workspace = true

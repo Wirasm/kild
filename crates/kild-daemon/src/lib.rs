@@ -5,6 +5,7 @@ pub mod protocol;
 pub mod pty;
 pub mod server;
 pub mod session;
+pub mod tls;
 pub mod types;
 
 // Primary re-exports

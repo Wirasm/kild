@@ -2,6 +2,9 @@
 //!
 //! These tests start a real server on a temp socket, connect via `DaemonClient`,
 //! and exercise the full IPC protocol.
+//!
+//! TCP/TLS tests use `kild_protocol::IpcConnection::connect_tls` (sync) via
+//! `tokio::task::spawn_blocking` to exercise the full TCP+TLS path.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -18,6 +21,7 @@ fn test_config(dir: &std::path::Path) -> DaemonConfig {
         pty_output_batch_ms: 4,
         client_buffer_size: 65536,
         shutdown_timeout_secs: 2,
+        ..DaemonConfig::default()
     }
 }
 
@@ -587,6 +591,107 @@ async fn test_destroy_then_recreate_same_session_id() {
 
     let result = tokio::time::timeout(Duration::from_secs(3), server_handle).await;
     assert!(result.is_ok());
+}
+
+/// Find a free TCP port by binding a listener at port 0 and reading the OS-assigned port.
+async fn find_free_tcp_port() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+/// Pre-generate a TLS cert+key at the given paths and return the DER-encoded certs.
+fn generate_tls_cert(
+    cert_path: &std::path::Path,
+    key_path: &std::path::Path,
+) -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    kild_daemon::tls::load_or_generate_cert(cert_path, key_path)
+        .expect("cert generation should succeed")
+        .0
+}
+
+#[tokio::test]
+async fn test_tcp_tls_ping_roundtrip() {
+    let port = find_free_tcp_port().await;
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let cert_path = dir.path().join("daemon.crt");
+    let key_path = dir.path().join("daemon.key");
+
+    // Pre-generate cert so we can extract its fingerprint before the server starts.
+    let certs = generate_tls_cert(&cert_path, &key_path);
+    let fingerprint = kild_core::daemon::tofu::cert_fingerprint(&certs[0]);
+
+    let mut config = test_config(dir.path());
+    config.bind_tcp = Some(addr);
+    config.tls_cert_path = Some(cert_path);
+    config.tls_key_path = Some(key_path);
+
+    let server_handle = tokio::spawn(async move { kild_daemon::run_server(config).await });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // IpcConnection::connect_tls is synchronous — run in spawn_blocking.
+    let addr_str = addr.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let verifier = kild_core::daemon::tofu::TofuVerifier::new(fingerprint);
+        let mut conn = kild_protocol::IpcConnection::connect_tls(&addr_str, verifier)?;
+        conn.send(&kild_protocol::ClientMessage::Ping {
+            id: "tls-ping".to_string(),
+        })
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        result.is_ok(),
+        "TCP/TLS ping should succeed: {:?}",
+        result.err()
+    );
+
+    server_handle.abort();
+}
+
+#[tokio::test]
+async fn test_tcp_tls_tofu_rejects_wrong_fingerprint() {
+    let port = find_free_tcp_port().await;
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let cert_path = dir.path().join("daemon.crt");
+    let key_path = dir.path().join("daemon.key");
+
+    // Generate cert (we intentionally will NOT use its fingerprint).
+    let _ = generate_tls_cert(&cert_path, &key_path);
+
+    let mut config = test_config(dir.path());
+    config.bind_tcp = Some(addr);
+    config.tls_cert_path = Some(cert_path);
+    config.tls_key_path = Some(key_path);
+
+    let server_handle = tokio::spawn(async move { kild_daemon::run_server(config).await });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Connect with an all-zeros fingerprint and attempt a request.
+    // rustls uses a lazy handshake — the TLS cert verification happens on the
+    // first read/write, not at connect time. So we must call send() to trigger it.
+    let addr_str = addr.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let wrong_fp = [0u8; 32];
+        let verifier = kild_core::daemon::tofu::TofuVerifier::new(wrong_fp);
+        let mut conn = kild_protocol::IpcConnection::connect_tls(&addr_str, verifier)?;
+        conn.send(&kild_protocol::ClientMessage::Ping {
+            id: "tofu-reject-test".to_string(),
+        })
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        result.is_err(),
+        "send() with wrong fingerprint must fail at TLS handshake"
+    );
+
+    server_handle.abort();
 }
 
 #[tokio::test]

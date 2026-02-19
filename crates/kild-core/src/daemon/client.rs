@@ -26,9 +26,40 @@ thread_local! {
 /// its own connection — for single-threaded CLI commands, this means one
 /// connection is reused across sequential operations within the same invocation.
 ///
+/// When `remote_host` is configured (via CLI override or config file), connects
+/// via TCP/TLS instead of Unix socket. TLS connections are never cached —
+/// see `get_tls_connection()` for rationale.
+///
 /// The connection is taken from the cache (exclusive ownership) and must be
 /// returned with `return_connection()` after successful use.
 fn get_connection() -> Result<IpcConnection, DaemonClientError> {
+    // CLI --remote override takes precedence over config file.
+    if let Some((host, fingerprint)) = crate::daemon::remote_override() {
+        debug!(event = "core.daemon.tcp_connection_override", host = %host);
+        return get_tls_connection(&host, fingerprint.as_deref());
+    }
+
+    // Config file remote_host takes precedence over local Unix socket.
+    let config = match kild_config::KildConfig::load_hierarchy() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                event = "core.daemon.config_load_failed",
+                error = %e,
+                "Failed to load config; falling back to defaults. \
+                 Remote daemon settings will not be applied."
+            );
+            kild_config::KildConfig::default()
+        }
+    };
+    if let Some(ref remote_host) = config.daemon.remote_host {
+        debug!(event = "core.daemon.tcp_connection_config", host = %remote_host);
+        return get_tls_connection(
+            remote_host,
+            config.daemon.remote_cert_fingerprint.as_deref(),
+        );
+    }
+
     let socket_path = crate::daemon::socket_path();
 
     CACHED_CONNECTION.with(|cell| {
@@ -44,6 +75,29 @@ fn get_connection() -> Result<IpcConnection, DaemonClientError> {
         debug!(event = "core.daemon.connection_created");
         Ok(conn)
     })
+}
+
+/// Create a fresh TLS connection to a remote daemon.
+///
+/// No connection caching: probing a `StreamOwned<ClientConnection, TcpStream>`
+/// with a 1ms read timeout can corrupt the TLS state machine. CLI commands are
+/// one-shot; fresh connection cost is acceptable (dominated by network latency).
+fn get_tls_connection(
+    addr: &str,
+    fingerprint_str: Option<&str>,
+) -> Result<IpcConnection, DaemonClientError> {
+    let fp_str = fingerprint_str.ok_or_else(|| DaemonClientError::ConnectionFailed {
+        message: "remote_host is set but remote_cert_fingerprint is missing — \
+                  pass --remote-fingerprint or set daemon.remote_cert_fingerprint in config"
+            .to_string(),
+    })?;
+
+    let fingerprint = crate::daemon::tofu::parse_fingerprint(fp_str)
+        .map_err(|e| DaemonClientError::ProtocolError { message: e })?;
+
+    let verifier = crate::daemon::tofu::TofuVerifier::new(fingerprint);
+
+    IpcConnection::connect_tls(addr, verifier).map_err(Into::into)
 }
 
 /// Return a connection to the cache for reuse by the next call.
@@ -116,6 +170,8 @@ impl From<IpcError> for DaemonClientError {
             }
             IpcError::ProtocolError { message } => DaemonClientError::ProtocolError { message },
             IpcError::Io(io) => DaemonClientError::Io(io),
+            // IpcError::TlsConfig is available because kild-core enables kild-protocol/tcp
+            IpcError::TlsConfig(msg) => DaemonClientError::ConnectionFailed { message: msg },
             other => DaemonClientError::ProtocolError {
                 message: other.to_string(),
             },
