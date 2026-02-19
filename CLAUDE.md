@@ -237,7 +237,7 @@ JSON output via tracing-subscriber. Silent by default — use `-v/--verbose` to 
 
 **Event format:** `{layer}.{domain}.{action}_{state}` — e.g. `core.session.create_started`, `cli.create_failed`, `daemon.pty.spawn_completed`. Layers map to crates (`cli`, `core`, `daemon`, `shim`, `ui`, `peek.cli`, `peek.core`). State suffixes: `_started`, `_completed`, `_failed`, `_skipped`.
 
-**Why:** Every user-visible operation needs a `_started`/`_completed` pair so failures can be triaged by scanning the event name alone. Each layer logs only its own concern — CLI logs intent and outcome, core logs domain logic, daemon logs PTY/server events.
+**Why:** Logging serves three purposes: (1) pinpoint exactly where in the codebase something lives — the event name is a direct map to layer + domain + operation; (2) surface failures — never swallow errors silently, always emit `_failed` with the error attached; (3) match GitHub issue labels — domain names align with issue labels so a bug report on `core.session` maps directly to `crates/kild-core/sessions/`. Every user-visible operation needs a `_started`/`_completed` pair. Each layer logs only its own concern.
 
 **Field conventions:** Use `%e` (Display) for errors, `?val` (Debug) for enums/structs. Always name fields — never log bare `{:?}`.
 
