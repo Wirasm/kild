@@ -326,14 +326,6 @@ fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String>
     let hooks_dir = paths.hooks_dir();
     let hook_path = paths.claude_status_hook();
 
-    if hook_path.exists() {
-        debug!(
-            event = "core.session.claude_status_hook_already_exists",
-            path = %hook_path.display()
-        );
-        return Ok(());
-    }
-
     std::fs::create_dir_all(&hooks_dir)
         .map_err(|e| format!("failed to create {}: {}", hooks_dir.display(), e))?;
 
@@ -343,6 +335,7 @@ fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String>
 # TeammateIdle, and TaskCompleted hooks.
 # Maps Claude Code events to KILD agent statuses.
 INPUT=$(cat)
+BRANCH="${KILD_SESSION_BRANCH:-unknown}"
 EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | sed 's/"hook_event_name":"//;s/"//')
 NTYPE=$(echo "$INPUT" | grep -o '"notification_type":"[^"]*"' | head -1 | sed 's/"notification_type":"//;s/"//')
 case "$EVENT" in
@@ -357,12 +350,12 @@ case "$EVENT" in
     ;;
 esac
 # Inject event into Honryū brain session if it is running.
-# Honryū receives a concise summary and decides what to do next.
+# Skip if this session IS the brain to prevent self-referential feedback loops.
 case "$EVENT" in
   Stop|SubagentStop|TeammateIdle|TaskCompleted)
-    if kild list --json 2>/dev/null | grep -q '"honryu"'; then
+    if [ "$BRANCH" != "honryu" ] && kild list --json 2>/dev/null | grep -q '"honryu"'; then
       LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null | head -c 200)
-      kild inject honryu "[EVENT] ${KILD_SESSION_BRANCH:-unknown} $EVENT: ${LAST_MSG:-no message}" 2>/dev/null || true
+      kild inject honryu "[EVENT] $BRANCH $EVENT: ${LAST_MSG:-no message}" 2>/dev/null || true
     fi
     ;;
 esac
