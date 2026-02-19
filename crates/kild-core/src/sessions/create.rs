@@ -11,6 +11,7 @@ use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_claude_integration,
     setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
 };
+use super::fleet;
 
 pub fn create_session(
     request: CreateSessionRequest,
@@ -263,6 +264,7 @@ pub fn create_session(
             setup_codex_integration(&validated.agent);
             setup_opencode_integration(&validated.agent, &worktree.path);
             setup_claude_integration(&validated.agent);
+            fleet::ensure_fleet_member(&validated.name, &worktree.path, &validated.agent);
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).
@@ -282,8 +284,12 @@ pub fn create_session(
                 }
             }
 
+            let fleet_command = match fleet::fleet_agent_flags(&validated.name, &validated.agent) {
+                Some(flags) => format!("{} {}", validated.command, flags),
+                None => validated.command.clone(),
+            };
             let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
-                &validated.command,
+                &fleet_command,
                 &validated.agent,
                 &session_id,
                 task_list_id.as_deref(),

@@ -10,6 +10,7 @@ use super::daemon_helpers::{
     build_daemon_create_request, compute_spawn_id, setup_claude_integration,
     setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
 };
+use super::fleet;
 
 /// Resolve the effective runtime mode for `open_session`.
 ///
@@ -301,10 +302,15 @@ pub fn open_session(
         setup_codex_integration(&agent);
         setup_opencode_integration(&agent, &session.worktree_path);
         setup_claude_integration(&agent);
+        fleet::ensure_fleet_member(&session.branch, &session.worktree_path, &agent);
 
         // Daemon path: create new daemon PTY (uses shared helper with create_session)
+        let fleet_command = match fleet::fleet_agent_flags(&session.branch, &agent) {
+            Some(flags) => format!("{} {}", agent_command, flags),
+            None => agent_command.clone(),
+        };
         let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
-            &agent_command,
+            &fleet_command,
             &agent,
             &session.id,
             new_task_list_id.as_deref(),
