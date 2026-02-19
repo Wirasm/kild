@@ -1,11 +1,9 @@
 use super::events::Event;
 use super::types::Command;
 
-/// Trait for dispatching business commands.
-///
-/// Decouples command definitions from their execution. Interfaces (CLI, UI)
-/// implement this trait to execute commands with their specific needs
-/// (e.g., UI adds event emission and async handling, CLI runs synchronously).
+/// Dispatch contract between command definitions and their execution.
+/// `CoreStore` is the production implementor. CLI calls handlers directly
+/// and does not implement this trait. Implemented by mocks in tests.
 ///
 /// # Semantics
 ///
