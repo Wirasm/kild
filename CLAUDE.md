@@ -97,6 +97,7 @@ cargo run -p kild -- open my-branch                    # Reopen agent in existin
 cargo run -p kild -- open --all                        # Open all stopped kilds
 cargo run -p kild -- open my-branch --resume           # Resume previous conversation
 cargo run -p kild -- open my-branch --no-attach        # Open daemon session without attach window
+cargo run -p kild -- open my-branch --no-attach --resume  # Headless resume (brain reopening workers)
 cargo run -p kild -- inject my-branch "do the thing"  # Deliver message to running worker via inbox
 cargo run -p kild -- stop my-branch                    # Stop agent, preserve kild
 cargo run -p kild -- stop --all                        # Stop all kilds

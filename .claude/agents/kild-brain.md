@@ -95,8 +95,9 @@ Choose mode based on whether the task modifies code (Mode 1/3) or just reads/ana
 kild inject <branch> "Your next task: <clear, specific instruction>"
 
 # Resume a stopped daemon worker without opening a terminal window.
-# Use --no-attach so Ghostty doesn't pop up a viewing window.
-kild open <branch> --no-attach
+# --resume restores the worker's prior Claude Code conversation context.
+# --no-attach suppresses the Ghostty viewing window.
+kild open <branch> --no-attach --resume
 # Then inject once the daemon PTY is running:
 sleep 2 && kild inject <branch> "<next instruction>"
 ```
@@ -148,7 +149,7 @@ Events arrive as injected messages like:
 Response protocol:
 1. Acknowledge the event briefly
 2. Check if you need more context (`kild diff <branch>`, task list)
-3. Decide: inject next instruction / `kild open --no-attach` / rebase / escalate / destroy
+3. Decide: inject next instruction / `kild open --no-attach --resume` / rebase / escalate / destroy
 4. Act
 5. Log the decision
 
