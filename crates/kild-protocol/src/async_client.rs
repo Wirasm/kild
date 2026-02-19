@@ -1,7 +1,8 @@
 //! Generic async JSONL client over any `futures::io::AsyncBufRead + AsyncWrite` pair.
 //!
 //! Used by `kild-ui` (smol executor) and will be used by the TCP transport
-//! when #479 is implemented. Transport-agnostic — callers supply the stream halves.
+//! when #479 is implemented. The I/O transport is generic — callers supply the
+//! stream halves. Message types are fixed to `ClientMessage`/`DaemonMessage`.
 
 use futures::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use serde::Serialize;
@@ -14,7 +15,7 @@ use crate::{ClientMessage, DaemonMessage, IpcError};
 /// `W` is typically `WriteHalf<T>` or `T` directly.
 ///
 /// Constructed via `AsyncIpcClient::new(reader, writer)`.
-/// For smol: split `Async<UnixStream>` with `futures::io::split()` first.
+/// For smol: split `Async<UnixStream>` with `smol::io::split()` first.
 pub struct AsyncIpcClient<R, W> {
     reader: R,
     writer: W,
@@ -47,9 +48,9 @@ where
 
     /// Write a JSONL message without flushing and without reading a response.
     ///
-    /// For fire-and-forget writes (WriteStdin, ResizePty) where caller does not
-    /// wait for the daemon's Ack. Caller is responsible for eventual flush or
-    /// connection teardown to drain the buffer.
+    /// For fire-and-forget writes (WriteStdin, ResizePty) where the caller does not
+    /// wait for the daemon's Ack. The caller must call `flush()` before the
+    /// connection is dropped, or buffered data will be silently lost.
     pub async fn write(&mut self, msg: &ClientMessage) -> Result<(), IpcError> {
         write_jsonl(&mut self.writer, msg).await
     }
@@ -105,6 +106,7 @@ async fn read_jsonl<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<DaemonMes
 }
 
 /// Read one JSONL line. Returns `Ok(None)` on EOF (connection closed).
+/// Returns `Err(IpcError::ProtocolError)` on a blank line (protocol violation).
 async fn read_jsonl_optional<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> Result<Option<DaemonMessage>, IpcError> {
@@ -115,7 +117,9 @@ async fn read_jsonl_optional<R: AsyncBufRead + Unpin>(
     }
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return Ok(None);
+        return Err(IpcError::ProtocolError {
+            message: "Daemon sent empty line (protocol violation)".to_string(),
+        });
     }
     serde_json::from_str(trimmed)
         .map(Some)
@@ -164,26 +168,87 @@ mod tests {
     }
 
     #[test]
-    fn test_send_converts_error_response_to_ipc_error() {
+    fn test_read_jsonl_optional_empty_line_is_protocol_error() {
         smol::block_on(async {
-            let response_json = format!(
-                "{}\n",
-                serde_json::to_string(&DaemonMessage::Error {
+            let data: &[u8] = b"\n";
+            let mut reader = futures::io::BufReader::new(Cursor::new(data));
+            let result = read_jsonl_optional(&mut reader).await;
+            assert!(matches!(result, Err(IpcError::ProtocolError { .. })));
+        });
+    }
+
+    #[test]
+    fn test_send_success_roundtrip() {
+        use std::io::{BufRead, Write};
+        smol::block_on(async {
+            let (client_stream, server_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+            let server = std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(&server_stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                writeln!(&server_stream, r#"{{"type":"ack","id":"t1"}}"#).unwrap();
+            });
+            let async_stream = smol::Async::new(client_stream).unwrap();
+            let (r, w) = smol::io::split(async_stream);
+            let mut client = AsyncIpcClient::new(futures::io::BufReader::new(r), w);
+            let response = client
+                .send(&ClientMessage::Ping {
                     id: "t1".to_string(),
-                    code: crate::ErrorCode::SessionNotFound,
-                    message: "no such session".to_string(),
                 })
-                .unwrap()
-            );
-            let mut reader =
-                futures::io::BufReader::new(Cursor::new(response_json.as_bytes().to_vec()));
-            let msg = read_jsonl(&mut reader).await.unwrap();
-            if let DaemonMessage::Error { code, message, .. } = msg {
+                .await
+                .unwrap();
+            assert!(matches!(response, DaemonMessage::Ack { .. }));
+            server.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn test_send_error_response_converts_to_ipc_error() {
+        use std::io::{BufRead, Write};
+        smol::block_on(async {
+            let (client_stream, server_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+            let server = std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(&server_stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let resp = r#"{"type":"error","id":"t1","code":"session_not_found","message":"no such session"}"#;
+                writeln!(&server_stream, "{resp}").unwrap();
+            });
+            let async_stream = smol::Async::new(client_stream).unwrap();
+            let (r, w) = smol::io::split(async_stream);
+            let mut client = AsyncIpcClient::new(futures::io::BufReader::new(r), w);
+            let result = client
+                .send(&ClientMessage::Ping {
+                    id: "t1".to_string(),
+                })
+                .await;
+            assert!(matches!(result, Err(IpcError::DaemonError { .. })));
+            if let Err(IpcError::DaemonError { code, .. }) = result {
                 assert_eq!(code, crate::ErrorCode::SessionNotFound);
-                assert_eq!(message, "no such session");
-            } else {
-                panic!("expected Error");
             }
+            server.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn test_read_next_streams_messages_and_returns_none_on_eof() {
+        smol::block_on(async {
+            let data = concat!(
+                r#"{"type":"pty_output","session_id":"s1","data":"aGk="}"#,
+                "\n",
+                r#"{"type":"pty_output","session_id":"s1","data":"dGhlcmU="}"#,
+                "\n"
+            );
+            let reader = futures::io::BufReader::new(Cursor::new(data.as_bytes()));
+            let writer = Cursor::new(vec![]);
+            let mut client = AsyncIpcClient::new(reader, writer);
+
+            let first = client.read_next().await.unwrap();
+            assert!(matches!(first, Some(DaemonMessage::PtyOutput { .. })));
+            let second = client.read_next().await.unwrap();
+            assert!(matches!(second, Some(DaemonMessage::PtyOutput { .. })));
+            let eof = client.read_next().await.unwrap();
+            assert!(eof.is_none());
         });
     }
 }

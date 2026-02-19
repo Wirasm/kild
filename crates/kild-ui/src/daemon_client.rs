@@ -40,26 +40,11 @@ pub enum DaemonClientError {
     #[error("I/O error: {0}")]
     Io(std::io::Error),
 
-    #[allow(dead_code)]
-    #[error("daemon closed connection (EOF)")]
-    ConnectionClosed,
-
-    #[allow(dead_code)]
-    #[error("daemon sent empty response")]
-    EmptyResponse,
-
-    #[allow(dead_code)]
-    #[error("invalid JSON from daemon: {source}: {json}")]
-    InvalidJson {
-        source: serde_json::Error,
-        json: String,
-    },
-
     #[error("unexpected response from daemon: {0:?}")]
     UnexpectedResponse(DaemonMessage),
 
     #[error("daemon error ({code}): {message}")]
-    DaemonError { code: String, message: String },
+    DaemonError { code: ErrorCode, message: String },
 
     #[allow(dead_code)]
     #[error("no running daemon session found")]
@@ -79,13 +64,12 @@ impl From<IpcError> for DaemonClientError {
                 DaemonClientError::Connect(std::io::Error::new(std::io::ErrorKind::NotFound, path))
             }
             IpcError::ConnectionFailed(io) => DaemonClientError::Connect(io),
-            IpcError::DaemonError { code, message } => DaemonClientError::DaemonError {
-                code: code.to_string(),
-                message,
-            },
+            IpcError::DaemonError { code, message } => {
+                DaemonClientError::DaemonError { code, message }
+            }
             IpcError::ProtocolError { message } => DaemonClientError::Protocol(message),
             IpcError::Io(io) => DaemonClientError::Io(io),
-            _ => DaemonClientError::Io(std::io::Error::other(e.to_string())),
+            _ => DaemonClientError::Protocol(e.to_string()),
         }
     }
 }
@@ -223,7 +207,23 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    let response = client.send(&request).await?;
+    // Intercept SessionNotFound before IpcError is converted to DaemonClientError,
+    // so we can return Ok(None) rather than propagating a DaemonError.
+    let response = match client.send(&request).await {
+        Ok(r) => r,
+        Err(IpcError::DaemonError {
+            code: ErrorCode::SessionNotFound,
+            ..
+        }) => {
+            info!(
+                event = "ui.daemon.get_session_completed",
+                session_id = session_id,
+                result = "not_found"
+            );
+            return Ok(None);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     match response {
         DaemonMessage::SessionInfo { session, .. } => {
@@ -233,20 +233,6 @@ pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, 
                 status = %session.status
             );
             Ok(Some(session))
-        }
-        // DaemonMessage::Error with SessionNotFound is converted to IpcError::DaemonError
-        // by AsyncIpcClient::send(), but we match the raw ErrorCode here as a fallback
-        // for any path that bypasses the client.
-        DaemonMessage::Error {
-            code: ErrorCode::SessionNotFound,
-            ..
-        } => {
-            info!(
-                event = "ui.daemon.get_session_completed",
-                session_id = session_id,
-                result = "not_found"
-            );
-            Ok(None)
         }
         other => Err(DaemonClientError::UnexpectedResponse(other)),
     }
@@ -323,8 +309,8 @@ pub async fn create_session_async(
 
 /// Two-connection handle for attached daemon session.
 ///
-/// - reader: receives streaming PtyOutput messages after Attach
-/// - writer: sends WriteStdin, ResizePty, Detach commands
+/// - `reader`: receives streaming PtyOutput messages after Attach
+/// - `writer`: sends WriteStdin, ResizePty, Detach commands
 ///
 /// Fields are private to enforce invariants established during construction
 /// (reader is attached, session_id matches the attached session).
@@ -385,7 +371,10 @@ pub async fn connect_for_attach(
     // Extract the reader half; discard the unused writer half of the read connection.
     let (reader, _) = read_client.into_parts();
 
-    // Connection 2: writer — held open for WriteStdin/ResizePty/Detach
+    // Connection 2: writer — held open for WriteStdin/ResizePty/Detach.
+    // No protocol handshake is sent on this connection: the daemon dispatches
+    // WriteStdin/ResizePty/Detach by session_id from each message's payload,
+    // not by connection-level attachment state.
     let write_stream = Async::<UnixStream>::connect(&kild_core::daemon::socket_path())
         .await
         .map_err(DaemonClientError::Connect)?;
@@ -439,12 +428,15 @@ pub async fn send_resize(
 }
 
 /// Send Detach IPC message.
+///
+/// Flushes after writing to ensure the daemon receives the detach before the
+/// writer is dropped — without flush a buffered Detach would be silently lost.
 pub async fn send_detach(writer: &mut UiWriter, session_id: &str) -> Result<(), DaemonClientError> {
     let msg = ClientMessage::Detach {
         id: next_request_id(),
         session_id: SessionId::from(session_id),
     };
-    kild_protocol::async_client::write_jsonl(writer, &msg)
+    kild_protocol::async_client::write_jsonl_flush(writer, &msg)
         .await
         .map_err(Into::into)
 }
@@ -465,44 +457,21 @@ mod tests {
     }
 
     #[test]
-    fn test_error_display_connection_closed() {
-        let err = DaemonClientError::ConnectionClosed;
-        assert_eq!(err.to_string(), "daemon closed connection (EOF)");
-    }
-
-    #[test]
     fn test_error_display_session_not_found() {
         let err = DaemonClientError::SessionNotFound;
         assert_eq!(err.to_string(), "no running daemon session found");
     }
 
     #[test]
-    fn test_error_display_empty_response() {
-        let err = DaemonClientError::EmptyResponse;
-        assert_eq!(err.to_string(), "daemon sent empty response");
-    }
-
-    #[test]
     fn test_error_display_daemon_error() {
         let err = DaemonClientError::DaemonError {
-            code: "session_not_found".to_string(),
+            code: ErrorCode::SessionNotFound,
             message: "no such session".to_string(),
         };
         assert_eq!(
             err.to_string(),
             "daemon error (session_not_found): no such session"
         );
-    }
-
-    #[test]
-    fn test_error_variants_are_distinct() {
-        let connect =
-            DaemonClientError::Connect(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
-        let closed = DaemonClientError::ConnectionClosed;
-        let empty = DaemonClientError::EmptyResponse;
-        let not_found = DaemonClientError::SessionNotFound;
-        assert_ne!(connect.to_string(), closed.to_string());
-        assert_ne!(empty.to_string(), not_found.to_string());
     }
 
     #[test]
@@ -617,13 +586,34 @@ mod tests {
     }
 
     #[test]
+    fn test_from_ipc_error_connection_failed() {
+        let e =
+            IpcError::ConnectionFailed(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe"));
+        let ce: DaemonClientError = e.into();
+        assert!(matches!(ce, DaemonClientError::Connect(_)));
+    }
+
+    #[test]
     fn test_from_ipc_error_daemon_error() {
         let e = IpcError::DaemonError {
             code: ErrorCode::SessionNotFound,
             message: "no such session".to_string(),
         };
         let ce: DaemonClientError = e.into();
-        assert!(matches!(ce, DaemonClientError::DaemonError { .. }));
+        assert!(matches!(
+            ce,
+            DaemonClientError::DaemonError {
+                code: ErrorCode::SessionNotFound,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_from_ipc_error_io() {
+        let e = IpcError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"));
+        let ce: DaemonClientError = e.into();
+        assert!(matches!(ce, DaemonClientError::Io(_)));
     }
 
     #[test]
