@@ -269,26 +269,20 @@ Daemon server sub-domains: `session`, `pty`, `server`, `connection`, `client`, `
 
 **State suffixes:** `_started`, `_completed`, `_failed`, `_skipped`
 
-### Logging Examples
+### Logging Principles
+
+Every log event must include a structured `event` field following `{layer}.{domain}.{action}_{state}`. The event name alone should identify what happened and where — no prose message needed for normal operations.
+
+Emit `_started` and `_completed` pairs for every user-visible operation so log triage can measure duration and detect hangs. Emit `_failed` on any error path with the error attached. Skip `_started` only for trivially fast, non-blocking reads.
+
+Use `%e` (Display) for error values, `?val` (Debug) for complex types like enums and structs. Never log raw `{:?}` without the field name — always name your fields.
+
+Each layer logs only its own concern. CLI logs intent and outcome; core logs domain logic; daemon logs PTY and server events; shim logs IPC calls. Do not log across layer boundaries.
 
 ```rust
-// CLI layer
 info!(event = "cli.create_started", branch = branch, agent = config.agent.default);
 error!(event = "cli.create_failed", error = %e);
-
-// Core layer - domain-prefixed
-info!(event = "core.session.create_started", branch = request.branch, agent = agent);
-warn!(event = "core.session.agent_not_available", agent = agent);
-
-// Sub-domains for nested concepts
 info!(event = "core.git.worktree.create_completed", path = %worktree_path.display());
-
-// UI layer
-info!(event = "ui.watcher.started", path = %sessions_dir.display());
-warn!(event = "ui.watcher.create_failed", error = %e, "File watcher unavailable");
-
-// Structured fields - use Display (%e) for errors, Debug (?val) for complex types
-error!(event = "core.session.destroy_kill_failed", pid = pid, error = %e);
 info!(event = "core.forge.pr_info_fetch_completed", pr_number = pr.number, state = ?pr.state);
 ```
 
