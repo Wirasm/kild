@@ -534,9 +534,17 @@ pub fn write_stdin(daemon_session_id: &str, data: &[u8]) -> Result<(), DaemonCli
             );
             Ok(())
         }
-        Ok(_) => Err(DaemonClientError::ProtocolError {
-            message: "Expected Ack response for WriteStdin".to_string(),
-        }),
+        Ok(other) => {
+            warn!(
+                event = "core.daemon.write_stdin_unexpected_response",
+                daemon_session_id = daemon_session_id,
+                response = ?other,
+            );
+            return_connection(conn);
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected Ack response for WriteStdin".to_string(),
+            })
+        }
         Err(IpcError::DaemonError { code, message }) => {
             return_connection(conn);
             Err(DaemonClientError::DaemonError { code, message })

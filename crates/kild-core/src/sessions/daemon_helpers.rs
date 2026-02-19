@@ -321,7 +321,8 @@ pub(crate) fn setup_codex_integration(agent: &str) {
 /// Notification, SubagentStop, TeammateIdle, and TaskCompleted hooks. It reads JSON
 /// from stdin, maps Claude Code events to KILD agent statuses, and calls
 /// `kild agent-status --self <status> --notify`.
-/// Idempotent: skips if script already exists.
+/// Always overwrites to pick up updated hook content (e.g. new brain-inject block).
+/// User edits to `~/.kild/hooks/claude-status` will be replaced on every create/open.
 fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String> {
     let hooks_dir = paths.hooks_dir();
     let hook_path = paths.claude_status_hook();

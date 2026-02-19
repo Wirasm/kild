@@ -18,18 +18,17 @@ pub const BRAIN_BRANCH: &str = "honryu";
 const TEAM_NAME: &str = "honryu";
 
 /// Returns the Claude config base directory, respecting CLAUDE_CONFIG_DIR env var.
-fn claude_config_dir() -> PathBuf {
+///
+/// Returns None when $HOME is unset and CLAUDE_CONFIG_DIR is not set.
+fn claude_config_dir() -> Option<PathBuf> {
     std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("HOME directory not found")
-                .join(".claude")
-        })
+        .ok()
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
 }
 
-fn team_dir() -> PathBuf {
-    claude_config_dir().join("teams").join(TEAM_NAME)
+fn team_dir() -> Option<PathBuf> {
+    claude_config_dir().map(|d| d.join("teams").join(TEAM_NAME))
 }
 
 /// Returns true if fleet mode should apply to a new daemon session.
@@ -37,7 +36,23 @@ fn team_dir() -> PathBuf {
 /// Active when the session is the brain itself (creates the team)
 /// or when the team directory already exists (brain was created earlier).
 fn fleet_mode_active(branch: &str) -> bool {
-    branch == BRAIN_BRANCH || team_dir().exists()
+    if branch == BRAIN_BRANCH {
+        return true;
+    }
+    let Some(dir) = team_dir() else {
+        warn!(event = "core.session.fleet.home_missing");
+        return false;
+    };
+    match dir.try_exists() {
+        Ok(exists) => exists,
+        Err(e) => {
+            warn!(
+                event = "core.session.fleet.dir_check_failed",
+                error = %e,
+            );
+            false
+        }
+    }
 }
 
 /// Returns extra args to append to the claude command for fleet mode.
@@ -75,7 +90,13 @@ pub fn ensure_fleet_member(branch: &str, cwd: &Path, agent: &str) {
         return;
     }
 
-    let dir = team_dir();
+    let Some(dir) = team_dir() else {
+        warn!(
+            event = "core.session.fleet.home_missing",
+            branch = branch,
+        );
+        return;
+    };
     let inbox_dir = dir.join("inboxes");
 
     if let Err(e) = std::fs::create_dir_all(&inbox_dir) {

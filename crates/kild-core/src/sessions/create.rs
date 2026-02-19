@@ -477,6 +477,8 @@ pub fn create_session(
         Some(request.runtime_mode.clone()),
     );
 
+    session.use_main_worktree = request.use_main_worktree;
+
     // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 

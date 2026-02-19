@@ -1,7 +1,9 @@
 use std::fs;
+use std::fs::OpenOptions;
 
 use chrono::Utc;
 use clap::ArgMatches;
+use nix::fcntl::{Flock, FlockArg};
 use serde_json::json;
 use tracing::{error, info};
 
@@ -41,6 +43,10 @@ pub(crate) fn handle_inject_command(
 /// Claude Code polls `~/.claude/teams/<team>/inboxes/<agent>.json` every 1 second
 /// and delivers unread messages as user turns. The session must have been started
 /// with `--agent-id <agent>@<team> --agent-name <agent> --team-name <team>`.
+///
+/// Uses an exclusive flock on `<agent>.lock` to prevent concurrent writes from
+/// the hook script (which fires on every worker Stop event) from racing and
+/// overwriting each other's messages.
 pub(crate) fn write_to_inbox(
     team: &str,
     agent: &str,
@@ -48,21 +54,36 @@ pub(crate) fn write_to_inbox(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let base = std::env::var("CLAUDE_CONFIG_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("HOME directory not found")
-                .join(".claude")
-        });
+        .ok()
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+        .ok_or("HOME directory not found — cannot locate Claude config directory")?;
 
     let inbox_dir = base.join("teams").join(team).join("inboxes");
     fs::create_dir_all(&inbox_dir)?;
 
     let inbox_path = inbox_dir.join(format!("{}.json", agent));
+    let lock_path = inbox_dir.join(format!("{}.lock", agent));
+
+    // Acquire exclusive file lock to prevent concurrent hook invocations from
+    // racing on the read-modify-write below. Held until _lock drops at end of fn.
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    let _lock = Flock::lock(lock_file, FlockArg::LockExclusive)
+        .map_err(|(_, e)| format!("failed to lock inbox: {}", e))?;
 
     // Read existing messages (preserving history for the session).
     let mut messages: Vec<serde_json::Value> = if inbox_path.exists() {
         let raw = fs::read_to_string(&inbox_path)?;
-        serde_json::from_str(&raw).unwrap_or_default()
+        serde_json::from_str(&raw).map_err(|e| {
+            format!(
+                "inbox at {} is corrupt ({}). Delete it and retry.",
+                inbox_path.display(),
+                e
+            )
+        })?
     } else {
         Vec::new()
     };
@@ -77,11 +98,5 @@ pub(crate) fn write_to_inbox(
 
     fs::write(&inbox_path, serde_json::to_string_pretty(&messages)?)?;
 
-    info!(
-        event = "cli.inject_completed",
-        team = team,
-        agent = agent,
-        inbox = %inbox_path.display(),
-    );
     Ok(())
 }
