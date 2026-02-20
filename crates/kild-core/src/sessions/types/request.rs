@@ -28,6 +28,12 @@ pub struct CreateSessionRequest {
     /// Use the main project root as working directory instead of creating a worktree.
     /// Intended for the Honryū brain session and other supervisory agents that don't write code.
     pub use_main_worktree: bool,
+    /// Optional prompt written to PTY stdin immediately after the session confirms Running.
+    ///
+    /// Only effective for daemon sessions (no `daemon_session_id` available for terminal sessions).
+    /// Best-effort: session creation succeeds even if prompt delivery fails.
+    /// No sleep is needed — PTY stdin is kernel-buffered until the agent reads it.
+    pub initial_prompt: Option<String>,
 }
 
 impl CreateSessionRequest {
@@ -45,6 +51,7 @@ impl CreateSessionRequest {
             no_fetch: false,
             runtime_mode: crate::state::types::RuntimeMode::Terminal,
             use_main_worktree: false,
+            initial_prompt: None,
         }
     }
 
@@ -64,6 +71,7 @@ impl CreateSessionRequest {
             no_fetch: false,
             runtime_mode: crate::state::types::RuntimeMode::Terminal,
             use_main_worktree: false,
+            initial_prompt: None,
         }
     }
 
@@ -84,6 +92,11 @@ impl CreateSessionRequest {
 
     pub fn with_runtime_mode(mut self, mode: crate::state::types::RuntimeMode) -> Self {
         self.runtime_mode = mode;
+        self
+    }
+
+    pub fn with_initial_prompt(mut self, prompt: Option<String>) -> Self {
+        self.initial_prompt = prompt;
         self
     }
 }

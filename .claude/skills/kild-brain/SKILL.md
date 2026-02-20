@@ -48,17 +48,16 @@ case "$STATUS" in
     echo "Honryū is already running."
     ;;
   stopped)
-    # Exists but stopped — reopen headlessly and orient
-    kild open honryu --no-attach --resume
-    sleep 2
-    kild inject honryu "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, and today's session log. Then greet the Tōryō and summarize the fleet state."
+    # Exists but stopped — reopen headlessly and orient.
+    # --initial-prompt delivers the orientation via PTY stdin on startup.
+    # No sleep needed — PTY stdin is kernel-buffered until the agent reads it.
+    kild open honryu --no-attach --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, and today's session log. Then greet the Tōryō and summarize the fleet state."
     echo "Honryū restarted."
     ;;
   *)
-    # No session — create fresh on main branch
-    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor"
-    sleep 3
-    kild inject honryu "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json and today's session log if they exist. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
+    # No session — create fresh on main branch.
+    # --initial-prompt delivers the first instruction via PTY stdin on startup.
+    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json and today's session log if they exist. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
     echo "Honryū initialized."
     ;;
 esac

@@ -89,17 +89,17 @@ Choose mode based on whether the task modifies code (Mode 1/3) or just reads/ana
 ### Sending Instructions to Workers
 
 ```bash
-# Inject the next instruction into a running daemon worker.
-# Worker receives this as the next user prompt turn (~1s latency via inbox poll).
+# Inject the next instruction into a running daemon worker via PTY stdin.
+# Works for all agents (claude, codex, gemini, amp, kiro, opencode).
 # Only call when worker is idle (Stop hook fired = they're waiting).
 kild inject <branch> "Your next task: <clear, specific instruction>"
 
 # Resume a stopped daemon worker without opening a terminal window.
 # --resume restores the worker's prior Claude Code conversation context.
 # --no-attach suppresses the Ghostty viewing window.
-kild open <branch> --no-attach --resume
-# Then inject once the daemon PTY is running:
-sleep 2 && kild inject <branch> "<next instruction>"
+# --initial-prompt delivers the first instruction via PTY stdin on startup.
+# No sleep needed — PTY stdin is kernel-buffered until the agent reads it.
+kild open <branch> --no-attach --resume --initial-prompt "<next instruction>"
 ```
 
 ### Reading Project Context
@@ -149,7 +149,7 @@ Events arrive as injected messages like:
 Response protocol:
 1. Acknowledge the event briefly
 2. Check if you need more context (`kild diff <branch>`, task list)
-3. Decide: inject next instruction / `kild open --no-attach --resume` / rebase / escalate / destroy
+3. Decide: inject next instruction / `kild open --no-attach --resume --initial-prompt "<instruction>"` / rebase / escalate / destroy
 4. Act
 5. Log the decision
 

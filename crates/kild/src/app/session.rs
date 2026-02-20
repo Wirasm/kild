@@ -88,6 +88,14 @@ pub fn create_command() -> Command {
                 .help("Run from the project root instead of creating an isolated worktree (for supervisory sessions like honryu)")
                 .action(ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("initial-prompt")
+                .long("initial-prompt")
+                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .value_name("TEXT")
+                .conflicts_with("no-agent")
+                .conflicts_with("no-daemon"),
+        )
 }
 
 pub fn open_command() -> Command {
@@ -154,6 +162,15 @@ pub fn open_command() -> Command {
                 .long("no-attach")
                 .help("Skip opening a terminal viewing window (for programmatic use, e.g. brain reopening workers)")
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("initial-prompt")
+                .long("initial-prompt")
+                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .value_name("TEXT")
+                .conflicts_with("no-agent")
+                .conflicts_with("no-daemon")
+                .conflicts_with("all"),
         )
 }
 

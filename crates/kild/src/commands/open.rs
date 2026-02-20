@@ -18,6 +18,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let resume = matches.get_flag("resume");
     let yolo = matches.get_flag("yolo");
     let no_attach = matches.get_flag("no-attach");
+    let initial_prompt = matches.get_one::<String>("initial-prompt");
 
     // Check for --all flag first
     if matches.get_flag("all") {
@@ -31,7 +32,15 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     info!(event = "cli.open_started", branch = branch, mode = ?mode);
 
-    match session_ops::open_session(branch, mode.clone(), runtime_mode, resume, yolo, no_attach) {
+    match session_ops::open_session(
+        branch,
+        mode.clone(),
+        runtime_mode,
+        resume,
+        yolo,
+        no_attach,
+        initial_prompt.map(|s| s.as_str()),
+    ) {
         Ok(session) => {
             match mode {
                 kild_core::OpenMode::BareShell => {
@@ -104,6 +113,7 @@ fn handle_open_all(
             resume,
             yolo,
             false,
+            None,
         ) {
             Ok(s) => {
                 info!(

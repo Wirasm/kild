@@ -8,8 +8,9 @@ use crate::terminal;
 use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
+    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt, ensure_shim_binary,
+    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
+    spawn_and_save_attach_window,
 };
 use super::fleet;
 
@@ -389,6 +390,11 @@ pub fn create_session(
                     exit_code,
                     scrollback_tail,
                 });
+            }
+
+            // Deliver initial prompt after the TUI has settled (best-effort).
+            if let Some(ref prompt) = request.initial_prompt {
+                deliver_initial_prompt(&daemon_result.daemon_session_id, prompt);
             }
 
             // Initialize tmux shim state directory

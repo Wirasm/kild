@@ -85,12 +85,14 @@ pub(crate) fn handle_create_command(
     let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, &config);
 
     let use_main = matches.get_flag("main");
+    let initial_prompt = matches.get_one::<String>("initial-prompt").cloned();
 
     let request = CreateSessionRequest::new(branch.clone(), agent_mode, note)
         .with_base_branch(base_branch)
         .with_no_fetch(no_fetch)
         .with_runtime_mode(runtime_mode)
-        .with_main_worktree(use_main);
+        .with_main_worktree(use_main)
+        .with_initial_prompt(initial_prompt);
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {

@@ -7,8 +7,9 @@ use crate::terminal::types::SpawnResult;
 use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
+    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt,
+    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
+    spawn_and_save_attach_window,
 };
 use super::fleet;
 
@@ -80,6 +81,7 @@ pub fn open_session(
     resume: bool,
     yolo: bool,
     no_attach: bool,
+    initial_prompt: Option<&str>,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -402,6 +404,11 @@ pub fn open_session(
             });
         }
 
+        // Deliver initial prompt after the TUI has settled (best-effort).
+        if let Some(prompt) = initial_prompt {
+            deliver_initial_prompt(&daemon_result.daemon_session_id, prompt);
+        }
+
         AgentProcess::new(
             agent.clone(),
             spawn_id,
@@ -515,6 +522,7 @@ mod tests {
             false,
             false,
             false,
+            None,
         );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
