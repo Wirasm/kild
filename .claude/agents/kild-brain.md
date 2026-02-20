@@ -89,8 +89,9 @@ Choose mode based on whether the task modifies code (Mode 1/3) or just reads/ana
 ### Sending Instructions to Workers
 
 ```bash
-# Inject the next instruction into a running daemon worker via PTY stdin.
-# Works for all agents (claude, codex, gemini, amp, kiro, opencode).
+# Inject the next instruction into a running daemon worker.
+# For claude workers: delivers via Claude Code inbox (~/.claude/teams/honryu/inboxes/<branch>.json).
+# For all other agents (codex, gemini, amp, kiro, opencode): writes to PTY stdin.
 # Only call when worker is idle (Stop hook fired = they're waiting).
 kild inject <branch> "Your next task: <clear, specific instruction>"
 

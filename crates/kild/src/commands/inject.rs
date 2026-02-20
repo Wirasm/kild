@@ -11,7 +11,7 @@ use kild_core::agents::{InjectMethod, get_inject_method};
 
 use super::helpers;
 
-/// Default team name for fleet mode. Will become a config key.
+/// Default team name for fleet mode.
 const DEFAULT_TEAM: &str = "honryu";
 
 pub(crate) fn handle_inject_command(
@@ -31,6 +31,13 @@ pub(crate) fn handle_inject_command(
 
     // Determine inject method: --inbox forces inbox protocol; otherwise use agent default.
     let method = if force_inbox {
+        if get_inject_method(&session.agent) != InjectMethod::ClaudeInbox {
+            eprintln!(
+                "Warning: --inbox is only meaningful for claude sessions; \
+                 session '{}' uses agent '{}'. Forcing inbox anyway.",
+                branch, session.agent
+            );
+        }
         InjectMethod::ClaudeInbox
     } else {
         get_inject_method(&session.agent)
@@ -53,7 +60,7 @@ pub(crate) fn handle_inject_command(
 
 /// Write text to the agent's PTY stdin via the daemon WriteStdin IPC.
 ///
-/// Works for all agents. The text is sent as raw bytes with a trailing newline.
+/// Works for all agents. Text is written first, then Enter (\r) after a 50ms pause.
 /// PTY stdin is kernel-buffered — the agent reads it when its input handler is ready.
 /// This is the universal inject path and works on cold start.
 fn write_to_pty(
@@ -121,7 +128,8 @@ pub(crate) fn write_to_inbox(
 
     // Read existing messages (preserving history for the session).
     let mut messages: Vec<serde_json::Value> = if inbox_path.exists() {
-        let raw = fs::read_to_string(&inbox_path)?;
+        let raw = fs::read_to_string(&inbox_path)
+            .map_err(|e| format!("failed to read inbox {}: {}", inbox_path.display(), e))?;
         serde_json::from_str(&raw).map_err(|e| {
             format!(
                 "inbox at {} is corrupt ({}). Delete it and retry.",
@@ -141,7 +149,97 @@ pub(crate) fn write_to_inbox(
         "read": false
     }));
 
-    fs::write(&inbox_path, serde_json::to_string_pretty(&messages)?)?;
+    fs::write(&inbox_path, serde_json::to_string_pretty(&messages)?)
+        .map_err(|e| format!("failed to write inbox {}: {}", inbox_path.display(), e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// Serialize tests that mutate CLAUDE_CONFIG_DIR — env vars are process-global.
+    static INJECT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn temp_claude_dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("kild_inject_test_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn write_to_inbox_creates_valid_json_message() {
+        let _lock = INJECT_ENV_LOCK.lock().unwrap();
+        let base = temp_claude_dir("write_basic");
+        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
+
+        write_to_inbox("honryu", "my-worker", "hello from brain").unwrap();
+
+        let inbox = base.join("teams/honryu/inboxes/my-worker.json");
+        assert!(inbox.exists());
+        let raw = std::fs::read_to_string(&inbox).unwrap();
+        let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["text"], "hello from brain");
+        assert_eq!(msgs[0]["from"], "honryu");
+        assert_eq!(msgs[0]["read"], false);
+        assert!(
+            msgs[0]["timestamp"].as_str().is_some(),
+            "timestamp should be present"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        // SAFETY: restoring env; lock still held.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+    }
+
+    #[test]
+    fn write_to_inbox_appends_without_overwriting_existing_messages() {
+        let _lock = INJECT_ENV_LOCK.lock().unwrap();
+        let base = temp_claude_dir("write_append");
+        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
+
+        write_to_inbox("honryu", "worker", "msg 1").unwrap();
+        write_to_inbox("honryu", "worker", "msg 2").unwrap();
+
+        let raw = std::fs::read_to_string(base.join("teams/honryu/inboxes/worker.json")).unwrap();
+        let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(msgs.len(), 2, "both messages should be present");
+        assert_eq!(msgs[0]["text"], "msg 1");
+        assert_eq!(msgs[1]["text"], "msg 2");
+
+        let _ = std::fs::remove_dir_all(&base);
+        // SAFETY: restoring env; lock still held.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+    }
+
+    #[test]
+    fn write_to_inbox_returns_error_on_corrupt_inbox() {
+        let _lock = INJECT_ENV_LOCK.lock().unwrap();
+        let base = temp_claude_dir("write_corrupt");
+        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
+        let inbox_dir = base.join("teams/honryu/inboxes");
+        std::fs::create_dir_all(&inbox_dir).unwrap();
+        std::fs::write(inbox_dir.join("worker.json"), "not valid json {{").unwrap();
+
+        let result = write_to_inbox("honryu", "worker", "text");
+        assert!(result.is_err(), "should error on corrupt inbox");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("corrupt"),
+            "error should mention corruption, got: {}",
+            msg
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        // SAFETY: restoring env; lock still held.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+    }
 }

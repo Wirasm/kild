@@ -469,16 +469,20 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         );
         git::removal::remove_worktree_force(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
+        info!(
+            event = "core.session.destroy_worktree_removed",
+            session_id = %session.id,
+            worktree_path = %session.worktree_path.display()
+        );
     } else {
         git::removal::remove_worktree_by_path(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
+        info!(
+            event = "core.session.destroy_worktree_removed",
+            session_id = %session.id,
+            worktree_path = %session.worktree_path.display()
+        );
     }
-
-    info!(
-        event = "core.session.destroy_worktree_removed",
-        session_id = %session.id,
-        worktree_path = %session.worktree_path.display()
-    );
 
     // 6. Delete local kild branch (best-effort, don't block destroy)
     if let Some(repo_path) = &main_repo_path {

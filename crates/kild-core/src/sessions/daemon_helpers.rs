@@ -31,18 +31,31 @@ pub(super) fn deliver_initial_prompt(daemon_session_id: &str, prompt: &str) {
     while start.elapsed() < timeout {
         std::thread::sleep(poll_interval);
 
-        if matches!(
-            crate::daemon::client::get_session_info(daemon_session_id),
-            Ok(Some((kild_protocol::SessionStatus::Stopped, _)))
-        ) {
-            break;
+        match crate::daemon::client::get_session_info(daemon_session_id) {
+            Ok(Some((kild_protocol::SessionStatus::Stopped, _))) => break,
+            Err(e) => {
+                warn!(
+                    event = "core.session.initial_prompt_session_info_failed",
+                    daemon_session_id = daemon_session_id,
+                    error = %e,
+                );
+                break;
+            }
+            _ => {}
         }
 
-        let scrollback_len = crate::daemon::client::read_scrollback(daemon_session_id)
-            .ok()
-            .flatten()
-            .map(|b| b.len())
-            .unwrap_or(0);
+        let scrollback_len = match crate::daemon::client::read_scrollback(daemon_session_id) {
+            Ok(Some(bytes)) => bytes.len(),
+            Ok(None) => 0,
+            Err(e) => {
+                warn!(
+                    event = "core.session.initial_prompt_scrollback_failed",
+                    daemon_session_id = daemon_session_id,
+                    error = %e,
+                );
+                break;
+            }
+        };
 
         if scrollback_len > 50 {
             if scrollback_len != last_scrollback_len {
@@ -452,9 +465,10 @@ esac
 # Skip if this session IS the brain to prevent self-referential feedback loops.
 case "$EVENT" in
   Stop|SubagentStop|TeammateIdle|TaskCompleted)
-    if [ "$BRANCH" != "honryu" ] && [ "$BRANCH" != "unknown" ] && kild list --json 2>/dev/null | grep -q '"honryu"'; then
+    if [ "$BRANCH" != "honryu" ] && [ "$BRANCH" != "unknown" ] && \
+       kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' > /dev/null 2>&1; then
       LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null | head -c 200)
-      kild inject honryu "[EVENT] $BRANCH $EVENT: ${LAST_MSG:-no message}" 2>/dev/null || true
+      kild inject honryu "[EVENT] $BRANCH $EVENT: ${LAST_MSG:-no message}" || true
     fi
     ;;
 esac
@@ -2132,6 +2146,14 @@ mod tests {
             content.contains("kild agent-status --self waiting --notify"),
             "Script should call kild agent-status for waiting"
         );
+        assert!(
+            content.contains(r#"BRANCH" != "honryu""#),
+            "Script must guard against brain injecting into itself (self-loop prevention)"
+        );
+        assert!(
+            content.contains(r#".status == "active""#),
+            "Script must check that honryu session is active, not just present"
+        );
 
         #[cfg(unix)]
         {
@@ -2148,7 +2170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ensure_claude_status_hook_idempotent() {
+    fn test_ensure_claude_status_hook_always_overwrites() {
         use std::fs;
 
         let temp_home =
