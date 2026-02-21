@@ -140,10 +140,10 @@ pub fn init_hooks_command() -> Command {
         .about("Initialize agent integration hooks in the current project")
         .arg(
             Arg::new("agent")
-                .help("Agent to configure (opencode)")
+                .help("Agent to configure (claude, opencode)")
                 .required(true)
                 .index(1)
-                .value_parser(["opencode"]),
+                .value_parser(["claude", "opencode"]),
         )
         .arg(
             Arg::new("no-install")

@@ -37,6 +37,7 @@ pub fn build_cli() -> Command {
         .subcommand(misc::health_command())
         .subcommand(daemon::daemon_command())
         .subcommand(daemon::attach_command())
+        .subcommand(daemon::inject_command())
         .subcommand(misc::completions_command())
         .subcommand(misc::init_hooks_command())
         .subcommand(project::project_command())

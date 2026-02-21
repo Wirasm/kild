@@ -431,18 +431,28 @@ mod tests {
             },
         ]);
 
-        let original_len = store.displays().len();
+        let original_ids: Vec<_> = store
+            .displays()
+            .iter()
+            .map(|d| d.session.id.clone())
+            .collect();
         store.update_statuses_only();
 
         // Note: update_statuses_only() may trigger a full refresh if the session count
         // on disk differs from the in-memory count (see issue #103 fix). In that case,
         // the displays will be replaced with whatever is on disk.
         //
-        // If the display count changed, a refresh was triggered and we can't test
-        // the status update logic directly. Skip the assertions in that case.
-        if store.displays().len() != original_len {
-            // Refresh was triggered due to count mismatch - this is expected behavior
-            // when running tests in an environment with actual session files.
+        // Check session IDs (not just count) to detect a refresh: the count can stay
+        // the same when disk sessions happen to equal the in-memory count, but the IDs
+        // will differ because our synthetic test IDs won't match real session files.
+        let new_ids: Vec<_> = store
+            .displays()
+            .iter()
+            .map(|d| d.session.id.clone())
+            .collect();
+        if original_ids != new_ids {
+            // Refresh was triggered - this is expected behavior when running tests
+            // in an environment with actual session files.
             return;
         }
 

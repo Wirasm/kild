@@ -301,56 +301,70 @@ fn collect_session_worktree_paths(sessions_dir: &Path) -> Result<HashSet<String>
         let entry = entry.map_err(|e| CleanupError::IoError { source: e })?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str::<serde_json::Value>(&content) {
-                        Ok(session) => {
-                            match session.get("worktree_path") {
-                                Some(worktree_value) => {
-                                    if let Some(worktree_path) = worktree_value.as_str() {
-                                        // Try to canonicalize for consistent comparison
-                                        let canonical = PathBuf::from(worktree_path)
-                                            .canonicalize()
-                                            .map(|p| p.to_string_lossy().to_string())
-                                            .unwrap_or_else(|_| worktree_path.to_string());
-                                        paths.insert(canonical);
-                                    } else {
-                                        warn!(
-                                            event = "core.cleanup.session_invalid_worktree_path_type",
-                                            file_path = %path.display(),
-                                            worktree_path_value = ?worktree_value,
-                                            "Session file has worktree_path but it is not a string"
-                                        );
-                                    }
-                                }
-                                None => {
+        // Support both storage formats:
+        // - New (current): <sessions_dir>/<safe_id>/kild.json
+        // - Old (legacy):  <sessions_dir>/<safe_id>.json
+        let session_file_path = if path.is_dir() {
+            let kild_json = path.join("kild.json");
+            if kild_json.exists() {
+                kild_json
+            } else {
+                continue;
+            }
+        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+            path.clone()
+        } else {
+            continue;
+        };
+
+        match std::fs::read_to_string(&session_file_path) {
+            Ok(content) => {
+                match serde_json::from_str::<serde_json::Value>(&content) {
+                    Ok(session) => {
+                        match session.get("worktree_path") {
+                            Some(worktree_value) => {
+                                if let Some(worktree_path) = worktree_value.as_str() {
+                                    // Try to canonicalize for consistent comparison
+                                    let canonical = PathBuf::from(worktree_path)
+                                        .canonicalize()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|_| worktree_path.to_string());
+                                    paths.insert(canonical);
+                                } else {
                                     warn!(
-                                        event = "core.cleanup.session_missing_worktree_path",
-                                        file_path = %path.display(),
-                                        "Session file is missing worktree_path field"
+                                        event = "core.cleanup.session_invalid_worktree_path_type",
+                                        file_path = %session_file_path.display(),
+                                        worktree_path_value = ?worktree_value,
+                                        "Session file has worktree_path but it is not a string"
                                     );
                                 }
                             }
-                        }
-                        Err(e) => {
-                            warn!(
-                                event = "core.cleanup.session_json_parse_failed",
-                                file_path = %path.display(),
-                                error = %e,
-                                "Session file contains invalid JSON"
-                            );
+                            None => {
+                                warn!(
+                                    event = "core.cleanup.session_missing_worktree_path",
+                                    file_path = %session_file_path.display(),
+                                    "Session file is missing worktree_path field"
+                                );
+                            }
                         }
                     }
+                    Err(e) => {
+                        warn!(
+                            event = "core.cleanup.session_json_parse_failed",
+                            file_path = %session_file_path.display(),
+                            error = %e,
+                            "Session file contains invalid JSON"
+                        );
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        event = "core.cleanup.session_read_failed",
-                        file_path = %path.display(),
-                        error = %e,
-                        "Could not read session file while collecting worktree paths"
-                    );
-                }
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.cleanup.session_read_failed",
+                    file_path = %session_file_path.display(),
+                    error = %e,
+                    "Could not read session file while collecting worktree paths"
+                );
             }
         }
     }
@@ -372,53 +386,68 @@ pub fn detect_stale_sessions(sessions_dir: &Path) -> Result<Vec<String>, Cleanup
         let entry = entry.map_err(|e| CleanupError::IoError { source: e })?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            // Try to read the session file
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    // Try to parse as JSON to validate it's a proper session file
-                    match serde_json::from_str::<serde_json::Value>(&content) {
-                        Ok(session) => {
-                            // Check if the worktree path exists
-                            if let Some(worktree_path) =
-                                session.get("worktree_path").and_then(|v| v.as_str())
-                            {
-                                let worktree_path = PathBuf::from(worktree_path);
-                                if !worktree_path.exists() {
-                                    // Session references non-existent worktree
-                                    if let Some(session_id) =
-                                        session.get("id").and_then(|v| v.as_str())
-                                    {
-                                        stale_sessions.push(session_id.to_string());
-                                    }
+        // Support both storage formats:
+        // - New (current): <sessions_dir>/<safe_id>/kild.json
+        // - Old (legacy):  <sessions_dir>/<safe_id>.json
+        let session_file_path = if path.is_dir() {
+            let kild_json = path.join("kild.json");
+            if kild_json.exists() {
+                kild_json
+            } else {
+                continue;
+            }
+        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+            path.clone()
+        } else {
+            continue;
+        };
+
+        // Try to read the session file
+        match std::fs::read_to_string(&session_file_path) {
+            Ok(content) => {
+                // Try to parse as JSON to validate it's a proper session file
+                match serde_json::from_str::<serde_json::Value>(&content) {
+                    Ok(session) => {
+                        // Check if the worktree path exists
+                        if let Some(worktree_path) =
+                            session.get("worktree_path").and_then(|v| v.as_str())
+                        {
+                            let worktree_path = PathBuf::from(worktree_path);
+                            if !worktree_path.exists() {
+                                // Session references non-existent worktree
+                                if let Some(session_id) = session.get("id").and_then(|v| v.as_str())
+                                {
+                                    stale_sessions.push(session_id.to_string());
                                 }
                             }
                         }
-                        Err(e) => {
-                            // Invalid JSON - consider it stale and log for debugging
-                            warn!(
-                                event = "core.cleanup.malformed_session_file",
-                                file_path = %path.display(),
-                                error = %e,
-                                "Found malformed session file during cleanup scan"
-                            );
-                            if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
-                                stale_sessions.push(file_name.to_string());
-                            }
+                    }
+                    Err(e) => {
+                        // Invalid JSON - consider it stale and log for debugging
+                        warn!(
+                            event = "core.cleanup.malformed_session_file",
+                            file_path = %session_file_path.display(),
+                            error = %e,
+                            "Found malformed session file during cleanup scan"
+                        );
+                        if let Some(file_name) =
+                            session_file_path.file_stem().and_then(|s| s.to_str())
+                        {
+                            stale_sessions.push(file_name.to_string());
                         }
                     }
                 }
-                Err(e) => {
-                    // Can't read session file - consider it stale and log for debugging
-                    warn!(
-                        event = "core.cleanup.unreadable_session_file",
-                        file_path = %path.display(),
-                        error = %e,
-                        "Found unreadable session file during cleanup scan"
-                    );
-                    if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
-                        stale_sessions.push(file_name.to_string());
-                    }
+            }
+            Err(e) => {
+                // Can't read session file - consider it stale and log for debugging
+                warn!(
+                    event = "core.cleanup.unreadable_session_file",
+                    file_path = %session_file_path.display(),
+                    error = %e,
+                    "Found unreadable session file during cleanup scan"
+                );
+                if let Some(file_name) = session_file_path.file_stem().and_then(|s| s.to_str()) {
+                    stale_sessions.push(file_name.to_string());
                 }
             }
         }

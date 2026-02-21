@@ -504,6 +504,62 @@ pub fn get_session_info(
     }
 }
 
+/// Write data to a daemon-managed session's stdin.
+///
+/// Base64-encodes `data` and sends a `WriteStdin` IPC message.
+/// Returns after the daemon sends `Ack`.
+pub fn write_stdin(daemon_session_id: &str, data: &[u8]) -> Result<(), DaemonClientError> {
+    use base64::Engine;
+
+    info!(
+        event = "core.daemon.write_stdin_started",
+        daemon_session_id = daemon_session_id,
+        bytes = data.len(),
+    );
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+    let request = ClientMessage::WriteStdin {
+        id: format!("write-{}", daemon_session_id),
+        session_id: SessionId::new(daemon_session_id),
+        data: encoded,
+    };
+
+    let mut conn = get_connection()?;
+    match conn.send(&request) {
+        Ok(DaemonMessage::Ack { .. }) => {
+            return_connection(conn);
+            info!(
+                event = "core.daemon.write_stdin_completed",
+                daemon_session_id = daemon_session_id,
+            );
+            Ok(())
+        }
+        Ok(other) => {
+            warn!(
+                event = "core.daemon.write_stdin_unexpected_response",
+                daemon_session_id = daemon_session_id,
+                response = ?other,
+            );
+            return_connection(conn);
+            Err(DaemonClientError::ProtocolError {
+                message: "Expected Ack response for WriteStdin".to_string(),
+            })
+        }
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => {
+            warn!(
+                event = "core.daemon.write_stdin_failed",
+                daemon_session_id = daemon_session_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
+    }
+}
+
 /// Read the scrollback buffer from a daemon session.
 ///
 /// Returns the raw scrollback bytes (decoded from base64), or `None` if the

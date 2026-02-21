@@ -5,6 +5,7 @@ pub mod daemon_helpers;
 pub mod destroy;
 pub mod env_cleanup;
 pub mod errors;
+pub(super) mod fleet;
 pub mod handler;
 pub mod info;
 pub mod list;

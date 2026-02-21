@@ -452,23 +452,37 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     let main_repo_path = git::removal::find_main_repo_root(&session.worktree_path);
 
     // 5. Remove git worktree
-    if force {
+    //
+    // Skipped for --main sessions: their worktree_path IS the project root.
+    // Calling remove_dir_all on it would delete the entire repository.
+    if session.use_main_worktree {
+        info!(
+            event = "core.session.destroy_worktree_skipped",
+            session_id = %session.id,
+            worktree_path = %session.worktree_path.display(),
+            reason = "main_worktree",
+        );
+    } else if force {
         info!(
             event = "core.session.destroy_worktree_force",
             worktree = %session.worktree_path.display()
         );
         git::removal::remove_worktree_force(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
+        info!(
+            event = "core.session.destroy_worktree_removed",
+            session_id = %session.id,
+            worktree_path = %session.worktree_path.display()
+        );
     } else {
         git::removal::remove_worktree_by_path(&session.worktree_path)
             .map_err(|e| SessionError::GitError { source: e })?;
+        info!(
+            event = "core.session.destroy_worktree_removed",
+            session_id = %session.id,
+            worktree_path = %session.worktree_path.display()
+        );
     }
-
-    info!(
-        event = "core.session.destroy_worktree_removed",
-        session_id = %session.id,
-        worktree_path = %session.worktree_path.display()
-    );
 
     // 6. Delete local kild branch (best-effort, don't block destroy)
     if let Some(repo_path) = &main_repo_path {

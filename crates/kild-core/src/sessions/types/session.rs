@@ -78,6 +78,14 @@ pub struct Session {
     #[serde(default)]
     pub runtime_mode: Option<crate::state::types::RuntimeMode>,
 
+    /// Whether this session was created with `--main` (runs from project root, no linked worktree).
+    ///
+    /// When true, `worktree_path` points to the project root itself.
+    /// `destroy_session` skips git worktree removal and directory deletion
+    /// to prevent `remove_dir_all` from being called on the project root.
+    #[serde(default)]
+    pub use_main_worktree: bool,
+
     /// All agent processes opened in this kild session.
     ///
     /// Populated by `kild create` (initial agent) and `kild open` (additional agents).
@@ -125,6 +133,7 @@ impl Session {
             agent_session_id,
             task_list_id,
             runtime_mode,
+            use_main_worktree: false,
         }
     }
 
@@ -200,6 +209,7 @@ impl Session {
             agent_session_id: None,
             task_list_id: None,
             runtime_mode: None,
+            use_main_worktree: false,
         }
     }
 }
