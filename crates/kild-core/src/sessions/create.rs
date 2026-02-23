@@ -8,9 +8,11 @@ use crate::terminal;
 use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, ensure_shim_binary, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
+    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt, ensure_shim_binary,
+    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
+    spawn_and_save_attach_window,
 };
+use super::fleet;
 
 pub fn create_session(
     request: CreateSessionRequest,
@@ -176,21 +178,42 @@ pub fn create_session(
         git_config.fetch_before_create = Some(false);
     }
 
-    let worktree = git::handler::create_worktree(
-        base_config.kild_dir(),
-        &project,
-        &validated.name,
-        Some(kild_config),
-        &git_config,
-    )
-    .map_err(|e| SessionError::GitError { source: e })?;
+    let worktree = if request.use_main_worktree {
+        // Skip worktree creation: run from the project root (main branch).
+        // Used for supervisory sessions (e.g. honryu brain) that don't write code.
+        let base_branch = git_config
+            .base_branch
+            .clone()
+            .unwrap_or_else(|| "main".to_string());
+        info!(
+            event = "core.session.main_worktree_used",
+            session_id = %session_id,
+            path = %project.path.display(),
+            branch = %base_branch,
+        );
+        git::types::WorktreeInfo {
+            path: project.path.clone(),
+            branch: base_branch,
+            project_id: project.id.clone(),
+        }
+    } else {
+        let wt = git::handler::create_worktree(
+            base_config.kild_dir(),
+            &project,
+            &validated.name,
+            Some(kild_config),
+            &git_config,
+        )
+        .map_err(|e| SessionError::GitError { source: e })?;
 
-    info!(
-        event = "core.session.worktree_created",
-        session_id = %session_id,
-        worktree_path = %worktree.path.display(),
-        branch = worktree.branch
-    );
+        info!(
+            event = "core.session.worktree_created",
+            session_id = %session_id,
+            worktree_path = %wt.path.display(),
+            branch = wt.branch
+        );
+        wt
+    };
 
     // 5. Launch agent — branch on runtime mode
     let spawn_id = compute_spawn_id(&session_id, 0);
@@ -263,6 +286,7 @@ pub fn create_session(
             setup_codex_integration(&validated.agent);
             setup_opencode_integration(&validated.agent, &worktree.path);
             setup_claude_integration(&validated.agent);
+            fleet::ensure_fleet_member(&validated.name, &worktree.path, &validated.agent);
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).
@@ -282,8 +306,12 @@ pub fn create_session(
                 }
             }
 
+            let fleet_command = match fleet::fleet_agent_flags(&validated.name, &validated.agent) {
+                Some(flags) => format!("{} {}", validated.command, flags),
+                None => validated.command.clone(),
+            };
             let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
-                &validated.command,
+                &fleet_command,
                 &validated.agent,
                 &session_id,
                 task_list_id.as_deref(),
@@ -450,8 +478,18 @@ pub fn create_session(
         Some(request.runtime_mode.clone()),
     );
 
+    session.use_main_worktree = request.use_main_worktree;
+
     // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
+
+    // 7b. Deliver initial prompt after session is on disk (best-effort, may block up to 20s).
+    // Must run after save so `kild list/inject/attach` can find the session during the wait.
+    if let Some(ref prompt) = request.initial_prompt
+        && let Some(dsid) = session.latest_agent().and_then(|a| a.daemon_session_id())
+    {
+        deliver_initial_prompt(dsid, prompt);
+    }
 
     // 8. Spawn attach window (best-effort) and update session with terminal info
     if request.runtime_mode == crate::state::types::RuntimeMode::Daemon {

@@ -39,8 +39,8 @@ pub mod types;
 pub use errors::AgentError;
 pub use registry::{
     default_agent_name, default_agent_type, get_agent, get_agent_by_type, get_all_process_patterns,
-    get_default_command, get_process_patterns, get_yolo_flags, is_agent_available, is_valid_agent,
-    supported_agents_string, valid_agent_names,
+    get_default_command, get_inject_method, get_process_patterns, get_yolo_flags,
+    is_agent_available, is_valid_agent, supported_agents_string, valid_agent_names,
 };
 pub use traits::AgentBackend;
-pub use types::AgentType;
+pub use types::{AgentType, InjectMethod};

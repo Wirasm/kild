@@ -9,6 +9,111 @@ use crate::terminal;
 use crate::terminal::types::TerminalType;
 use kild_config::KildConfig;
 
+/// Deliver an initial prompt to a daemon session's PTY stdin (best-effort).
+///
+/// Waits for the agent's TUI to fully settle before injecting — both text and Enter
+/// are written after the scrollback stabilizes, not before startup. This is necessary
+/// because most agents flush PTY stdin during TUI initialization, and some (gemini, amp)
+/// continue loading after the first render before their input loop is truly ready.
+///
+/// Detection: scrollback must exceed 50 bytes AND stop growing for 500ms.
+/// Write order: text → 50ms pause → `\r` (same cadence as `kild inject`).
+/// Never blocks the caller beyond 20s. Never fails — logs and returns on any error.
+pub(super) fn deliver_initial_prompt(daemon_session_id: &str, prompt: &str) {
+    let timeout = std::time::Duration::from_secs(20);
+    let poll_interval = std::time::Duration::from_millis(200);
+    let stable_window = std::time::Duration::from_millis(500);
+    let start = std::time::Instant::now();
+    let mut last_scrollback_len: usize = 0;
+    let mut last_change = std::time::Instant::now();
+    let mut tui_ready = false;
+
+    while start.elapsed() < timeout {
+        std::thread::sleep(poll_interval);
+
+        match crate::daemon::client::get_session_info(daemon_session_id) {
+            Ok(Some((kild_protocol::SessionStatus::Stopped, _))) => break,
+            Err(e) => {
+                warn!(
+                    event = "core.session.initial_prompt_session_info_failed",
+                    daemon_session_id = daemon_session_id,
+                    error = %e,
+                );
+                break;
+            }
+            _ => {}
+        }
+
+        let scrollback_len = match crate::daemon::client::read_scrollback(daemon_session_id) {
+            Ok(Some(bytes)) => bytes.len(),
+            Ok(None) => 0,
+            Err(e) => {
+                warn!(
+                    event = "core.session.initial_prompt_scrollback_failed",
+                    daemon_session_id = daemon_session_id,
+                    error = %e,
+                );
+                break;
+            }
+        };
+
+        if scrollback_len > 50 {
+            if scrollback_len != last_scrollback_len {
+                last_scrollback_len = scrollback_len;
+                last_change = std::time::Instant::now();
+            } else if last_change.elapsed() >= stable_window {
+                tui_ready = true;
+                break;
+            }
+        }
+    }
+
+    if !tui_ready {
+        warn!(
+            event = "core.session.initial_prompt_tui_timeout",
+            daemon_session_id = daemon_session_id,
+            elapsed_ms = start.elapsed().as_millis(),
+        );
+    }
+
+    let text_ok = match crate::daemon::client::write_stdin(daemon_session_id, prompt.as_bytes()) {
+        Ok(()) => true,
+        Err(e) => {
+            warn!(
+                event = "core.session.initial_prompt_failed",
+                daemon_session_id = daemon_session_id,
+                phase = "text",
+                error = %e,
+            );
+            false
+        }
+    };
+
+    if text_ok {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        match crate::daemon::client::write_stdin(daemon_session_id, b"\r") {
+            Ok(()) => {
+                info!(
+                    event = "core.session.initial_prompt_sent",
+                    daemon_session_id = daemon_session_id,
+                    bytes = prompt.len(),
+                    tui_ready = tui_ready,
+                    wait_ms = start.elapsed().as_millis(),
+                );
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.initial_prompt_failed",
+                    daemon_session_id = daemon_session_id,
+                    phase = "enter",
+                    error = %e,
+                );
+            }
+        }
+    }
+}
+
 /// Compute a unique spawn ID for a given session and spawn index.
 ///
 /// Each agent spawn within a session gets its own spawn ID, which is used for
@@ -245,9 +350,15 @@ fn ensure_codex_config_with_home(home: &Path, paths: &KildPaths) -> Result<(), S
             )
         })?;
 
-        if let Some(toml::Value::Array(arr)) = parsed.get("notify")
-            && !arr.is_empty()
-        {
+        // Check top-level notify first. Also check raw content for the hook path to handle
+        // cases where a previous append landed under a table (e.g. [notice.model_migrations])
+        // rather than at the top level.
+        let top_level_ok = matches!(
+            parsed.get("notify"),
+            Some(toml::Value::Array(arr)) if !arr.is_empty()
+        );
+        let raw_has_hook = content.contains(hook_path_str.as_str());
+        if top_level_ok || raw_has_hook {
             info!(event = "core.session.codex_config_already_configured");
             return Ok(());
         }
@@ -321,18 +432,11 @@ pub(crate) fn setup_codex_integration(agent: &str) {
 /// Notification, SubagentStop, TeammateIdle, and TaskCompleted hooks. It reads JSON
 /// from stdin, maps Claude Code events to KILD agent statuses, and calls
 /// `kild agent-status --self <status> --notify`.
-/// Idempotent: skips if script already exists.
+/// Always overwrites to pick up updated hook content (e.g. new brain-inject block).
+/// User edits to `~/.kild/hooks/claude-status` will be replaced on every create/open.
 fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String> {
     let hooks_dir = paths.hooks_dir();
     let hook_path = paths.claude_status_hook();
-
-    if hook_path.exists() {
-        debug!(
-            event = "core.session.claude_status_hook_already_exists",
-            path = %hook_path.display()
-        );
-        return Ok(());
-    }
 
     std::fs::create_dir_all(&hooks_dir)
         .map_err(|e| format!("failed to create {}: {}", hooks_dir.display(), e))?;
@@ -343,6 +447,7 @@ fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String>
 # TeammateIdle, and TaskCompleted hooks.
 # Maps Claude Code events to KILD agent statuses.
 INPUT=$(cat)
+BRANCH="${KILD_SESSION_BRANCH:-unknown}"
 EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | sed 's/"hook_event_name":"//;s/"//')
 NTYPE=$(echo "$INPUT" | grep -o '"notification_type":"[^"]*"' | head -1 | sed 's/"notification_type":"//;s/"//')
 case "$EVENT" in
@@ -354,6 +459,17 @@ case "$EVENT" in
       permission_prompt) kild agent-status --self waiting --notify ;;
       idle_prompt)       kild agent-status --self idle --notify ;;
     esac
+    ;;
+esac
+# Inject event into Honryū brain session if it is running.
+# Skip if this session IS the brain to prevent self-referential feedback loops.
+case "$EVENT" in
+  Stop|SubagentStop|TeammateIdle|TaskCompleted)
+    if [ "$BRANCH" != "honryu" ] && [ "$BRANCH" != "unknown" ] && \
+       kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' > /dev/null 2>&1; then
+      LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null | tr -d '"' | tr -d "'" | tr -d '`' | head -c 200)
+      kild inject honryu "[EVENT] $BRANCH $EVENT: ${LAST_MSG:-no message}" || true
+    fi
     ;;
 esac
 "#;
@@ -2030,6 +2146,14 @@ mod tests {
             content.contains("kild agent-status --self waiting --notify"),
             "Script should call kild agent-status for waiting"
         );
+        assert!(
+            content.contains(r#"BRANCH" != "honryu""#),
+            "Script must guard against brain injecting into itself (self-loop prevention)"
+        );
+        assert!(
+            content.contains(r#".status == "active""#),
+            "Script must check that honryu session is active, not just present"
+        );
 
         #[cfg(unix)]
         {
@@ -2046,7 +2170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ensure_claude_status_hook_idempotent() {
+    fn test_ensure_claude_status_hook_always_overwrites() {
         use std::fs;
 
         let temp_home =

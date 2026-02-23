@@ -27,10 +27,19 @@ pub(crate) fn handle_attach_command(
         match session.latest_agent().and_then(|a| a.daemon_session_id()) {
             Some(id) => id.to_string(),
             None => {
-                let msg = format!(
-                    "'{}' is not daemon-managed. Use 'kild focus {}' for terminal sessions.",
-                    branch, branch
-                );
+                // Distinguish stopped daemon sessions from non-daemon terminal sessions.
+                let is_daemon = session.runtime_mode == Some(kild_core::RuntimeMode::Daemon);
+                let msg = if is_daemon {
+                    format!(
+                        "'{}' is stopped. Use 'kild open {}' to reopen it.",
+                        branch, branch
+                    )
+                } else {
+                    format!(
+                        "'{}' is not daemon-managed. Use 'kild focus {}' for terminal sessions.",
+                        branch, branch
+                    )
+                };
                 eprintln!("{}", msg);
                 error!(
                     event = "cli.attach_failed",

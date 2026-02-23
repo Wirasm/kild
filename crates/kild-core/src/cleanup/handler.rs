@@ -286,13 +286,15 @@ pub fn scan_for_orphans_with_strategy(
         }
         CleanupStrategy::OlderThan(days) => {
             let sessions =
-                operations::detect_stale_sessions(&config.sessions_dir()).map_err(|e| {
-                    error!(event = "core.cleanup.strategy_failed", strategy = "OlderThan", error = %e);
-                    CleanupError::StrategyFailed {
-                        strategy: format!("OlderThan({})", days),
-                        source: Box::new(e),
-                    }
-                })?;
+                operations::detect_sessions_older_than(&config.sessions_dir(), days).map_err(
+                    |e| {
+                        error!(event = "core.cleanup.strategy_failed", strategy = "OlderThan", error = %e);
+                        CleanupError::StrategyFailed {
+                            strategy: format!("OlderThan({})", days),
+                            source: Box::new(e),
+                        }
+                    },
+                )?;
             for session_id in sessions {
                 summary.add_session(session_id);
             }

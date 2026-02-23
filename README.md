@@ -87,6 +87,9 @@ kild create my-branch --agent claude --daemon
 
 # Force external terminal window (override config default)
 kild create my-branch --agent claude --no-daemon
+
+# Run from project root without creating a worktree (for supervisory sessions)
+kild create honryu --agent claude --daemon --main
 ```
 
 ### List active kilds
@@ -149,6 +152,12 @@ kild open --all --yolo
 
 # Open bare terminals in all stopped kilds
 kild open --all --no-agent
+
+# Open daemon session without launching a Ghostty window (for programmatic use)
+kild open <branch> --daemon --no-attach
+
+# Open and resume without attaching (brain reopening workers headlessly)
+kild open <branch> --daemon --no-attach --resume
 ```
 
 ### Open kild in code editor
@@ -272,6 +281,17 @@ kild attach <branch>
 ```
 
 **Note**: Daemon mode is experimental (Phase 1b). The daemon runtime supports background and foreground modes, auto-start via config, scrollback replay on attach, PTY exit notification with automatic session state updates, and works with both `kild create` and `kild open` commands. When creating or opening daemon sessions, KILD automatically spawns a terminal attach window for immediate visual feedback. Daemon sessions automatically enable Claude Code agent teams by injecting a tmux-compatible shim.
+
+### Inject a message to a running worker
+```bash
+# Send text to a daemon worker's PTY stdin (works with all agents)
+kild inject <branch> "implement the auth module"
+
+# Force Claude Code inbox protocol instead of PTY stdin
+kild inject <branch> "implement the auth module" --inbox
+```
+
+**Note**: For Claude daemon sessions, inject uses the inbox polling protocol by default (message delivered as a new user turn within ~1s). For all other agents, it writes to PTY stdin. The worker should be idle before injecting.
 
 ### Manage the project registry
 ```bash

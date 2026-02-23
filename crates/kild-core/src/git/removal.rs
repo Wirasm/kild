@@ -4,6 +4,29 @@ use tracing::{debug, error, info, warn};
 
 use crate::git::{errors::GitError, naming};
 
+/// Safety check: refuse to delete a path that is a main git repository checkout.
+///
+/// A main checkout has a `.git` **directory** at its root, while worktrees have
+/// a `.git` **file** (pointing back to the main repo's `.git/worktrees/<name>/`).
+/// This prevents catastrophic deletion of the project root via `remove_dir_all`.
+fn assert_not_main_repo(worktree_path: &Path) -> Result<(), GitError> {
+    let dot_git = worktree_path.join(".git");
+    if dot_git.is_dir() {
+        error!(
+            event = "core.git.worktree.remove_blocked_main_repo",
+            path = %worktree_path.display(),
+            "Refusing to remove path that is a main git repository checkout"
+        );
+        return Err(GitError::WorktreeRemovalFailed {
+            path: worktree_path.display().to_string(),
+            message: "Path is a main git repository, not a worktree. \
+                      This is a safety guard to prevent deleting project roots."
+                .to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub fn remove_worktree(
     project: &crate::git::types::ProjectInfo,
     worktree_path: &Path,
@@ -226,6 +249,8 @@ pub fn delete_branch_if_exists(repo_root: &Path, branch_name: &str) {
 }
 
 pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
+    assert_not_main_repo(worktree_path)?;
+
     info!(
         event = "core.git.worktree.remove_by_path_started",
         worktree_path = %worktree_path.display()
@@ -294,6 +319,8 @@ pub fn remove_worktree_by_path(worktree_path: &Path) -> Result<(), GitError> {
 /// Use with caution - uncommitted work will be lost.
 /// This first tries to prune from git, then force-deletes the directory.
 pub fn remove_worktree_force(worktree_path: &Path) -> Result<(), GitError> {
+    assert_not_main_repo(worktree_path)?;
+
     info!(
         event = "core.git.worktree.remove_force_started",
         path = %worktree_path.display()
@@ -485,5 +512,75 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&repo_dir);
         let _ = std::fs::remove_dir_all(&worktree_base);
+    }
+
+    #[test]
+    fn test_assert_not_main_repo_blocks_main_checkout() {
+        let dir = create_temp_test_dir("kild_test_assert_main_repo");
+        init_test_repo(&dir);
+
+        // dir has .git/ directory → should be blocked
+        let result = assert_not_main_repo(&dir);
+        assert!(result.is_err(), "Should refuse to remove main repo root");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("main git repository"),
+            "Error should explain it's a main repo"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_assert_not_main_repo_allows_worktree() {
+        let repo_dir = create_temp_test_dir("kild_test_assert_wt_repo");
+        let worktree_base = create_temp_test_dir("kild_test_assert_wt_base");
+        init_test_repo(&repo_dir);
+
+        let repo = Repository::open(&repo_dir).unwrap();
+        let worktree_path = worktree_base.join("my-worktree");
+        let head_ref = repo.head().unwrap();
+        let mut opts = WorktreeAddOptions::new();
+        opts.reference(Some(&head_ref));
+        let _ = repo.worktree("my-worktree", &worktree_path, Some(&opts));
+
+        // Worktree has .git file (not directory) → should be allowed
+        if worktree_path.exists() {
+            let result = assert_not_main_repo(&worktree_path);
+            assert!(result.is_ok(), "Should allow worktree removal");
+        }
+
+        let _ = std::fs::remove_dir_all(&repo_dir);
+        let _ = std::fs::remove_dir_all(&worktree_base);
+    }
+
+    #[test]
+    fn test_remove_worktree_force_blocks_main_repo() {
+        let dir = create_temp_test_dir("kild_test_force_blocks_main");
+        init_test_repo(&dir);
+
+        let result = remove_worktree_force(&dir);
+        assert!(result.is_err(), "Should refuse to force-remove main repo");
+
+        // Directory must still exist
+        assert!(dir.exists(), "Main repo directory must not be deleted");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_remove_worktree_by_path_blocks_main_repo() {
+        let dir = create_temp_test_dir("kild_test_bypath_blocks_main");
+        init_test_repo(&dir);
+
+        let result = remove_worktree_by_path(&dir);
+        assert!(result.is_err(), "Should refuse to remove main repo");
+
+        // Directory must still exist
+        assert!(dir.exists(), "Main repo directory must not be deleted");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -181,7 +181,7 @@ mod gemini {
         binary: "gemini",
         command: "gemini",
         process_patterns: ["gemini", "gemini-cli"],
-        yolo_flags: "--yolo"
+        yolo_flags: "--yolo --approval-mode yolo"
     );
 }
 

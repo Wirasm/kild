@@ -82,6 +82,20 @@ pub fn create_command() -> Command {
                 .action(ArgAction::SetTrue)
                 .conflicts_with("daemon"),
         )
+        .arg(
+            Arg::new("main")
+                .long("main")
+                .help("Run from the project root instead of creating an isolated worktree (for supervisory sessions like honryu)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("initial-prompt")
+                .long("initial-prompt")
+                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .value_name("TEXT")
+                .conflicts_with("no-agent")
+                .conflicts_with("no-daemon"),
+        )
 }
 
 pub fn open_command() -> Command {
@@ -142,6 +156,21 @@ pub fn open_command() -> Command {
                 .help("Launch agent in external terminal window (overrides config)")
                 .action(ArgAction::SetTrue)
                 .conflicts_with("daemon"),
+        )
+        .arg(
+            Arg::new("no-attach")
+                .long("no-attach")
+                .help("Skip opening a terminal viewing window (for programmatic use, e.g. brain reopening workers)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("initial-prompt")
+                .long("initial-prompt")
+                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .value_name("TEXT")
+                .conflicts_with("no-agent")
+                .conflicts_with("no-daemon")
+                .conflicts_with("all"),
         )
 }
 

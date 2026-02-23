@@ -67,6 +67,22 @@ fn handle_single_stats(
 
     let session = helpers::require_session_json(branch, "cli.stats_failed", json_output)?;
 
+    if session.use_main_worktree {
+        let msg = format!(
+            "Branch health is not available for --main sessions (no isolated worktree). \
+             '{}' runs from the project root.",
+            branch
+        );
+        if json_output {
+            return Err(super::helpers::print_json_error(
+                &msg,
+                "MAIN_WORKTREE_SESSION",
+            ));
+        }
+        eprintln!("{}", msg);
+        return Err(msg.into());
+    }
+
     let health = kild_core::git::collect_branch_health(
         &session.worktree_path,
         branch,
@@ -146,6 +162,15 @@ fn handle_all_stats(
     let mut errors: Vec<FailedOperation> = Vec::new();
 
     for session in &sessions {
+        // Skip --main sessions — they have no isolated branch to measure.
+        if session.use_main_worktree {
+            info!(
+                event = "cli.stats_skip_main_session",
+                branch = %session.branch,
+            );
+            continue;
+        }
+
         match kild_core::git::collect_branch_health(
             &session.worktree_path,
             &session.branch,
@@ -187,6 +212,15 @@ fn handle_all_stats(
     }
 
     if !errors.is_empty() {
+        eprintln!();
+        for (branch, msg) in &errors {
+            eprintln!(
+                "{} '{}': {}",
+                crate::color::error("Stats failed for"),
+                branch,
+                msg
+            );
+        }
         let total = result_count + errors.len();
         return Err(format_partial_failure_error("compute stats", errors.len(), total).into());
     }

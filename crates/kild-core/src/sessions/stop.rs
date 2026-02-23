@@ -40,7 +40,8 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         }
 
         // Iterate all tracked agents — branch on daemon vs terminal
-        let mut kill_errors: Vec<(u32, String)> = Vec::with_capacity(session.agent_count());
+        let mut daemon_errors: Vec<String> = Vec::new();
+        let mut kill_errors: Vec<(u32, String)> = Vec::new();
         for agent_proc in session.agents() {
             if let Some(daemon_sid) = agent_proc.daemon_session_id() {
                 // Daemon-managed: destroy daemon session state via IPC.
@@ -59,7 +60,20 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                         daemon_session_id = daemon_sid,
                         error = %e
                     );
-                    kill_errors.push((0, e.to_string()));
+                    daemon_errors.push(e.to_string());
+                }
+
+                // Close the attach terminal window so it doesn't linger showing
+                // "failed to launch" after the PTY is gone.
+                if let (Some(terminal_type), Some(window_id)) =
+                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+                {
+                    info!(
+                        event = "core.session.stop_close_attach_window",
+                        terminal_type = ?terminal_type,
+                        agent = agent_proc.agent(),
+                    );
+                    terminal::handler::close_terminal(terminal_type, Some(window_id));
                 }
             } else {
                 // Terminal-managed: close window + kill process
@@ -105,6 +119,12 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             }
         }
 
+        // Report daemon errors first (they are not PID-related).
+        if !daemon_errors.is_empty() && kill_errors.is_empty() {
+            let message = daemon_errors.join("; ");
+            return Err(SessionError::DaemonError { message });
+        }
+
         if !kill_errors.is_empty() {
             for (pid, err) in &kill_errors {
                 error!(
@@ -114,7 +134,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                 );
             }
 
-            let error_count = kill_errors.len();
+            let error_count = kill_errors.len() + daemon_errors.len();
             let (first_pid, first_msg) = {
                 let (p, m) = kill_errors.first().unwrap();
                 (*p, m.clone())
@@ -128,10 +148,15 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!(
+                let mut msg = format!(
                     "{} processes failed to stop (PIDs: {}). Kill them manually.",
-                    error_count, pids
-                )
+                    kill_errors.len(),
+                    pids
+                );
+                for de in &daemon_errors {
+                    msg.push_str(&format!("\nDaemon error: {}", de));
+                }
+                msg
             };
 
             return Err(SessionError::ProcessKillFailed {

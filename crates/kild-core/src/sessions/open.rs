@@ -7,9 +7,11 @@ use crate::terminal::types::SpawnResult;
 use kild_config::{Config, KildConfig};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, setup_claude_integration,
-    setup_codex_integration, setup_opencode_integration, spawn_and_save_attach_window,
+    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt,
+    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
+    spawn_and_save_attach_window,
 };
+use super::fleet;
 
 /// Resolve the effective runtime mode for `open_session`.
 ///
@@ -78,6 +80,8 @@ pub fn open_session(
     runtime_mode: Option<crate::state::types::RuntimeMode>,
     resume: bool,
     yolo: bool,
+    no_attach: bool,
+    initial_prompt: Option<&str>,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -301,10 +305,15 @@ pub fn open_session(
         setup_codex_integration(&agent);
         setup_opencode_integration(&agent, &session.worktree_path);
         setup_claude_integration(&agent);
+        fleet::ensure_fleet_member(&session.branch, &session.worktree_path, &agent);
 
         // Daemon path: create new daemon PTY (uses shared helper with create_session)
+        let fleet_command = match fleet::fleet_agent_flags(&session.branch, &agent) {
+            Some(flags) => format!("{} {}", agent_command, flags),
+            None => agent_command.clone(),
+        };
         let (cmd, cmd_args, env_vars, use_login_shell) = build_daemon_create_request(
-            &agent_command,
+            &fleet_command,
             &agent,
             &session.id,
             new_task_list_id.as_deref(),
@@ -395,6 +404,11 @@ pub fn open_session(
             });
         }
 
+        // Deliver initial prompt after the TUI has settled (best-effort).
+        if let Some(prompt) = initial_prompt {
+            deliver_initial_prompt(&daemon_result.daemon_session_id, prompt);
+        }
+
         AgentProcess::new(
             agent.clone(),
             spawn_id,
@@ -479,8 +493,10 @@ pub fn open_session(
     // 6. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
-    // 7. Spawn attach window (best-effort) and update session with terminal info
-    if is_daemon {
+    // 7. Spawn attach window (best-effort) and update session with terminal info.
+    // Skipped when no_attach is set — for programmatic opens (e.g. brain reopening workers)
+    // where a Ghostty window popping up is undesirable.
+    if is_daemon && !no_attach {
         spawn_and_save_attach_window(&mut session, name, &kild_config, &config.sessions_dir())?;
     }
 
@@ -505,6 +521,8 @@ mod tests {
             Some(crate::state::types::RuntimeMode::Terminal),
             false,
             false,
+            false,
+            None,
         );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));

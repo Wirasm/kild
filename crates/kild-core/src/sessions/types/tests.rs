@@ -1336,3 +1336,39 @@ fn test_session_with_old_pascal_case_status_deserializes() {
     let reserialized = serde_json::to_string(&session).unwrap();
     assert!(reserialized.contains(r#""status":"active""#));
 }
+
+#[test]
+fn test_use_main_worktree_serde_roundtrip() {
+    let mut session = Session::new_for_test("honryu", PathBuf::from("/tmp/project"));
+    session.use_main_worktree = true;
+
+    let json = serde_json::to_string(&session).unwrap();
+    let reloaded: Session = serde_json::from_str(&json).unwrap();
+    assert!(
+        reloaded.use_main_worktree,
+        "use_main_worktree must survive serde roundtrip — this guards against \
+         remove_dir_all on the project root during destroy"
+    );
+}
+
+#[test]
+fn test_use_main_worktree_defaults_false_on_old_json() {
+    let json = r#"{
+        "id": "test/honryu",
+        "project_id": "test",
+        "branch": "honryu",
+        "worktree_path": "/tmp/project",
+        "agent": "claude",
+        "status": "Active",
+        "created_at": "2024-01-01T00:00:00Z",
+        "port_range_start": 3000,
+        "port_range_end": 3009,
+        "port_count": 10
+    }"#;
+
+    let session: Session = serde_json::from_str(json).unwrap();
+    assert!(
+        !session.use_main_worktree,
+        "use_main_worktree must default to false for old sessions without the field"
+    );
+}

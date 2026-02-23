@@ -6,6 +6,8 @@ use kild_core::BranchName;
 use kild_core::errors::KildError;
 use kild_core::session_ops;
 
+use crate::color;
+
 pub(crate) fn handle_agent_status_command(
     matches: &ArgMatches,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -40,6 +42,7 @@ pub(crate) fn handle_agent_status_command(
             if json_output {
                 return Err(super::helpers::print_json_error(&e, e.error_code()));
             }
+            eprintln!("{} {}", color::error("Invalid status:"), e);
             return Err(e.into());
         }
     };

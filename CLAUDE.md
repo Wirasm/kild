@@ -90,11 +90,18 @@ cargo clippy --all -- -D warnings  # Lint with warnings as errors
 cargo run -p kild -- create my-branch                  # Create kild with default agent
 cargo run -p kild -- create my-branch --note "Auth"    # Create with description
 cargo run -p kild -- create my-branch --yolo           # Create with autonomous mode
+cargo run -p kild -- create my-branch --main           # Run from project root (no worktree)
+cargo run -p kild -- create my-branch --initial-prompt "Start with auth"  # Inject prompt on startup
 cargo run -p kild -- list                              # List all kilds
 cargo run -p kild -- list --json                       # JSON output
 cargo run -p kild -- open my-branch                    # Reopen agent in existing kild
 cargo run -p kild -- open --all                        # Open all stopped kilds
 cargo run -p kild -- open my-branch --resume           # Resume previous conversation
+cargo run -p kild -- open my-branch --no-attach        # Open daemon session without attach window
+cargo run -p kild -- open my-branch --no-attach --resume  # Headless resume (brain reopening workers)
+cargo run -p kild -- open my-branch --initial-prompt "Next task: ..."  # Inject prompt on reopen
+cargo run -p kild -- inject my-branch "do the thing"  # Send to worker (inbox for claude, PTY for others)
+cargo run -p kild -- inject my-branch "msg" --inbox   # Force Claude Code inbox protocol
 cargo run -p kild -- stop my-branch                    # Stop agent, preserve kild
 cargo run -p kild -- stop --all                        # Stop all kilds
 cargo run -p kild -- stop my-branch --pane %1          # Stop a single teammate pane
@@ -124,7 +131,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Key modules in kild-core:**
 
-- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list)
+- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list). `fleet.rs` handles Honryū fleet mode — injecting team flags and managing inbox/config for claude daemon sessions.
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
 - `daemon/` - Daemon client for IPC communication with thread-local connection pooling (delegates to kild-protocol::IpcConnection) and auto-start logic (discovers kild-daemon binary as sibling executable). `tofu.rs` implements SHA-256 TOFU fingerprint verification for remote TCP/TLS connections. `mod.rs` exposes `set_remote_override()` for `--remote` CLI flag to route connections via TCP/TLS without touching handler signatures.
@@ -197,7 +204,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 **Key modules in kild (CLI):**
 
 - `app/` - CLI command implementations (daemon.rs, git.rs, global.rs, misc.rs, project.rs, query.rs, session.rs, tests.rs). `global.rs` parses `--remote`/`--remote-fingerprint` flags and calls `set_remote_override()` to route all IPC over TCP/TLS for that invocation.
-- `commands/` - Individual command handler modules (teammates.rs, stop.rs, attach.rs, and others)
+- `commands/` - Individual command handler modules (teammates.rs, stop.rs, attach.rs, inject.rs, and others)
 - `main.rs` - CLI entry point with clap argument parsing
 - `color.rs` - Tallinn Night palette output formatting
 
@@ -325,9 +332,9 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `daemon_helpers.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
 - `daemon_helpers.rs:ensure_claude_status_hook()` - Installs `~/.kild/hooks/claude-status` for Claude Code integration (idempotent, best-effort)
 - `daemon_helpers.rs:ensure_claude_settings()` - Patches `~/.claude/settings.json` with hook entries (respects existing config, best-effort)
-- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim, Codex, and Claude Code env vars into daemon PTY requests
-- `create.rs:create_session()` - Initializes shim state directory, `panes.json`, and agent-specific hooks for daemon sessions
-- `open.rs:open_session()` - Ensures agent-specific hooks when opening sessions
+- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim, Codex, Claude Code env vars, and fleet agent flags into daemon PTY requests
+- `create.rs:create_session()` - Initializes shim state directory, `panes.json`, agent-specific hooks, and fleet membership for daemon sessions
+- `open.rs:open_session()` - Ensures agent-specific hooks and fleet membership when opening sessions
 - `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
 
 ## Agent Hook Integration
@@ -343,6 +350,7 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 3. Claude Code calls the hook with JSON events on stdin
 4. Hook maps events to KILD statuses: Stop/SubagentStop/TeammateIdle/TaskCompleted → idle, Notification(permission_prompt) → waiting, Notification(idle_prompt) → idle
 5. Hook calls `kild agent-status --self <status> --notify` to update session state and send desktop notifications
+6. On Stop/idle events, hook also calls `kild inject honryu "[EVENT] <branch> <event>: <last_message>"` to forward worker state to the brain session (skipped if the session IS honryu, preventing self-loops; also skipped if honryu is not running)
 
 **Hook script:** `~/.kild/hooks/claude-status` (shell script, auto-generated, do not edit)
 
@@ -385,6 +393,29 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 **Environment variables:**
 
 - `$KILD_SESSION_BRANCH` - Injected into Codex sessions as fallback for `--self` PWD-based detection
+
+### Fleet Mode (Honryū)
+
+**Purpose:** Auto-wires Claude Code agent team flags into daemon sessions so `kild inject` can deliver messages via the Claude Code inbox polling protocol.
+
+**How it works:**
+
+- Fleet mode activates when `~/.claude/teams/honryu/` exists or when creating the `honryu` (brain) session itself
+- Daemon sessions with the `claude` agent get `--agent-id <branch>@honryu --agent-name <branch> --team-name honryu` appended to the agent command
+- The brain session (`honryu` branch) additionally loads `--agent kild-brain` as team lead
+- `kild inject <branch> "<text>"` routes via PTY stdin for non-claude agents; for claude sessions it writes to `~/.claude/teams/honryu/inboxes/<branch>.json` (Claude Code delivers it as a new user turn within ~1s). Use `--inbox` to force the inbox path.
+- `ensure_fleet_member()` in `fleet.rs` creates the inbox file and team config on every create/open (idempotent, best-effort)
+- Non-claude agents and terminal sessions are unaffected
+
+**Key files:** `crates/kild-core/src/sessions/fleet.rs`, `crates/kild/src/commands/inject.rs`
+
+**Typical brain setup:**
+
+```
+kild create honryu --daemon --main   # brain: runs from project root, no worktree
+kild create <worker> --daemon        # worker: auto-joins fleet with team flags
+kild inject <worker> "do the thing"  # brain → worker message
+```
 
 ## Forge Backend Pattern
 

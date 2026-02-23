@@ -27,9 +27,19 @@ pub fn count_session_files_in_dir(sessions_dir: &Path) -> Option<usize> {
 
     match std::fs::read_dir(sessions_dir) {
         Ok(entries) => {
+            // Count session entries in both storage formats:
+            // - New (current): <sessions_dir>/<safe_id>/kild.json  → count subdirs with kild.json
+            // - Old (legacy):  <sessions_dir>/<safe_id>.json        → count .json files
             let count = entries
                 .filter_map(|e| e.ok())
-                .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("json"))
+                .filter(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        path.join("kild.json").exists()
+                    } else {
+                        path.extension().and_then(|s| s.to_str()) == Some("json")
+                    }
+                })
                 .count();
             Some(count)
         }

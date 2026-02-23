@@ -26,6 +26,35 @@ pub fn daemon_command() -> Command {
         )
 }
 
+pub fn inject_command() -> Command {
+    Command::new("inject")
+        .about("Send text to a running daemon worker")
+        .long_about(
+            "Send text to a running daemon worker. For claude sessions, writes to the \
+             Claude Code inbox (polled every ~1s). For all other agents, writes to PTY \
+             stdin. Only call when the worker is idle (Stop hook fired). Use --inbox to \
+             force the inbox protocol for non-claude agents.",
+        )
+        .arg(
+            Arg::new("branch")
+                .help("Branch name of the target kild")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::new("text")
+                .help("Text to inject (a newline is appended automatically)")
+                .required(true)
+                .index(2),
+        )
+        .arg(
+            Arg::new("inbox")
+                .long("inbox")
+                .help("Force Claude Code inbox protocol (default for claude, PTY stdin for others)")
+                .action(ArgAction::SetTrue),
+        )
+}
+
 pub fn attach_command() -> Command {
     Command::new("attach")
         .about("Attach to a daemon-managed kild session")

@@ -1693,3 +1693,120 @@ fn test_cli_attach_without_pane() {
     let sub = matches.subcommand_matches("attach").unwrap();
     assert!(sub.get_one::<String>("pane").is_none());
 }
+
+// --- inject command tests ---
+
+#[test]
+fn test_cli_inject_command() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec!["kild", "inject", "my-worker", "do the thing"])
+        .unwrap();
+    let sub = matches.subcommand_matches("inject").unwrap();
+    assert_eq!(sub.get_one::<String>("branch").unwrap(), "my-worker");
+    assert_eq!(sub.get_one::<String>("text").unwrap(), "do the thing");
+    assert!(!sub.get_flag("inbox"));
+}
+
+#[test]
+fn test_cli_inject_with_inbox_flag() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec!["kild", "inject", "my-worker", "msg", "--inbox"])
+        .unwrap();
+    let sub = matches.subcommand_matches("inject").unwrap();
+    assert!(sub.get_flag("inbox"));
+}
+
+#[test]
+fn test_cli_inject_requires_branch_and_text() {
+    let app = build_cli();
+    assert!(
+        app.try_get_matches_from(vec!["kild", "inject", "my-worker"])
+            .is_err()
+    );
+
+    let app = build_cli();
+    assert!(app.try_get_matches_from(vec!["kild", "inject"]).is_err());
+}
+
+// --- create --main flag ---
+
+#[test]
+fn test_cli_create_with_main_flag() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec!["kild", "create", "honryu", "--main"])
+        .unwrap();
+    let sub = matches.subcommand_matches("create").unwrap();
+    assert!(sub.get_flag("main"));
+}
+
+// --- open --no-attach flag ---
+
+#[test]
+fn test_cli_open_with_no_attach_flag() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec!["kild", "open", "my-branch", "--no-attach"])
+        .unwrap();
+    let sub = matches.subcommand_matches("open").unwrap();
+    assert!(sub.get_flag("no-attach"));
+}
+
+// --- --initial-prompt flag ---
+
+#[test]
+fn test_cli_create_with_initial_prompt() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--daemon",
+            "--initial-prompt",
+            "start with auth",
+        ])
+        .unwrap();
+    let sub = matches.subcommand_matches("create").unwrap();
+    assert_eq!(
+        sub.get_one::<String>("initial-prompt").unwrap(),
+        "start with auth"
+    );
+}
+
+#[test]
+fn test_cli_open_with_initial_prompt() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec![
+            "kild",
+            "open",
+            "my-branch",
+            "--initial-prompt",
+            "next task: fix tests",
+        ])
+        .unwrap();
+    let sub = matches.subcommand_matches("open").unwrap();
+    assert_eq!(
+        sub.get_one::<String>("initial-prompt").unwrap(),
+        "next task: fix tests"
+    );
+}
+
+#[test]
+fn test_cli_create_initial_prompt_conflicts_with_no_daemon() {
+    let app = build_cli();
+    assert!(
+        app.try_get_matches_from(vec![
+            "kild",
+            "create",
+            "my-branch",
+            "--no-daemon",
+            "--initial-prompt",
+            "hello",
+        ])
+        .is_err()
+    );
+}
