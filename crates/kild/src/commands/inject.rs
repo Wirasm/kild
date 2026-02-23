@@ -25,9 +25,23 @@ pub(crate) fn handle_inject_command(
         .ok_or("Text argument is required")?;
     let force_inbox = matches.get_flag("inbox");
 
+    // Reject empty text — it produces a no-op inbox message or blank PTY input.
+    if text.trim().is_empty() {
+        eprintln!("{}", crate::color::error("Inject text cannot be empty."));
+        return Err("Inject text cannot be empty".into());
+    }
+
     info!(event = "cli.inject_started", branch = branch);
 
     let session = helpers::require_session(branch, "cli.inject_failed")?;
+
+    // Warn when injecting to a stopped session — the message will queue but nobody reads it.
+    if session.status != kild_core::SessionStatus::Active {
+        eprintln!(
+            "Warning: session '{}' is {:?} — message may not be delivered.",
+            branch, session.status
+        );
+    }
 
     // Determine inject method: --inbox forces inbox protocol; otherwise use agent default.
     let method = if force_inbox {

@@ -209,6 +209,15 @@ fn handle_all_stats(
     }
 
     if !errors.is_empty() {
+        eprintln!();
+        for (branch, msg) in &errors {
+            eprintln!(
+                "{} '{}': {}",
+                crate::color::error("Stats failed for"),
+                branch,
+                msg
+            );
+        }
         let total = result_count + errors.len();
         return Err(format_partial_failure_error("compute stats", errors.len(), total).into());
     }
