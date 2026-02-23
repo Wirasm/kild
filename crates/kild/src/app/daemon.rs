@@ -28,12 +28,12 @@ pub fn daemon_command() -> Command {
 
 pub fn inject_command() -> Command {
     Command::new("inject")
-        .about("Send text to a running daemon worker's PTY stdin")
+        .about("Send text to a running daemon worker")
         .long_about(
-            "Writes text to a daemon-managed kild's PTY stdin as the next user \
-             prompt turn. Works with all agents. Only call when the worker is idle \
-             (Stop hook fired). Use --inbox to force the Claude Code inbox protocol \
-             instead of PTY stdin.",
+            "Send text to a running daemon worker. For claude sessions, writes to the \
+             Claude Code inbox (polled every ~1s). For all other agents, writes to PTY \
+             stdin. Only call when the worker is idle (Stop hook fired). Use --inbox to \
+             force the inbox protocol for non-claude agents.",
         )
         .arg(
             Arg::new("branch")
@@ -50,7 +50,7 @@ pub fn inject_command() -> Command {
         .arg(
             Arg::new("inbox")
                 .long("inbox")
-                .help("Use Claude Code inbox protocol instead of PTY stdin (claude daemon sessions only)")
+                .help("Force Claude Code inbox protocol (default for claude, PTY stdin for others)")
                 .action(ArgAction::SetTrue),
         )
 }
