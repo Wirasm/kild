@@ -4,7 +4,7 @@ use clap_complete::Shell;
 use crate::app::build_cli;
 
 pub(crate) fn handle_completions_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let shell = matches
         .get_one::<Shell>("shell")

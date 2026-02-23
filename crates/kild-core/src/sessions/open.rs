@@ -351,7 +351,7 @@ pub fn open_session(
 
         if let Some(exit_code) = maybe_early_exit {
             let scrollback_tail =
-                match crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id) {
+                match crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id, kild_config) {
                     Ok(Some(bytes)) => {
                         let text = String::from_utf8_lossy(&bytes);
                         let lines: Vec<&str> = text.lines().collect();
@@ -380,6 +380,7 @@ pub fn open_session(
             if let Err(e) = crate::daemon::client::destroy_daemon_session(
                 &daemon_result.daemon_session_id,
                 true,
+                kild_config,
             ) {
                 warn!(
                     event = "core.session.open_daemon_cleanup_failed",

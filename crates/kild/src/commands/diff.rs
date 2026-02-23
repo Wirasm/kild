@@ -7,7 +7,7 @@ use kild_core::git::get_diff_stats;
 use super::helpers;
 use super::helpers::shorten_home_path;
 
-pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_diff_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;

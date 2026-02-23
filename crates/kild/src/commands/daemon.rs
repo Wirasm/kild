@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use tracing::{debug, error, info, warn};
 
 pub(crate) fn handle_daemon_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     match matches.subcommand() {
         Some(("start", sub)) => handle_daemon_start(sub),

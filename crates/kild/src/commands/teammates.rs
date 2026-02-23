@@ -9,7 +9,7 @@ use super::helpers;
 use crate::color;
 
 pub(crate) fn handle_teammates_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")

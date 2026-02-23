@@ -4,7 +4,7 @@ use tracing::{info, warn};
 use crate::color;
 
 pub(crate) fn handle_init_hooks_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let agent = matches
         .get_one::<String>("agent")

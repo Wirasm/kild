@@ -123,14 +123,12 @@ pub fn cleanup_task_list(session_id: &str, task_list_id: &str, home_dir: &std::p
 /// When `force` is true:
 /// - Process kill failures are logged but don't block destruction
 /// - Worktree is force-deleted even with uncommitted changes (work will be lost)
-pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
+pub fn destroy_session(name: &str, force: bool, config: &kild_config::KildConfig) -> Result<(), SessionError> {
     info!(
         event = "core.session.destroy_started",
         name = name,
         force = force
     );
-
-    let config = Config::new();
 
     // 1. Find session by name (branch name)
     let session =
@@ -170,7 +168,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                     daemon_session_id = daemon_sid,
                     agent = agent_proc.agent()
                 );
-                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, force) {
+                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, force, config) {
                     warn!(
                         event = "core.session.destroy_daemon_failed_continue",
                         daemon_session_id = daemon_sid,
@@ -309,7 +307,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                         daemon_session_id = %daemon_session.id,
                     );
                     if let Err(e) =
-                        crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
+                        crate::daemon::client::destroy_daemon_session(&daemon_session.id, true, config)
                     {
                         warn!(
                             event = "core.session.destroy_ui_session_failed",
@@ -365,7 +363,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
                                         daemon_session_id = child_sid
                                     );
                                     if let Err(e) = crate::daemon::client::destroy_daemon_session(
-                                        child_sid, true,
+                                        child_sid, true, config
                                     ) {
                                         error!(
                                             event = "core.session.destroy_shim_child_failed",

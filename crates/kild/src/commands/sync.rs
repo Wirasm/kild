@@ -8,7 +8,7 @@ use super::helpers::{
     load_config_with_warning,
 };
 
-pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_sync_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("all") {
         let base_override = matches.get_one::<String>("base").cloned();
         return handle_sync_all(base_override);

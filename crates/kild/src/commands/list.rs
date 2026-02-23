@@ -10,7 +10,7 @@ use kild_core::session_ops;
 use super::json_types::{EnrichedSession, FleetSummary, ListOutput};
 use crate::color;
 
-pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_list_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let json_output = matches.get_flag("json");
 
     info!(event = "cli.list_started", json_output = json_output);

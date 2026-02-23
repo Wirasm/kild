@@ -6,7 +6,7 @@ use kild_core::session_ops;
 use super::helpers::{format_partial_failure_error, load_config_with_warning, plural};
 
 pub(crate) fn handle_overlaps_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let json_output = matches.get_flag("json");
     let config = load_config_with_warning();

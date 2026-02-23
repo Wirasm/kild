@@ -4,7 +4,7 @@ use tracing::{error, info};
 use super::helpers;
 use super::helpers::is_valid_branch_name;
 
-pub(crate) fn handle_cd_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_cd_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;

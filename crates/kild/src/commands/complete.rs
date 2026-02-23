@@ -7,7 +7,7 @@ use kild_core::session_ops;
 use super::helpers::is_valid_branch_name;
 
 pub(crate) fn handle_complete_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")

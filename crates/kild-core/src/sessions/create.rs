@@ -266,7 +266,7 @@ pub fn create_session(
 
             // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
             // Daemon-not-running and session-not-found are expected (normal case).
-            match crate::daemon::client::destroy_daemon_session(&spawn_id, true) {
+            match crate::daemon::client::destroy_daemon_session(&spawn_id, true, kild_config) {
                 Ok(()) => {
                     debug!(
                         event = "core.session.preemptive_cleanup_completed",
@@ -301,7 +301,7 @@ pub fn create_session(
                 cols: 80,
                 use_login_shell,
             };
-            let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
+            let daemon_result = crate::daemon::client::create_pty_session(&daemon_request, kild_config)
                 .map_err(|e| SessionError::DaemonError {
                     message: e.to_string(),
                 })?;
@@ -314,7 +314,7 @@ pub fn create_session(
                 let mut result = None;
                 for delay_ms in [50u64, 100, 200] {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                    match crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
+                    match crate::daemon::client::get_session_info(&daemon_result.daemon_session_id, kild_config)
                     {
                         Ok(Some((kild_protocol::SessionStatus::Stopped, exit_code))) => {
                             result = Some(exit_code);
@@ -329,7 +329,7 @@ pub fn create_session(
 
             if let Some(exit_code) = maybe_early_exit {
                 let scrollback_tail =
-                    crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
+                    crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id, kild_config)
                         .inspect_err(|e| {
                             debug!(
                                 event = "core.session.scrollback_read_failed",
@@ -350,6 +350,7 @@ pub fn create_session(
                 if let Err(e) = crate::daemon::client::destroy_daemon_session(
                     &daemon_result.daemon_session_id,
                     true,
+                    kild_config,
                 ) {
                     warn!(
                         event = "core.session.create_daemon_cleanup_failed",

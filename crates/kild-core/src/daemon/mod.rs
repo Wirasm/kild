@@ -61,25 +61,4 @@ pub fn find_sibling_binary(binary_name: &str) -> Result<PathBuf, String> {
     Ok(sibling)
 }
 
-// TODO: replace with explicit context parameter threaded through command handlers.
-// Thread-local override lets `--remote` CLI flag take precedence over config
-// without touching every command handler signature. Acceptable for the CLI
-// (single-threaded, one invocation = one call path).
-thread_local! {
-    static REMOTE_OVERRIDE: RefCell<Option<(String, Option<String>)>> = const { RefCell::new(None) };
-}
 
-/// Set a process-wide remote daemon override from CLI flags.
-///
-/// When set, `get_connection()` in `client.rs` connects via TCP/TLS
-/// regardless of the config file. Takes precedence over `remote_host` in config.
-pub fn set_remote_override(host: &str, fingerprint: Option<&str>) {
-    REMOTE_OVERRIDE.with(|cell| {
-        *cell.borrow_mut() = Some((host.to_string(), fingerprint.map(|s| s.to_string())));
-    });
-}
-
-/// Read the current remote override, if any.
-pub(crate) fn remote_override() -> Option<(String, Option<String>)> {
-    REMOTE_OVERRIDE.with(|cell| cell.borrow().clone())
-}

@@ -9,10 +9,8 @@ use kild_config::Config;
 /// Stops the agent process in a kild without destroying the kild.
 ///
 /// The worktree and session file are preserved. The kild can be reopened with `open_session()`.
-pub fn stop_session(name: &str) -> Result<(), SessionError> {
+pub fn stop_session(name: &str, config: &kild_config::KildConfig) -> Result<(), SessionError> {
     info!(event = "core.session.stop_started", name = name);
-
-    let config = Config::new();
 
     // 1. Find session by name (branch name)
     let mut session =
@@ -53,7 +51,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                     daemon_session_id = daemon_sid,
                     agent = agent_proc.agent()
                 );
-                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, false) {
+                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, false, config) {
                     error!(
                         event = "core.session.destroy_daemon_failed",
                         daemon_session_id = daemon_sid,
@@ -192,7 +190,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 /// # Arguments
 /// * `branch` - Branch name of the parent kild session
 /// * `pane_id` - Pane ID to stop (e.g. "%1", "%2")
-pub fn stop_teammate(branch: &str, pane_id: &str) -> Result<(), SessionError> {
+pub fn stop_teammate(branch: &str, pane_id: &str, config: &kild_config::KildConfig) -> Result<(), SessionError> {
     if pane_id == "%0" {
         return Err(SessionError::LeaderPaneStop {
             branch: branch.to_string(),
@@ -205,7 +203,6 @@ pub fn stop_teammate(branch: &str, pane_id: &str) -> Result<(), SessionError> {
         pane_id = pane_id
     );
 
-    let config = Config::new();
     let session =
         persistence::find_session_by_name(&config.sessions_dir(), branch)?.ok_or_else(|| {
             SessionError::NotFound {
@@ -246,7 +243,7 @@ pub fn stop_teammate(branch: &str, pane_id: &str) -> Result<(), SessionError> {
         .ok_or_else(pane_not_found)?
         .to_string();
 
-    crate::daemon::client::destroy_daemon_session(&daemon_session_id, false).map_err(|e| {
+    crate::daemon::client::destroy_daemon_session(&daemon_session_id, false, config).map_err(|e| {
         SessionError::DaemonError {
             message: e.to_string(),
         }

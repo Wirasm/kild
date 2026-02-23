@@ -10,7 +10,7 @@ use super::helpers::{
     resolve_explicit_runtime_mode, resolve_open_mode,
 };
 
-pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_open_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let mode = resolve_open_mode(matches);
     let daemon_flag = matches.get_flag("daemon");
     let no_daemon_flag = matches.get_flag("no-daemon");

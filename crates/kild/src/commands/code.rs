@@ -6,7 +6,7 @@ use kild_core::editor::EditorError;
 use super::helpers::{self, load_config_with_warning, shorten_home_path};
 use crate::color;
 
-pub(crate) fn handle_code_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_code_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;

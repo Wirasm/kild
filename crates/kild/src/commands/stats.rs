@@ -20,7 +20,7 @@ struct StatsOutput {
     merge_readiness: MergeReadiness,
 }
 
-pub(crate) fn handle_stats_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_stats_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("all") {
         let base_override = matches.get_one::<String>("base").cloned();
         let json_output = matches.get_flag("json");

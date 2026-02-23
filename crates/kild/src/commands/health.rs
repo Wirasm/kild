@@ -9,7 +9,7 @@ use super::helpers::{is_valid_branch_name, load_config_with_warning};
 use crate::table::{display_width, pad};
 
 pub(crate) fn handle_health_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches.get_one::<String>("branch");
     let json_output = matches.get_flag("json");

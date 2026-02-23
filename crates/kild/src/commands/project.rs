@@ -11,7 +11,7 @@ use kild_core::projects::{
 use crate::color;
 
 pub(crate) fn handle_project_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     match matches.subcommand() {
         Some(("add", sub)) => handle_project_add(sub),

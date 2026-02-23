@@ -7,7 +7,7 @@ use kild_core::errors::KildError;
 use kild_core::session_ops;
 
 pub(crate) fn handle_agent_status_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let use_self = matches.get_flag("self");
     let notify = matches.get_flag("notify");

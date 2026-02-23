@@ -7,7 +7,7 @@ use kild_core::events;
 use super::helpers::shorten_home_path;
 
 pub(crate) fn handle_cleanup_command(
-    sub_matches: &ArgMatches,
+    sub_matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.cleanup_started");
 

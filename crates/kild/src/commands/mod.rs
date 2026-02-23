@@ -34,39 +34,39 @@ mod stop;
 mod sync;
 mod teammates;
 
-pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     events::log_app_startup();
 
     match matches.subcommand() {
-        Some(("create", sub_matches)) => create::handle_create_command(sub_matches),
-        Some(("list", sub_matches)) => list::handle_list_command(sub_matches),
-        Some(("cd", sub_matches)) => cd::handle_cd_command(sub_matches),
-        Some(("destroy", sub_matches)) => destroy::handle_destroy_command(sub_matches),
-        Some(("complete", sub_matches)) => complete::handle_complete_command(sub_matches),
-        Some(("completions", sub_matches)) => completions::handle_completions_command(sub_matches),
-        Some(("open", sub_matches)) => open::handle_open_command(sub_matches),
-        Some(("stop", sub_matches)) => stop::handle_stop_command(sub_matches),
-        Some(("code", sub_matches)) => code::handle_code_command(sub_matches),
-        Some(("focus", sub_matches)) => focus::handle_focus_command(sub_matches),
-        Some(("hide", sub_matches)) => hide::handle_hide_command(sub_matches),
-        Some(("diff", sub_matches)) => diff::handle_diff_command(sub_matches),
-        Some(("commits", sub_matches)) => commits::handle_commits_command(sub_matches),
-        Some(("pr", sub_matches)) => pr::handle_pr_command(sub_matches),
-        Some(("stats", sub_matches)) => stats::handle_stats_command(sub_matches),
-        Some(("overlaps", sub_matches)) => overlaps::handle_overlaps_command(sub_matches),
-        Some(("status", sub_matches)) => status::handle_status_command(sub_matches),
+        Some(("create", sub_matches)) => create::handle_create_command(sub_matches, config),
+        Some(("list", sub_matches)) => list::handle_list_command(sub_matches, config),
+        Some(("cd", sub_matches)) => cd::handle_cd_command(sub_matches, config),
+        Some(("destroy", sub_matches)) => destroy::handle_destroy_command(sub_matches, config),
+        Some(("complete", sub_matches)) => complete::handle_complete_command(sub_matches, config),
+        Some(("completions", sub_matches)) => completions::handle_completions_command(sub_matches, config),
+        Some(("open", sub_matches)) => open::handle_open_command(sub_matches, config),
+        Some(("stop", sub_matches)) => stop::handle_stop_command(sub_matches, config),
+        Some(("code", sub_matches)) => code::handle_code_command(sub_matches, config),
+        Some(("focus", sub_matches)) => focus::handle_focus_command(sub_matches, config),
+        Some(("hide", sub_matches)) => hide::handle_hide_command(sub_matches, config),
+        Some(("diff", sub_matches)) => diff::handle_diff_command(sub_matches, config),
+        Some(("commits", sub_matches)) => commits::handle_commits_command(sub_matches, config),
+        Some(("pr", sub_matches)) => pr::handle_pr_command(sub_matches, config),
+        Some(("stats", sub_matches)) => stats::handle_stats_command(sub_matches, config),
+        Some(("overlaps", sub_matches)) => overlaps::handle_overlaps_command(sub_matches, config),
+        Some(("status", sub_matches)) => status::handle_status_command(sub_matches, config),
         Some(("agent-status", sub_matches)) => {
-            agent_status::handle_agent_status_command(sub_matches)
+            agent_status::handle_agent_status_command(sub_matches, config)
         }
-        Some(("rebase", sub_matches)) => rebase::handle_rebase_command(sub_matches),
-        Some(("sync", sub_matches)) => sync::handle_sync_command(sub_matches),
-        Some(("cleanup", sub_matches)) => cleanup::handle_cleanup_command(sub_matches),
-        Some(("health", sub_matches)) => health::handle_health_command(sub_matches),
-        Some(("daemon", sub_matches)) => daemon::handle_daemon_command(sub_matches),
-        Some(("attach", sub_matches)) => attach::handle_attach_command(sub_matches),
-        Some(("teammates", sub_matches)) => teammates::handle_teammates_command(sub_matches),
-        Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches),
-        Some(("project", sub_matches)) => project::handle_project_command(sub_matches),
+        Some(("rebase", sub_matches)) => rebase::handle_rebase_command(sub_matches, config),
+        Some(("sync", sub_matches)) => sync::handle_sync_command(sub_matches, config),
+        Some(("cleanup", sub_matches)) => cleanup::handle_cleanup_command(sub_matches, config),
+        Some(("health", sub_matches)) => health::handle_health_command(sub_matches, config),
+        Some(("daemon", sub_matches)) => daemon::handle_daemon_command(sub_matches, config),
+        Some(("attach", sub_matches)) => attach::handle_attach_command(sub_matches, config),
+        Some(("teammates", sub_matches)) => teammates::handle_teammates_command(sub_matches, config),
+        Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches, config),
+        Some(("project", sub_matches)) => project::handle_project_command(sub_matches, config),
         _ => {
             error!(event = "cli.command_unknown");
             Err("Unknown command".into())

@@ -18,15 +18,23 @@ fn main() {
     let quiet = !verbose;
     init_logging(quiet);
 
+    let mut config = match kild_config::KildConfig::load_hierarchy() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(event = "cli.config_load_failed", error = %e);
+            kild_config::KildConfig::default()
+        }
+    };
+
     // Apply --remote override before any IPC operations.
     if let Some(remote) = matches.get_one::<String>("remote") {
-        let fingerprint = matches
-            .get_one::<String>("remote-fingerprint")
-            .map(|s| s.as_str());
-        kild_core::daemon::set_remote_override(remote, fingerprint);
+        config.daemon.remote_host = Some(remote.clone());
+        if let Some(fingerprint) = matches.get_one::<String>("remote-fingerprint") {
+            config.daemon.remote_cert_fingerprint = Some(fingerprint.clone());
+        }
     }
 
-    if let Err(e) = commands::run_command(&matches) {
+    if let Err(e) = commands::run_command(&matches, &config) {
         // Error already printed to user via eprintln! in command handlers.
         // In verbose mode, JSON logs were also emitted.
         // Exit with non-zero code without printing Rust's Debug representation.

@@ -6,7 +6,7 @@ use kild_core::events;
 use super::helpers;
 
 pub(crate) fn handle_commits_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 

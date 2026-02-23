@@ -32,26 +32,7 @@ thread_local! {
 ///
 /// The connection is taken from the cache (exclusive ownership) and must be
 /// returned with `return_connection()` after successful use.
-fn get_connection() -> Result<IpcConnection, DaemonClientError> {
-    // CLI --remote override takes precedence over config file.
-    if let Some((host, fingerprint)) = crate::daemon::remote_override() {
-        debug!(event = "core.daemon.tcp_connection_override", host = %host);
-        return get_tls_connection(&host, fingerprint.as_deref());
-    }
-
-    // Config file remote_host takes precedence over local Unix socket.
-    let config = match kild_config::KildConfig::load_hierarchy() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(
-                event = "core.daemon.config_load_failed",
-                error = %e,
-                "Failed to load config; falling back to defaults. \
-                 Remote daemon settings will not be applied."
-            );
-            kild_config::KildConfig::default()
-        }
-    };
+fn get_connection(config: &kild_config::KildConfig) -> Result<IpcConnection, DaemonClientError> {
     if let Some(ref remote_host) = config.daemon.remote_host {
         debug!(event = "core.daemon.tcp_connection_config", host = %remote_host);
         return get_tls_connection(
@@ -214,6 +195,7 @@ pub struct DaemonCreateRequest<'a> {
 /// Blocks until the daemon responds with session ID or error.
 pub fn create_pty_session(
     request: &DaemonCreateRequest<'_>,
+    config: &kild_config::KildConfig,
 ) -> Result<DaemonCreateResult, DaemonClientError> {
     info!(
         event = "core.daemon.create_pty_session_started",
@@ -234,7 +216,7 @@ pub fn create_pty_session(
         use_login_shell: request.use_login_shell,
     };
 
-    let mut conn = get_connection()?;
+    let mut conn = get_connection(config)?;
     let response = conn.send(&msg);
 
     match response {
@@ -267,7 +249,7 @@ pub fn create_pty_session(
 }
 
 /// Stop a daemon-managed session (kill the PTY process).
-pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientError> {
+pub fn stop_daemon_session(daemon_session_id: &str, config: &kild_config::KildConfig) -> Result<(), DaemonClientError> {
     info!(
         event = "core.daemon.stop_session_started",
         daemon_session_id = daemon_session_id
@@ -278,7 +260,7 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = get_connection()?;
+    let mut conn = get_connection(config)?;
     match conn.send(&request) {
         Ok(_) => {
             return_connection(conn);
@@ -307,6 +289,7 @@ pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientEr
 pub fn destroy_daemon_session(
     daemon_session_id: &str,
     force: bool,
+    config: &kild_config::KildConfig,
 ) -> Result<(), DaemonClientError> {
     info!(
         event = "core.daemon.destroy_session_started",
@@ -320,7 +303,7 @@ pub fn destroy_daemon_session(
         force,
     };
 
-    let mut conn = get_connection()?;
+    let mut conn = get_connection(config)?;
     match conn.send(&request) {
         Ok(_) => {
             return_connection(conn);
@@ -346,14 +329,14 @@ pub fn destroy_daemon_session(
 }
 
 /// Check if the daemon is running and responsive.
-pub fn ping_daemon() -> Result<bool, DaemonClientError> {
+pub fn ping_daemon(config: &kild_config::KildConfig) -> Result<bool, DaemonClientError> {
     debug!(event = "core.daemon.ping_started");
 
     let request = ClientMessage::Ping {
         id: "ping".to_string(),
     };
 
-    let mut conn = match get_connection() {
+    let mut conn = match get_connection(config) {
         Ok(c) => c,
         Err(DaemonClientError::NotRunning { .. }) => return Ok(false),
         Err(e) => return Err(e),
@@ -383,6 +366,7 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
 /// Returns `Err(...)` for unexpected failures (connection errors, protocol errors).
 pub fn get_session_status(
     daemon_session_id: &str,
+    config: &kild_config::KildConfig,
 ) -> Result<Option<SessionStatus>, DaemonClientError> {
     debug!(
         event = "core.daemon.get_session_status_started",
@@ -394,7 +378,7 @@ pub fn get_session_status(
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match get_connection() {
+    let mut conn = match get_connection(config) {
         Ok(c) => c,
         Err(DaemonClientError::NotRunning { .. }) => {
             debug!(
@@ -459,13 +443,14 @@ pub fn get_session_status(
 /// Returns `Ok(None)` if the daemon is not running or the session is not found.
 pub fn get_session_info(
     daemon_session_id: &str,
+    config: &kild_config::KildConfig,
 ) -> Result<Option<(SessionStatus, Option<i32>)>, DaemonClientError> {
     let request = ClientMessage::GetSession {
         id: format!("info-{}", daemon_session_id),
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match get_connection() {
+    let mut conn = match get_connection(config) {
         Ok(c) => c,
         Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
         Err(e) => return Err(e),
@@ -508,13 +493,13 @@ pub fn get_session_info(
 ///
 /// Returns the raw scrollback bytes (decoded from base64), or `None` if the
 /// daemon is not running or the session is not found.
-pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, DaemonClientError> {
+pub fn read_scrollback(daemon_session_id: &str, config: &kild_config::KildConfig) -> Result<Option<Vec<u8>>, DaemonClientError> {
     let request = ClientMessage::ReadScrollback {
         id: format!("scrollback-{}", daemon_session_id),
         session_id: SessionId::new(daemon_session_id),
     };
 
-    let mut conn = match get_connection() {
+    let mut conn = match get_connection(config) {
         Ok(c) => c,
         Err(DaemonClientError::NotRunning { .. }) => return Ok(None),
         Err(e) => return Err(e),
@@ -563,7 +548,7 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
 ///
 /// Returns all sessions from the daemon. The caller can filter by prefix
 /// to find sessions belonging to a specific kild (e.g., UI-created shells).
-pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonClientError> {
+pub fn list_daemon_sessions(config: &kild_config::KildConfig) -> Result<Vec<kild_protocol::SessionInfo>, DaemonClientError> {
     debug!(event = "core.daemon.list_sessions_started");
 
     let request = ClientMessage::ListSessions {
@@ -571,7 +556,7 @@ pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonC
         project_id: None,
     };
 
-    let mut conn = get_connection()?;
+    let mut conn = get_connection(config)?;
 
     match conn.send(&request) {
         Ok(DaemonMessage::SessionList { sessions, .. }) => {
@@ -600,14 +585,14 @@ pub fn list_daemon_sessions() -> Result<Vec<kild_protocol::SessionInfo>, DaemonC
 }
 
 /// Request the daemon to shut down gracefully.
-pub fn request_shutdown() -> Result<(), DaemonClientError> {
+pub fn request_shutdown(config: &kild_config::KildConfig) -> Result<(), DaemonClientError> {
     info!(event = "core.daemon.shutdown_started");
 
     let request = ClientMessage::DaemonStop {
         id: "shutdown".to_string(),
     };
 
-    let mut conn = get_connection()?;
+    let mut conn = get_connection(config)?;
     match conn.send(&request) {
         Ok(_) => {
             // Don't return connection — daemon is shutting down

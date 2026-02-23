@@ -5,7 +5,7 @@ use kild_core::session_ops;
 
 use super::helpers::{self, is_valid_branch_name};
 
-pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_pr_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;

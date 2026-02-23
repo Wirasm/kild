@@ -10,7 +10,7 @@ use super::helpers::{
 use crate::color;
 
 pub(crate) fn handle_destroy_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let force = matches.get_flag("force");
 

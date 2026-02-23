@@ -58,7 +58,7 @@ impl Store for CoreStore {
                 }])
             }
             Command::DestroyKild { branch, force } => {
-                session_ops::destroy_session(&branch, force)?;
+                session_ops::destroy_session(&branch, force, config)?;
                 Ok(vec![Event::KildDestroyed { branch }])
             }
             Command::OpenKild {
@@ -75,7 +75,7 @@ impl Store for CoreStore {
                 }])
             }
             Command::StopKild { branch } => {
-                session_ops::stop_session(&branch)?;
+                session_ops::stop_session(&branch, config)?;
                 Ok(vec![Event::KildStopped { branch }])
             }
             Command::CompleteKild { branch } => {

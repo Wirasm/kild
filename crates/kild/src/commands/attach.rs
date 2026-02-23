@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 use super::helpers;
 
 pub(crate) fn handle_attach_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")

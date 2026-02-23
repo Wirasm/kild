@@ -9,7 +9,7 @@ use super::helpers::{
 };
 
 pub(crate) fn handle_rebase_command(
-    matches: &ArgMatches,
+    matches: &ArgMatches, config: &kild_config::KildConfig
 ) -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("all") {
         let base_override = matches.get_one::<String>("base").cloned();

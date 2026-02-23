@@ -8,7 +8,7 @@ use kild_core::session_ops;
 use super::helpers::{FailedOperation, format_count, format_partial_failure_error};
 use crate::color;
 
-pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_stop_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(pane_id) = matches.get_one::<String>("pane") {
         let branch = matches
             .get_one::<String>("branch")

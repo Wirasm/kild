@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use super::helpers;
 
-pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn handle_focus_command(matches: &ArgMatches, config: &kild_config::KildConfig) -> Result<(), Box<dyn std::error::Error>> {
     let branch = matches
         .get_one::<String>("branch")
         .ok_or("Branch argument is required")?;
