@@ -28,6 +28,7 @@ mod list;
 mod open;
 mod overlaps;
 mod pr;
+mod prime;
 mod project;
 mod rebase;
 mod stats;
@@ -67,6 +68,7 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("daemon", sub_matches)) => daemon::handle_daemon_command(sub_matches),
         Some(("attach", sub_matches)) => attach::handle_attach_command(sub_matches),
         Some(("inbox", sub_matches)) => inbox::handle_inbox_command(sub_matches),
+        Some(("prime", sub_matches)) => prime::handle_prime_command(sub_matches),
         Some(("inject", sub_matches)) => inject::handle_inject_command(sub_matches),
         Some(("teammates", sub_matches)) => teammates::handle_teammates_command(sub_matches),
         Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches),
