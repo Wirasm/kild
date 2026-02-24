@@ -117,7 +117,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Workspace structure:**
 
-- `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths including `tls_cert_path()` and `tls_key_path()` for daemon TLS certs). Single source of truth for KILD filesystem layout.
+- `crates/kild-paths` - Centralized path construction for ~/.kild/ directory layout (KildPaths struct with typed methods for all paths including `tls_cert_path()` and `tls_key_path()` for daemon TLS certs, and `fleet_dir()`, `fleet_project_dir()`, `fleet_dropbox_dir()` for fleet dropbox paths). Single source of truth for KILD filesystem layout.
 - `crates/kild-config` - TOML configuration types, loading, validation, and keybindings for ~/.kild/config.toml. Depends only on kild-paths and kild-protocol. Single source of truth for all KildConfig/Config/Keybindings types. Extracted from kild-core to enable fast incremental compilation of config-only changes.
 - `crates/kild-protocol` - Shared IPC protocol types (ClientMessage, DaemonMessage, SessionInfo, SessionStatus, ErrorCode), domain newtypes (SessionId, BranchName, ProjectId), and serde-only domain enums (ForgeType). Also provides `IpcConnection` for JSONL-over-Unix-socket-or-TCP/TLS client used by both kild-core and kild-tmux-shim with connection health checking via `is_alive()` and TLS variant via `connect_tls()`, and `AsyncIpcClient<R, W>` — a generic async JSONL client over any `AsyncBufRead + AsyncWrite` pair used by kild-ui. All public enums are `#[non_exhaustive]` for forward compatibility. Newtypes defined via `newtype_string!` macro for compile-time type safety. Deps: serde, serde_json, futures (tempfile, smol for tests). No tokio, no kild-core. Single source of truth for daemon wire format and IPC client.
 - `crates/kild-core` - Core library with all business logic, no CLI dependencies
@@ -131,7 +131,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 
 **Key modules in kild-core:**
 
-- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list). `fleet.rs` handles Honryū fleet mode — injecting team flags and managing inbox/config for claude daemon sessions.
+- `sessions/` - Session lifecycle (create, open, stop, destroy, complete, list). `fleet.rs` handles Honryū fleet mode — injecting team flags and managing inbox/config for claude daemon sessions. `dropbox.rs` manages per-session fleet dropbox directories at `~/.kild/fleet/<project_id>/<branch>/` including protocol generation, env var injection, and cleanup.
 - `terminal/` - Multi-backend terminal abstraction (Ghostty, iTerm, Terminal.app, Alacritty)
 - `agents/` - Agent backend system (amp, claude, kiro, gemini, codex, opencode, resume.rs for session continuity)
 - `daemon/` - Daemon client for IPC communication with thread-local connection pooling (delegates to kild-protocol::IpcConnection) and auto-start logic (discovers kild-daemon binary as sibling executable). `tofu.rs` implements SHA-256 TOFU fingerprint verification for remote TCP/TLS connections. `mod.rs` exposes `set_remote_override()` for `--remote` CLI flag to route connections via TCP/TLS without touching handler signatures.
@@ -333,9 +333,9 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `daemon_helpers.rs:ensure_claude_status_hook()` - Installs `~/.kild/hooks/claude-status` for Claude Code integration (idempotent, best-effort)
 - `daemon_helpers.rs:ensure_claude_settings()` - Patches `~/.claude/settings.json` with hook entries (respects existing config, best-effort)
 - `daemon_helpers.rs:build_daemon_create_request()` - Injects shim, Codex, Claude Code env vars, and fleet agent flags into daemon PTY requests
-- `create.rs:create_session()` - Initializes shim state directory, `panes.json`, agent-specific hooks, and fleet membership for daemon sessions
-- `open.rs:open_session()` - Ensures agent-specific hooks and fleet membership when opening sessions
-- `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`
+- `create.rs:create_session()` - Initializes shim state directory, `panes.json`, agent-specific hooks, fleet membership, and dropbox directory for daemon sessions
+- `open.rs:open_session()` - Ensures agent-specific hooks, fleet membership, and dropbox directory when opening sessions
+- `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, cleans up task lists at `~/.claude/tasks/<task_list_id>/`, and removes fleet dropbox at `~/.kild/fleet/<project_id>/<branch>/`
 
 ## Agent Hook Integration
 
@@ -405,9 +405,22 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - The brain session (`honryu` branch) additionally loads `--agent kild-brain` as team lead
 - `kild inject <branch> "<text>"` routes via PTY stdin for non-claude agents; for claude sessions it writes to `~/.claude/teams/honryu/inboxes/<branch>.json` (Claude Code delivers it as a new user turn within ~1s). Use `--inbox` to force the inbox path.
 - `ensure_fleet_member()` in `fleet.rs` creates the inbox file and team config on every create/open (idempotent, best-effort)
+- `ensure_dropbox()` in `dropbox.rs` creates `~/.kild/fleet/<project_id>/<branch>/` with a `protocol.md` on every create/open (idempotent, best-effort). Directory is removed on destroy.
 - Non-claude agents and terminal sessions are unaffected
 
-**Key files:** `crates/kild-core/src/sessions/fleet.rs`, `crates/kild/src/commands/inject.rs`
+**Environment variables injected into fleet daemon sessions:**
+
+- `$KILD_DROPBOX` - Path to the session's dropbox directory (`~/.kild/fleet/<project_id>/<branch>/`)
+- `$KILD_FLEET_DIR` - Path to the project fleet directory (`~/.kild/fleet/<project_id>/`). Brain session only.
+
+**Dropbox file protocol** (used by workers to communicate with the brain):
+
+- `task.md` - Current task (written by brain)
+- `ack` - Task acknowledgment (written by worker after reading task.md)
+- `report.md` - Task result (written by worker on completion)
+- `protocol.md` - Protocol instructions (auto-generated by KILD, do not edit)
+
+**Key files:** `crates/kild-core/src/sessions/fleet.rs`, `crates/kild-core/src/sessions/dropbox.rs`, `crates/kild/src/commands/inject.rs`
 
 **Typical brain setup:**
 
