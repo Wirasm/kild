@@ -1,24 +1,54 @@
-//! Dropbox messaging protocol — fleet directory setup and protocol generation.
+//! Dropbox messaging protocol — fleet directory setup, protocol generation, and task writes.
 //!
 //! The dropbox is a per-session directory at `~/.kild/fleet/<project_id>/<branch>/`
 //! (where `<branch>` has `/` replaced with `_` for filesystem safety) containing
-//! fleet protocol instructions and (in future phases) task files.
+//! fleet protocol instructions and task files (`task-id`, `task.md`, `history.jsonl`).
 //! Created only for fleet-capable agents (claude) when fleet mode is active —
 //! no-op for normal sessions and non-claude agents.
 
+use std::fs::OpenOptions;
+use std::io::Write;
+
 use chrono::Utc;
 use kild_paths::KildPaths;
+use nix::fcntl::{Flock, FlockArg};
 use serde::Serialize;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use super::errors::SessionError;
 use super::fleet;
 
+/// Direction of a fleet message: brain→worker or worker→brain.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Direction {
+    In,
+    #[allow(dead_code)] // Phase 3: worker→brain reporting
+    Out,
+}
+
+/// Delivery method used for a task injection.
+///
+/// Recorded in `history.jsonl` to trace how a task was delivered.
+/// Each inject may use multiple methods (e.g. dropbox + inbox for Claude agents).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryMethod {
+    /// File-based dropbox protocol (universal).
+    Dropbox,
+    /// Claude Code inbox JSON protocol.
+    ClaudeInbox,
+    /// PTY stdin injection.
+    Pty,
+    /// Initial prompt written at session creation (before agent starts).
+    InitialPrompt,
+}
+
 /// A single entry in the append-only `history.jsonl` audit trail.
 #[derive(Debug, Serialize)]
 struct HistoryEntry {
-    /// Direction: "in" = brain→worker.
-    dir: &'static str,
+    /// Direction: "in" = brain→worker, "out" = worker→brain.
+    dir: Direction,
     /// Sender identifier (e.g. "kild").
     from: String,
     /// Recipient branch name.
@@ -30,7 +60,7 @@ struct HistoryEntry {
     /// First ~80 chars of the task text.
     summary: String,
     /// Delivery methods attempted (e.g. ["dropbox", "claude_inbox"]).
-    delivery: Vec<String>,
+    delivery: Vec<DeliveryMethod>,
 }
 
 /// Ensure the dropbox directory exists with a current `protocol.md`.
@@ -106,18 +136,27 @@ pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
 /// and appends to `history.jsonl`. No-op (returns `Ok(None)`) if fleet mode
 /// is not active or the dropbox directory does not exist.
 /// Returns `Ok(Some(task_id))` on success with the new task number.
+///
+/// Uses an exclusive flock on `task.lock` to prevent concurrent writers
+/// (e.g. create --initial-prompt racing with inject) from producing
+/// duplicate task IDs.
+///
+/// Note: `write_task` does NOT check `is_fleet_capable_agent` — it relies on
+/// `ensure_dropbox` (which IS agent-guarded) to control which sessions get a
+/// dropbox directory. If the directory exists, the task is written. This is
+/// intentional: Phase 3 may extend dropbox to non-Claude agents.
 pub fn write_task(
     project_id: &str,
     branch: &str,
     text: &str,
-    delivery: &[&str],
+    delivery: &[DeliveryMethod],
 ) -> Result<Option<u64>, SessionError> {
     if !fleet::fleet_mode_active(branch) {
         return Ok(None);
     }
 
     let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
-        source: std::io::Error::new(std::io::ErrorKind::NotFound, e),
+        source: std::io::Error::other(e),
     })?;
     let dropbox_dir = paths.fleet_dropbox_dir(project_id, branch);
 
@@ -125,44 +164,123 @@ pub fn write_task(
         return Ok(None);
     }
 
-    // Read current task-id (default 0), increment.
+    info!(
+        event = "core.session.dropbox.write_task_started",
+        branch = branch,
+        text_len = text.len(),
+    );
+
+    // Acquire exclusive lock for the duration of the read-modify-write.
+    // Mirrors the flock pattern in inject.rs::write_to_inbox.
+    let lock_path = dropbox_dir.join("task.lock");
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| SessionError::IoError { source: e })?;
+    let _lock = Flock::lock(lock_file, FlockArg::LockExclusive)
+        .map_err(|(_, e)| SessionError::IoError { source: e.into() })?;
+
+    // Read current task-id, distinguishing: missing (normal) vs corrupt (warn) vs unreadable (error).
     let task_id_path = dropbox_dir.join("task-id");
-    let current_id: u64 = std::fs::read_to_string(&task_id_path)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
+    let current_id: u64 = match std::fs::read_to_string(&task_id_path) {
+        Ok(s) => match s.trim().parse::<u64>() {
+            Ok(id) => id,
+            Err(e) => {
+                warn!(
+                    event = "core.session.dropbox.task_id_corrupt",
+                    branch = branch,
+                    path = %task_id_path.display(),
+                    content = s.trim(),
+                    error = %e,
+                );
+                0
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(e) => {
+            error!(
+                event = "core.session.dropbox.task_id_read_failed",
+                branch = branch,
+                path = %task_id_path.display(),
+                error = %e,
+            );
+            return Err(SessionError::IoError { source: e });
+        }
+    };
     let new_id = current_id + 1;
 
     // Write task-id.
-    std::fs::write(&task_id_path, format!("{new_id}\n"))?;
+    std::fs::write(&task_id_path, format!("{new_id}\n")).map_err(|e| {
+        error!(
+            event = "core.session.dropbox.write_task_id_failed",
+            branch = branch,
+            task_id = new_id,
+            path = %task_id_path.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
 
-    // Write task.md.
+    // Write task.md — roll back task-id on failure to keep files consistent.
     let task_path = dropbox_dir.join("task.md");
-    std::fs::write(&task_path, format!("# Task {new_id}\n\n{text}\n"))?;
+    if let Err(e) = std::fs::write(&task_path, format!("# Task {new_id}\n\n{text}\n")) {
+        error!(
+            event = "core.session.dropbox.write_task_md_failed",
+            branch = branch,
+            task_id = new_id,
+            path = %task_path.display(),
+            error = %e,
+        );
+        // Roll back task-id so the next write gets the same number.
+        let _ = std::fs::write(&task_id_path, format!("{current_id}\n"));
+        return Err(SessionError::IoError { source: e });
+    }
 
-    // Append history.jsonl.
+    // Append history.jsonl — task delivery already succeeded via task.md;
+    // log loudly on failure but do not roll back the task files.
     let history_path = dropbox_dir.join("history.jsonl");
     let summary: String = text.lines().next().unwrap_or("").chars().take(80).collect();
     let entry = HistoryEntry {
-        dir: "in",
+        dir: Direction::In,
         from: "kild".to_string(),
         to: branch.to_string(),
         task_id: new_id,
         ts: Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
         summary,
-        delivery: delivery.iter().map(|s| (*s).to_string()).collect(),
+        delivery: delivery.to_vec(),
     };
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&history_path)?;
-    use std::io::Write;
+        .open(&history_path)
+        .map_err(|e| {
+            error!(
+                event = "core.session.dropbox.write_history_failed",
+                branch = branch,
+                task_id = new_id,
+                path = %history_path.display(),
+                error = %e,
+            );
+            SessionError::IoError { source: e }
+        })?;
     writeln!(
         file,
         "{}",
         serde_json::to_string(&entry)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-    )?;
+    )
+    .map_err(|e| {
+        error!(
+            event = "core.session.dropbox.write_history_failed",
+            branch = branch,
+            task_id = new_id,
+            path = %history_path.display(),
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
 
     info!(
         event = "core.session.dropbox.write_task_completed",
@@ -586,7 +704,12 @@ mod tests {
         with_fleet_env("wt_creates_files", |_| {
             ensure_dropbox("proj123", "my-branch", "claude");
 
-            let result = write_task("proj123", "my-branch", "Implement OAuth", &["dropbox"]);
+            let result = write_task(
+                "proj123",
+                "my-branch",
+                "Implement OAuth",
+                &[DeliveryMethod::Dropbox],
+            );
             assert_eq!(result.unwrap(), Some(1));
 
             let paths = KildPaths::resolve().unwrap();
@@ -620,10 +743,20 @@ mod tests {
         with_fleet_env("wt_increments", |_| {
             ensure_dropbox("proj123", "my-branch", "claude");
 
-            let r1 = write_task("proj123", "my-branch", "First task", &["dropbox"]);
+            let r1 = write_task(
+                "proj123",
+                "my-branch",
+                "First task",
+                &[DeliveryMethod::Dropbox],
+            );
             assert_eq!(r1.unwrap(), Some(1));
 
-            let r2 = write_task("proj123", "my-branch", "Second task", &["dropbox", "pty"]);
+            let r2 = write_task(
+                "proj123",
+                "my-branch",
+                "Second task",
+                &[DeliveryMethod::Dropbox, DeliveryMethod::Pty],
+            );
             assert_eq!(r2.unwrap(), Some(2));
 
             let paths = KildPaths::resolve().unwrap();
@@ -648,7 +781,12 @@ mod tests {
     #[test]
     fn write_task_noop_when_fleet_not_active() {
         without_fleet_env("wt_no_fleet", |_| {
-            let result = write_task("proj123", "my-branch", "Should not write", &["dropbox"]);
+            let result = write_task(
+                "proj123",
+                "my-branch",
+                "Should not write",
+                &[DeliveryMethod::Dropbox],
+            );
             assert_eq!(result.unwrap(), None);
 
             let paths = KildPaths::resolve().unwrap();
@@ -661,7 +799,12 @@ mod tests {
     fn write_task_noop_when_dropbox_dir_missing() {
         with_fleet_env("wt_no_dir", |_| {
             // Fleet is active but ensure_dropbox was NOT called — dir doesn't exist.
-            let result = write_task("proj123", "my-branch", "Should not write", &["dropbox"]);
+            let result = write_task(
+                "proj123",
+                "my-branch",
+                "Should not write",
+                &[DeliveryMethod::Dropbox],
+            );
             assert_eq!(result.unwrap(), None);
         });
     }
@@ -676,7 +819,12 @@ mod tests {
             let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
             std::fs::write(dropbox_dir.join("task-id"), "garbage").unwrap();
 
-            let result = write_task("proj123", "my-branch", "Recover", &["dropbox"]);
+            let result = write_task(
+                "proj123",
+                "my-branch",
+                "Recover",
+                &[DeliveryMethod::Dropbox],
+            );
             assert_eq!(result.unwrap(), Some(1));
 
             let tid = std::fs::read_to_string(dropbox_dir.join("task-id")).unwrap();
@@ -693,7 +841,7 @@ mod tests {
                 "proj123",
                 "my-branch",
                 "Test delivery",
-                &["dropbox", "claude_inbox"],
+                &[DeliveryMethod::Dropbox, DeliveryMethod::ClaudeInbox],
             )
             .unwrap();
 
@@ -715,7 +863,13 @@ mod tests {
             ensure_dropbox("proj123", "my-branch", "claude");
 
             let long_text = "A".repeat(200);
-            write_task("proj123", "my-branch", &long_text, &["dropbox"]).unwrap();
+            write_task(
+                "proj123",
+                "my-branch",
+                &long_text,
+                &[DeliveryMethod::Dropbox],
+            )
+            .unwrap();
 
             let paths = KildPaths::resolve().unwrap();
             let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
@@ -724,6 +878,32 @@ mod tests {
                 serde_json::from_str(history.lines().next().unwrap()).unwrap();
             let summary = entry["summary"].as_str().unwrap();
             assert_eq!(summary.len(), 80, "summary should be truncated to 80 chars");
+        });
+    }
+
+    #[test]
+    fn write_task_summary_uses_first_line_only() {
+        with_fleet_env("wt_summary_multiline", |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            write_task(
+                "proj123",
+                "my-branch",
+                "# Auth task\n\nImplement OAuth flow with PKCE for the login page.",
+                &[DeliveryMethod::Dropbox],
+            )
+            .unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            let history = std::fs::read_to_string(dropbox_dir.join("history.jsonl")).unwrap();
+            let entry: serde_json::Value =
+                serde_json::from_str(history.lines().next().unwrap()).unwrap();
+            assert_eq!(
+                entry["summary"].as_str().unwrap(),
+                "# Auth task",
+                "summary should use first line only, not full body"
+            );
         });
     }
 }

@@ -68,10 +68,11 @@ pub(crate) fn handle_inject_command(
     }
 
     // Determine delivery methods that will be attempted.
-    let mut delivery_methods: Vec<&str> = vec!["dropbox"];
+    use kild_core::sessions::dropbox::DeliveryMethod;
+    let mut delivery_methods: Vec<DeliveryMethod> = vec![DeliveryMethod::Dropbox];
     match method {
-        InjectMethod::ClaudeInbox => delivery_methods.push("claude_inbox"),
-        InjectMethod::Pty => delivery_methods.push("pty"),
+        InjectMethod::ClaudeInbox => delivery_methods.push(DeliveryMethod::ClaudeInbox),
+        InjectMethod::Pty => delivery_methods.push(DeliveryMethod::Pty),
     }
 
     // Write task files to dropbox (fleet mode only — no-op otherwise).
@@ -128,7 +129,7 @@ pub(crate) fn handle_inject_command(
         crate::color::ice(branch),
         via
     );
-    info!(event = "cli.inject_completed", branch = branch, via = via);
+    info!(event = "cli.inject_completed", branch = branch, via = via, dropbox_task_id = ?dropbox_task_id);
     Ok(())
 }
 

@@ -497,7 +497,10 @@ pub fn create_session(
             &session.project_id,
             &validated.name,
             prompt,
-            &["dropbox", "initial_prompt"],
+            &[
+                dropbox::DeliveryMethod::Dropbox,
+                dropbox::DeliveryMethod::InitialPrompt,
+            ],
         )
     {
         warn!(

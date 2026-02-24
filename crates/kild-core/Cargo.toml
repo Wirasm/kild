@@ -26,6 +26,7 @@ base64.workspace = true
 kild-config.workspace = true
 kild-paths.workspace = true
 kild-protocol = { workspace = true, features = ["tcp"] }
+nix = { workspace = true, features = ["fs"] }
 
 # TLS for TOFU fingerprint verifier and TCP client
 rustls = { workspace = true }
