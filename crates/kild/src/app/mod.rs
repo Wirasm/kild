@@ -33,6 +33,7 @@ pub fn build_cli() -> Command {
         .subcommand(git::sync_command())
         .subcommand(misc::cleanup_command())
         .subcommand(misc::stats_command())
+        .subcommand(misc::inbox_command())
         .subcommand(misc::overlaps_command())
         .subcommand(misc::health_command())
         .subcommand(daemon::daemon_command())

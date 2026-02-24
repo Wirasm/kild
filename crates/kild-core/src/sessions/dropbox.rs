@@ -12,18 +12,17 @@ use std::io::Write;
 use chrono::Utc;
 use kild_paths::KildPaths;
 use nix::fcntl::{Flock, FlockArg};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use super::errors::SessionError;
 use super::fleet;
 
 /// Direction of a fleet message: brain→worker or worker→brain.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum Direction {
+pub enum Direction {
     In,
-    #[allow(dead_code)] // Phase 3: worker→brain reporting
     Out,
 }
 
@@ -31,7 +30,7 @@ enum Direction {
 ///
 /// Recorded in `history.jsonl` to trace how a task was delivered.
 /// Each inject may use multiple methods (e.g. dropbox + inbox for Claude agents).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryMethod {
     /// File-based dropbox protocol (universal).
@@ -45,22 +44,39 @@ pub enum DeliveryMethod {
 }
 
 /// A single entry in the append-only `history.jsonl` audit trail.
-#[derive(Debug, Serialize)]
-struct HistoryEntry {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryEntry {
     /// Direction: "in" = brain→worker, "out" = worker→brain.
-    dir: Direction,
+    pub dir: Direction,
     /// Sender identifier (e.g. "kild").
-    from: String,
+    pub from: String,
     /// Recipient branch name.
-    to: String,
+    pub to: String,
     /// Monotonically incrementing task number.
-    task_id: u64,
+    pub task_id: u64,
     /// ISO 8601 timestamp with milliseconds.
-    ts: String,
+    pub ts: String,
     /// First ~80 chars of the task text.
-    summary: String,
+    pub summary: String,
     /// Delivery methods attempted (e.g. ["dropbox", "claude_inbox"]).
-    delivery: Vec<DeliveryMethod>,
+    pub delivery: Vec<DeliveryMethod>,
+}
+
+/// Read-only snapshot of a session's dropbox protocol state.
+#[derive(Debug, Serialize)]
+pub struct DropboxState {
+    /// Branch name (for display convenience).
+    pub branch: String,
+    /// Current task ID from `task-id` file. `None` if no task yet.
+    pub task_id: Option<u64>,
+    /// Full content of `task.md`. `None` if no task yet.
+    pub task_content: Option<String>,
+    /// Ack value from `ack` file. `None` if worker hasn't acked.
+    pub ack: Option<u64>,
+    /// Full content of `report.md`. `None` if worker hasn't reported.
+    pub report: Option<String>,
+    /// Latest history entry (for delivery method info). `None` if no history.
+    pub latest_history: Option<HistoryEntry>,
 }
 
 /// Ensure the dropbox directory exists with a current `protocol.md`.
@@ -346,6 +362,121 @@ pub(super) fn inject_dropbox_env_vars(
         branch = branch,
         dropbox = %dropbox.display(),
     );
+}
+
+/// Read the current dropbox protocol state for a session.
+///
+/// Returns `Ok(None)` if fleet mode is not active or the dropbox directory
+/// does not exist (normal for non-fleet sessions). Each file is read
+/// independently — a missing or corrupt individual file yields `None` for
+/// that field (with a warning log), not an error for the whole read.
+pub fn read_dropbox_state(
+    project_id: &str,
+    branch: &str,
+) -> Result<Option<DropboxState>, SessionError> {
+    if !fleet::fleet_mode_active(branch) {
+        return Ok(None);
+    }
+
+    let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
+        source: std::io::Error::other(e),
+    })?;
+    let dropbox_dir = paths.fleet_dropbox_dir(project_id, branch);
+
+    if !dropbox_dir.exists() {
+        return Ok(None);
+    }
+
+    let task_id = read_optional_u64(&dropbox_dir.join("task-id"), branch);
+    let task_content = read_optional_string(&dropbox_dir.join("task.md"), branch);
+    let ack = read_optional_u64(&dropbox_dir.join("ack"), branch);
+    let report = read_optional_string(&dropbox_dir.join("report.md"), branch);
+    let latest_history = read_latest_history(&dropbox_dir.join("history.jsonl"), branch);
+
+    Ok(Some(DropboxState {
+        branch: branch.to_string(),
+        task_id,
+        task_content,
+        ack,
+        report,
+        latest_history,
+    }))
+}
+
+/// Read a file as a trimmed u64, returning None on missing or parse failure.
+fn read_optional_u64(path: &std::path::Path, branch: &str) -> Option<u64> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => match s.trim().parse::<u64>() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                warn!(
+                    event = "core.session.dropbox.read_parse_failed",
+                    branch = branch,
+                    path = %path.display(),
+                    error = %e,
+                );
+                None
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            warn!(
+                event = "core.session.dropbox.read_file_failed",
+                branch = branch,
+                path = %path.display(),
+                error = %e,
+            );
+            None
+        }
+    }
+}
+
+/// Read a file as a string, returning None if missing or empty.
+fn read_optional_string(path: &std::path::Path, branch: &str) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(s) if s.trim().is_empty() => None,
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            warn!(
+                event = "core.session.dropbox.read_file_failed",
+                branch = branch,
+                path = %path.display(),
+                error = %e,
+            );
+            None
+        }
+    }
+}
+
+/// Read the last line of history.jsonl and parse as HistoryEntry.
+fn read_latest_history(path: &std::path::Path, branch: &str) -> Option<HistoryEntry> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            warn!(
+                event = "core.session.dropbox.read_history_failed",
+                branch = branch,
+                path = %path.display(),
+                error = %e,
+            );
+            return None;
+        }
+    };
+    let last_line = content.lines().rev().find(|l| !l.trim().is_empty())?;
+    match serde_json::from_str::<HistoryEntry>(last_line) {
+        Ok(entry) => Some(entry),
+        Err(e) => {
+            warn!(
+                event = "core.session.dropbox.read_history_parse_failed",
+                branch = branch,
+                path = %path.display(),
+                error = %e,
+            );
+            None
+        }
+    }
 }
 
 /// Clean up the dropbox directory for a session. Best-effort.
@@ -863,6 +994,152 @@ mod tests {
                 "# Auth task",
                 "summary should use first line only, not full body"
             );
+        });
+    }
+
+    // --- read_dropbox_state ---
+
+    #[test]
+    fn read_dropbox_state_returns_none_when_fleet_not_active() {
+        with_env("rds_no_fleet", false, |_| {
+            let result = read_dropbox_state("proj123", "my-branch").unwrap();
+            assert!(
+                result.is_none(),
+                "should return None when fleet is not active"
+            );
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_returns_none_when_dir_missing() {
+        with_env("rds_no_dir", true, |_| {
+            // Fleet active but ensure_dropbox not called — dir missing.
+            let result = read_dropbox_state("proj123", "my-branch").unwrap();
+            assert!(
+                result.is_none(),
+                "should return None when dropbox dir missing"
+            );
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_empty_dropbox_returns_all_none_fields() {
+        with_env("rds_empty", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            let state = read_dropbox_state("proj123", "my-branch")
+                .unwrap()
+                .expect("should return Some for existing dropbox");
+
+            assert_eq!(state.branch, "my-branch");
+            assert!(state.task_id.is_none());
+            assert!(state.task_content.is_none());
+            assert!(state.ack.is_none());
+            assert!(state.report.is_none());
+            assert!(state.latest_history.is_none());
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_after_write_task() {
+        with_env("rds_after_write", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            write_task(
+                "proj123",
+                "my-branch",
+                "Implement OAuth",
+                &[DeliveryMethod::Dropbox, DeliveryMethod::ClaudeInbox],
+            )
+            .unwrap();
+
+            let state = read_dropbox_state("proj123", "my-branch")
+                .unwrap()
+                .expect("should return Some after write_task");
+
+            assert_eq!(state.task_id, Some(1));
+            assert!(
+                state
+                    .task_content
+                    .as_ref()
+                    .unwrap()
+                    .contains("Implement OAuth")
+            );
+            assert!(state.ack.is_none());
+            assert!(state.report.is_none());
+
+            let history = state.latest_history.expect("should have history entry");
+            assert_eq!(history.task_id, 1);
+            assert_eq!(history.delivery.len(), 2);
+            assert_eq!(history.delivery[0], DeliveryMethod::Dropbox);
+            assert_eq!(history.delivery[1], DeliveryMethod::ClaudeInbox);
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_with_ack_and_report() {
+        with_env("rds_ack_report", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            write_task(
+                "proj123",
+                "my-branch",
+                "Fix the bug",
+                &[DeliveryMethod::Dropbox],
+            )
+            .unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            std::fs::write(dropbox_dir.join("ack"), "1\n").unwrap();
+            std::fs::write(dropbox_dir.join("report.md"), "Done. All tests pass.\n").unwrap();
+
+            let state = read_dropbox_state("proj123", "my-branch")
+                .unwrap()
+                .expect("should return Some");
+
+            assert_eq!(state.ack, Some(1));
+            assert_eq!(state.report.as_deref(), Some("Done. All tests pass.\n"));
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_corrupt_ack_returns_none() {
+        with_env("rds_corrupt_ack", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            write_task("proj123", "my-branch", "Task", &[DeliveryMethod::Dropbox]).unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            std::fs::write(dropbox_dir.join("ack"), "garbage").unwrap();
+
+            let state = read_dropbox_state("proj123", "my-branch")
+                .unwrap()
+                .expect("should return Some");
+
+            assert!(state.ack.is_none(), "corrupt ack should be None, not error");
+            assert_eq!(state.task_id, Some(1), "task_id should still be readable");
+        });
+    }
+
+    #[test]
+    fn read_dropbox_state_corrupt_history_returns_none() {
+        with_env("rds_corrupt_history", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            write_task("proj123", "my-branch", "Task", &[DeliveryMethod::Dropbox]).unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            // Overwrite history with garbage
+            std::fs::write(dropbox_dir.join("history.jsonl"), "not valid json\n").unwrap();
+
+            let state = read_dropbox_state("proj123", "my-branch")
+                .unwrap()
+                .expect("should return Some");
+
+            assert!(
+                state.latest_history.is_none(),
+                "corrupt history should be None, not error"
+            );
+            assert_eq!(state.task_id, Some(1), "task_id should still be readable");
         });
     }
 }
