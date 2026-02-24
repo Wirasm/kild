@@ -48,8 +48,7 @@ pub(crate) fn handle_prime_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     let session = helpers::require_session_json(branch, "cli.prime_failed", json_output)?;
     let all_sessions = session_ops::list_sessions().map_err(|e| {
         error!(event = "cli.prime_failed", branch = branch, error = %e);
-        let boxed: Box<dyn std::error::Error> = e.into();
-        boxed
+        Box::<dyn std::error::Error>::from(e)
     })?;
     let sessions: Vec<_> = all_sessions
         .into_iter()
@@ -59,8 +58,7 @@ pub(crate) fn handle_prime_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     let context = dropbox::generate_prime_context(&session.project_id, &session.branch, &sessions)
         .map_err(|e| {
             error!(event = "cli.prime_failed", branch = branch, error = %e);
-            let boxed: Box<dyn std::error::Error> = e.into();
-            boxed
+            Box::<dyn std::error::Error>::from(e)
         })?;
 
     let context = match context {
@@ -94,14 +92,15 @@ pub(crate) fn handle_prime_command(matches: &ArgMatches) -> Result<(), Box<dyn s
 }
 
 fn prime_output_from_context(ctx: &PrimeContext) -> PrimeOutput {
-    let (task_id, task_content, ack, report) = match &ctx.dropbox_state {
-        Some(state) => (
+    let (task_id, task_content, ack, report) = if let Some(state) = &ctx.dropbox_state {
+        (
             state.task_id,
             state.task_content.clone(),
             state.ack,
             state.report.clone(),
-        ),
-        None => (None, None, None, None),
+        )
+    } else {
+        (None, None, None, None)
     };
 
     let acked = task_id.is_some() && task_id == ack;

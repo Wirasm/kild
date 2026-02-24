@@ -144,11 +144,11 @@ impl PrimeContext {
             if let Some(task_id) = state.task_id {
                 out.push_str(&format!("Task ID: {:03}\n", task_id));
                 let ack_str = match state.ack {
-                    Some(ack) if ack == task_id => format!("Acked: {} (current)", ack),
-                    Some(ack) => format!("Acked: {} (stale)", ack),
-                    None => "Acked: no".to_string(),
+                    Some(ack) if ack == task_id => format!("Acked: {} (current)\n", ack),
+                    Some(ack) => format!("Acked: {} (stale)\n", ack),
+                    None => "Acked: no\n".to_string(),
                 };
-                out.push_str(&format!("{ack_str}\n"));
+                out.push_str(&ack_str);
                 if let Some(content) = &state.task_content {
                     out.push('\n');
                     out.push_str(content.trim());
