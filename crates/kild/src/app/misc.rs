@@ -75,6 +75,51 @@ pub fn stats_command() -> Command {
         )
 }
 
+pub fn inbox_command() -> Command {
+    Command::new("inbox")
+        .about("Inspect fleet dropbox protocol state for a kild")
+        .arg(
+            Arg::new("branch")
+                .help("Branch name of the kild")
+                .index(1)
+                .required_unless_present("all"),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Output in JSON format")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("all")
+                .long("all")
+                .help("Show inbox state for all fleet kilds")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("branch"),
+        )
+        .arg(
+            Arg::new("task")
+                .long("task")
+                .help("Show only the current task content")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["report", "status", "all", "json"]),
+        )
+        .arg(
+            Arg::new("report")
+                .long("report")
+                .help("Show only the latest report")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["task", "status", "all", "json"]),
+        )
+        .arg(
+            Arg::new("status")
+                .long("status")
+                .help("Show only task-id vs ack status")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["task", "report", "all", "json"]),
+        )
+}
+
 pub fn overlaps_command() -> Command {
     Command::new("overlaps")
         .about("Detect file overlaps across kilds in the current project")
