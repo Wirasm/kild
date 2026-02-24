@@ -5,7 +5,7 @@ use chrono::Utc;
 use clap::ArgMatches;
 use nix::fcntl::{Flock, FlockArg};
 use serde_json::json;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use kild_core::agents::{InjectMethod, get_inject_method};
 
@@ -67,6 +67,36 @@ pub(crate) fn handle_inject_command(
         return Err(msg.into());
     }
 
+    // Determine delivery methods that will be attempted.
+    let mut delivery_methods: Vec<&str> = vec!["dropbox"];
+    match method {
+        InjectMethod::ClaudeInbox => delivery_methods.push("claude_inbox"),
+        InjectMethod::Pty => delivery_methods.push("pty"),
+    }
+
+    // Write task files to dropbox (fleet mode only — no-op otherwise).
+    // Runs before PTY/inbox dispatch so task.md exists when wake-up fires.
+    let dropbox_task_id = match kild_core::sessions::dropbox::write_task(
+        &session.project_id,
+        &session.branch,
+        text,
+        &delivery_methods,
+    ) {
+        Ok(Some(id)) => Some(id),
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                crate::color::warning(&format!(
+                    "Warning: Dropbox write failed for '{}': {}",
+                    branch, e
+                ))
+            );
+            warn!(event = "cli.inject.dropbox_write_failed", branch = branch, error = %e);
+            None
+        }
+    };
+
     let result = match method {
         InjectMethod::Pty => write_to_pty(&session, text),
         InjectMethod::ClaudeInbox => write_to_inbox(DEFAULT_TEAM, branch, text),
@@ -82,6 +112,16 @@ pub(crate) fn handle_inject_command(
         InjectMethod::ClaudeInbox => "inbox",
         InjectMethod::Pty => "pty",
     };
+
+    if let Some(task_id) = dropbox_task_id {
+        println!(
+            "{} task {} to {}",
+            crate::color::muted("Wrote"),
+            crate::color::aurora(&task_id.to_string()),
+            crate::color::ice(&format!("dropbox/{}", branch)),
+        );
+    }
+
     println!(
         "{} {} (via {})",
         crate::color::muted("Sent to"),

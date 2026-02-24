@@ -490,6 +490,27 @@ pub fn create_session(
     // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
+    // 7a. Write initial task to dropbox BEFORE delivering to PTY.
+    // Files exist before the agent process reads them — no race condition.
+    if let Some(ref prompt) = request.initial_prompt
+        && let Err(e) = dropbox::write_task(
+            &session.project_id,
+            &validated.name,
+            prompt,
+            &["dropbox", "initial_prompt"],
+        )
+    {
+        warn!(
+            event = "core.session.dropbox.initial_task_write_failed",
+            branch = %validated.name,
+            error = %e,
+        );
+        eprintln!(
+            "Warning: Failed to write initial task to dropbox for '{}': {}",
+            validated.name, e,
+        );
+    }
+
     // 7b. Deliver initial prompt after session is on disk (best-effort, may block up to 20s).
     // Must run after save so `kild list/inject/attach` can find the session during the wait.
     if let Some(ref prompt) = request.initial_prompt
