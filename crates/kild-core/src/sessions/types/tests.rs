@@ -805,58 +805,6 @@ fn test_session_with_corrupted_agent_fails_to_deserialize() {
 }
 
 #[test]
-fn test_agent_status_display() {
-    assert_eq!(AgentStatus::Working.to_string(), "working");
-    assert_eq!(AgentStatus::Idle.to_string(), "idle");
-    assert_eq!(AgentStatus::Waiting.to_string(), "waiting");
-    assert_eq!(AgentStatus::Done.to_string(), "done");
-    assert_eq!(AgentStatus::Error.to_string(), "error");
-}
-
-#[test]
-fn test_agent_status_from_str() {
-    assert_eq!(
-        "working".parse::<AgentStatus>().unwrap(),
-        AgentStatus::Working
-    );
-    assert_eq!("idle".parse::<AgentStatus>().unwrap(), AgentStatus::Idle);
-    assert_eq!(
-        "waiting".parse::<AgentStatus>().unwrap(),
-        AgentStatus::Waiting
-    );
-    assert_eq!("done".parse::<AgentStatus>().unwrap(), AgentStatus::Done);
-    assert_eq!("error".parse::<AgentStatus>().unwrap(), AgentStatus::Error);
-}
-
-#[test]
-fn test_agent_status_from_str_invalid() {
-    let err = "invalid".parse::<AgentStatus>().unwrap_err();
-    assert!(err.contains("Invalid agent status"));
-    assert!(err.contains("invalid"));
-}
-
-#[test]
-fn test_agent_status_serde_roundtrip() {
-    for status in [
-        AgentStatus::Working,
-        AgentStatus::Idle,
-        AgentStatus::Waiting,
-        AgentStatus::Done,
-        AgentStatus::Error,
-    ] {
-        let json = serde_json::to_string(&status).unwrap();
-        let parsed: AgentStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, status);
-    }
-}
-
-#[test]
-fn test_agent_status_serde_lowercase() {
-    let json = serde_json::to_string(&AgentStatus::Working).unwrap();
-    assert_eq!(json, r#""working""#);
-}
-
-#[test]
 fn test_agent_status_info_serde_roundtrip() {
     let info = AgentStatusInfo {
         status: AgentStatus::Working,

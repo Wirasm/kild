@@ -201,7 +201,6 @@ impl std::str::FromStr for AgentStatus {
 }
 
 /// How the agent process should be hosted.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeMode {
@@ -214,7 +213,6 @@ pub enum RuntimeMode {
 }
 
 /// What to launch when opening a kild terminal.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpenMode {
     /// Launch the session's default agent (from config).
@@ -229,7 +227,6 @@ pub enum OpenMode {
 ///
 /// Mirrors [`OpenMode`] for the create path. Determines whether the new kild
 /// gets an AI agent or a bare terminal shell.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentMode {
     /// Use default agent from config.
@@ -529,5 +526,17 @@ mod tests {
             let roundtripped: OpenMode = serde_json::from_str(&json).unwrap();
             assert_eq!(mode, roundtripped);
         }
+    }
+
+    #[test]
+    fn test_runtime_mode_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&RuntimeMode::Terminal).unwrap(),
+            r#""terminal""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimeMode::Daemon).unwrap(),
+            r#""daemon""#
+        );
     }
 }

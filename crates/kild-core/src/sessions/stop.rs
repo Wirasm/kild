@@ -1,6 +1,7 @@
 use tracing::{error, info, warn};
 
 use kild_paths::KildPaths;
+use kild_protocol::RuntimeMode;
 
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
@@ -178,9 +179,9 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             .any(|a| a.daemon_session_id().is_some());
 
         let inferred_mode = if has_daemon_agent {
-            kild_protocol::RuntimeMode::Daemon
+            RuntimeMode::Daemon
         } else {
-            kild_protocol::RuntimeMode::Terminal
+            RuntimeMode::Terminal
         };
 
         session.runtime_mode = Some(inferred_mode);
@@ -300,7 +301,6 @@ mod tests {
 
     #[test]
     fn test_stop_infers_runtime_mode_daemon_from_agent() {
-        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let unique_id = format!(
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn test_stop_infers_runtime_mode_terminal_when_no_daemon() {
         use crate::terminal::types::TerminalType;
-        use kild_protocol::RuntimeMode;
+
         use std::fs;
 
         let unique_id = format!(
@@ -483,7 +483,6 @@ mod tests {
 
     #[test]
     fn test_stop_preserves_existing_runtime_mode() {
-        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let unique_id = format!(

@@ -145,7 +145,7 @@ fn handle_open_all(
             let mode_label = match runtime_mode {
                 Some(kild_core::RuntimeMode::Daemon) => " [daemon]",
                 Some(kild_core::RuntimeMode::Terminal) => " [terminal]",
-                Some(_) | None => "",
+                None => "",
             };
             println!("  {} ({}){}", branch, agent, mode_label);
         }

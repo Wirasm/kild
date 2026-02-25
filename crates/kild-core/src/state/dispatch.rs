@@ -8,6 +8,7 @@ use crate::state::events::Event;
 use crate::state::store::Store;
 use crate::state::types::Command;
 use kild_config::KildConfig;
+use kild_protocol::RuntimeMode;
 
 /// Default Store implementation that routes commands to kild-core handlers.
 ///
@@ -47,7 +48,7 @@ impl Store for CoreStore {
                 // Terminal, but the user's config may have daemon.enabled = true.
                 // Without this, the UI always spawns external terminals.
                 let request = if self.config.is_daemon_enabled() {
-                    request.with_runtime_mode(kild_protocol::RuntimeMode::Daemon)
+                    request.with_runtime_mode(RuntimeMode::Daemon)
                 } else {
                     request
                 };
