@@ -928,20 +928,18 @@ On startup and after completing each task:
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use super::*;
-
-    /// Serialize tests that mutate HOME and CLAUDE_CONFIG_DIR — env vars are process-global.
-    static DROPBOX_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Set up temp dirs and override HOME + CLAUDE_CONFIG_DIR for a test.
     ///
     /// When `fleet_active` is true, creates the Honryū team directory so
     /// `fleet_mode_active` returns true for non-brain branches. The callback
     /// receives the HOME dir; the dropbox will be at `<home>/.kild/fleet/...`.
+    ///
+    /// Uses `fleet::ENV_LOCK` — the same lock held by `fleet::tests` — so that
+    /// concurrent fleet tests cannot overwrite `CLAUDE_CONFIG_DIR` mid-test.
     fn with_env(test_name: &str, fleet_active: bool, f: impl FnOnce(&std::path::Path)) {
-        let _lock = DROPBOX_ENV_LOCK.lock().unwrap();
+        let _lock = fleet::ENV_LOCK.lock().unwrap();
         let base = std::env::temp_dir().join(format!(
             "kild_dropbox_test_{}_{}",
             test_name,
@@ -961,7 +959,7 @@ mod tests {
         let home_dir = base.join("home");
         std::fs::create_dir_all(&home_dir).unwrap();
 
-        // SAFETY: DROPBOX_ENV_LOCK serializes all env mutations in this module.
+        // SAFETY: fleet::ENV_LOCK serializes all env mutations across fleet + dropbox tests.
         unsafe {
             std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
             std::env::set_var("HOME", &home_dir);
