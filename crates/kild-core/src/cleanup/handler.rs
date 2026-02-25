@@ -599,14 +599,46 @@ fn load_session_for_cleanup(
     // Try new format: <sessions_dir>/<safe_id>/kild.json
     let new_path = sessions_dir.join(&safe_id).join("kild.json");
     let content = if new_path.exists() {
-        std::fs::read_to_string(&new_path).ok()?
+        match std::fs::read_to_string(&new_path) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(
+                    event = "core.cleanup.session_file_read_failed",
+                    session_id = session_id,
+                    path = %new_path.display(),
+                    error = %e,
+                );
+                return None;
+            }
+        }
     } else {
         // Try legacy format: <sessions_dir>/<safe_id>.json
         let legacy_path = sessions_dir.join(format!("{safe_id}.json"));
-        std::fs::read_to_string(&legacy_path).ok()?
+        match std::fs::read_to_string(&legacy_path) {
+            Ok(c) => c,
+            Err(e) => {
+                debug!(
+                    event = "core.cleanup.session_file_not_found",
+                    session_id = session_id,
+                    path = %legacy_path.display(),
+                    error = %e,
+                );
+                return None;
+            }
+        }
     };
 
-    let session: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let session: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(
+                event = "core.cleanup.session_file_parse_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            return None;
+        }
+    };
 
     let worktree_path = session.get("worktree_path")?.as_str().map(PathBuf::from)?;
     let use_main_worktree = session
@@ -716,7 +748,7 @@ fn cleanup_stale_sessions(
                 match removal_result {
                     Ok(()) => {
                         info!(
-                            event = "core.cleanup.session_worktree_removed",
+                            event = "core.cleanup.session_worktree_remove_completed",
                             session_id = session_id,
                             worktree_path = %worktree_path.display(),
                         );
@@ -744,7 +776,7 @@ fn cleanup_stale_sessions(
             } else {
                 // Worktree directory already gone — just clean up session file
                 debug!(
-                    event = "core.cleanup.session_worktree_already_gone",
+                    event = "core.cleanup.session_worktree_remove_skipped",
                     session_id = session_id,
                     worktree_path = %worktree_path.display(),
                 );
@@ -753,7 +785,7 @@ fn cleanup_stale_sessions(
             // Session data couldn't be loaded — still remove the session file
             // to clean up corrupted/incomplete session entries.
             warn!(
-                event = "core.cleanup.session_data_unreadable",
+                event = "core.cleanup.session_data_load_failed",
                 session_id = session_id,
                 "Could not load session data for worktree cleanup — removing session file only"
             );
