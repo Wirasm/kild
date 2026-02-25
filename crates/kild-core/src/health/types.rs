@@ -1,4 +1,4 @@
-use crate::sessions::types::AgentStatus;
+use kild_protocol::AgentStatus;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

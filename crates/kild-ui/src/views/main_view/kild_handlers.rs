@@ -42,10 +42,8 @@ impl MainView {
         }
 
         if self.terminal_tabs.get(&id).is_none_or(|t| t.is_empty()) {
-            if matches!(
-                runtime_mode,
-                Some(kild_core::state::types::RuntimeMode::Daemon)
-            ) && display.process_status == kild_core::ProcessStatus::Running
+            if matches!(runtime_mode, Some(kild_core::RuntimeMode::Daemon))
+                && display.process_status == kild_core::ProcessStatus::Running
                 && let Some(ref dsid) = daemon_session_id
             {
                 self.active_terminal_id = Some(id.clone());

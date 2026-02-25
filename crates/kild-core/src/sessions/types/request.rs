@@ -1,4 +1,4 @@
-use kild_protocol::BranchName;
+use kild_protocol::{AgentMode, BranchName, RuntimeMode};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -12,7 +12,7 @@ pub struct ValidatedRequest {
 pub struct CreateSessionRequest {
     pub branch: BranchName,
     /// What agent to launch (default from config, specific override, or bare shell).
-    pub agent_mode: crate::state::types::AgentMode,
+    pub agent_mode: AgentMode,
     pub note: Option<String>,
     /// Optional project path for UI context. When provided, this path is used
     /// instead of current working directory for project detection.
@@ -24,7 +24,7 @@ pub struct CreateSessionRequest {
     /// Skip fetching before create (CLI --no-fetch flag).
     pub no_fetch: bool,
     /// Whether to launch in an external terminal or daemon-owned PTY.
-    pub runtime_mode: crate::state::types::RuntimeMode,
+    pub runtime_mode: RuntimeMode,
     /// Use the main project root as working directory instead of creating a worktree.
     /// Intended for the Honryū brain session and other supervisory agents that don't write code.
     pub use_main_worktree: bool,
@@ -37,11 +37,7 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
-    pub fn new(
-        branch: impl Into<BranchName>,
-        agent_mode: crate::state::types::AgentMode,
-        note: Option<String>,
-    ) -> Self {
+    pub fn new(branch: impl Into<BranchName>, agent_mode: AgentMode, note: Option<String>) -> Self {
         Self {
             branch: branch.into(),
             agent_mode,
@@ -49,7 +45,7 @@ impl CreateSessionRequest {
             project_path: None,
             base_branch: None,
             no_fetch: false,
-            runtime_mode: crate::state::types::RuntimeMode::Terminal,
+            runtime_mode: RuntimeMode::Terminal,
             use_main_worktree: false,
             initial_prompt: None,
         }
@@ -58,7 +54,7 @@ impl CreateSessionRequest {
     /// Create a request with explicit project path (for UI usage)
     pub fn with_project_path(
         branch: impl Into<BranchName>,
-        agent_mode: crate::state::types::AgentMode,
+        agent_mode: AgentMode,
         note: Option<String>,
         project_path: PathBuf,
     ) -> Self {
@@ -69,7 +65,7 @@ impl CreateSessionRequest {
             project_path: Some(project_path),
             base_branch: None,
             no_fetch: false,
-            runtime_mode: crate::state::types::RuntimeMode::Terminal,
+            runtime_mode: RuntimeMode::Terminal,
             use_main_worktree: false,
             initial_prompt: None,
         }
@@ -90,7 +86,7 @@ impl CreateSessionRequest {
         self
     }
 
-    pub fn with_runtime_mode(mut self, mode: crate::state::types::RuntimeMode) -> Self {
+    pub fn with_runtime_mode(mut self, mode: RuntimeMode) -> Self {
         self.runtime_mode = mode;
         self
     }

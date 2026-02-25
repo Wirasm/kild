@@ -1,46 +1,7 @@
 use std::path::PathBuf;
 
-use kild_protocol::BranchName;
+use kild_protocol::{AgentMode, AgentStatus, BranchName, OpenMode, RuntimeMode};
 use serde::{Deserialize, Serialize};
-
-use crate::sessions::types::AgentStatus;
-
-/// How the agent process should be hosted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeMode {
-    #[serde(alias = "Terminal")]
-    /// Launch in an external terminal window (Ghostty, iTerm, etc.)
-    Terminal,
-    #[serde(alias = "Daemon")]
-    /// Launch in a daemon-owned PTY
-    Daemon,
-}
-
-/// What to launch when opening a kild terminal.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum OpenMode {
-    /// Launch the session's default agent (from config).
-    DefaultAgent,
-    /// Launch a specific agent (overrides session config).
-    Agent(String),
-    /// Open a bare terminal with `$SHELL` instead of an agent.
-    BareShell,
-}
-
-/// What agent to launch when creating a kild.
-///
-/// Mirrors [`OpenMode`] for the create path. Determines whether the new kild
-/// gets an AI agent or a bare terminal shell.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum AgentMode {
-    /// Use default agent from config.
-    DefaultAgent,
-    /// Use a specific agent (overrides config default).
-    Agent(String),
-    /// Open a bare terminal with `$SHELL` instead of an agent.
-    BareShell,
-}
 
 /// All business operations that can be dispatched through the store.
 ///
@@ -106,20 +67,7 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_agent_mode_serde_roundtrip() {
-        let modes = vec![
-            AgentMode::DefaultAgent,
-            AgentMode::Agent("claude".to_string()),
-            AgentMode::BareShell,
-        ];
-        for mode in modes {
-            let json = serde_json::to_string(&mode).unwrap();
-            let roundtripped: AgentMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(mode, roundtripped);
-        }
-    }
+    use kild_protocol::{AgentMode, AgentStatus, OpenMode, RuntimeMode};
 
     #[test]
     fn test_create_kild_with_bare_shell_serde() {
@@ -282,38 +230,5 @@ mod tests {
 
         // Verify the resume field is actually in the JSON
         assert!(json.contains("\"resume\":true"));
-    }
-
-    #[test]
-    fn test_runtime_mode_serializes_as_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&RuntimeMode::Terminal).unwrap(),
-            r#""terminal""#
-        );
-        assert_eq!(
-            serde_json::to_string(&RuntimeMode::Daemon).unwrap(),
-            r#""daemon""#
-        );
-    }
-
-    #[test]
-    fn test_runtime_mode_deserializes_old_pascal_case() {
-        assert_eq!(
-            serde_json::from_str::<RuntimeMode>(r#""Terminal""#).unwrap(),
-            RuntimeMode::Terminal
-        );
-        assert_eq!(
-            serde_json::from_str::<RuntimeMode>(r#""Daemon""#).unwrap(),
-            RuntimeMode::Daemon
-        );
-    }
-
-    #[test]
-    fn test_runtime_mode_roundtrip_new_format() {
-        for mode in [RuntimeMode::Terminal, RuntimeMode::Daemon] {
-            let json = serde_json::to_string(&mode).unwrap();
-            let parsed: RuntimeMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(parsed, mode);
-        }
     }
 }
