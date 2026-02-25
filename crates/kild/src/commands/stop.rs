@@ -101,13 +101,31 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.stop_all_started");
 
     let sessions = session_ops::list_sessions()?;
-    let active: Vec<_> = sessions
-        .into_iter()
-        .filter(|s| s.status == SessionStatus::Active)
-        .collect();
+    let mut active = Vec::new();
+    let mut already_stopped = Vec::new();
+
+    for s in sessions {
+        match s.status {
+            SessionStatus::Active => active.push(s),
+            SessionStatus::Stopped => already_stopped.push(s),
+            _ => {}
+        }
+    }
 
     if active.is_empty() {
-        println!("No running kilds to stop.");
+        if already_stopped.is_empty() {
+            println!("No running kilds to stop.");
+        } else {
+            println!(
+                "{} already stopped: {}",
+                color::muted(&format_count(already_stopped.len())),
+                already_stopped
+                    .iter()
+                    .map(|s| s.branch.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         info!(event = "cli.stop_all_completed", stopped = 0, failed = 0);
         return Ok(());
     }
@@ -153,6 +171,19 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
         for (branch, err) in &errors {
             eprintln!("  {}: {}", color::ice(branch), err);
         }
+    }
+
+    // Report already-stopped sessions
+    if !already_stopped.is_empty() {
+        println!(
+            "{} already stopped: {}",
+            color::muted(&format_count(already_stopped.len())),
+            already_stopped
+                .iter()
+                .map(|s| s.branch.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 
     info!(
