@@ -16,6 +16,7 @@ pub mod list;
 pub mod open;
 pub mod persistence;
 pub mod ports;
+mod shim_cleanup;
 pub(super) mod shim_init;
 mod shim_setup;
 pub mod stop;
