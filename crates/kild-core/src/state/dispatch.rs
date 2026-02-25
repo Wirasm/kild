@@ -88,7 +88,8 @@ impl Store for CoreStore {
                 Ok(vec![Event::KildStopped { branch }])
             }
             Command::CompleteKild { branch } => {
-                session_ops::complete_session(&branch)?;
+                let request = crate::sessions::types::CompleteRequest::new(&*branch);
+                session_ops::complete_session(&request)?;
                 Ok(vec![Event::KildCompleted { branch }])
             }
             Command::UpdateAgentStatus { branch, status } => {

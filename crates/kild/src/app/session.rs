@@ -244,20 +244,53 @@ pub fn destroy_command() -> Command {
 
 pub fn complete_command() -> Command {
     Command::new("complete")
-        .about("Complete a kild: destroy and clean up remote branch if PR was merged")
+        .about("Complete a kild: merge PR, clean up remote branch, destroy session")
         .long_about(
-            "Completes a kild by destroying the worktree and optionally deleting the remote branch.\n\n\
-            If the PR was already merged (user ran 'gh pr merge' first), this command also deletes\n\
-            the orphaned remote branch. If the PR hasn't been merged yet, it just destroys the kild\n\
-            so that 'gh pr merge --delete-branch' can work afterwards.\n\n\
-            Works with either workflow:\n\
-            - Complete first, then merge: kild complete → gh pr merge --delete-branch\n\
-            - Merge first, then complete: gh pr merge → kild complete (deletes remote)"
+            "Handles the full merge lifecycle for a kild:\n\n\
+            1. Check for uncommitted changes\n\
+            2. Check PR exists and CI status\n\
+            3. Merge the PR (squash by default)\n\
+            4. Delete remote branch\n\
+            5. Destroy worktree and session\n\n\
+            Use --no-merge for legacy behavior (cleanup only, requires PR already merged).\n\
+            Use --dry-run to preview what would happen without making changes.",
         )
         .arg(
             Arg::new("branch")
                 .help("Branch name of the kild to complete")
                 .required(true)
                 .index(1),
+        )
+        .arg(
+            Arg::new("merge-strategy")
+                .long("merge-strategy")
+                .help("PR merge strategy")
+                .value_parser(["squash", "merge", "rebase"])
+                .default_value("squash"),
+        )
+        .arg(
+            Arg::new("no-merge")
+                .long("no-merge")
+                .help("Skip merging — just clean up (requires PR already merged)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .short('f')
+                .help("Force through safety checks (uncommitted changes, CI failures)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("dry-run")
+                .long("dry-run")
+                .help("Show what would happen without making changes")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("skip-ci")
+                .long("skip-ci")
+                .help("Skip CI status check before merging")
+                .action(ArgAction::SetTrue),
         )
 }

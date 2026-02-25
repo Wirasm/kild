@@ -79,6 +79,21 @@ pub enum SessionError {
     )]
     NoPrFound { name: String },
 
+    #[error(
+        "Cannot complete '{name}': PR is not open (state: {state}).\n   Use 'kild destroy {name}' to remove the kild without merging."
+    )]
+    PrNotOpen { name: String, state: String },
+
+    #[error(
+        "Cannot complete '{name}': CI checks are failing ({summary}).\n   Fix the failing checks, or use '--skip-ci' to bypass the CI check."
+    )]
+    CiFailing { name: String, summary: String },
+
+    #[error(
+        "Cannot complete '{name}': merge failed.\n   {message}\n   Resolve the issue and try again, or use 'kild destroy {name}' to discard."
+    )]
+    MergeFailed { name: String, message: String },
+
     #[error("Daemon error: {message}")]
     DaemonError { message: String },
 
@@ -141,6 +156,9 @@ impl KildError for SessionError {
             SessionError::ConfigError { .. } => "CONFIG_ERROR",
             SessionError::UncommittedChanges { .. } => "SESSION_UNCOMMITTED_CHANGES",
             SessionError::NoPrFound { .. } => "SESSION_NO_PR_FOUND",
+            SessionError::PrNotOpen { .. } => "SESSION_PR_NOT_OPEN",
+            SessionError::CiFailing { .. } => "SESSION_CI_FAILING",
+            SessionError::MergeFailed { .. } => "SESSION_MERGE_FAILED",
             SessionError::DaemonError { .. } => "DAEMON_ERROR",
             SessionError::DaemonPtyExitedEarly { .. } => "DAEMON_PTY_EXITED_EARLY",
             SessionError::DaemonAutoStartFailed { .. } => "DAEMON_AUTO_START_FAILED",
@@ -172,6 +190,9 @@ impl KildError for SessionError {
                 | SessionError::ConfigError { .. }
                 | SessionError::UncommittedChanges { .. }
                 | SessionError::NoPrFound { .. }
+                | SessionError::PrNotOpen { .. }
+                | SessionError::CiFailing { .. }
+                | SessionError::MergeFailed { .. }
                 | SessionError::ResumeUnsupported { .. }
                 | SessionError::ResumeNoSessionId { .. }
                 | SessionError::NoTeammates { .. }

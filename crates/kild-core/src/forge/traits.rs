@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::forge::errors::ForgeError;
-use crate::forge::types::{PrCheckResult, PrInfo};
+use crate::forge::types::{MergeStrategy, PrCheckResult, PrInfo};
 
 /// Trait defining the interface for forge (code hosting) backends.
 ///
@@ -37,6 +37,20 @@ pub trait ForgeBackend: Send + Sync {
         worktree_path: &Path,
         branch: &str,
     ) -> Result<Option<PrInfo>, ForgeError>;
+
+    /// Merge a PR using the specified strategy.
+    ///
+    /// Calls the forge CLI to merge the PR. The `--delete-branch` flag is NOT
+    /// passed because KILD manages remote branch cleanup separately (the worktree
+    /// blocks `gh`'s local branch deletion).
+    ///
+    /// Returns `Ok(())` on successful merge, or `Err(ForgeError)` on failure.
+    fn merge_pr(
+        &self,
+        worktree_path: &Path,
+        branch: &str,
+        strategy: MergeStrategy,
+    ) -> Result<(), ForgeError>;
 }
 
 #[cfg(test)]
@@ -72,6 +86,15 @@ mod tests {
             _branch: &str,
         ) -> Result<Option<PrInfo>, ForgeError> {
             Ok(None)
+        }
+
+        fn merge_pr(
+            &self,
+            _worktree_path: &Path,
+            _branch: &str,
+            _strategy: MergeStrategy,
+        ) -> Result<(), ForgeError> {
+            Ok(())
         }
     }
 

@@ -100,15 +100,57 @@ impl DestroySafetyInfo {
     }
 }
 
+/// Request options for `complete_session`.
+#[derive(Debug, Clone)]
+pub struct CompleteRequest {
+    /// Branch name of the kild to complete.
+    pub name: String,
+    /// Merge strategy (squash, merge, rebase).
+    pub merge_strategy: crate::forge::types::MergeStrategy,
+    /// Skip merging — just clean up (old behavior, requires PR already merged).
+    pub no_merge: bool,
+    /// Force through safety checks (uncommitted changes, CI failures, pending reviews).
+    pub force: bool,
+    /// Show what would happen without doing it.
+    pub dry_run: bool,
+    /// Skip CI status check before merging.
+    pub skip_ci: bool,
+}
+
+impl CompleteRequest {
+    /// Create a new request with defaults (squash, merge enabled, no force/dry-run).
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            merge_strategy: crate::forge::types::MergeStrategy::default(),
+            no_merge: false,
+            force: false,
+            dry_run: false,
+            skip_ci: false,
+        }
+    }
+}
+
 /// Result of the `complete_session` operation, distinguishing between different outcomes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompleteResult {
-    /// PR was merged and remote branch was successfully deleted
-    RemoteDeleted,
-    /// PR was merged but remote branch deletion failed (logged as warning, non-fatal)
-    RemoteDeleteFailed,
-    /// PR was not merged, remote branch preserved for future merge
-    PrNotMerged,
-    /// Could not verify PR merge status (no forge, CLI error, no remote)
-    PrCheckUnavailable,
+    /// PR was merged by this command, remote branch deleted, session destroyed.
+    Merged {
+        /// The merge strategy used.
+        strategy: crate::forge::types::MergeStrategy,
+        /// Whether remote branch was deleted (false if deletion failed, non-fatal).
+        remote_deleted: bool,
+    },
+    /// PR was already merged (--no-merge or detected as merged). Cleaned up.
+    AlreadyMerged {
+        /// Whether remote branch was deleted.
+        remote_deleted: bool,
+    },
+    /// --no-merge mode: PR not merged, session destroyed, remote branch preserved.
+    CleanupOnly,
+    /// --dry-run: shows what would happen.
+    DryRun {
+        /// Steps that would be performed.
+        steps: Vec<String>,
+    },
 }

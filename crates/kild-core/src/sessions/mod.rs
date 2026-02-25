@@ -33,6 +33,6 @@ pub use errors::SessionError;
 pub use handler::{create_session, get_session, list_sessions, open_session, stop_session};
 pub use info::SessionInfo;
 pub use types::{
-    AgentProcess, AgentStatus, AgentStatusInfo, CompleteResult, CreateSessionRequest,
-    DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatus, AgentStatusInfo, CompleteRequest, CompleteResult,
+    CreateSessionRequest, DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
 };

@@ -107,6 +107,55 @@ impl std::fmt::Display for ReviewStatus {
     }
 }
 
+/// Merge strategy for landing a PR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MergeStrategy {
+    /// Squash all commits into one (default).
+    #[default]
+    Squash,
+    /// Create a merge commit.
+    Merge,
+    /// Rebase commits onto the base branch.
+    Rebase,
+}
+
+impl MergeStrategy {
+    /// Returns the `gh pr merge` flag for this strategy.
+    pub fn gh_flag(&self) -> &'static str {
+        match self {
+            MergeStrategy::Squash => "--squash",
+            MergeStrategy::Merge => "--merge",
+            MergeStrategy::Rebase => "--rebase",
+        }
+    }
+}
+
+impl std::fmt::Display for MergeStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Squash => write!(f, "squash"),
+            Self::Merge => write!(f, "merge"),
+            Self::Rebase => write!(f, "rebase"),
+        }
+    }
+}
+
+impl std::str::FromStr for MergeStrategy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "squash" => Ok(MergeStrategy::Squash),
+            "merge" => Ok(MergeStrategy::Merge),
+            "rebase" => Ok(MergeStrategy::Rebase),
+            other => Err(format!(
+                "Unknown merge strategy '{}'. Valid: squash, merge, rebase",
+                other
+            )),
+        }
+    }
+}
+
 /// PR metadata stored as a sidecar file (`{session_id}.pr`).
 ///
 /// Fetched from a forge platform and cached locally.
@@ -661,5 +710,36 @@ mod tests {
             MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::Ready
         );
+    }
+
+    // --- MergeStrategy tests ---
+
+    #[test]
+    fn test_merge_strategy_default_is_squash() {
+        assert_eq!(MergeStrategy::default(), MergeStrategy::Squash);
+    }
+
+    #[test]
+    fn test_merge_strategy_display() {
+        assert_eq!(MergeStrategy::Squash.to_string(), "squash");
+        assert_eq!(MergeStrategy::Merge.to_string(), "merge");
+        assert_eq!(MergeStrategy::Rebase.to_string(), "rebase");
+    }
+
+    #[test]
+    fn test_merge_strategy_gh_flag() {
+        assert_eq!(MergeStrategy::Squash.gh_flag(), "--squash");
+        assert_eq!(MergeStrategy::Merge.gh_flag(), "--merge");
+        assert_eq!(MergeStrategy::Rebase.gh_flag(), "--rebase");
+    }
+
+    #[test]
+    fn test_merge_strategy_from_str() {
+        use std::str::FromStr;
+        assert_eq!(MergeStrategy::from_str("squash"), Ok(MergeStrategy::Squash));
+        assert_eq!(MergeStrategy::from_str("merge"), Ok(MergeStrategy::Merge));
+        assert_eq!(MergeStrategy::from_str("rebase"), Ok(MergeStrategy::Rebase));
+        assert_eq!(MergeStrategy::from_str("SQUASH"), Ok(MergeStrategy::Squash));
+        assert!(MergeStrategy::from_str("invalid").is_err());
     }
 }

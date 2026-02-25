@@ -37,7 +37,9 @@ pub use kild_protocol::{
 
 // Re-export config types from kild-config
 pub use editor::{EditorBackend, EditorError, EditorType};
-pub use forge::types::{CiStatus, MergeReadiness, PrCheckResult, PrInfo, PrState, ReviewStatus};
+pub use forge::types::{
+    CiStatus, MergeReadiness, MergeStrategy, PrCheckResult, PrInfo, PrState, ReviewStatus,
+};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
 pub use git::types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,
@@ -53,8 +55,8 @@ pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::agent_status::AgentStatusResult;
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{
-    AgentProcess, AgentStatusInfo, CompleteResult, CreateSessionRequest, DestroySafetyInfo,
-    GitStatus, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatusInfo, CompleteRequest, CompleteResult, CreateSessionRequest,
+    DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
 };
 pub use state::{Command, CoreStore, DispatchError, Event, Store};
 

@@ -712,10 +712,63 @@ fn test_cli_complete_command() {
 }
 
 #[test]
-fn test_cli_complete_rejects_force_flag() {
+fn test_cli_complete_accepts_force_flag() {
     let app = build_cli();
-    // --force should not be accepted on complete (removed in #188)
-    let matches = app.try_get_matches_from(vec!["kild", "complete", "test-branch", "--force"]);
+    let matches = app
+        .try_get_matches_from(vec!["kild", "complete", "test-branch", "--force"])
+        .unwrap();
+    let complete_matches = matches.subcommand_matches("complete").unwrap();
+    assert!(complete_matches.get_flag("force"));
+}
+
+#[test]
+fn test_cli_complete_accepts_merge_strategy() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec![
+            "kild",
+            "complete",
+            "test-branch",
+            "--merge-strategy",
+            "rebase",
+        ])
+        .unwrap();
+    let complete_matches = matches.subcommand_matches("complete").unwrap();
+    assert_eq!(
+        complete_matches
+            .get_one::<String>("merge-strategy")
+            .unwrap(),
+        "rebase"
+    );
+}
+
+#[test]
+fn test_cli_complete_accepts_no_merge_and_dry_run() {
+    let app = build_cli();
+    let matches = app
+        .try_get_matches_from(vec![
+            "kild",
+            "complete",
+            "test-branch",
+            "--no-merge",
+            "--dry-run",
+        ])
+        .unwrap();
+    let complete_matches = matches.subcommand_matches("complete").unwrap();
+    assert!(complete_matches.get_flag("no-merge"));
+    assert!(complete_matches.get_flag("dry-run"));
+}
+
+#[test]
+fn test_cli_complete_rejects_invalid_merge_strategy() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild",
+        "complete",
+        "test-branch",
+        "--merge-strategy",
+        "invalid",
+    ]);
     assert!(matches.is_err());
 }
 

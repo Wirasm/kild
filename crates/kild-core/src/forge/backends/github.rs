@@ -3,11 +3,11 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::forge::errors::ForgeError;
 use crate::forge::traits::ForgeBackend;
-use crate::forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
+use crate::forge::types::{CiStatus, MergeStrategy, PrCheckResult, PrInfo, PrState, ReviewStatus};
 use crate::git::naming::{KILD_BRANCH_PREFIX, kild_branch_name};
 
 /// GitHub forge backend using the `gh` CLI.
@@ -189,6 +189,51 @@ impl ForgeBackend for GitHubBackend {
             Err(e) => Err(ForgeError::from(e)),
         }
     }
+
+    fn merge_pr(
+        &self,
+        worktree_path: &Path,
+        branch: &str,
+        strategy: MergeStrategy,
+    ) -> Result<(), ForgeError> {
+        let branch = normalize_branch(branch);
+        info!(
+            event = "core.forge.merge_started",
+            branch = %branch,
+            strategy = %strategy,
+            worktree_path = %worktree_path.display()
+        );
+
+        let output = std::process::Command::new("gh")
+            .current_dir(worktree_path)
+            .args(["pr", "merge", &branch, strategy.gh_flag()])
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                info!(
+                    event = "core.forge.merge_completed",
+                    branch = %branch,
+                    strategy = %strategy
+                );
+                Ok(())
+            }
+            Ok(output) => {
+                let exit_code = output.status.code().unwrap_or(-1);
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                error!(
+                    event = "core.forge.merge_failed",
+                    branch = %branch,
+                    exit_code = exit_code,
+                    stderr = %stderr
+                );
+                Err(ForgeError::CliError {
+                    message: format!("gh pr merge failed (exit {}): {}", exit_code, stderr),
+                })
+            }
+            Err(e) => Err(ForgeError::from(e)),
+        }
+    }
 }
 
 /// Parse the JSON output from `gh pr view` into a `PrInfo`.
@@ -250,7 +295,16 @@ fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<PrInfo> {
         "MERGED" => PrState::Merged,
         "CLOSED" => PrState::Closed,
         "OPEN" if is_draft => PrState::Draft,
-        _ => PrState::Open,
+        "OPEN" => PrState::Open,
+        unknown => {
+            warn!(
+                event = "core.forge.pr_state_unknown",
+                branch = branch,
+                state = unknown,
+                "Unknown PR state from gh CLI — treating as Open"
+            );
+            PrState::Open
+        }
     };
 
     let (ci_status, ci_summary) = parse_ci_status(&value);
