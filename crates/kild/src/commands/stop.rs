@@ -112,20 +112,8 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if active.is_empty() {
-        if already_stopped.is_empty() {
-            println!("No running kilds to stop.");
-        } else {
-            println!(
-                "{} already stopped: {}",
-                color::muted(&format_count(already_stopped.len())),
-                already_stopped
-                    .iter()
-                    .map(|s| s.branch.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-        }
+    if active.is_empty() && already_stopped.is_empty() {
+        println!("No running kilds to stop.");
         info!(event = "cli.stop_all_completed", stopped = 0, failed = 0);
         return Ok(());
     }
