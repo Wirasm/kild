@@ -1,18 +1,15 @@
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::agents;
 use crate::sessions::{errors::SessionError, persistence, types::*};
-use crate::terminal;
-use crate::terminal::types::SpawnResult;
 use kild_config::{Config, KildConfig};
 use kild_protocol::{OpenMode, RuntimeMode};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt,
-    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
-    spawn_and_save_attach_window,
+    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt, spawn_and_save_attach_window,
+    spawn_daemon_agent, spawn_terminal_agent,
 };
-use super::{dropbox, fleet};
+use super::dropbox;
 
 /// Resolve the effective runtime mode for `open_session`.
 ///
@@ -33,38 +30,6 @@ fn resolve_effective_runtime_mode(
         (RuntimeMode::Daemon, "config")
     } else {
         (RuntimeMode::Terminal, "default")
-    }
-}
-
-/// Capture process metadata from spawn result for PID reuse protection.
-///
-/// Attempts to get fresh process info from the OS. Falls back to spawn result metadata
-/// if process info retrieval fails (logs warning in that case).
-fn capture_process_metadata(
-    spawn_result: &SpawnResult,
-    event_prefix: &str,
-) -> (Option<String>, Option<u64>) {
-    let Some(pid) = spawn_result.process_id else {
-        return (
-            spawn_result.process_name.clone(),
-            spawn_result.process_start_time,
-        );
-    };
-
-    match crate::process::get_process_info(pid) {
-        Ok(info) => (Some(info.name), Some(info.start_time)),
-        Err(e) => {
-            warn!(
-                event = %format!("core.session.{}_process_info_failed", event_prefix),
-                pid = pid,
-                error = %e,
-                "Failed to get process metadata after spawn - using spawn result metadata"
-            );
-            (
-                spawn_result.process_name.clone(),
-                spawn_result.process_start_time,
-            )
-        }
     }
 }
 
@@ -297,124 +262,26 @@ pub fn open_session(
 
     let use_daemon = effective_runtime_mode == RuntimeMode::Daemon;
 
-    let now = chrono::Utc::now().to_rfc3339();
+    let spawn_params = AgentSpawnParams {
+        branch: &session.branch,
+        agent: &agent,
+        agent_command: &agent_command,
+        worktree_path: &session.worktree_path,
+        session_id: &session.id,
+        spawn_id: &spawn_id,
+        task_list_id: new_task_list_id.as_deref(),
+        project_id: &session.project_id,
+        kild_config: &kild_config,
+    };
 
     let new_agent = if use_daemon {
-        // Auto-start daemon if not running (config.daemon.auto_start, default: true)
-        crate::daemon::ensure_daemon_running(&kild_config)?;
+        let agent_process = spawn_daemon_agent(&spawn_params)?;
 
-        setup_codex_integration(&agent);
-        setup_opencode_integration(&agent, &session.worktree_path);
-        setup_claude_integration(&agent);
-        fleet::ensure_fleet_member(&session.branch, &session.worktree_path, &agent);
-        dropbox::ensure_dropbox(&session.project_id, &session.branch, &agent);
-
-        // Daemon path: create new daemon PTY (uses shared helper with create_session)
-        let fleet_command = match fleet::fleet_agent_flags(&session.branch, &agent) {
-            Some(flags) => format!("{} {}", agent_command, flags),
-            None => agent_command.clone(),
-        };
-        let mut params = build_daemon_create_request(
-            &fleet_command,
-            &agent,
-            &session.id,
-            new_task_list_id.as_deref(),
-            &session.branch,
-        )?;
-        dropbox::inject_dropbox_env_vars(
-            &mut params.env_vars,
-            &session.project_id,
-            &session.branch,
-            &agent,
-        );
-
-        let daemon_request = crate::daemon::client::DaemonCreateRequest {
-            request_id: &spawn_id,
-            session_id: &spawn_id,
-            working_directory: &session.worktree_path,
-            command: &params.cmd,
-            args: &params.cmd_args,
-            env_vars: &params.env_vars,
-            rows: 24,
-            cols: 80,
-            use_login_shell: params.use_login_shell,
-        };
-        let daemon_result =
-            crate::daemon::client::create_pty_session(&daemon_request).map_err(|e| {
-                SessionError::DaemonError {
-                    message: e.to_string(),
-                }
-            })?;
-
-        // Early exit detection: poll with exponential backoff until Running or Stopped.
-        // Fast-failing processes (bad resume session, missing binary, env issues)
-        // typically exit within 50ms of spawn. Exit early on Running confirmation.
-        // Worst-case window: 350ms (50+100+200) before falling through with None (assume alive).
-        let maybe_early_exit: Option<Option<i32>> = {
-            let mut result = None;
-            for delay_ms in [50u64, 100, 200] {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                match crate::daemon::client::get_session_info(&daemon_result.daemon_session_id) {
-                    Ok(Some((kild_protocol::SessionStatus::Stopped, exit_code))) => {
-                        result = Some(exit_code);
-                        break;
-                    }
-                    Ok(Some((kild_protocol::SessionStatus::Running, _))) => break, // confirmed alive
-                    _ => {} // Creating or IPC error — keep polling
-                }
-            }
-            result
-        };
-
-        if let Some(exit_code) = maybe_early_exit {
-            let scrollback_tail =
-                match crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id) {
-                    Ok(Some(bytes)) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        let lines: Vec<&str> = text.lines().collect();
-                        let start = lines.len().saturating_sub(20);
-                        lines[start..].join("\n")
-                    }
-                    Ok(None) => {
-                        warn!(
-                            event = "core.session.open_scrollback_empty",
-                            daemon_session_id = %daemon_result.daemon_session_id,
-                            "Daemon session exited early with empty scrollback"
-                        );
-                        String::new()
-                    }
-                    Err(e) => {
-                        warn!(
-                            event = "core.session.open_scrollback_read_failed",
-                            daemon_session_id = %daemon_result.daemon_session_id,
-                            error = %e,
-                            "Failed to read scrollback after early PTY exit"
-                        );
-                        String::new()
-                    }
-                };
-
-            if let Err(e) = crate::daemon::client::destroy_daemon_session(
-                &daemon_result.daemon_session_id,
-                true,
-            ) {
-                warn!(
-                    event = "core.session.open_daemon_cleanup_failed",
-                    daemon_session_id = %daemon_result.daemon_session_id,
-                    error = %e,
-                    "Failed to clean up daemon session after early exit"
-                );
-            }
-
-            return Err(SessionError::DaemonPtyExitedEarly {
-                exit_code,
-                scrollback_tail,
-            });
-        }
-
-        // Deliver initial prompt after the TUI has settled (best-effort).
-        if let Some(prompt) = initial_prompt {
-            let delivered = deliver_initial_prompt(&daemon_result.daemon_session_id, prompt);
+        // Open-only: deliver initial prompt after the TUI has settled (best-effort).
+        if let Some(prompt) = initial_prompt
+            && let Some(dsid) = agent_process.daemon_session_id()
+        {
+            let delivered = deliver_initial_prompt(dsid, prompt);
             // Clear .idle_sent gate so the next idle event notifies the brain.
             // deliver_initial_prompt bypasses dropbox::write_task(), which normally
             // handles this. Only clear when delivery succeeded — clearing on failure
@@ -424,69 +291,12 @@ pub fn open_session(
             }
         }
 
-        AgentProcess::new(
-            agent.clone(),
-            spawn_id,
-            None,
-            None,
-            None,
-            None,
-            None,
-            agent_command.clone(),
-            now.clone(),
-            Some(daemon_result.daemon_session_id),
-        )?
+        agent_process
     } else {
-        setup_codex_integration(&agent);
-        setup_opencode_integration(&agent, &session.worktree_path);
-        setup_claude_integration(&agent);
-
-        // Terminal path: spawn in external terminal
-        // Wrap with `env` to strip nesting-detection vars and inject agent env.
-        let terminal_command = {
-            let mut env_prefix: Vec<(String, String)> = Vec::new();
-            if let Some(ref tlid) = new_task_list_id {
-                env_prefix.extend(agents::resume::task_list_env_vars(&agent, tlid));
-            }
-            env_prefix.extend(agents::resume::codex_env_vars(&agent, &session.branch));
-            env_prefix.extend(agents::resume::claude_env_vars(&agent, &session.branch));
-            super::env_cleanup::build_env_command(&env_prefix, &agent_command)
-        };
-        debug!(
-            event = "core.session.terminal_command_constructed",
-            command = %terminal_command,
-        );
-        let spawn_result = terminal::handler::spawn_terminal(
-            &session.worktree_path,
-            &terminal_command,
-            &kild_config,
-            Some(&spawn_id),
-            Some(config.kild_dir()),
-        )
-        .map_err(|e| SessionError::TerminalError { source: e })?;
-
-        let (process_name, process_start_time) = capture_process_metadata(&spawn_result, "open");
-
-        let command = if spawn_result.command_executed.trim().is_empty() {
-            format!("{} (command not captured)", agent)
-        } else {
-            spawn_result.command_executed.clone()
-        };
-
-        AgentProcess::new(
-            agent.clone(),
-            spawn_id,
-            spawn_result.process_id,
-            process_name.clone(),
-            process_start_time,
-            Some(spawn_result.terminal_type.clone()),
-            spawn_result.terminal_window_id.clone(),
-            command,
-            now.clone(),
-            None,
-        )?
+        spawn_terminal_agent(&spawn_params)?
     };
 
+    let now = chrono::Utc::now().to_rfc3339();
     session.status = SessionStatus::Active;
     session.last_activity = Some(now);
     session.add_agent(new_agent);

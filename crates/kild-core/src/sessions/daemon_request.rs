@@ -6,7 +6,7 @@ use crate::sessions::errors::SessionError;
 
 /// Result of building a daemon PTY create request.
 #[derive(Debug)]
-pub(super) struct DaemonSpawnParams {
+pub(super) struct DaemonRequestParams {
     pub cmd: String,
     pub cmd_args: Vec<String>,
     pub env_vars: Vec<(String, String)>,
@@ -154,7 +154,7 @@ pub(super) fn build_daemon_create_request(
     session_id: &str,
     task_list_id: Option<&str>,
     branch: &str,
-) -> Result<DaemonSpawnParams, SessionError> {
+) -> Result<DaemonRequestParams, SessionError> {
     let use_login_shell = agent_name == "shell";
 
     let (cmd, cmd_args) = if use_login_shell {
@@ -249,7 +249,7 @@ pub(super) fn build_daemon_create_request(
     let claude_env = agents::resume::claude_env_vars(agent_name, branch);
     env_vars.extend(claude_env);
 
-    Ok(DaemonSpawnParams {
+    Ok(DaemonRequestParams {
         cmd,
         cmd_args,
         env_vars,
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_agent_wraps_in_login_shell() {
-        let DaemonSpawnParams {
+        let DaemonRequestParams {
             cmd,
             cmd_args: args,
             use_login_shell,
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_single_word_agent_wraps_in_login_shell() {
-        let DaemonSpawnParams {
+        let DaemonRequestParams {
             cmd,
             cmd_args: args,
             use_login_shell,
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_bare_shell_uses_login_shell() {
-        let DaemonSpawnParams {
+        let DaemonRequestParams {
             cmd_args: args,
             use_login_shell,
             ..
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_agent_escapes_single_quotes() {
-        let DaemonSpawnParams { cmd_args: args, .. } = build_daemon_create_request(
+        let DaemonRequestParams { cmd_args: args, .. } = build_daemon_create_request(
             "claude --note 'hello world'",
             "claude",
             "test-session",
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_collects_env_vars() {
-        let DaemonSpawnParams { env_vars, .. } =
+        let DaemonRequestParams { env_vars, .. } =
             build_daemon_create_request("claude", "claude", "test-session", None, "test-branch")
                 .unwrap();
 
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_includes_shim_env_vars() {
-        let DaemonSpawnParams { env_vars, .. } =
+        let DaemonRequestParams { env_vars, .. } =
             build_daemon_create_request("claude", "claude", "proj_my-branch", None, "my-branch")
                 .unwrap();
 
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_includes_task_list_env_var_for_claude() {
-        let DaemonSpawnParams { env_vars, .. } = build_daemon_create_request(
+        let DaemonRequestParams { env_vars, .. } = build_daemon_create_request(
             "claude",
             "claude",
             "myproject_my-branch",
@@ -543,7 +543,7 @@ mod tests {
             ("amp", "amp"),
             ("opencode", "opencode"),
         ] {
-            let DaemonSpawnParams { env_vars, .. } = build_daemon_create_request(
+            let DaemonRequestParams { env_vars, .. } = build_daemon_create_request(
                 agent_cmd,
                 agent_name,
                 "test-session",
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_no_task_list_env_var_when_none() {
-        let DaemonSpawnParams { env_vars, .. } =
+        let DaemonRequestParams { env_vars, .. } =
             build_daemon_create_request("claude", "claude", "test-session", None, "test-branch")
                 .unwrap();
 
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_includes_codex_env_vars() {
-        let DaemonSpawnParams { env_vars, .. } =
+        let DaemonRequestParams { env_vars, .. } =
             build_daemon_create_request("codex", "codex", "test-session", None, "my-feature")
                 .unwrap();
 
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_build_daemon_request_includes_claude_env_vars() {
-        let DaemonSpawnParams { env_vars, .. } =
+        let DaemonRequestParams { env_vars, .. } =
             build_daemon_create_request("claude", "claude", "test-session", None, "my-feature")
                 .unwrap();
 
