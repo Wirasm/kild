@@ -216,6 +216,7 @@ impl std::fmt::Display for MergeReadiness {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::types::{BaseBranchDrift, CommitActivity, DiffStats};
 
     #[test]
     fn test_forge_type_as_str() {
@@ -407,8 +408,6 @@ mod tests {
     }
 
     // --- MergeReadiness tests ---
-
-    use crate::git::types::{BaseBranchDrift, CommitActivity, DiffStats};
 
     fn make_health(
         conflict_status: ConflictStatus,
