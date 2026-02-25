@@ -366,26 +366,19 @@ mod tests {
             content.contains("error\\|fail\\|exception\\|panic"),
             "Script should check for failure indicators in SubagentStop"
         );
-        // Verify TeammateIdle and TaskCompleted are NOT forwarded in the brain injection case
-        // branches (they should only appear in the agent-status block and comments)
+        // TeammateIdle and TaskCompleted must not appear in the forward block
+        // (they're filtered out; only appear in the agent-status case and comments above FORWARD="")
         let forward_block = content
             .split("FORWARD=\"\"")
             .nth(1)
             .expect("Should have FORWARD assignment");
-        let event_prefixes = ["Stop", "Subagent", "Teammate", "TaskCompleted"];
-        let case_branches: Vec<&str> = forward_block
-            .lines()
-            .filter(|l| event_prefixes.iter().any(|p| l.trim_start().starts_with(p)))
-            .collect();
         assert!(
-            !case_branches.iter().any(|l| l.contains("TeammateIdle")),
-            "TeammateIdle must not be a forwarded case branch, got: {:?}",
-            case_branches
+            !forward_block.contains("TeammateIdle"),
+            "TeammateIdle must not be in the forward block"
         );
         assert!(
-            !case_branches.iter().any(|l| l.contains("TaskCompleted")),
-            "TaskCompleted must not be a forwarded case branch, got: {:?}",
-            case_branches
+            !forward_block.contains("TaskCompleted"),
+            "TaskCompleted must not be in the forward block"
         );
 
         #[cfg(unix)]
