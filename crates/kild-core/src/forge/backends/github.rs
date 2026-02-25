@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::forge::errors::ForgeError;
 use crate::forge::traits::ForgeBackend;
@@ -220,7 +220,7 @@ impl ForgeBackend for GitHubBackend {
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                warn!(
+                error!(
                     event = "core.forge.merge_failed",
                     branch = %branch,
                     exit_code = output.status.code(),

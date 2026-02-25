@@ -85,7 +85,7 @@ pub enum SessionError {
     PrNotOpen { name: String, state: String },
 
     #[error(
-        "Cannot complete '{name}': CI checks are failing ({summary}).\n   Fix the failing checks or use '--force' to merge anyway."
+        "Cannot complete '{name}': CI checks are failing ({summary}).\n   Fix the failing checks, or use '--skip-ci' to bypass the CI check."
     )]
     CiFailing { name: String, summary: String },
 

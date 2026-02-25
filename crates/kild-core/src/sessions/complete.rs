@@ -90,41 +90,41 @@ pub fn complete_session(request: &CompleteRequest) -> Result<CompleteResult, Ses
             }
         };
 
-    // 4. Check PR existence
-    match forge_backend.check_pr_exists(&session.worktree_path, &kild_branch) {
-        crate::forge::types::PrCheckResult::Exists => {
-            debug!(event = "core.session.complete_pr_exists", branch = name);
-        }
-        crate::forge::types::PrCheckResult::NotFound => {
-            error!(
-                event = "core.session.complete_no_pr",
-                name = name,
-                reason = "not_found"
-            );
-            return Err(SessionError::NoPrFound {
-                name: name.to_string(),
-            });
-        }
-        crate::forge::types::PrCheckResult::Unavailable => {
-            warn!(
-                event = "core.session.complete_pr_check_unavailable",
-                branch = name,
-                "Cannot verify PR status — proceeding anyway"
-            );
-        }
-    }
-
+    // 4. --no-merge path uses check_pr_exists + is_pr_merged (lightweight checks)
     if request.no_merge {
+        match forge_backend.check_pr_exists(&session.worktree_path, &kild_branch) {
+            crate::forge::types::PrCheckResult::Exists => {
+                debug!(event = "core.session.complete_pr_exists", branch = name);
+            }
+            crate::forge::types::PrCheckResult::NotFound => {
+                error!(
+                    event = "core.session.complete_no_pr",
+                    name = name,
+                    reason = "not_found"
+                );
+                return Err(SessionError::NoPrFound {
+                    name: name.to_string(),
+                });
+            }
+            crate::forge::types::PrCheckResult::Unavailable => {
+                warn!(
+                    event = "core.session.complete_pr_check_unavailable",
+                    branch = name,
+                    "Cannot verify PR status — proceeding anyway"
+                );
+            }
+        }
         return complete_no_merge(
             name,
             &session.worktree_path,
             &kild_branch,
             forge_backend,
+            request.force,
             request.dry_run,
         );
     }
 
-    // 5. Fetch PR info for CI + state checks
+    // 5. Default merge path: fetch_pr_info subsumes check_pr_exists (returns state, CI, reviews)
     let pr_info = match forge_backend.fetch_pr_info(&session.worktree_path, &kild_branch) {
         Ok(Some(info)) => info,
         Ok(None) => {
@@ -280,6 +280,7 @@ fn complete_no_merge(
     worktree_path: &Path,
     kild_branch: &str,
     forge_backend: &dyn crate::forge::ForgeBackend,
+    force: bool,
     dry_run: bool,
 ) -> Result<CompleteResult, SessionError> {
     let pr_merged = match forge_backend.is_pr_merged(worktree_path, kild_branch) {
@@ -319,23 +320,38 @@ fn complete_no_merge(
         return Ok(CompleteResult::DryRun { steps });
     }
 
-    if pr_merged == Some(true) {
-        let remote_deleted = try_delete_remote(worktree_path, kild_branch);
-        super::destroy::destroy_session(name, false)?;
-        info!(
-            event = "core.session.complete_completed",
-            name = name,
-            outcome = "already_merged_no_merge"
-        );
-        Ok(CompleteResult::AlreadyMerged { remote_deleted })
-    } else {
-        super::destroy::destroy_session(name, false)?;
-        info!(
-            event = "core.session.complete_completed",
-            name = name,
-            outcome = "cleanup_only"
-        );
-        Ok(CompleteResult::CleanupOnly)
+    match pr_merged {
+        Some(true) => {
+            let remote_deleted = try_delete_remote(worktree_path, kild_branch);
+            super::destroy::destroy_session(name, force)?;
+            info!(
+                event = "core.session.complete_completed",
+                name = name,
+                outcome = "already_merged_no_merge"
+            );
+            Ok(CompleteResult::AlreadyMerged { remote_deleted })
+        }
+        Some(false) => {
+            super::destroy::destroy_session(name, force)?;
+            info!(
+                event = "core.session.complete_completed",
+                name = name,
+                outcome = "cleanup_only"
+            );
+            Ok(CompleteResult::CleanupOnly)
+        }
+        None => {
+            // Forge check failed (network error, no auth, etc.) — don't destroy
+            // on ambiguous state since it's irreversible.
+            error!(
+                event = "core.session.complete_pr_check_unavailable",
+                name = name,
+                "Cannot determine PR merge status — aborting to avoid destroying session with unknown state"
+            );
+            Err(SessionError::NoPrFound {
+                name: name.to_string(),
+            })
+        }
     }
 }
 

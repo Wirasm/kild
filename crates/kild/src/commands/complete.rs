@@ -44,6 +44,7 @@ pub(crate) fn handle_complete_command(
         no_merge = request.no_merge,
         force = request.force,
         dry_run = request.dry_run,
+        skip_ci = request.skip_ci,
     );
 
     match session_ops::complete_session(&request) {
@@ -67,6 +68,8 @@ pub(crate) fn handle_complete_command(
                     println!("Completed '{}'. PR was already merged.", branch);
                     if remote_deleted {
                         println!("  Remote branch deleted.");
+                    } else {
+                        println!("  Warning: remote branch deletion failed.");
                     }
                 }
                 CompleteResult::CleanupOnly => {
