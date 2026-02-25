@@ -6,10 +6,9 @@ use kild_config::{Config, KildConfig};
 use kild_protocol::{OpenMode, RuntimeMode};
 
 use super::daemon_helpers::{
-    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt, spawn_and_save_attach_window,
-    spawn_daemon_agent, spawn_terminal_agent,
+    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt_for_session,
+    spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
-use super::dropbox;
 
 /// Resolve the effective runtime mode for `open_session`.
 ///
@@ -277,18 +276,16 @@ pub fn open_session(
     let new_agent = if use_daemon {
         let agent_process = spawn_daemon_agent(&spawn_params)?;
 
-        // Open-only: deliver initial prompt after the TUI has settled (best-effort).
-        if let Some(prompt) = initial_prompt
-            && let Some(dsid) = agent_process.daemon_session_id()
-        {
-            let delivered = deliver_initial_prompt(dsid, prompt);
-            // Clear .idle_sent gate so the next idle event notifies the brain.
-            // deliver_initial_prompt bypasses dropbox::write_task(), which normally
-            // handles this. Only clear when delivery succeeded — clearing on failure
-            // would cause a phantom brain notification on the next idle event.
-            if delivered {
-                dropbox::clear_idle_gate(&session.project_id, &session.branch);
-            }
+        // Open-only: deliver initial prompt after spawn.
+        // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
+        if let Some(prompt) = initial_prompt {
+            deliver_initial_prompt_for_session(
+                &session.project_id,
+                &session.branch,
+                &agent,
+                agent_process.daemon_session_id(),
+                prompt,
+            );
         }
 
         agent_process

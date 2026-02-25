@@ -122,6 +122,60 @@ pub(super) fn deliver_initial_prompt(daemon_session_id: &str, prompt: &str) -> b
     text_ok
 }
 
+/// Write the initial prompt to the dropbox and deliver it to the agent.
+///
+/// For fleet claude sessions, skips PTY delivery — dropbox task.md + Claude inbox
+/// deliver reliably without PTY timing issues (#540). PTY delivery remains the only
+/// path for non-fleet sessions and non-claude agents.
+pub(super) fn deliver_initial_prompt_for_session(
+    project_id: &str,
+    branch: &str,
+    agent: &str,
+    daemon_session_id: Option<&str>,
+    prompt: &str,
+) {
+    let dropbox_wrote = match super::dropbox::write_task(
+        project_id,
+        branch,
+        prompt,
+        &[
+            super::dropbox::DeliveryMethod::Dropbox,
+            super::dropbox::DeliveryMethod::InitialPrompt,
+        ],
+    ) {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(e) => {
+            warn!(
+                event = "core.session.dropbox.initial_task_write_failed",
+                branch = %branch,
+                error = %e,
+            );
+            eprintln!(
+                "Warning: Failed to write initial task to dropbox for '{}': {}",
+                branch, e,
+            );
+            false
+        }
+    };
+
+    let skip_pty = dropbox_wrote && super::fleet::is_claude_fleet_agent(agent);
+    if skip_pty {
+        super::dropbox::clear_idle_gate(project_id, branch);
+        info!(
+            event = "core.session.initial_prompt_pty_skipped",
+            branch = %branch,
+            reason = "fleet_claude_session",
+            "Skipping PTY delivery — dropbox task.md handles initial prompt for fleet claude sessions"
+        );
+    } else if let Some(dsid) = daemon_session_id {
+        let delivered = deliver_initial_prompt(dsid, prompt);
+        if delivered {
+            super::dropbox::clear_idle_gate(project_id, branch);
+        }
+    }
+}
+
 /// Compute a unique spawn ID for a given session and spawn index.
 ///
 /// Each agent spawn within a session gets its own spawn ID, which is used for

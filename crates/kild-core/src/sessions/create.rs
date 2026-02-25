@@ -7,10 +7,9 @@ use kild_config::{Config, KildConfig};
 use kild_protocol::{AgentMode, RuntimeMode};
 
 use super::daemon_helpers::{
-    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt, ensure_shim_binary,
+    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt_for_session, ensure_shim_binary,
     spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
-use super::dropbox;
 
 pub fn create_session(
     request: CreateSessionRequest,
@@ -313,43 +312,16 @@ pub fn create_session(
     // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
-    // 7a. Write initial task to dropbox BEFORE delivering to PTY.
-    // Files exist before the agent process reads them — no race condition.
-    if let Some(ref prompt) = request.initial_prompt
-        && let Err(e) = dropbox::write_task(
+    // 7a+7b. Write initial prompt to dropbox and deliver to agent (best-effort, may block up to 20s).
+    // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
+    if let Some(ref prompt) = request.initial_prompt {
+        deliver_initial_prompt_for_session(
             &session.project_id,
             &validated.name,
+            &validated.agent,
+            session.latest_agent().and_then(|a| a.daemon_session_id()),
             prompt,
-            &[
-                dropbox::DeliveryMethod::Dropbox,
-                dropbox::DeliveryMethod::InitialPrompt,
-            ],
-        )
-    {
-        warn!(
-            event = "core.session.dropbox.initial_task_write_failed",
-            branch = %validated.name,
-            error = %e,
         );
-        eprintln!(
-            "Warning: Failed to write initial task to dropbox for '{}': {}",
-            validated.name, e,
-        );
-    }
-
-    // 7b. Deliver initial prompt after session is on disk (best-effort, may block up to 20s).
-    // Must run after save so `kild list/inject/attach` can find the session during the wait.
-    if let Some(ref prompt) = request.initial_prompt
-        && let Some(dsid) = session.latest_agent().and_then(|a| a.daemon_session_id())
-    {
-        let delivered = deliver_initial_prompt(dsid, prompt);
-        // Clear .idle_sent gate so the next idle event notifies the brain.
-        // deliver_initial_prompt bypasses dropbox::write_task(), which normally
-        // handles this. Only clear when delivery succeeded — clearing on failure
-        // would cause a phantom brain notification on the next idle event.
-        if delivered {
-            dropbox::clear_idle_gate(&session.project_id, &session.branch);
-        }
     }
 
     // 8. Spawn attach window (best-effort) and update session with terminal info
