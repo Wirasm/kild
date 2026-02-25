@@ -308,6 +308,20 @@ kild inbox <branch> --status  # ack status line only
 kild inbox <branch> --json    # machine-readable JSON
 ```
 
+### Generate fleet context for agent bootstrapping
+```bash
+# Output protocol + current task + fleet status as a markdown blob
+kild prime <branch>
+
+# Fleet status table only (compact)
+kild prime <branch> --status
+
+# Machine-readable JSON output
+kild prime <branch> --json
+```
+
+**Note**: Returns an error if fleet mode is not active. Designed for use in brain→worker injection: `kild inject worker "$(kild prime worker)"`.
+
 ### Manage the project registry
 ```bash
 # Register a git repo in the project registry

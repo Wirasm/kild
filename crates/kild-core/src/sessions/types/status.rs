@@ -11,6 +11,16 @@ pub enum SessionStatus {
     Destroyed,
 }
 
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => write!(f, "active"),
+            Self::Stopped => write!(f, "stopped"),
+            Self::Destroyed => write!(f, "destroyed"),
+        }
+    }
+}
+
 /// Agent-reported activity status, written via `kild agent-status` command.
 ///
 /// This is distinct from `ProcessStatus` (running/stopped) and `HealthStatus`

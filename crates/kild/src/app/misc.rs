@@ -120,6 +120,30 @@ pub fn inbox_command() -> Command {
         )
 }
 
+pub fn prime_command() -> Command {
+    Command::new("prime")
+        .about("Generate fleet context blob for agent bootstrapping")
+        .arg(
+            Arg::new("branch")
+                .help("Branch name of the kild to prime")
+                .index(1)
+                .required(true),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Output in JSON format")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("status")
+                .long("status")
+                .help("Output fleet status table only (compact)")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("json"),
+        )
+}
+
 pub fn overlaps_command() -> Command {
     Command::new("overlaps")
         .about("Detect file overlaps across kilds in the current project")
