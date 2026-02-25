@@ -36,7 +36,11 @@ pub(super) fn init_pane_registry(session_id: &str, daemon_session_id: &str) -> R
         }
     });
 
-    std::fs::File::create(paths.shim_lock_file(session_id))
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths.shim_lock_file(session_id))
         .map_err(|e| format!("failed to create shim lock file: {}", e))?;
 
     let json = serde_json::to_string_pretty(&initial_state)
