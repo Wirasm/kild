@@ -2,7 +2,9 @@ use crate::errors::KildError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
-    #[error("Session '{name}' already exists")]
+    #[error(
+        "Kild '{name}' already exists.\n  Resume: kild open {name}\n  Remove: kild destroy {name}"
+    )]
     AlreadyExists { name: String },
 
     #[error("Session '{name}' not found")]
@@ -188,7 +190,10 @@ mod tests {
         let error = SessionError::AlreadyExists {
             name: "test".to_string(),
         };
-        assert_eq!(error.to_string(), "Session 'test' already exists");
+        let display = error.to_string();
+        assert!(display.contains("Kild 'test' already exists"));
+        assert!(display.contains("kild open test"));
+        assert!(display.contains("kild destroy test"));
         assert_eq!(error.error_code(), "SESSION_ALREADY_EXISTS");
         assert!(error.is_user_error());
     }
