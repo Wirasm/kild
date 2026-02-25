@@ -72,9 +72,9 @@ pub fn create_session(
 
             (name, command)
         }
-        _ => {
+        other => {
             return Err(SessionError::ConfigError {
-                message: "Unsupported agent mode".to_string(),
+                message: format!("Unsupported agent mode: {:?}", other),
             });
         }
     };
@@ -480,9 +480,9 @@ pub fn create_session(
                 Some(daemon_result.daemon_session_id),
             )?
         }
-        _ => {
+        other => {
             return Err(SessionError::ConfigError {
-                message: "Unsupported runtime mode".to_string(),
+                message: format!("Unsupported runtime mode: {:?}", other),
             });
         }
     };

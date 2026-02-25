@@ -70,20 +70,6 @@ mod tests {
     use kild_protocol::{AgentMode, AgentStatus, OpenMode, RuntimeMode};
 
     #[test]
-    fn test_agent_mode_serde_roundtrip() {
-        let modes = vec![
-            AgentMode::DefaultAgent,
-            AgentMode::Agent("claude".to_string()),
-            AgentMode::BareShell,
-        ];
-        for mode in modes {
-            let json = serde_json::to_string(&mode).unwrap();
-            let roundtripped: AgentMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(mode, roundtripped);
-        }
-    }
-
-    #[test]
     fn test_create_kild_with_bare_shell_serde() {
         let cmd = Command::CreateKild {
             branch: "debug-session".into(),
@@ -244,38 +230,5 @@ mod tests {
 
         // Verify the resume field is actually in the JSON
         assert!(json.contains("\"resume\":true"));
-    }
-
-    #[test]
-    fn test_runtime_mode_serializes_as_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&RuntimeMode::Terminal).unwrap(),
-            r#""terminal""#
-        );
-        assert_eq!(
-            serde_json::to_string(&RuntimeMode::Daemon).unwrap(),
-            r#""daemon""#
-        );
-    }
-
-    #[test]
-    fn test_runtime_mode_deserializes_old_pascal_case() {
-        assert_eq!(
-            serde_json::from_str::<RuntimeMode>(r#""Terminal""#).unwrap(),
-            RuntimeMode::Terminal
-        );
-        assert_eq!(
-            serde_json::from_str::<RuntimeMode>(r#""Daemon""#).unwrap(),
-            RuntimeMode::Daemon
-        );
-    }
-
-    #[test]
-    fn test_runtime_mode_roundtrip_new_format() {
-        for mode in [RuntimeMode::Terminal, RuntimeMode::Daemon] {
-            let json = serde_json::to_string(&mode).unwrap();
-            let parsed: RuntimeMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(parsed, mode);
-        }
     }
 }

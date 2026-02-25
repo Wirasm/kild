@@ -201,9 +201,9 @@ pub fn open_session(
                 })?;
                 (agent, command)
             }
-            _ => {
+            other => {
                 return Err(SessionError::ConfigError {
-                    message: "Unsupported open mode".to_string(),
+                    message: format!("Unsupported open mode: {:?}", other),
                 });
             }
         };
