@@ -3,16 +3,14 @@ use tracing::{debug, error, info, warn};
 use crate::agents;
 use crate::git;
 use crate::sessions::{errors::SessionError, persistence, ports, types::*, validation};
-use crate::terminal;
 use kild_config::{Config, KildConfig};
 use kild_protocol::{AgentMode, RuntimeMode};
 
 use super::daemon_helpers::{
-    build_daemon_create_request, compute_spawn_id, deliver_initial_prompt, ensure_shim_binary,
-    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
-    spawn_and_save_attach_window,
+    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt, ensure_shim_binary,
+    spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
-use super::{dropbox, fleet};
+use super::dropbox;
 
 pub fn create_session(
     request: CreateSessionRequest,
@@ -231,77 +229,29 @@ pub fn create_session(
     let spawn_id = compute_spawn_id(&session_id, 0);
     let now = chrono::Utc::now().to_rfc3339();
 
+    let spawn_params = AgentSpawnParams {
+        branch: &validated.name,
+        agent: &validated.agent,
+        agent_command: &validated.command,
+        worktree_path: &worktree.path,
+        session_id: &session_id,
+        spawn_id: &spawn_id,
+        task_list_id: task_list_id.as_deref(),
+        project_id: &project_id,
+        kild_config,
+    };
+
     let initial_agent = match request.runtime_mode {
-        RuntimeMode::Terminal => {
-            setup_codex_integration(&validated.agent);
-            setup_opencode_integration(&validated.agent, &worktree.path);
-            setup_claude_integration(&validated.agent);
-
-            // Terminal path: spawn in external terminal
-            // Wrap with `env` to strip nesting-detection vars and inject agent env.
-            let terminal_command = {
-                let mut env_prefix: Vec<(String, String)> = Vec::new();
-                if let Some(ref tlid) = task_list_id {
-                    env_prefix.extend(agents::resume::task_list_env_vars(&agent, tlid));
-                }
-                env_prefix.extend(agents::resume::codex_env_vars(&agent, &validated.name));
-                env_prefix.extend(agents::resume::claude_env_vars(&agent, &validated.name));
-                super::env_cleanup::build_env_command(&env_prefix, &validated.command)
-            };
-            debug!(
-                event = "core.session.terminal_command_constructed",
-                command = %terminal_command,
-            );
-            let spawn_result = terminal::handler::spawn_terminal(
-                &worktree.path,
-                &terminal_command,
-                kild_config,
-                Some(&spawn_id),
-                Some(base_config.kild_dir()),
-            )
-            .map_err(|e| SessionError::TerminalError { source: e })?;
-
-            let command = if spawn_result.command_executed.trim().is_empty() {
-                format!("{} (command not captured)", validated.agent)
-            } else {
-                spawn_result.command_executed.clone()
-            };
-            AgentProcess::new(
-                validated.agent.clone(),
-                spawn_id,
-                spawn_result.process_id,
-                spawn_result.process_name.clone(),
-                spawn_result.process_start_time,
-                Some(spawn_result.terminal_type.clone()),
-                spawn_result.terminal_window_id.clone(),
-                command,
-                now.clone(),
-                None,
-            )?
-        }
+        RuntimeMode::Terminal => spawn_terminal_agent(&spawn_params)?,
         RuntimeMode::Daemon => {
-            // New path: request daemon to create PTY session.
-            // The daemon is a pure PTY manager — it spawns a command in a
-            // working directory. Worktree creation and session persistence
-            // are handled here in kild-core.
-
-            // Auto-start daemon if not running (config.daemon.auto_start, default: true)
-            crate::daemon::ensure_daemon_running(kild_config)?;
-
-            // Ensure the tmux shim binary is installed at ~/.kild/bin/tmux
+            // Create-only: ensure tmux shim binary is installed at ~/.kild/bin/tmux
             if let Err(msg) = ensure_shim_binary() {
                 warn!(event = "core.session.shim_binary_failed", error = %msg);
                 eprintln!("Warning: {}", msg);
                 eprintln!("Agent teams will not work in this session.");
             }
 
-            setup_codex_integration(&validated.agent);
-            setup_opencode_integration(&validated.agent, &worktree.path);
-            setup_claude_integration(&validated.agent);
-            fleet::ensure_fleet_member(&validated.name, &worktree.path, &validated.agent);
-            dropbox::ensure_dropbox(&project_id, &validated.name, &validated.agent);
-
-            // Pre-emptive cleanup: remove stale daemon session if previous destroy failed.
+            // Create-only: pre-emptive cleanup of stale daemon session from previous destroy failure.
             // Daemon-not-running and session-not-found are expected (normal case).
             match crate::daemon::client::destroy_daemon_session(&spawn_id, true) {
                 Ok(()) => {
@@ -319,101 +269,11 @@ pub fn create_session(
                 }
             }
 
-            let fleet_command = match fleet::fleet_agent_flags(&validated.name, &validated.agent) {
-                Some(flags) => format!("{} {}", validated.command, flags),
-                None => validated.command.clone(),
-            };
-            let mut params = build_daemon_create_request(
-                &fleet_command,
-                &validated.agent,
-                &session_id,
-                task_list_id.as_deref(),
-                &validated.name,
-            )?;
-            dropbox::inject_dropbox_env_vars(
-                &mut params.env_vars,
-                &project_id,
-                &validated.name,
-                &validated.agent,
-            );
+            let agent_process = spawn_daemon_agent(&spawn_params)?;
 
-            let daemon_request = crate::daemon::client::DaemonCreateRequest {
-                request_id: &spawn_id,
-                session_id: &spawn_id,
-                working_directory: &worktree.path,
-                command: &params.cmd,
-                args: &params.cmd_args,
-                env_vars: &params.env_vars,
-                rows: 24,
-                cols: 80,
-                use_login_shell: params.use_login_shell,
-            };
-            let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
-                .map_err(|e| SessionError::DaemonError {
-                    message: e.to_string(),
-                })?;
-
-            // Early exit detection: poll with exponential backoff until Running or Stopped.
-            // Fast-failing processes (bad resume session, missing binary, env issues)
-            // typically exit within 50ms of spawn. Exit early on Running confirmation.
-            // Worst-case window: 350ms (50+100+200) before falling through with None (assume alive).
-            let maybe_early_exit: Option<Option<i32>> = {
-                let mut result = None;
-                for delay_ms in [50u64, 100, 200] {
-                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                    match crate::daemon::client::get_session_info(&daemon_result.daemon_session_id)
-                    {
-                        Ok(Some((kild_protocol::SessionStatus::Stopped, exit_code))) => {
-                            result = Some(exit_code);
-                            break;
-                        }
-                        Ok(Some((kild_protocol::SessionStatus::Running, _))) => break, // confirmed alive
-                        _ => {} // Creating or IPC error — keep polling
-                    }
-                }
-                result
-            };
-
-            if let Some(exit_code) = maybe_early_exit {
-                let scrollback_tail =
-                    crate::daemon::client::read_scrollback(&daemon_result.daemon_session_id)
-                        .inspect_err(|e| {
-                            debug!(
-                                event = "core.session.scrollback_read_failed",
-                                daemon_session_id = daemon_result.daemon_session_id,
-                                error = %e,
-                            );
-                        })
-                        .ok()
-                        .flatten()
-                        .map(|bytes| {
-                            let text = String::from_utf8_lossy(&bytes);
-                            let lines: Vec<&str> = text.lines().collect();
-                            let start = lines.len().saturating_sub(20);
-                            lines[start..].join("\n")
-                        })
-                        .unwrap_or_default();
-
-                if let Err(e) = crate::daemon::client::destroy_daemon_session(
-                    &daemon_result.daemon_session_id,
-                    true,
-                ) {
-                    warn!(
-                        event = "core.session.create_daemon_cleanup_failed",
-                        daemon_session_id = %daemon_result.daemon_session_id,
-                        error = %e,
-                    );
-                }
-
-                return Err(SessionError::DaemonPtyExitedEarly {
-                    exit_code,
-                    scrollback_tail,
-                });
-            }
-
-            // Initialize tmux shim state directory
-            if let Err(e) =
-                super::shim_init::init_pane_registry(&session_id, &daemon_result.daemon_session_id)
+            // Create-only: initialize tmux shim state directory
+            if let Some(dsid) = agent_process.daemon_session_id()
+                && let Err(e) = super::shim_init::init_pane_registry(&session_id, dsid)
             {
                 error!(
                     event = "core.session.shim_init_failed",
@@ -424,18 +284,7 @@ pub fn create_session(
                 eprintln!("Agent teams will not work in this session.");
             }
 
-            AgentProcess::new(
-                validated.agent.clone(),
-                spawn_id,
-                None,
-                None,
-                None,
-                None,
-                None,
-                validated.command.clone(),
-                now.clone(),
-                Some(daemon_result.daemon_session_id),
-            )?
+            agent_process
         }
     };
 

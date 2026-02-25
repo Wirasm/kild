@@ -4,6 +4,7 @@ pub mod complete;
 pub mod create;
 pub mod daemon_helpers;
 mod daemon_request;
+mod daemon_spawn;
 pub mod destroy;
 pub mod dropbox;
 pub mod env_cleanup;
