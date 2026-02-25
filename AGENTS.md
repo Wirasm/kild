@@ -271,7 +271,7 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 - `main.rs` - Entry point, file-based logging controlled by KILD_SHIM_LOG env var
 - `errors.rs` - ShimError type
 
-**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`daemon_helpers.rs` for sessions with `handler.rs` as re-export facade, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim is a flat CLI crate with per-module files (no nested mod structure).
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types.rs`, `mod.rs`. Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`shim_setup.rs`/`attach.rs`/`daemon_request.rs` for sessions with `handler.rs` as re-export facade, `integrations/` subdirectory for claude.rs/codex.rs/opencode.rs hook + settings integration, `manager.rs`/`persistence.rs` for projects). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim is a flat CLI crate with per-module files (no nested mod structure).
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
@@ -501,10 +501,10 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 
 **Integration points in kild-core:**
 
-- `daemon_helpers.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
-- `daemon_helpers.rs:ensure_codex_notify_hook()` - Installs `~/.kild/hooks/codex-notify` for Codex CLI integration (idempotent, best-effort)
-- `daemon_helpers.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
-- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim and Codex env vars into daemon PTY requests
+- `shim_setup.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
+- `integrations/codex.rs:ensure_codex_notify_hook()` - Installs `~/.kild/hooks/codex-notify` for Codex CLI integration (idempotent, best-effort)
+- `integrations/codex.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
+- `daemon_request.rs:build_daemon_create_request()` - Injects shim and Codex env vars into daemon PTY requests
 - `create.rs:create_session()` - Initializes shim state directory, `panes.json`, and Codex notify hook for daemon sessions
 - `open.rs:open_session()` - Ensures Codex notify hook when opening Codex sessions
 - `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, and cleans up task lists at `~/.claude/tasks/<task_list_id>/`

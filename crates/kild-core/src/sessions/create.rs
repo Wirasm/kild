@@ -323,7 +323,7 @@ pub fn create_session(
                 Some(flags) => format!("{} {}", validated.command, flags),
                 None => validated.command.clone(),
             };
-            let (cmd, cmd_args, mut env_vars, use_login_shell) = build_daemon_create_request(
+            let mut params = build_daemon_create_request(
                 &fleet_command,
                 &validated.agent,
                 &session_id,
@@ -331,7 +331,7 @@ pub fn create_session(
                 &validated.name,
             )?;
             dropbox::inject_dropbox_env_vars(
-                &mut env_vars,
+                &mut params.env_vars,
                 &project_id,
                 &validated.name,
                 &validated.agent,
@@ -341,12 +341,12 @@ pub fn create_session(
                 request_id: &spawn_id,
                 session_id: &spawn_id,
                 working_directory: &worktree.path,
-                command: &cmd,
-                args: &cmd_args,
-                env_vars: &env_vars,
+                command: &params.cmd,
+                args: &params.cmd_args,
+                env_vars: &params.env_vars,
                 rows: 24,
                 cols: 80,
-                use_login_shell,
+                use_login_shell: params.use_login_shell,
             };
             let daemon_result = crate::daemon::client::create_pty_session(&daemon_request)
                 .map_err(|e| SessionError::DaemonError {

@@ -226,7 +226,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `commands/` - Command implementations (assert.rs, diff.rs, elements.rs, interact.rs, list.rs, screenshot.rs, window_resolution.rs)
 - `main.rs` - CLI entry point
 
-**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types/`, `mod.rs`. Core types and submodules may be organized as directories (e.g., `sessions/types/` contains agent_process.rs, request.rs, safety.rs, session.rs, status.rs, tests.rs; `sessions/persistence/` contains patching.rs, session_files.rs, sidecar.rs, tests.rs). Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`daemon_helpers.rs` for sessions with `handler.rs` as re-export facade). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim, kild (CLI), and kild-peek (CLI) use focused modules organized by domain (parser/, app/, commands/).
+**Module pattern:** Each domain in kild-core starts with `errors.rs`, `types/`, `mod.rs`. Core types and submodules may be organized as directories (e.g., `sessions/types/` contains agent_process.rs, request.rs, safety.rs, session.rs, status.rs, tests.rs; `sessions/persistence/` contains patching.rs, session_files.rs, sidecar.rs, tests.rs; `sessions/integrations/` contains claude.rs, codex.rs, opencode.rs, mod.rs for agent hook + settings integration). Additional files vary by domain (e.g., `create.rs`/`open.rs`/`stop.rs`/`list.rs`/`destroy.rs`/`complete.rs`/`agent_status.rs`/`shim_setup.rs`/`attach.rs`/`daemon_request.rs` for sessions with `handler.rs` as re-export facade). kild-daemon uses a flatter structure with top-level errors/types and module-specific implementation files. kild-tmux-shim, kild (CLI), and kild-peek (CLI) use focused modules organized by domain (parser/, app/, commands/).
 
 **CLI interaction:** Commands delegate directly to `kild-core` handlers. No business logic in CLI layer.
 
@@ -339,12 +339,12 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 
 **Integration points in kild-core:**
 
-- `daemon_helpers.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
-- `daemon_helpers.rs:ensure_codex_notify_hook()` - Installs `~/.kild/hooks/codex-notify` for Codex CLI integration (idempotent, best-effort)
-- `daemon_helpers.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
-- `daemon_helpers.rs:ensure_claude_status_hook()` - Installs `~/.kild/hooks/claude-status` for Claude Code integration (idempotent, best-effort)
-- `daemon_helpers.rs:ensure_claude_settings()` - Patches `~/.claude/settings.json` with hook entries (respects existing config, best-effort)
-- `daemon_helpers.rs:build_daemon_create_request()` - Injects shim, Codex, Claude Code env vars, and fleet agent flags into daemon PTY requests
+- `shim_setup.rs:ensure_shim_binary()` - Symlinks shim as `~/.kild/bin/tmux` (best-effort, warns on failure)
+- `integrations/codex.rs:ensure_codex_notify_hook()` - Installs `~/.kild/hooks/codex-notify` for Codex CLI integration (idempotent, best-effort)
+- `integrations/codex.rs:ensure_codex_config()` - Patches `~/.codex/config.toml` with notify hook (respects existing config, best-effort)
+- `integrations/claude.rs:ensure_claude_status_hook()` - Installs `~/.kild/hooks/claude-status` for Claude Code integration (idempotent, best-effort)
+- `integrations/claude.rs:ensure_claude_settings()` - Patches `~/.claude/settings.json` with hook entries (respects existing config, best-effort)
+- `daemon_request.rs:build_daemon_create_request()` - Injects shim, Codex, Claude Code env vars, and fleet agent flags into daemon PTY requests
 - `create.rs:create_session()` - Initializes shim state directory, `panes.json`, agent-specific hooks, fleet membership, and dropbox directory for daemon sessions
 - `open.rs:open_session()` - Ensures agent-specific hooks, fleet membership, and dropbox directory when opening sessions
 - `destroy.rs:destroy_session()` - Destroys child shim PTYs and UI-created daemon sessions via daemon IPC, removes `~/.kild/shim/<session>/`, cleans up task lists at `~/.claude/tasks/<task_list_id>/`, and removes fleet dropbox at `~/.kild/fleet/<project_id>/<branch>/`
