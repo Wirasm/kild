@@ -164,14 +164,15 @@ fn handle_stop_all() -> Result<(), Box<dyn std::error::Error>> {
     // Report already-stopped sessions
     if !already_stopped.is_empty() {
         println!(
-            "{} already stopped: {}",
-            color::muted(&format_count(already_stopped.len())),
-            already_stopped
-                .iter()
-                .map(|s| s.branch.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "{}",
+            color::muted(&format!(
+                "Already stopped {}:",
+                format_count(already_stopped.len())
+            ))
         );
+        for session in &already_stopped {
+            println!("  {}", color::ice(&session.branch));
+        }
     }
 
     info!(
