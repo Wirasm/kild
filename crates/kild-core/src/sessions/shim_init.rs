@@ -4,6 +4,13 @@ use kild_paths::KildPaths;
 ///
 /// Creates `~/.kild/shim/<session_id>/panes.json` with the leader pane
 /// registered as `%0`. Idempotent: overwrites existing state.
+///
+/// # Schema contract
+///
+/// The JSON written here must stay in sync with `PaneRegistry` in
+/// `kild-tmux-shim/src/state.rs`. A parallel `state::init_registry()` exists
+/// there but cannot be called from kild-core due to the crate dependency
+/// direction. If the registry schema changes, update both.
 pub(super) fn init_pane_registry(session_id: &str, daemon_session_id: &str) -> Result<(), String> {
     let paths = KildPaths::resolve().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(paths.shim_session_dir(session_id))
