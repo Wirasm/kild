@@ -298,7 +298,16 @@ fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<PrInfo> {
         "MERGED" => PrState::Merged,
         "CLOSED" => PrState::Closed,
         "OPEN" if is_draft => PrState::Draft,
-        _ => PrState::Open,
+        "OPEN" => PrState::Open,
+        unknown => {
+            warn!(
+                event = "core.forge.pr_state_unknown",
+                branch = branch,
+                state = unknown,
+                "Unknown PR state from gh CLI — treating as Open"
+            );
+            PrState::Open
+        }
     };
 
     let (ci_status, ci_summary) = parse_ci_status(&value);
