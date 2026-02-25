@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use base64::Engine;
 use kild_paths::KildPaths;
-use kild_protocol::{ClientMessage, DaemonMessage, IpcConnection, SessionId};
+use kild_protocol::{ClientMessage, DaemonMessage, IpcConnection, SessionId, SessionStatus};
 use tracing::{debug, warn};
 
 use crate::errors::ShimError;
@@ -217,6 +217,35 @@ pub fn read_scrollback(session_id: &str) -> Result<Vec<u8>, ShimError> {
                 error = %e,
             );
             Err(e.into())
+        }
+    }
+}
+
+/// Query session status and PID from the daemon.
+///
+/// Returns `(status, pty_pid, exit_code)`. On failure (daemon down, session not found),
+/// returns `(Stopped, None, None)` as a safe default — a missing session is effectively dead.
+pub fn get_session_status(session_id: &str) -> (SessionStatus, Option<u32>, Option<i32>) {
+    let request = ClientMessage::GetSession {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: SessionId::new(session_id),
+    };
+
+    let conn = match get_or_connect() {
+        Ok(c) => c,
+        Err(_) => return (SessionStatus::Stopped, None, None),
+    };
+
+    let mut conn = conn;
+    match conn.send(&request) {
+        Ok(DaemonMessage::SessionInfo { session, .. }) => {
+            let result = (session.status, session.pty_pid, session.exit_code);
+            return_conn(conn);
+            result
+        }
+        _ => {
+            // Session not found or error — treat as dead
+            (SessionStatus::Stopped, None, None)
         }
     }
 }

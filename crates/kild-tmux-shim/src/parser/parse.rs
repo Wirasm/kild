@@ -65,6 +65,7 @@ fn parse_split_window<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError
     let mut size = None;
     let mut print_info = false;
     let mut format = None;
+    let mut command = Vec::new();
     let mut i = 0;
 
     while i < args.len() {
@@ -75,6 +76,17 @@ fn parse_split_window<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError
             "-l" => size = Some(take_value(args, &mut i)?),
             "-P" => print_info = true,
             "-F" => format = Some(take_value(args, &mut i)?),
+            "-d" => {} // detached — no-op in shim (all panes are "detached")
+            "--" => {
+                // Everything after `--` is the shell command
+                command = args[i + 1..].to_vec();
+                break;
+            }
+            arg if !arg.starts_with('-') => {
+                // First non-flag arg starts the shell command (all remaining args are part of it)
+                command = args[i..].to_vec();
+                break;
+            }
             _ => {}
         }
         i += 1;
@@ -86,6 +98,7 @@ fn parse_split_window<'a>(args: &[&'a str]) -> Result<TmuxCommand<'a>, ShimError
         size,
         print_info,
         format,
+        command,
     }))
 }
 

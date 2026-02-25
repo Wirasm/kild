@@ -325,7 +325,9 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 5. Shim creates new daemon PTYs for teammates via IPC, manages pane state locally in `~/.kild/shim/<session>/`
 6. `kild destroy` automatically cleans up all child shim PTYs
 
-**Supported tmux commands:** `split-window` (creates daemon PTYs), `send-keys` (writes to PTY stdin with key name translation), `kill-pane` (destroys PTYs), `display-message` (expands format strings), `list-panes`, `select-pane`, `set-option`, `select-layout` (no-op), `resize-pane` (no-op), `has-session`, `new-session`, `new-window`, `list-windows`, `break-pane`, `join-pane`, `capture-pane` (reads PTY scrollback with `-p` for print, `-S` for start line).
+**Supported tmux commands:** `split-window` (creates daemon PTYs; supports shell-command after `--` or as trailing positional args — when provided, the command runs directly in the PTY and `#{pane_dead}` becomes `1` on exit), `send-keys` (writes to PTY stdin with key name translation), `kill-pane` (destroys PTYs), `display-message` (expands format strings), `list-panes`, `select-pane`, `set-option`, `select-layout` (no-op), `resize-pane` (no-op), `has-session`, `new-session`, `new-window`, `list-windows`, `break-pane`, `join-pane`, `capture-pane` (reads PTY scrollback with `-p` for print, `-S` for start line).
+
+**Format variables:** `#{pane_id}`, `#{session_name}`, `#{window_index}`, `#{window_name}`, `#{pane_title}`, `#{pane_dead}` (queries daemon — `1` if process exited, `0` if running), `#{pane_pid}` (queries daemon — PID of pane process), `#{pane_dead_status}` (queries daemon — exit code of dead pane).
 
 **State management:** File-based pane registry at `~/.kild/shim/<session_id>/panes.json` with flock-based concurrency control. Each pane maps to a daemon session ID.
 

@@ -27,6 +27,9 @@ pub struct SplitWindowArgs<'a> {
     pub size: Option<&'a str>,
     pub print_info: bool,
     pub format: Option<&'a str>,
+    /// Shell command to execute in the new pane (after `--` or as trailing positional args).
+    /// When empty, a login shell (`$SHELL`) is spawned instead.
+    pub command: Vec<&'a str>,
 }
 
 #[derive(Debug)]

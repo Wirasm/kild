@@ -32,6 +32,7 @@ fn test_split_window_defaults() {
         assert!(sw.size.is_none());
         assert!(!sw.print_info);
         assert!(sw.format.is_none());
+        assert!(sw.command.is_empty());
     } else {
         panic!("expected SplitWindow");
     }
@@ -258,6 +259,110 @@ fn test_split_window_vertical_explicit() {
     let cmd = parse(&a).unwrap();
     if let TmuxCommand::SplitWindow(sw) = cmd {
         assert!(!sw.horizontal);
+    } else {
+        panic!("expected SplitWindow");
+    }
+}
+
+// --- split-window with shell command ---
+
+#[test]
+fn test_split_window_command_after_double_dash() {
+    let a: Vec<String> = vec![
+        "split-window",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "--",
+        "/usr/local/bin/claude",
+        "--agent-type",
+        "researcher",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    let cmd = parse(&a).unwrap();
+    if let TmuxCommand::SplitWindow(sw) = cmd {
+        assert!(sw.print_info);
+        assert_eq!(sw.format, Some("#{pane_id}"));
+        assert_eq!(
+            sw.command,
+            vec!["/usr/local/bin/claude", "--agent-type", "researcher"]
+        );
+    } else {
+        panic!("expected SplitWindow");
+    }
+}
+
+#[test]
+fn test_split_window_command_as_positional() {
+    let a: Vec<String> = vec!["split-window", "-d", "-P", "/bin/sh", "-c", "echo hello"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let cmd = parse(&a).unwrap();
+    if let TmuxCommand::SplitWindow(sw) = cmd {
+        assert!(sw.print_info);
+        assert_eq!(sw.command, vec!["/bin/sh", "-c", "echo hello"]);
+    } else {
+        panic!("expected SplitWindow");
+    }
+}
+
+#[test]
+fn test_split_window_detached_flag() {
+    let a = args("split-window -d -P");
+    let cmd = parse(&a).unwrap();
+    if let TmuxCommand::SplitWindow(sw) = cmd {
+        assert!(sw.print_info);
+        assert!(sw.command.is_empty());
+    } else {
+        panic!("expected SplitWindow");
+    }
+}
+
+#[test]
+fn test_split_window_command_with_all_flags() {
+    let a: Vec<String> = vec![
+        "split-window",
+        "-d",
+        "-h",
+        "-t",
+        "%0",
+        "-l",
+        "50%",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "--",
+        "node",
+        "script.js",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    let cmd = parse(&a).unwrap();
+    if let TmuxCommand::SplitWindow(sw) = cmd {
+        assert!(sw.horizontal);
+        assert_eq!(sw.target, Some("%0"));
+        assert_eq!(sw.size, Some("50%"));
+        assert!(sw.print_info);
+        assert_eq!(sw.format, Some("#{pane_id}"));
+        assert_eq!(sw.command, vec!["node", "script.js"]);
+    } else {
+        panic!("expected SplitWindow");
+    }
+}
+
+#[test]
+fn test_split_window_empty_command_after_double_dash() {
+    let a: Vec<String> = vec!["split-window", "--"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let cmd = parse(&a).unwrap();
+    if let TmuxCommand::SplitWindow(sw) = cmd {
+        assert!(sw.command.is_empty());
     } else {
         panic!("expected SplitWindow");
     }
