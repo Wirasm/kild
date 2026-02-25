@@ -35,10 +35,8 @@ pub(crate) fn handle_inject_command(
 
     let mut session = helpers::require_session(branch, "cli.inject_failed")?;
 
-    // Sync daemon-managed sessions: if the daemon is unreachable (crash, socket gone),
-    // update status to Stopped so the check below blocks the inject.
-    // Structured daemon errors (e.g., unexpected error code) are not treated as
-    // unreachable — the "session_not_active" guard below still catches those via status.
+    // If the daemon crashed or the socket is gone, update status to Stopped
+    // so the active-session check below blocks the inject with a clear message.
     kild_core::session_ops::sync_daemon_session_status(&mut session);
 
     // Determine inject method: --inbox forces inbox protocol; otherwise use agent default.

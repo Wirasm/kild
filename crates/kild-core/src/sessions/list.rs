@@ -69,18 +69,7 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
     let status = match crate::daemon::client::get_session_status(&daemon_sid) {
         Ok(s) => s,
         Err(e) => {
-            if is_daemon_unreachable(&e) {
-                // Connection failed, broken pipe, empty response, etc. — the daemon
-                // is not running or died mid-request. Treat as daemon down → sync to Stopped.
-                warn!(
-                    event = "core.session.daemon_status_sync_unreachable",
-                    session_id = %session.id,
-                    daemon_session_id = daemon_sid,
-                    error = %e,
-                    "Daemon unreachable — marking session as stopped"
-                );
-                None // Fall through to mark as Stopped below
-            } else {
+            if !is_daemon_unreachable(&e) {
                 // Daemon sent a structured error (DaemonError) — it's alive but
                 // returned something unexpected. Don't sync to avoid false positives.
                 warn!(
@@ -92,6 +81,16 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
                 );
                 return false;
             }
+            // Connection failed, broken pipe, empty response, etc. — daemon is
+            // not running or died mid-request. Treat as daemon down → sync to Stopped.
+            warn!(
+                event = "core.session.daemon_status_sync_unreachable",
+                session_id = %session.id,
+                daemon_session_id = daemon_sid,
+                error = %e,
+                "Daemon unreachable — marking session as stopped"
+            );
+            None
         }
     };
 
@@ -148,9 +147,8 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
 /// a dying daemon) all indicate the daemon process is not functional. Only
 /// `DaemonError` (a structured error response) proves the daemon is alive.
 ///
-/// Note: `NotRunning` is classified as unreachable for defensive completeness,
-/// but in practice `get_session_status()` absorbs `NotRunning` into `Ok(None)`
-/// before it reaches the error handler in `sync_daemon_session_status`.
+/// Note: `get_session_status()` converts `NotRunning` into `Ok(None)` before
+/// returning, so `NotRunning` cannot reach this helper in practice.
 fn is_daemon_unreachable(e: &DaemonClientError) -> bool {
     !matches!(e, DaemonClientError::DaemonError { .. })
 }
@@ -306,9 +304,8 @@ mod tests {
 
     #[test]
     fn test_is_daemon_unreachable_not_running() {
-        // Note: in practice, get_session_status() absorbs NotRunning into Ok(None)
-        // before it reaches is_daemon_unreachable. This test exercises the helper
-        // in isolation for defensive completeness.
+        // NotRunning cannot reach is_daemon_unreachable in practice (absorbed by
+        // get_session_status into Ok(None)), but the helper classifies it correctly.
         let err = DaemonClientError::NotRunning {
             path: "/tmp/test.sock".to_string(),
         };
