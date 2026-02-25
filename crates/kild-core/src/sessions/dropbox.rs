@@ -3,8 +3,8 @@
 //! The dropbox is a per-session directory at `~/.kild/fleet/<project_id>/<branch>/`
 //! (where `<branch>` has `/` replaced with `_` for filesystem safety) containing
 //! fleet protocol instructions and task files (`task-id`, `task.md`, `history.jsonl`).
-//! Created only for fleet-capable agents (claude) when fleet mode is active —
-//! no-op for normal sessions and non-claude agents.
+//! Created for all real AI agents (claude, codex, gemini, kiro, amp, opencode) when
+//! fleet mode is active — no-op for bare shell sessions.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -241,9 +241,9 @@ impl PrimeContext {
 ///
 /// Idempotent: creates directory if missing, overwrites `protocol.md` on every call
 /// (picks up template changes). Best-effort: warns on failure, never blocks session
-/// creation/opening. No-op for non-fleet-capable agents (mirrors `ensure_fleet_member`).
+/// creation/opening. No-op for non-agent sessions (shell) or when fleet is not active.
 pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
-    if !fleet::is_fleet_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
+    if !fleet::is_dropbox_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
         return;
     }
 
@@ -280,7 +280,7 @@ pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
     }
 
     let protocol_path = dropbox_dir.join("protocol.md");
-    let protocol_content = generate_protocol(&dropbox_dir);
+    let protocol_content = generate_protocol(branch, &dropbox_dir);
 
     if let Err(e) = std::fs::write(&protocol_path, protocol_content) {
         warn!(
@@ -315,10 +315,9 @@ pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
 /// (e.g. create --initial-prompt racing with inject) from producing
 /// duplicate task IDs.
 ///
-/// Note: `write_task` does NOT check `is_fleet_capable_agent` — it relies on
+/// Note: `write_task` does NOT check `is_dropbox_capable_agent` — it relies on
 /// `ensure_dropbox` (which IS agent-guarded) to control which sessions get a
-/// dropbox directory. If the directory exists, the task is written. This is
-/// intentional: Phase 3 may extend dropbox to non-Claude agents.
+/// dropbox directory. If the directory exists, the task is written.
 pub fn write_task(
     project_id: &str,
     branch: &str,
@@ -481,7 +480,7 @@ pub fn write_task(
 
 /// Inject `KILD_DROPBOX` (and `KILD_FLEET_DIR` for brain) into daemon env vars.
 ///
-/// No-op for non-fleet-capable agents or when fleet mode is not active.
+/// No-op for non-agent sessions (shell) or when fleet mode is not active.
 /// Best-effort: warns and skips injection if path resolution fails.
 /// Called at the call site after `build_daemon_create_request` returns,
 /// to avoid modifying that function's signature.
@@ -491,7 +490,7 @@ pub(super) fn inject_dropbox_env_vars(
     branch: &str,
     agent: &str,
 ) {
-    if !fleet::is_fleet_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
+    if !fleet::is_dropbox_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
         return;
     }
 
@@ -801,12 +800,63 @@ pub(super) fn cleanup_dropbox(project_id: &str, branch: &str) {
 }
 
 /// Generate protocol.md content with baked-in absolute paths.
-fn generate_protocol(dropbox_dir: &std::path::Path) -> String {
+///
+/// Produces a brain-specific template when `branch` matches `BRAIN_BRANCH`,
+/// otherwise produces the standard worker template.
+fn generate_protocol(branch: &str, dropbox_dir: &std::path::Path) -> String {
     let dropbox = dropbox_dir.display();
     // NOTE: Raw string content is flush-left to avoid embedding leading whitespace.
     // This matches the pattern in daemon_helpers.rs for hook script generation.
-    format!(
-        r##"# KILD Fleet Protocol
+    if branch == fleet::BRAIN_BRANCH {
+        // Brain gets the fleet project dir (parent of its own dropbox).
+        let fleet_dir = match dropbox_dir.parent() {
+            Some(p) => p.display().to_string(),
+            None => {
+                warn!(
+                    event = "core.session.dropbox.brain_fleet_dir_missing",
+                    branch = branch,
+                    dropbox = %dropbox_dir.display(),
+                );
+                "$KILD_FLEET_DIR".to_string()
+            }
+        };
+        format!(
+            r##"# KILD Fleet Protocol — Brain
+
+You are the Honryū fleet supervisor. You manage workers by writing tasks to their dropboxes and reading their reports.
+
+## Directing Workers
+
+Worker dropboxes: {fleet_dir}/<worker-branch>/
+
+To assign a task:
+1. Use `kild inject <worker> "your task description"` to write the task
+   (this updates task.md, task-id, and history.jsonl atomically)
+2. The worker reads task.md and writes ack
+3. The worker executes and writes report.md
+4. Read report.md to get results
+
+## File Paths (per worker)
+
+- Task:   {fleet_dir}/<worker>/task.md
+- Ack:    {fleet_dir}/<worker>/ack
+- Report: {fleet_dir}/<worker>/report.md
+
+## Your Own Dropbox
+
+Your dropbox: {dropbox}
+
+## Rules
+
+- Use `kild inject` to assign tasks — do not write task.md directly
+- Check ack to confirm the worker has picked up the task
+- Read report.md to get results before assigning the next task
+- Do not modify worker ack or report.md — those are written by workers
+"##
+        )
+    } else {
+        format!(
+            r##"# KILD Fleet Protocol
 
 You are a worker in a KILD fleet managed by the Honryu brain supervisor.
 
@@ -834,7 +884,8 @@ On startup and after completing each task:
 - Always write report.md when done
 - Do not modify task.md — it is written by the brain
 "##
-    )
+        )
+    }
 }
 
 #[cfg(test)]
@@ -886,12 +937,14 @@ mod tests {
         }
     }
 
-    // --- generate_protocol ---
+    // --- generate_protocol (worker) ---
 
     #[test]
-    fn generate_protocol_contains_baked_absolute_paths() {
-        let content =
-            generate_protocol(std::path::Path::new("/home/user/.kild/fleet/abc/my-branch"));
+    fn generate_protocol_worker_contains_baked_absolute_paths() {
+        let content = generate_protocol(
+            "my-branch",
+            std::path::Path::new("/home/user/.kild/fleet/abc/my-branch"),
+        );
         assert!(content.contains("/home/user/.kild/fleet/abc/my-branch"));
         assert!(content.contains("/home/user/.kild/fleet/abc/my-branch/task.md"));
         assert!(content.contains("/home/user/.kild/fleet/abc/my-branch/ack"));
@@ -899,12 +952,68 @@ mod tests {
     }
 
     #[test]
-    fn generate_protocol_contains_instructions() {
-        let content = generate_protocol(std::path::Path::new("/tmp/dropbox"));
+    fn generate_protocol_worker_contains_instructions() {
+        let content = generate_protocol("my-branch", std::path::Path::new("/tmp/dropbox"));
         assert!(content.contains("KILD Fleet Protocol"));
+        assert!(content.contains("You are a worker"));
         assert!(content.contains("Read task.md"));
         assert!(content.contains("Write your results to report.md"));
         assert!(content.contains("Do not modify task.md"));
+    }
+
+    // --- generate_protocol (brain) ---
+
+    #[test]
+    fn generate_protocol_brain_contains_supervisor_instructions() {
+        let content = generate_protocol(
+            fleet::BRAIN_BRANCH,
+            std::path::Path::new("/home/user/.kild/fleet/abc/honryu"),
+        );
+        assert!(
+            content.contains("Fleet Protocol — Brain"),
+            "brain should get brain-specific header"
+        );
+        assert!(
+            content.contains("fleet supervisor"),
+            "brain should be addressed as supervisor"
+        );
+        assert!(
+            !content.contains("You are a worker"),
+            "brain must NOT get worker instructions"
+        );
+    }
+
+    #[test]
+    fn generate_protocol_brain_contains_fleet_dir_paths() {
+        let content = generate_protocol(
+            fleet::BRAIN_BRANCH,
+            std::path::Path::new("/home/user/.kild/fleet/abc/honryu"),
+        );
+        // Fleet dir is the parent of the brain's dropbox dir.
+        assert!(
+            content.contains("/home/user/.kild/fleet/abc/<worker-branch>/"),
+            "brain template should reference fleet dir for worker dropboxes"
+        );
+        assert!(
+            content.contains("/home/user/.kild/fleet/abc/<worker>/task.md"),
+            "brain template should show per-worker task.md path"
+        );
+        assert!(
+            content.contains("/home/user/.kild/fleet/abc/<worker>/report.md"),
+            "brain template should show per-worker report.md path"
+        );
+    }
+
+    #[test]
+    fn generate_protocol_brain_rules_are_supervisor_oriented() {
+        let content = generate_protocol(
+            fleet::BRAIN_BRANCH,
+            std::path::Path::new("/tmp/fleet/honryu"),
+        );
+        assert!(content.contains("kild inject"));
+        assert!(content.contains("Check ack"));
+        assert!(content.contains("Read report.md to get results"));
+        assert!(content.contains("Do not modify worker ack or report.md"));
     }
 
     // --- ensure_dropbox ---
@@ -932,6 +1041,25 @@ mod tests {
     }
 
     #[test]
+    fn ensure_dropbox_brain_gets_brain_template() {
+        with_env("brain_template", true, |_| {
+            ensure_dropbox("proj123", fleet::BRAIN_BRANCH, "claude");
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", fleet::BRAIN_BRANCH);
+            let content = std::fs::read_to_string(dropbox_dir.join("protocol.md")).unwrap();
+            assert!(
+                content.contains("fleet supervisor"),
+                "brain must get supervisor template"
+            );
+            assert!(
+                !content.contains("You are a worker"),
+                "brain must not get worker template"
+            );
+        });
+    }
+
+    #[test]
     fn ensure_dropbox_is_idempotent() {
         with_env("idempotent", true, |_| {
             ensure_dropbox("proj123", "my-branch", "claude");
@@ -944,15 +1072,33 @@ mod tests {
     }
 
     #[test]
-    fn ensure_dropbox_noop_for_non_claude_agent() {
+    fn ensure_dropbox_creates_for_non_claude_agent() {
         with_env("non_claude", true, |_| {
             ensure_dropbox("proj123", "my-branch", "codex");
 
             let paths = KildPaths::resolve().unwrap();
             let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
             assert!(
+                dropbox_dir.exists(),
+                "non-claude agent should get a dropbox"
+            );
+            assert!(
+                dropbox_dir.join("protocol.md").exists(),
+                "protocol.md should be created"
+            );
+        });
+    }
+
+    #[test]
+    fn ensure_dropbox_noop_for_shell_session() {
+        with_env("shell_noop", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "shell");
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            assert!(
                 !dropbox_dir.exists(),
-                "non-claude agent should not create dropbox"
+                "bare shell session should not create dropbox"
             );
         });
     }
@@ -1037,14 +1183,32 @@ mod tests {
     }
 
     #[test]
-    fn inject_env_vars_noop_for_non_claude_agent() {
+    fn inject_env_vars_works_for_non_claude_agent() {
         with_env("inject_non_claude", true, |_| {
             let mut env_vars: Vec<(String, String)> = vec![];
             inject_dropbox_env_vars(&mut env_vars, "proj123", "worker", "codex");
 
+            let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
+            assert!(
+                keys.contains(&"KILD_DROPBOX"),
+                "non-claude agent should get KILD_DROPBOX"
+            );
+            assert!(
+                !keys.contains(&"KILD_FLEET_DIR"),
+                "non-brain worker should NOT get KILD_FLEET_DIR"
+            );
+        });
+    }
+
+    #[test]
+    fn inject_env_vars_noop_for_shell_session() {
+        with_env("inject_shell", true, |_| {
+            let mut env_vars: Vec<(String, String)> = vec![];
+            inject_dropbox_env_vars(&mut env_vars, "proj123", "worker", "shell");
+
             assert!(
                 env_vars.is_empty(),
-                "non-claude agent should not get dropbox env vars"
+                "shell session should not get dropbox env vars"
             );
         });
     }

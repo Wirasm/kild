@@ -415,7 +415,7 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `kild inject <branch> "<text>"` routes via PTY stdin for non-claude agents; for claude sessions it writes to `~/.claude/teams/honryu/inboxes/<branch>.json` (Claude Code delivers it as a new user turn within ~1s). Use `--inbox` to force the inbox path.
 - `ensure_fleet_member()` in `fleet.rs` creates the inbox file and team config on every create/open (idempotent, best-effort)
 - `ensure_dropbox()` in `dropbox.rs` creates `~/.kild/fleet/<project_id>/<branch>/` with a `protocol.md` on every create/open (idempotent, best-effort). Directory is removed on destroy.
-- Non-claude agents and terminal sessions are unaffected
+- Bare shell sessions are unaffected — they have no agent to consume tasks. Non-claude agents participate in the dropbox protocol but do not receive Claude Code inbox/team flags.
 
 **Environment variables injected into fleet daemon sessions:**
 
