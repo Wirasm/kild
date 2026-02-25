@@ -493,20 +493,15 @@ pub fn open_session(
 
     // Update agent session ID for resume support.
     // Preserve the previous ID in history so the original conversation remains recoverable.
-    if let Some(sid) = new_agent_session_id {
-        if let Some(prev) = session.agent_session_id.take()
-            && prev != sid
-        {
-            warn!(
-                event = "core.session.agent_session_id_rotated",
-                branch = name,
-                previous_id = %prev,
-                new_id = %sid,
-                "Previous agent session ID moved to history — use --resume to continue an existing conversation"
-            );
-            session.agent_session_id_history.push(prev);
-        }
-        session.agent_session_id = Some(sid);
+    if let Some(sid) = new_agent_session_id
+        && session.rotate_agent_session_id(sid.clone())
+    {
+        warn!(
+            event = "core.session.agent_session_id_rotated",
+            branch = name,
+            new_id = %sid,
+            "Previous agent session ID moved to history — use --resume to continue an existing conversation"
+        );
     }
 
     // Update task list ID for task list persistence
@@ -1155,15 +1150,14 @@ mod tests {
     fn test_fresh_open_preserves_previous_session_id_in_history() {
         use std::fs;
 
-        let unique_id = format!(
-            "{}_{}",
+        let temp_dir = std::env::temp_dir().join(format!(
+            "kild_test_sid_history_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        );
-        let temp_dir = std::env::temp_dir().join(format!("kild_test_sid_history_{}", unique_id));
+        ));
         let _ = fs::remove_dir_all(&temp_dir);
         let sessions_dir = temp_dir.join("sessions");
         let worktree_dir = temp_dir.join("worktree");
@@ -1192,13 +1186,7 @@ mod tests {
             None,
         );
 
-        // Simulate what open_session does when overwriting agent_session_id
-        if let Some(prev) = session.agent_session_id.take()
-            && prev != new_sid
-        {
-            session.agent_session_id_history.push(prev);
-        }
-        session.agent_session_id = Some(new_sid.clone());
+        assert!(session.rotate_agent_session_id(new_sid.clone()));
 
         // Verify: new ID is active, old ID is in history
         assert_eq!(session.agent_session_id, Some(new_sid));
@@ -1228,14 +1216,7 @@ mod tests {
         );
         session.agent_session_id = Some(sid.clone());
 
-        // Simulate resume path: new_agent_session_id == existing (same session)
-        if let Some(prev) = session.agent_session_id.take()
-            && prev != sid
-        {
-            session.agent_session_id_history.push(prev);
-        }
-        session.agent_session_id = Some(sid);
-
+        assert!(!session.rotate_agent_session_id(sid));
         assert!(
             session.agent_session_id_history.is_empty(),
             "Resume with same ID must not add to history"
@@ -1255,14 +1236,8 @@ mod tests {
         );
         session.agent_session_id = Some(ids[0].clone());
 
-        // Simulate three successive fresh opens
         for new_sid in &ids[1..] {
-            if let Some(prev) = session.agent_session_id.take()
-                && prev != *new_sid
-            {
-                session.agent_session_id_history.push(prev);
-            }
-            session.agent_session_id = Some(new_sid.clone());
+            session.rotate_agent_session_id(new_sid.clone());
         }
 
         assert_eq!(session.agent_session_id, Some(ids[3].clone()));

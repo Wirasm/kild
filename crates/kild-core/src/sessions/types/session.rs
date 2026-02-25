@@ -198,6 +198,23 @@ impl Session {
         self.agents = agents;
     }
 
+    /// Rotate agent_session_id, preserving the previous ID in history.
+    ///
+    /// No-op on the history if the new ID is identical to the current one (resume path).
+    /// Returns `true` if the previous ID was different and moved to history.
+    pub fn rotate_agent_session_id(&mut self, new_id: String) -> bool {
+        let rotated = if let Some(prev) = self.agent_session_id.take()
+            && prev != new_id
+        {
+            self.agent_session_id_history.push(prev);
+            true
+        } else {
+            false
+        };
+        self.agent_session_id = Some(new_id);
+        rotated
+    }
+
     /// Create a minimal Session for testing purposes.
     #[cfg(test)]
     pub fn new_for_test(branch: impl Into<BranchName>, worktree_path: PathBuf) -> Self {

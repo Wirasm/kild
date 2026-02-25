@@ -510,12 +510,10 @@ pub(super) fn clear_idle_gate(project_id: &str, branch: &str) {
         }
     };
 
-    remove_idle_gate_file(
-        &paths
-            .fleet_dropbox_dir(project_id, branch)
-            .join(".idle_sent"),
-        branch,
-    );
+    let gate_path = paths
+        .fleet_dropbox_dir(project_id, branch)
+        .join(".idle_sent");
+    remove_idle_gate_file(&gate_path, branch);
 }
 
 /// Inject `KILD_DROPBOX` (and `KILD_FLEET_DIR` for brain) into daemon env vars.

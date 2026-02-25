@@ -23,7 +23,8 @@ pub(super) struct DaemonSpawnParams {
 /// Detection: scrollback must exceed 50 bytes AND stop growing for 500ms.
 /// Write order: text → 50ms pause → `\r` (same cadence as `kild inject`).
 /// Never blocks the caller beyond 20s. Never fails — logs and returns on any error.
-/// Returns `true` if the prompt text was successfully written to the PTY.
+/// Returns `true` if the prompt text bytes were written to the PTY.
+/// The subsequent Enter keystroke (`\r`) is best-effort and does not affect the return value.
 pub(super) fn deliver_initial_prompt(daemon_session_id: &str, prompt: &str) -> bool {
     let timeout = std::time::Duration::from_secs(20);
     let poll_interval = std::time::Duration::from_millis(200);
