@@ -56,7 +56,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
             Err(e) => {
                 error!(
                     event = "core.session.shim_registry_parse_failed",
-                    session_id = session_id,
+                    session_id = %session_id,
                     path = %panes_path.display(),
                     error = %e,
                 );
@@ -73,7 +73,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
         Err(e) => {
             error!(
                 event = "core.session.shim_registry_read_failed",
-                session_id = session_id,
+                session_id = %session_id,
                 path = %panes_path.display(),
                 error = %e,
             );
@@ -89,7 +89,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
     if let Err(e) = std::fs::remove_dir_all(&shim_dir) {
         error!(
             event = "core.session.shim_cleanup_failed",
-            session_id = session_id,
+            session_id = %session_id,
             path = %shim_dir.display(),
             error = %e,
         );
@@ -101,7 +101,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
     } else {
         info!(
             event = "core.session.shim_cleanup_completed",
-            session_id = session_id
+            session_id = %session_id
         );
     }
 }

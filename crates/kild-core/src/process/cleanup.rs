@@ -9,7 +9,7 @@ use crate::sessions::types::Session;
 /// Handles both multi-agent sessions (per-agent spawn ID PID files) and
 /// legacy sessions (session-level PID file). Failures are logged at debug
 /// level since PID file cleanup is best-effort.
-pub fn cleanup_session_pid_files(session: &Session, kild_dir: &Path, operation: &str) {
+pub(crate) fn cleanup_session_pid_files(session: &Session, kild_dir: &Path, operation: &str) {
     if !session.has_agents() {
         // Legacy session (pre-multi-agent) — attempt session-level PID file cleanup
         warn!(
