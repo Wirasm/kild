@@ -3,8 +3,8 @@
 //! The dropbox is a per-session directory at `~/.kild/fleet/<project_id>/<branch>/`
 //! (where `<branch>` has `/` replaced with `_` for filesystem safety) containing
 //! fleet protocol instructions and task files (`task-id`, `task.md`, `history.jsonl`).
-//! Created only for fleet-capable agents (claude) when fleet mode is active —
-//! no-op for normal sessions and non-claude agents.
+//! Created for all real AI agents (claude, codex, gemini, kiro, amp, opencode) when
+//! fleet mode is active — no-op for bare shell sessions.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -241,9 +241,9 @@ impl PrimeContext {
 ///
 /// Idempotent: creates directory if missing, overwrites `protocol.md` on every call
 /// (picks up template changes). Best-effort: warns on failure, never blocks session
-/// creation/opening. No-op for non-fleet-capable agents (mirrors `ensure_fleet_member`).
+/// creation/opening. No-op for non-agent sessions (shell) or when fleet is not active.
 pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
-    if !fleet::is_fleet_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
+    if !fleet::is_dropbox_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
         return;
     }
 
@@ -315,10 +315,9 @@ pub(super) fn ensure_dropbox(project_id: &str, branch: &str, agent: &str) {
 /// (e.g. create --initial-prompt racing with inject) from producing
 /// duplicate task IDs.
 ///
-/// Note: `write_task` does NOT check `is_fleet_capable_agent` — it relies on
+/// Note: `write_task` does NOT check `is_dropbox_capable_agent` — it relies on
 /// `ensure_dropbox` (which IS agent-guarded) to control which sessions get a
-/// dropbox directory. If the directory exists, the task is written. This is
-/// intentional: Phase 3 may extend dropbox to non-Claude agents.
+/// dropbox directory. If the directory exists, the task is written.
 pub fn write_task(
     project_id: &str,
     branch: &str,
@@ -458,7 +457,7 @@ pub fn write_task(
 
 /// Inject `KILD_DROPBOX` (and `KILD_FLEET_DIR` for brain) into daemon env vars.
 ///
-/// No-op for non-fleet-capable agents or when fleet mode is not active.
+/// No-op for non-agent sessions (shell) or when fleet mode is not active.
 /// Best-effort: warns and skips injection if path resolution fails.
 /// Called at the call site after `build_daemon_create_request` returns,
 /// to avoid modifying that function's signature.
@@ -468,7 +467,7 @@ pub(super) fn inject_dropbox_env_vars(
     branch: &str,
     agent: &str,
 ) {
-    if !fleet::is_fleet_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
+    if !fleet::is_dropbox_capable_agent(agent) || !fleet::fleet_mode_active(branch) {
         return;
     }
 
@@ -921,15 +920,33 @@ mod tests {
     }
 
     #[test]
-    fn ensure_dropbox_noop_for_non_claude_agent() {
+    fn ensure_dropbox_creates_for_non_claude_agent() {
         with_env("non_claude", true, |_| {
             ensure_dropbox("proj123", "my-branch", "codex");
 
             let paths = KildPaths::resolve().unwrap();
             let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
             assert!(
+                dropbox_dir.exists(),
+                "non-claude agent should get a dropbox"
+            );
+            assert!(
+                dropbox_dir.join("protocol.md").exists(),
+                "protocol.md should be created"
+            );
+        });
+    }
+
+    #[test]
+    fn ensure_dropbox_noop_for_shell_session() {
+        with_env("shell_noop", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "shell");
+
+            let paths = KildPaths::resolve().unwrap();
+            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
+            assert!(
                 !dropbox_dir.exists(),
-                "non-claude agent should not create dropbox"
+                "bare shell session should not create dropbox"
             );
         });
     }
@@ -1014,14 +1031,28 @@ mod tests {
     }
 
     #[test]
-    fn inject_env_vars_noop_for_non_claude_agent() {
+    fn inject_env_vars_works_for_non_claude_agent() {
         with_env("inject_non_claude", true, |_| {
             let mut env_vars: Vec<(String, String)> = vec![];
             inject_dropbox_env_vars(&mut env_vars, "proj123", "worker", "codex");
 
+            let keys: Vec<&str> = env_vars.iter().map(|(k, _)| k.as_str()).collect();
+            assert!(
+                keys.contains(&"KILD_DROPBOX"),
+                "non-claude agent should get KILD_DROPBOX"
+            );
+        });
+    }
+
+    #[test]
+    fn inject_env_vars_noop_for_shell_session() {
+        with_env("inject_shell", true, |_| {
+            let mut env_vars: Vec<(String, String)> = vec![];
+            inject_dropbox_env_vars(&mut env_vars, "proj123", "worker", "shell");
+
             assert!(
                 env_vars.is_empty(),
-                "non-claude agent should not get dropbox env vars"
+                "shell session should not get dropbox env vars"
             );
         });
     }

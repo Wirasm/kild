@@ -1,12 +1,16 @@
 /// Fleet mode — Honryū team setup for daemon sessions.
 ///
-/// When a daemon session is created or opened with the "claude" agent, fleet mode
-/// injects Claude Code team flags so the inbox poller activates. This allows
-/// `kild inject <branch>` to deliver messages via the inbox protocol.
+/// Two separate gates control fleet functionality:
+///
+/// - **Dropbox** (`is_dropbox_capable_agent`): file-based protocol (task.md, ack,
+///   report.md) available to ALL real AI agents (claude, codex, gemini, kiro, amp,
+///   opencode). Bare shell sessions are excluded.
+///
+/// - **Claude inbox/team** (`is_claude_fleet_agent`): Claude Code inbox JSON injection
+///   and `--agent-id`/`--team-name` CLI flags. Claude-only.
 ///
 /// Fleet mode is opt-in: it activates when the honryu team directory exists
 /// (~/.claude/teams/honryu/) or when the brain session itself is being created.
-/// Non-claude agents and terminal sessions are unaffected.
 use std::path::{Path, PathBuf};
 
 use tracing::warn;
@@ -33,10 +37,18 @@ fn team_dir() -> Option<PathBuf> {
     claude_config_dir().map(|d| d.join("teams").join(TEAM_NAME))
 }
 
-/// Returns true if the agent supports the fleet inbox protocol.
+/// Returns true if the agent supports the file-based dropbox protocol.
 ///
-/// Only claude sessions participate in fleet mode; all other agents are unaffected.
-pub(super) fn is_fleet_capable_agent(agent: &str) -> bool {
+/// All real AI agents can read/write dropbox files (task.md, ack, report.md).
+/// Only bare shell sessions are excluded — they have no agent to consume tasks.
+pub(super) fn is_dropbox_capable_agent(agent: &str) -> bool {
+    AgentType::parse(agent).is_some()
+}
+
+/// Returns true if the agent supports the Claude Code inbox/team protocol.
+///
+/// Only claude sessions get inbox JSON injection and `--agent-id`/`--team-name` flags.
+pub(super) fn is_claude_fleet_agent(agent: &str) -> bool {
     AgentType::parse(agent) == Some(AgentType::Claude)
 }
 
@@ -69,7 +81,7 @@ pub(super) fn fleet_mode_active(branch: &str) -> bool {
 /// Returns None if fleet mode does not apply (wrong agent, not active, etc.).
 /// The returned string is appended to the existing agent command.
 pub fn fleet_agent_flags(branch: &str, agent: &str) -> Option<String> {
-    if !is_fleet_capable_agent(agent) || !fleet_mode_active(branch) {
+    if !is_claude_fleet_agent(agent) || !fleet_mode_active(branch) {
         return None;
     }
 
@@ -95,7 +107,7 @@ pub fn fleet_agent_flags(branch: &str, agent: &str) -> Option<String> {
 /// Idempotent — safe to call on every create/open. Warns on failure,
 /// never blocks session creation.
 pub fn ensure_fleet_member(branch: &str, cwd: &Path, agent: &str) {
-    if !is_fleet_capable_agent(agent) || !fleet_mode_active(branch) {
+    if !is_claude_fleet_agent(agent) || !fleet_mode_active(branch) {
         return;
     }
 
@@ -321,6 +333,38 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         // SAFETY: restoring env; lock still held.
         unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+    }
+
+    // --- is_dropbox_capable_agent ---
+
+    #[test]
+    fn is_dropbox_capable_agent_true_for_all_real_agents() {
+        assert!(is_dropbox_capable_agent("claude"));
+        assert!(is_dropbox_capable_agent("codex"));
+        assert!(is_dropbox_capable_agent("gemini"));
+        assert!(is_dropbox_capable_agent("kiro"));
+        assert!(is_dropbox_capable_agent("amp"));
+        assert!(is_dropbox_capable_agent("opencode"));
+    }
+
+    #[test]
+    fn is_dropbox_capable_agent_false_for_shell() {
+        assert!(!is_dropbox_capable_agent("shell"));
+        assert!(!is_dropbox_capable_agent(""));
+        assert!(!is_dropbox_capable_agent("unknown-thing"));
+    }
+
+    // --- is_claude_fleet_agent ---
+
+    #[test]
+    fn is_claude_fleet_agent_true_only_for_claude() {
+        assert!(is_claude_fleet_agent("claude"));
+        assert!(!is_claude_fleet_agent("codex"));
+        assert!(!is_claude_fleet_agent("gemini"));
+        assert!(!is_claude_fleet_agent("kiro"));
+        assert!(!is_claude_fleet_agent("amp"));
+        assert!(!is_claude_fleet_agent("opencode"));
+        assert!(!is_claude_fleet_agent("shell"));
     }
 
     // --- fleet_agent_flags ---
