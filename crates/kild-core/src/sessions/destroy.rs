@@ -465,6 +465,9 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     // 3d. Clean up fleet dropbox directory
     super::dropbox::cleanup_dropbox(&session.project_id, &session.branch);
 
+    // 3e. Clean up fleet inbox file and team config entry
+    super::fleet::remove_fleet_member(&session.branch);
+
     // 4. Resolve main repo path before worktree removal (needed for branch cleanup)
     let main_repo_path = git::removal::find_main_repo_root(&session.worktree_path);
 
