@@ -13,6 +13,7 @@ pub mod list;
 pub mod open;
 pub mod persistence;
 pub mod ports;
+pub(super) mod shim_init;
 pub mod stop;
 pub mod store;
 pub mod types;

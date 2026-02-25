@@ -1,4 +1,3 @@
-use kild_paths::KildPaths;
 use tracing::{debug, error, info, warn};
 
 use crate::agents;
@@ -412,47 +411,9 @@ pub fn create_session(
             }
 
             // Initialize tmux shim state directory
-            let shim_init_result = (|| -> Result<(), String> {
-                let shim_dir = KildPaths::resolve()
-                    .map_err(|e| e.to_string())?
-                    .shim_session_dir(&session_id);
-                std::fs::create_dir_all(&shim_dir)
-                    .map_err(|e| format!("failed to create shim state directory: {}", e))?;
-
-                let initial_state = serde_json::json!({
-                    "next_pane_id": 1,
-                    "session_name": "kild_0",
-                    "panes": {
-                        "%0": {
-                            "daemon_session_id": daemon_result.daemon_session_id,
-                            "title": "",
-                            "border_style": "",
-                            "window_id": "0",
-                            "hidden": false
-                        }
-                    },
-                    "windows": {
-                        "0": { "name": "main", "pane_ids": ["%0"] }
-                    },
-                    "sessions": {
-                        "kild_0": { "name": "kild_0", "windows": ["0"] }
-                    }
-                });
-
-                let lock_path = shim_dir.join("panes.lock");
-                std::fs::File::create(&lock_path)
-                    .map_err(|e| format!("failed to create shim lock file: {}", e))?;
-
-                let panes_path = shim_dir.join("panes.json");
-                let json = serde_json::to_string_pretty(&initial_state)
-                    .map_err(|e| format!("failed to serialize shim state: {}", e))?;
-                std::fs::write(&panes_path, json)
-                    .map_err(|e| format!("failed to write shim state: {}", e))?;
-
-                Ok(())
-            })();
-
-            if let Err(e) = shim_init_result {
+            if let Err(e) =
+                super::shim_init::init_pane_registry(&session_id, &daemon_result.daemon_session_id)
+            {
                 error!(
                     event = "core.session.shim_init_failed",
                     session_id = %session_id,
