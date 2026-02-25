@@ -109,7 +109,7 @@ mod tests {
         let events = store
             .dispatch(Command::CreateKild {
                 branch: "feat".into(),
-                agent_mode: crate::state::types::AgentMode::DefaultAgent,
+                agent_mode: kild_protocol::AgentMode::DefaultAgent,
                 note: None,
                 project_path: None,
             })
@@ -127,8 +127,8 @@ mod tests {
         let events = store
             .dispatch(Command::OpenKild {
                 branch: "feat".into(),
-                mode: crate::state::types::OpenMode::DefaultAgent,
-                runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
+                mode: kild_protocol::OpenMode::DefaultAgent,
+                runtime_mode: Some(kild_protocol::RuntimeMode::Terminal),
                 resume: false,
                 yolo: false,
             })
@@ -139,7 +139,7 @@ mod tests {
         let events = store
             .dispatch(Command::OpenKild {
                 branch: "feat".into(),
-                mode: crate::state::types::OpenMode::DefaultAgent,
+                mode: kild_protocol::OpenMode::DefaultAgent,
                 runtime_mode: None,
                 resume: false,
                 yolo: false,
@@ -234,7 +234,7 @@ mod tests {
         let commands: Vec<Command> = vec![
             Command::CreateKild {
                 branch: "b".into(),
-                agent_mode: crate::state::types::AgentMode::DefaultAgent,
+                agent_mode: kild_protocol::AgentMode::DefaultAgent,
                 note: None,
                 project_path: None,
             },
@@ -244,8 +244,8 @@ mod tests {
             },
             Command::OpenKild {
                 branch: "b".into(),
-                mode: crate::state::types::OpenMode::DefaultAgent,
-                runtime_mode: Some(crate::state::types::RuntimeMode::Terminal),
+                mode: kild_protocol::OpenMode::DefaultAgent,
+                runtime_mode: Some(kild_protocol::RuntimeMode::Terminal),
                 resume: false,
                 yolo: false,
             },
@@ -253,7 +253,7 @@ mod tests {
             Command::CompleteKild { branch: "b".into() },
             Command::UpdateAgentStatus {
                 branch: "b".into(),
-                status: crate::sessions::types::AgentStatus::Working,
+                status: kild_protocol::AgentStatus::Working,
             },
             Command::RefreshPrStatus { branch: "b".into() },
             Command::RefreshSessions,

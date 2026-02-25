@@ -765,8 +765,8 @@ fn test_remove_pr_info_file_missing_is_noop() {
 
 #[test]
 fn test_save_load_roundtrip_all_fields() {
-    use crate::state::types::RuntimeMode;
     use crate::terminal::types::TerminalType;
+    use kild_protocol::RuntimeMode;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let sessions_dir = tmp.path();

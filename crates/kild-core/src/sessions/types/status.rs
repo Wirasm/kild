@@ -1,3 +1,4 @@
+use kild_protocol::AgentStatus;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,50 +18,6 @@ impl std::fmt::Display for SessionStatus {
             Self::Active => write!(f, "active"),
             Self::Stopped => write!(f, "stopped"),
             Self::Destroyed => write!(f, "destroyed"),
-        }
-    }
-}
-
-/// Agent-reported activity status, written via `kild agent-status` command.
-///
-/// This is distinct from `ProcessStatus` (running/stopped) and `HealthStatus`
-/// (inferred from metrics). `AgentStatus` is explicitly reported by the agent
-/// via hooks, giving real-time insight into what the agent is doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentStatus {
-    Working,
-    Idle,
-    Waiting,
-    Done,
-    Error,
-}
-
-impl std::fmt::Display for AgentStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Working => write!(f, "working"),
-            Self::Idle => write!(f, "idle"),
-            Self::Waiting => write!(f, "waiting"),
-            Self::Done => write!(f, "done"),
-            Self::Error => write!(f, "error"),
-        }
-    }
-}
-
-impl std::str::FromStr for AgentStatus {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "working" => Ok(Self::Working),
-            "idle" => Ok(Self::Idle),
-            "waiting" => Ok(Self::Waiting),
-            "done" => Ok(Self::Done),
-            "error" => Ok(Self::Error),
-            other => Err(format!(
-                "Invalid agent status: '{}'. Valid: working, idle, waiting, done, error",
-                other
-            )),
         }
     }
 }

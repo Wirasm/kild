@@ -30,8 +30,10 @@ pub mod sessions;
 pub mod state;
 pub mod terminal;
 
-// Re-export newtypes from kild-protocol
-pub use kild_protocol::{BranchName, ProjectId, SessionId};
+// Re-export newtypes and shared domain enums from kild-protocol
+pub use kild_protocol::{
+    AgentMode, AgentStatus, BranchName, OpenMode, ProjectId, RuntimeMode, SessionId,
+};
 
 // Re-export config types from kild-config
 pub use editor::{EditorBackend, EditorError, EditorType};
@@ -51,12 +53,10 @@ pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::agent_status::AgentStatusResult;
 pub use sessions::info::SessionInfo;
 pub use sessions::types::{
-    AgentProcess, AgentStatus, AgentStatusInfo, CompleteResult, CreateSessionRequest,
-    DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatusInfo, CompleteResult, CreateSessionRequest, DestroySafetyInfo,
+    GitStatus, ProcessStatus, Session, SessionStatus,
 };
-pub use state::{
-    AgentMode, Command, CoreStore, DispatchError, Event, OpenMode, RuntimeMode, Store,
-};
+pub use state::{Command, CoreStore, DispatchError, Event, Store};
 
 // Re-export handler modules as the primary API
 pub use cleanup::handler as cleanup_ops;

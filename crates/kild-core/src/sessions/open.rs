@@ -18,10 +18,10 @@ use super::{dropbox, fleet};
 /// Priority: explicit CLI flag > session's stored mode > config > Terminal default.
 /// Returns the resolved mode and its source label for logging.
 fn resolve_effective_runtime_mode(
-    explicit: Option<crate::state::types::RuntimeMode>,
-    from_session: Option<crate::state::types::RuntimeMode>,
+    explicit: Option<kild_protocol::RuntimeMode>,
+    from_session: Option<kild_protocol::RuntimeMode>,
     config: &kild_config::KildConfig,
-) -> (crate::state::types::RuntimeMode, &'static str) {
+) -> (kild_protocol::RuntimeMode, &'static str) {
     if let Some(mode) = explicit {
         return (mode, "explicit");
     }
@@ -29,9 +29,9 @@ fn resolve_effective_runtime_mode(
         return (mode, "session");
     }
     if config.is_daemon_enabled() {
-        (crate::state::types::RuntimeMode::Daemon, "config")
+        (kild_protocol::RuntimeMode::Daemon, "config")
     } else {
-        (crate::state::types::RuntimeMode::Terminal, "default")
+        (kild_protocol::RuntimeMode::Terminal, "default")
     }
 }
 
@@ -76,8 +76,8 @@ fn capture_process_metadata(
 /// from the session's stored mode, then config, then Terminal default.
 pub fn open_session(
     name: &str,
-    mode: crate::state::types::OpenMode,
-    runtime_mode: Option<crate::state::types::RuntimeMode>,
+    mode: kild_protocol::OpenMode,
+    runtime_mode: Option<kild_protocol::RuntimeMode>,
     resume: bool,
     yolo: bool,
     no_attach: bool,
@@ -128,10 +128,10 @@ pub fn open_session(
     }
 
     // 3. Determine agent and command based on OpenMode
-    let is_bare_shell = matches!(mode, crate::state::types::OpenMode::BareShell);
+    let is_bare_shell = matches!(mode, kild_protocol::OpenMode::BareShell);
     let (agent, agent_command) =
         match mode {
-            crate::state::types::OpenMode::BareShell => {
+            kild_protocol::OpenMode::BareShell => {
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| {
                     let fallback = "/bin/sh".to_string();
                     warn!(
@@ -144,7 +144,7 @@ pub fn open_session(
                 info!(event = "core.session.open_shell_selected", shell = %shell);
                 ("shell".to_string(), shell)
             }
-            crate::state::types::OpenMode::Agent(name) => {
+            kild_protocol::OpenMode::Agent(name) => {
                 info!(event = "core.session.open_agent_selected", agent = name);
 
                 // Warn if agent CLI is not available in PATH
@@ -165,7 +165,7 @@ pub fn open_session(
                 })?;
                 (name, command)
             }
-            crate::state::types::OpenMode::DefaultAgent => {
+            kild_protocol::OpenMode::DefaultAgent => {
                 // Use session's stored agent, but fall back to config default
                 // when the session was created with --no-agent (stored as "shell").
                 // "shell" is not a registered agent, so get_agent_command would fail.
@@ -200,6 +200,11 @@ pub fn open_session(
                     }
                 })?;
                 (agent, command)
+            }
+            _ => {
+                return Err(SessionError::ConfigError {
+                    message: "Unsupported open mode".to_string(),
+                });
             }
         };
 
@@ -294,7 +299,7 @@ pub fn open_session(
         source = source
     );
 
-    let use_daemon = effective_runtime_mode == crate::state::types::RuntimeMode::Daemon;
+    let use_daemon = effective_runtime_mode == kild_protocol::RuntimeMode::Daemon;
 
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -494,7 +499,7 @@ pub fn open_session(
     }
 
     // Update runtime mode so future opens auto-detect correctly
-    let is_daemon = effective_runtime_mode == crate::state::types::RuntimeMode::Daemon;
+    let is_daemon = effective_runtime_mode == kild_protocol::RuntimeMode::Daemon;
     session.runtime_mode = Some(effective_runtime_mode);
 
     // 6. Save session BEFORE spawning attach window so `kild attach` can find it
@@ -524,8 +529,8 @@ mod tests {
     fn test_open_session_not_found() {
         let result = open_session(
             "non-existent",
-            crate::state::types::OpenMode::DefaultAgent,
-            Some(crate::state::types::RuntimeMode::Terminal),
+            kild_protocol::OpenMode::DefaultAgent,
+            Some(kild_protocol::RuntimeMode::Terminal),
             false,
             false,
             false,
@@ -789,7 +794,7 @@ mod tests {
 
     #[test]
     fn test_resolve_runtime_mode_explicit_wins() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let config = kild_config::KildConfig::default();
         let (mode, source) = resolve_effective_runtime_mode(
@@ -803,7 +808,7 @@ mod tests {
 
     #[test]
     fn test_resolve_runtime_mode_session_when_no_explicit() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let config = kild_config::KildConfig::default();
         let (mode, source) =
@@ -814,7 +819,7 @@ mod tests {
 
     #[test]
     fn test_resolve_runtime_mode_config_when_daemon_enabled() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let mut config = kild_config::KildConfig::default();
         config.daemon.enabled = Some(true);
@@ -825,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_resolve_runtime_mode_default_terminal() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let config = kild_config::KildConfig::default();
         let (mode, source) = resolve_effective_runtime_mode(None, None, &config);
@@ -837,7 +842,7 @@ mod tests {
     /// each session's stored runtime_mode is respected.
     #[test]
     fn test_resolve_runtime_mode_none_explicit_with_daemon_session() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let config = kild_config::KildConfig::default();
         // Simulates open --all (no flags): explicit=None, session has Daemon
@@ -856,7 +861,7 @@ mod tests {
     /// Regression test: explicit flags should override all sessions (open --all --daemon)
     #[test]
     fn test_resolve_runtime_mode_explicit_overrides_session_in_open_all() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
 
         let config = kild_config::KildConfig::default();
         // open --all --daemon: explicit=Daemon should override session=Terminal
@@ -880,7 +885,7 @@ mod tests {
 
     #[test]
     fn test_runtime_mode_persists_through_stop_reload_cycle() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let temp_dir = std::env::temp_dir().join(format!(

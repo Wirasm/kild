@@ -1,7 +1,8 @@
 use crate::health::types::{HealthMetrics, HealthOutput, HealthStatus, KildHealth};
 use crate::process::types::ProcessMetrics;
-use crate::sessions::types::{AgentStatus, Session};
+use crate::sessions::types::Session;
 use chrono::{DateTime, Utc};
+use kild_protocol::AgentStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static IDLE_THRESHOLD_MINUTES: AtomicU64 = AtomicU64::new(10);

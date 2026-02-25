@@ -103,7 +103,7 @@ fn test_create_session_request_with_note() {
     // Test CreateSessionRequest properly includes note
     let request_with_note = CreateSessionRequest::new(
         "feature-auth".to_string(),
-        crate::state::types::AgentMode::Agent("claude".to_string()),
+        kild_protocol::AgentMode::Agent("claude".to_string()),
         Some("OAuth2 implementation".to_string()),
     );
     assert_eq!(
@@ -114,7 +114,7 @@ fn test_create_session_request_with_note() {
     // Test request without note
     let request_without_note = CreateSessionRequest::new(
         "feature-auth".to_string(),
-        crate::state::types::AgentMode::Agent("claude".to_string()),
+        kild_protocol::AgentMode::Agent("claude".to_string()),
         None,
     );
     assert_eq!(request_without_note.note, None);
@@ -122,7 +122,7 @@ fn test_create_session_request_with_note() {
 
 #[test]
 fn test_create_session_request_agent_mode() {
-    use crate::state::types::AgentMode;
+    use kild_protocol::AgentMode;
 
     let request =
         CreateSessionRequest::new("test-branch".to_string(), AgentMode::DefaultAgent, None);
@@ -247,7 +247,7 @@ fn test_session_backward_compatibility_terminal_window_id() {
 fn test_create_session_request_with_project_path() {
     let request = CreateSessionRequest::with_project_path(
         "test-branch".to_string(),
-        crate::state::types::AgentMode::Agent("claude".to_string()),
+        kild_protocol::AgentMode::Agent("claude".to_string()),
         None,
         PathBuf::from("/path/to/project"),
     );
@@ -262,7 +262,7 @@ fn test_create_session_request_with_project_path() {
 fn test_create_session_request_new_has_no_project_path() {
     let request = CreateSessionRequest::new(
         "test-branch".to_string(),
-        crate::state::types::AgentMode::DefaultAgent,
+        kild_protocol::AgentMode::DefaultAgent,
         None,
     );
     assert!(request.project_path.is_none());
@@ -979,7 +979,7 @@ fn test_session_backward_compatibility_runtime_mode() {
 
 #[test]
 fn test_session_with_runtime_mode_roundtrip() {
-    use crate::state::types::RuntimeMode;
+    use kild_protocol::RuntimeMode;
 
     let session = Session::new(
         "test/branch".into(),
@@ -1010,7 +1010,7 @@ fn test_session_with_runtime_mode_roundtrip() {
 
 #[test]
 fn test_session_runtime_mode_survives_clear_agents() {
-    use crate::state::types::RuntimeMode;
+    use kild_protocol::RuntimeMode;
 
     let mut session = Session::new(
         "test/branch".into(),
@@ -1118,7 +1118,7 @@ fn test_process_status_roundtrip() {
 
 #[test]
 fn test_session_new_sets_all_fields() {
-    use crate::state::types::RuntimeMode;
+    use kild_protocol::RuntimeMode;
 
     let session = Session::new(
         "proj/feature".into(),

@@ -20,7 +20,7 @@ pub fn create_session(
 ) -> Result<Session, SessionError> {
     // Determine agent name and command based on AgentMode
     let (agent, agent_command) = match &request.agent_mode {
-        crate::state::types::AgentMode::BareShell => {
+        kild_protocol::AgentMode::BareShell => {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| {
                 let fallback = "/bin/sh".to_string();
                 warn!(
@@ -33,7 +33,7 @@ pub fn create_session(
             info!(event = "core.session.create_shell_selected", shell = %shell);
             ("shell".to_string(), shell)
         }
-        crate::state::types::AgentMode::Agent(name) => {
+        kild_protocol::AgentMode::Agent(name) => {
             let command =
                 kild_config
                     .get_agent_command(name)
@@ -52,7 +52,7 @@ pub fn create_session(
 
             (name.clone(), command)
         }
-        crate::state::types::AgentMode::DefaultAgent => {
+        kild_protocol::AgentMode::DefaultAgent => {
             let name = kild_config.agent.default.clone();
             let command =
                 kild_config
@@ -71,6 +71,11 @@ pub fn create_session(
             }
 
             (name, command)
+        }
+        _ => {
+            return Err(SessionError::ConfigError {
+                message: "Unsupported agent mode".to_string(),
+            });
         }
     };
 
@@ -232,7 +237,7 @@ pub fn create_session(
     let now = chrono::Utc::now().to_rfc3339();
 
     let initial_agent = match request.runtime_mode {
-        crate::state::types::RuntimeMode::Terminal => {
+        kild_protocol::RuntimeMode::Terminal => {
             setup_codex_integration(&validated.agent);
             setup_opencode_integration(&validated.agent, &worktree.path);
             setup_claude_integration(&validated.agent);
@@ -279,7 +284,7 @@ pub fn create_session(
                 None,
             )?
         }
-        crate::state::types::RuntimeMode::Daemon => {
+        kild_protocol::RuntimeMode::Daemon => {
             // New path: request daemon to create PTY session.
             // The daemon is a pure PTY manager — it spawns a command in a
             // working directory. Worktree creation and session persistence
@@ -475,6 +480,11 @@ pub fn create_session(
                 Some(daemon_result.daemon_session_id),
             )?
         }
+        _ => {
+            return Err(SessionError::ConfigError {
+                message: "Unsupported runtime mode".to_string(),
+            });
+        }
     };
 
     // 6. Create session record
@@ -535,7 +545,7 @@ pub fn create_session(
     }
 
     // 8. Spawn attach window (best-effort) and update session with terminal info
-    if request.runtime_mode == crate::state::types::RuntimeMode::Daemon {
+    if request.runtime_mode == kild_protocol::RuntimeMode::Daemon {
         spawn_and_save_attach_window(
             &mut session,
             &validated.name,
@@ -752,7 +762,7 @@ mod tests {
         // Create the request with explicit project_path
         let request = CreateSessionRequest::with_project_path(
             "test-branch".to_string(),
-            crate::state::types::AgentMode::Agent("claude".to_string()),
+            kild_protocol::AgentMode::Agent("claude".to_string()),
             None,
             temp_dir.clone(),
         );
@@ -783,7 +793,7 @@ mod tests {
         // Also verify that without project_path, we'd get a different result
         let request_without_path = CreateSessionRequest::new(
             "test-branch".to_string(),
-            crate::state::types::AgentMode::Agent("claude".to_string()),
+            kild_protocol::AgentMode::Agent("claude".to_string()),
             None,
         );
         assert!(
@@ -799,7 +809,7 @@ mod tests {
     fn test_create_session_request_none_project_path_uses_cwd_detection() {
         let request = CreateSessionRequest::new(
             "test-branch".to_string(),
-            crate::state::types::AgentMode::Agent("claude".to_string()),
+            kild_protocol::AgentMode::Agent("claude".to_string()),
             Some("test note".to_string()),
         );
 

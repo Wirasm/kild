@@ -76,7 +76,7 @@ pub struct Session {
     /// Used by `kild open` to auto-detect runtime mode when no flags are passed.
     /// `None` for sessions created before this field was added.
     #[serde(default)]
-    pub runtime_mode: Option<crate::state::types::RuntimeMode>,
+    pub runtime_mode: Option<kild_protocol::RuntimeMode>,
 
     /// Whether this session was created with `--main` (runs from project root, no linked worktree).
     ///
@@ -114,7 +114,7 @@ impl Session {
         agents: Vec<AgentProcess>,
         agent_session_id: Option<String>,
         task_list_id: Option<String>,
-        runtime_mode: Option<crate::state::types::RuntimeMode>,
+        runtime_mode: Option<kild_protocol::RuntimeMode>,
     ) -> Self {
         Self {
             id,

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use kild_protocol::{BranchName, SessionId};
 use serde::{Deserialize, Serialize};
 
-use crate::sessions::types::AgentStatus;
+use kild_protocol::AgentStatus;
 
 /// All business state changes that can result from a dispatched command.
 ///

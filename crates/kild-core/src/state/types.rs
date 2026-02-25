@@ -1,46 +1,7 @@
 use std::path::PathBuf;
 
-use kild_protocol::BranchName;
+use kild_protocol::{AgentMode, AgentStatus, BranchName, OpenMode, RuntimeMode};
 use serde::{Deserialize, Serialize};
-
-use crate::sessions::types::AgentStatus;
-
-/// How the agent process should be hosted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeMode {
-    #[serde(alias = "Terminal")]
-    /// Launch in an external terminal window (Ghostty, iTerm, etc.)
-    Terminal,
-    #[serde(alias = "Daemon")]
-    /// Launch in a daemon-owned PTY
-    Daemon,
-}
-
-/// What to launch when opening a kild terminal.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum OpenMode {
-    /// Launch the session's default agent (from config).
-    DefaultAgent,
-    /// Launch a specific agent (overrides session config).
-    Agent(String),
-    /// Open a bare terminal with `$SHELL` instead of an agent.
-    BareShell,
-}
-
-/// What agent to launch when creating a kild.
-///
-/// Mirrors [`OpenMode`] for the create path. Determines whether the new kild
-/// gets an AI agent or a bare terminal shell.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum AgentMode {
-    /// Use default agent from config.
-    DefaultAgent,
-    /// Use a specific agent (overrides config default).
-    Agent(String),
-    /// Open a bare terminal with `$SHELL` instead of an agent.
-    BareShell,
-}
 
 /// All business operations that can be dispatched through the store.
 ///
@@ -106,6 +67,7 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kild_protocol::{AgentMode, AgentStatus, OpenMode, RuntimeMode};
 
     #[test]
     fn test_agent_mode_serde_roundtrip() {

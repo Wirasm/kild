@@ -4,7 +4,7 @@
 //! Used by `kild agent-status --notify` to alert when an agent enters
 //! `Waiting` or `Error` status.
 
-use crate::sessions::types::AgentStatus;
+use kild_protocol::AgentStatus;
 use tracing::{info, warn};
 
 #[cfg(not(target_os = "macos"))]

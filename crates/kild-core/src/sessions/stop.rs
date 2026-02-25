@@ -178,9 +178,9 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             .any(|a| a.daemon_session_id().is_some());
 
         let inferred_mode = if has_daemon_agent {
-            crate::state::types::RuntimeMode::Daemon
+            kild_protocol::RuntimeMode::Daemon
         } else {
-            crate::state::types::RuntimeMode::Terminal
+            kild_protocol::RuntimeMode::Terminal
         };
 
         session.runtime_mode = Some(inferred_mode);
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_stop_infers_runtime_mode_daemon_from_agent() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let unique_id = format!(
@@ -392,8 +392,8 @@ mod tests {
 
     #[test]
     fn test_stop_infers_runtime_mode_terminal_when_no_daemon() {
-        use crate::state::types::RuntimeMode;
         use crate::terminal::types::TerminalType;
+        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let unique_id = format!(
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_stop_preserves_existing_runtime_mode() {
-        use crate::state::types::RuntimeMode;
+        use kild_protocol::RuntimeMode;
         use std::fs;
 
         let unique_id = format!(
@@ -652,7 +652,8 @@ mod tests {
 
     #[test]
     fn test_stop_removes_agent_status_sidecar() {
-        use crate::sessions::types::{AgentStatus, AgentStatusInfo};
+        use crate::sessions::types::AgentStatusInfo;
+        use kild_protocol::AgentStatus;
         use std::fs;
 
         let unique_id = format!(
