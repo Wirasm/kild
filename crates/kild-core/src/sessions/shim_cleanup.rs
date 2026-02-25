@@ -1,6 +1,8 @@
 use kild_paths::KildPaths;
 use tracing::{error, info};
 
+use crate::daemon::client::destroy_daemon_session;
+
 /// Destroy all child shim panes for a session and remove the shim directory.
 ///
 /// Reads `~/.kild/shim/<session_id>/panes.json`, destroys every child pane's
@@ -25,7 +27,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
                 if let Some(panes) = registry.get("panes").and_then(|p| p.as_object()) {
                     for (pane_id, entry) in panes {
                         if pane_id == "%0" {
-                            continue; // Skip the parent pane (already destroyed by caller)
+                            continue; // Skip the leader pane (already destroyed by caller)
                         }
                         if let Some(child_sid) =
                             entry.get("daemon_session_id").and_then(|s| s.as_str())
@@ -35,9 +37,7 @@ pub(super) fn cleanup_shim_panes(paths: &KildPaths, session_id: &str) {
                                 pane_id = pane_id,
                                 daemon_session_id = child_sid
                             );
-                            if let Err(e) =
-                                crate::daemon::client::destroy_daemon_session(child_sid, true)
-                            {
+                            if let Err(e) = destroy_daemon_session(child_sid, true) {
                                 error!(
                                     event = "core.session.destroy_shim_child_failed",
                                     pane_id = pane_id,
