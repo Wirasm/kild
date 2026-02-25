@@ -1,5 +1,6 @@
 use git2::{BranchType, Repository};
-use tracing::{error, info, warn};
+use std::path::{Path, PathBuf};
+use tracing::{debug, error, info, warn};
 
 use crate::cleanup::{errors::CleanupError, operations, types::*};
 use crate::git;
@@ -139,12 +140,15 @@ pub fn cleanup_orphaned_resources(
         }
     }
 
-    // Clean up stale sessions
+    // Clean up stale sessions (also removes associated worktrees)
     if !summary.stale_sessions.is_empty() {
-        match cleanup_stale_sessions(&summary.stale_sessions) {
-            Ok(cleaned_sessions) => {
+        match cleanup_stale_sessions(&summary.stale_sessions, force) {
+            Ok((cleaned_sessions, skipped)) => {
                 for session_id in cleaned_sessions {
                     cleaned_summary.add_session(session_id);
+                }
+                for (path, reason) in skipped {
+                    cleaned_summary.add_skipped_worktree(path, reason);
                 }
             }
             Err(e) => {
@@ -582,14 +586,93 @@ fn cleanup_orphaned_worktrees(
     Ok((cleaned_worktrees, skipped_worktrees))
 }
 
-fn cleanup_stale_sessions(session_ids: &[String]) -> Result<Vec<String>, CleanupError> {
+/// Load minimal session data needed for worktree cleanup.
+///
+/// Returns `(worktree_path, use_main_worktree, branch)` or `None` if the
+/// session file can't be read or parsed.
+fn load_session_for_cleanup(
+    sessions_dir: &Path,
+    session_id: &str,
+) -> Option<(PathBuf, bool, String)> {
+    let safe_id = session_id.replace('/', "_");
+
+    // Try new format: <sessions_dir>/<safe_id>/kild.json
+    let new_path = sessions_dir.join(&safe_id).join("kild.json");
+    let content = if new_path.exists() {
+        match std::fs::read_to_string(&new_path) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(
+                    event = "core.cleanup.session_file_read_failed",
+                    session_id = session_id,
+                    path = %new_path.display(),
+                    error = %e,
+                );
+                return None;
+            }
+        }
+    } else {
+        // Try legacy format: <sessions_dir>/<safe_id>.json
+        let legacy_path = sessions_dir.join(format!("{safe_id}.json"));
+        match std::fs::read_to_string(&legacy_path) {
+            Ok(c) => c,
+            Err(e) => {
+                debug!(
+                    event = "core.cleanup.session_file_not_found",
+                    session_id = session_id,
+                    path = %legacy_path.display(),
+                    error = %e,
+                );
+                return None;
+            }
+        }
+    };
+
+    let session: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(
+                event = "core.cleanup.session_file_parse_failed",
+                session_id = session_id,
+                error = %e,
+            );
+            return None;
+        }
+    };
+
+    let worktree_path = session.get("worktree_path")?.as_str().map(PathBuf::from)?;
+    let use_main_worktree = session
+        .get("use_main_worktree")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let branch = session.get("branch")?.as_str()?.to_string();
+
+    Some((worktree_path, use_main_worktree, branch))
+}
+
+type SessionCleanupResult = (Vec<String>, Vec<(PathBuf, String)>);
+
+fn cleanup_stale_sessions(
+    session_ids: &[String],
+    force: bool,
+) -> Result<SessionCleanupResult, CleanupError> {
+    let config = Config::new();
+    cleanup_stale_sessions_in(&config.sessions_dir(), session_ids, force)
+}
+
+/// Inner implementation that accepts `sessions_dir` for testability.
+fn cleanup_stale_sessions_in(
+    sessions_dir: &Path,
+    session_ids: &[String],
+    force: bool,
+) -> Result<SessionCleanupResult, CleanupError> {
     // Early return for empty list
     if session_ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
 
-    let config = Config::new();
     let mut cleaned_sessions = Vec::new();
+    let mut skipped_worktrees: Vec<(PathBuf, String)> = Vec::new();
 
     for session_id in session_ids {
         info!(
@@ -597,7 +680,137 @@ fn cleanup_stale_sessions(session_ids: &[String]) -> Result<Vec<String>, Cleanup
             session_id = session_id
         );
 
-        match sessions::persistence::remove_session_file(&config.sessions_dir(), session_id) {
+        // Load session data for worktree cleanup
+        let session_data = load_session_for_cleanup(sessions_dir, session_id);
+
+        if let Some((ref worktree_path, use_main_worktree, ref branch)) = session_data {
+            if use_main_worktree {
+                // --main sessions: worktree_path IS the project root.
+                // Never remove the project root directory.
+                info!(
+                    event = "core.cleanup.session_worktree_skipped",
+                    session_id = session_id,
+                    reason = "main_worktree",
+                );
+            } else if worktree_path.exists() {
+                // Safety: check for uncommitted changes unless --force
+                if !force {
+                    match git::get_worktree_status(worktree_path) {
+                        Ok(status)
+                            if status.has_uncommitted_changes && !status.status_check_failed =>
+                        {
+                            warn!(
+                                event = "core.cleanup.session_delete_skipped",
+                                session_id = session_id,
+                                worktree_path = %worktree_path.display(),
+                                reason = "uncommitted_changes",
+                            );
+                            skipped_worktrees.push((
+                                worktree_path.clone(),
+                                "has uncommitted changes".to_string(),
+                            ));
+                            continue;
+                        }
+                        Ok(status) if status.status_check_failed => {
+                            warn!(
+                                event = "core.cleanup.session_delete_skipped",
+                                session_id = session_id,
+                                worktree_path = %worktree_path.display(),
+                                reason = "status_check_failed",
+                            );
+                            skipped_worktrees.push((
+                                worktree_path.clone(),
+                                "cannot verify git status".to_string(),
+                            ));
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(
+                                event = "core.cleanup.session_delete_skipped",
+                                session_id = session_id,
+                                worktree_path = %worktree_path.display(),
+                                reason = "status_check_failed",
+                                error = %e,
+                            );
+                            skipped_worktrees.push((
+                                worktree_path.clone(),
+                                format!("cannot verify git status: {e}"),
+                            ));
+                            continue;
+                        }
+                        Ok(_) => {} // Clean worktree, proceed
+                    }
+                }
+
+                // Resolve main repo path before worktree removal (needed for
+                // branch cleanup — the .git file disappears with the worktree).
+                let main_repo_path = git::removal::find_main_repo_root(worktree_path);
+
+                // Remove worktree (force removes even with uncommitted changes)
+                let removal_result = if force {
+                    git::removal::remove_worktree_force(worktree_path)
+                } else {
+                    git::removal::remove_worktree_by_path(worktree_path)
+                };
+
+                match removal_result {
+                    Ok(()) => {
+                        info!(
+                            event = "core.cleanup.session_worktree_remove_completed",
+                            session_id = session_id,
+                            worktree_path = %worktree_path.display(),
+                        );
+
+                        // Delete kild branch (best-effort, same as destroy)
+                        match &main_repo_path {
+                            Some(repo_path) => {
+                                let kild_branch = git::naming::kild_branch_name(branch);
+                                git::removal::delete_branch_if_exists(repo_path, &kild_branch);
+                            }
+                            None => {
+                                warn!(
+                                    event = "core.cleanup.session_branch_cleanup_skipped",
+                                    session_id = session_id,
+                                    branch = branch,
+                                    reason = "could not resolve main repo root",
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            event = "core.cleanup.session_worktree_remove_failed",
+                            session_id = session_id,
+                            worktree_path = %worktree_path.display(),
+                            error = %e,
+                        );
+                        skipped_worktrees.push((
+                            worktree_path.clone(),
+                            format!("worktree removal failed: {e}"),
+                        ));
+                        continue;
+                    }
+                }
+            } else {
+                // Worktree directory already gone — just clean up session file
+                debug!(
+                    event = "core.cleanup.session_worktree_remove_skipped",
+                    session_id = session_id,
+                    worktree_path = %worktree_path.display(),
+                );
+            }
+        } else {
+            // Session data couldn't be loaded — still remove the session file
+            // to clean up corrupted/incomplete session entries.
+            warn!(
+                event = "core.cleanup.session_data_load_failed",
+                session_id = session_id,
+                "Could not load session data for worktree cleanup — removing session file only"
+            );
+        }
+
+        // Remove session file
+        match sessions::persistence::remove_session_file(sessions_dir, session_id) {
             Ok(()) => {
                 info!(
                     event = "core.cleanup.session_delete_completed",
@@ -616,7 +829,7 @@ fn cleanup_stale_sessions(session_ids: &[String]) -> Result<Vec<String>, Cleanup
         }
     }
 
-    Ok(cleaned_sessions)
+    Ok((cleaned_sessions, skipped_worktrees))
 }
 
 #[cfg(test)]
@@ -714,9 +927,11 @@ mod tests {
 
     #[test]
     fn test_cleanup_stale_sessions_empty_list() {
-        let result = cleanup_stale_sessions(&[]);
+        let result = cleanup_stale_sessions(&[], false);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 0);
+        let (cleaned, skipped) = result.unwrap();
+        assert_eq!(cleaned.len(), 0);
+        assert_eq!(skipped.len(), 0);
     }
 
     #[test]
@@ -758,5 +973,355 @@ mod tests {
         assert_eq!(summary.orphaned_branches.len(), 0);
         assert_eq!(summary.orphaned_worktrees.len(), 0);
         assert_eq!(summary.stale_sessions.len(), 0);
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_new_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create a session in new format: <safe_id>/kild.json
+        let session_dir = sessions_dir.join("test-session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let content = serde_json::json!({
+            "id": "test-session",
+            "worktree_path": "/tmp/kild-test-wt",
+            "branch": "test-branch",
+            "use_main_worktree": false,
+        });
+        std::fs::write(session_dir.join("kild.json"), content.to_string()).unwrap();
+
+        let result = load_session_for_cleanup(sessions_dir, "test-session");
+        assert!(result.is_some());
+        let (wt_path, use_main, branch) = result.unwrap();
+        assert_eq!(wt_path, PathBuf::from("/tmp/kild-test-wt"));
+        assert!(!use_main);
+        assert_eq!(branch, "test-branch");
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_legacy_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Create a session in legacy format: <safe_id>.json
+        let content = serde_json::json!({
+            "id": "legacy-session",
+            "worktree_path": "/tmp/kild-legacy-wt",
+            "branch": "legacy-branch",
+        });
+        std::fs::write(
+            sessions_dir.join("legacy-session.json"),
+            content.to_string(),
+        )
+        .unwrap();
+
+        let result = load_session_for_cleanup(sessions_dir, "legacy-session");
+        assert!(result.is_some());
+        let (wt_path, use_main, branch) = result.unwrap();
+        assert_eq!(wt_path, PathBuf::from("/tmp/kild-legacy-wt"));
+        assert!(!use_main); // default when field is absent
+        assert_eq!(branch, "legacy-branch");
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_main_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions_dir = tmp.path();
+
+        let session_dir = sessions_dir.join("main-session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let content = serde_json::json!({
+            "id": "main-session",
+            "worktree_path": "/home/user/project",
+            "branch": "main-branch",
+            "use_main_worktree": true,
+        });
+        std::fs::write(session_dir.join("kild.json"), content.to_string()).unwrap();
+
+        let result = load_session_for_cleanup(sessions_dir, "main-session");
+        assert!(result.is_some());
+        let (_, use_main, _) = result.unwrap();
+        assert!(use_main);
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_missing_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_session_for_cleanup(tmp.path(), "nonexistent");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions_dir = tmp.path();
+
+        let session_dir = sessions_dir.join("bad-session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("kild.json"), "not valid json").unwrap();
+
+        let result = load_session_for_cleanup(sessions_dir, "bad-session");
+        assert!(result.is_none());
+    }
+
+    /// Helper: create a git repo with initial commit, a kild branch, and worktree.
+    /// Returns (canonical_worktree_path, _repo_dir_guard, _worktree_base_guard).
+    fn create_test_worktree(
+        branch_suffix: &str,
+    ) -> (PathBuf, tempfile::TempDir, tempfile::TempDir) {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let worktree_base = tempfile::tempdir().unwrap();
+
+        let repo = git2::Repository::init(repo_dir.path()).unwrap();
+        let sig = repo
+            .signature()
+            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+        let commit = repo.find_commit(commit_oid).unwrap();
+
+        let branch_name = format!("kild/{branch_suffix}");
+        let admin_name = format!("kild-{branch_suffix}");
+        repo.branch(&branch_name, &commit, false).unwrap();
+        let worktree_path = worktree_base.path().join(&admin_name);
+        let branch_ref = repo
+            .find_branch(&branch_name, git2::BranchType::Local)
+            .unwrap()
+            .into_reference();
+        let mut opts = git2::WorktreeAddOptions::new();
+        opts.reference(Some(&branch_ref));
+        repo.worktree(&admin_name, &worktree_path, Some(&opts))
+            .unwrap();
+
+        let canonical = worktree_path.canonicalize().unwrap();
+        (canonical, repo_dir, worktree_base)
+    }
+
+    /// Helper: write a minimal session file for cleanup tests.
+    fn write_cleanup_session(
+        sessions_dir: &std::path::Path,
+        session_id: &str,
+        worktree_path: &std::path::Path,
+        branch: &str,
+        use_main_worktree: bool,
+    ) {
+        let session_dir = sessions_dir.join(session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let content = serde_json::json!({
+            "id": session_id,
+            "project_id": "test-project",
+            "branch": branch,
+            "worktree_path": worktree_path.to_str().unwrap(),
+            "agent": "claude",
+            "status": "stopped",
+            "created_at": "2025-01-01T00:00:00Z",
+            "use_main_worktree": use_main_worktree,
+        });
+        std::fs::write(session_dir.join("kild.json"), content.to_string()).unwrap();
+    }
+
+    #[test]
+    fn test_cleanup_stale_sessions_removes_worktree_and_session() {
+        let (canonical_worktree, _repo_guard, _wt_guard) =
+            create_test_worktree("cleanup-full-test");
+        assert!(canonical_worktree.exists());
+
+        let sessions_dir = tempfile::tempdir().unwrap();
+        write_cleanup_session(
+            sessions_dir.path(),
+            "full-test-session",
+            &canonical_worktree,
+            "cleanup-full-test",
+            false,
+        );
+
+        // Call the inner function directly with our temp sessions dir
+        let result = cleanup_stale_sessions_in(
+            sessions_dir.path(),
+            &["full-test-session".to_string()],
+            false,
+        );
+
+        assert!(result.is_ok(), "Cleanup should succeed");
+        let (cleaned, skipped) = result.unwrap();
+        assert_eq!(cleaned, vec!["full-test-session"]);
+        assert!(skipped.is_empty(), "Nothing should be skipped");
+
+        // Worktree directory must be gone
+        assert!(
+            !canonical_worktree.exists(),
+            "Worktree directory should be removed"
+        );
+        // Session file must be gone
+        assert!(
+            !sessions_dir.path().join("full-test-session").exists(),
+            "Session directory should be removed"
+        );
+    }
+
+    #[test]
+    fn test_cleanup_stale_sessions_skips_uncommitted_changes() {
+        let (canonical_worktree, _repo_guard, _wt_guard) =
+            create_test_worktree("cleanup-dirty-test");
+        assert!(canonical_worktree.exists());
+
+        // Create an uncommitted file in the worktree
+        std::fs::write(
+            canonical_worktree.join("dirty-file.txt"),
+            "uncommitted work",
+        )
+        .unwrap();
+
+        let sessions_dir = tempfile::tempdir().unwrap();
+        write_cleanup_session(
+            sessions_dir.path(),
+            "dirty-session",
+            &canonical_worktree,
+            "cleanup-dirty-test",
+            false,
+        );
+
+        // Without --force: should skip
+        let result =
+            cleanup_stale_sessions_in(sessions_dir.path(), &["dirty-session".to_string()], false);
+
+        assert!(result.is_ok());
+        let (cleaned, skipped) = result.unwrap();
+        assert!(
+            cleaned.is_empty(),
+            "Session should NOT be cleaned (uncommitted changes)"
+        );
+        assert_eq!(skipped.len(), 1, "Worktree should be in skipped list");
+        assert_eq!(skipped[0].0, canonical_worktree);
+        assert!(
+            skipped[0].1.contains("uncommitted"),
+            "Skip reason should mention uncommitted changes, got: {}",
+            skipped[0].1,
+        );
+
+        // Worktree must still exist
+        assert!(canonical_worktree.exists(), "Worktree should be preserved");
+        // Session file must still exist
+        assert!(
+            sessions_dir.path().join("dirty-session").exists(),
+            "Session file should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_cleanup_stale_sessions_force_removes_uncommitted_changes() {
+        let (canonical_worktree, _repo_guard, _wt_guard) =
+            create_test_worktree("cleanup-force-test");
+
+        // Create an uncommitted file
+        std::fs::write(canonical_worktree.join("dirty-file.txt"), "will be lost").unwrap();
+
+        let sessions_dir = tempfile::tempdir().unwrap();
+        write_cleanup_session(
+            sessions_dir.path(),
+            "force-session",
+            &canonical_worktree,
+            "cleanup-force-test",
+            false,
+        );
+
+        // With --force: should remove despite uncommitted changes
+        let result =
+            cleanup_stale_sessions_in(sessions_dir.path(), &["force-session".to_string()], true);
+
+        assert!(result.is_ok());
+        let (cleaned, skipped) = result.unwrap();
+        assert_eq!(cleaned, vec!["force-session"]);
+        assert!(skipped.is_empty(), "Nothing should be skipped with --force");
+
+        // Worktree must be gone
+        assert!(
+            !canonical_worktree.exists(),
+            "Worktree should be force-removed"
+        );
+    }
+
+    #[test]
+    fn test_cleanup_stale_sessions_worktree_already_gone() {
+        let sessions_dir = tempfile::tempdir().unwrap();
+        let nonexistent = PathBuf::from("/tmp/kild-test-nonexistent-cleanup-wt-xyz");
+        assert!(!nonexistent.exists());
+
+        write_cleanup_session(
+            sessions_dir.path(),
+            "gone-session",
+            &nonexistent,
+            "gone-branch",
+            false,
+        );
+
+        // Worktree doesn't exist — should still clean up session file
+        let result =
+            cleanup_stale_sessions_in(sessions_dir.path(), &["gone-session".to_string()], false);
+
+        assert!(result.is_ok());
+        let (cleaned, skipped) = result.unwrap();
+        assert_eq!(cleaned, vec!["gone-session"]);
+        assert!(skipped.is_empty());
+        // Session file must be gone
+        assert!(!sessions_dir.path().join("gone-session").exists());
+    }
+
+    #[test]
+    fn test_cleanup_stale_sessions_main_worktree_preserves_directory() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let sessions_dir = tempfile::tempdir().unwrap();
+
+        // Create a sentinel file to verify the directory isn't deleted
+        std::fs::write(project_dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        write_cleanup_session(
+            sessions_dir.path(),
+            "main-session",
+            project_dir.path(),
+            "main-branch",
+            true, // use_main_worktree = true
+        );
+
+        let result =
+            cleanup_stale_sessions_in(sessions_dir.path(), &["main-session".to_string()], false);
+
+        assert!(result.is_ok());
+        let (cleaned, skipped) = result.unwrap();
+        // Session file should still be cleaned up
+        assert_eq!(cleaned, vec!["main-session"]);
+        assert!(skipped.is_empty());
+        // Project directory must still exist (NOT removed!)
+        assert!(
+            project_dir.path().exists(),
+            "Main worktree directory should NOT be removed"
+        );
+        assert!(
+            project_dir.path().join("Cargo.toml").exists(),
+            "Project files should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_load_session_for_cleanup_escapes_slashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions_dir = tmp.path();
+
+        // Session ID with slash (gets escaped to underscore in file path)
+        let session_dir = sessions_dir.join("kild_test-branch");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let content = serde_json::json!({
+            "id": "kild/test-branch",
+            "worktree_path": "/tmp/kild-test-wt",
+            "branch": "test-branch",
+        });
+        std::fs::write(session_dir.join("kild.json"), content.to_string()).unwrap();
+
+        let result = load_session_for_cleanup(sessions_dir, "kild/test-branch");
+        assert!(result.is_some());
     }
 }
