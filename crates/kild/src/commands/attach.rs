@@ -18,7 +18,7 @@ pub(crate) fn handle_attach_command(
     info!(event = "cli.attach_started", branch = branch);
 
     // 1. Look up session to get daemon_session_id
-    let session = helpers::require_session(branch, "cli.attach_failed")?;
+    let mut session = helpers::require_session(branch, "cli.attach_failed")?;
 
     // If --pane is specified, look up that pane's daemon session ID
     let daemon_session_id = if let Some(pane_id) = matches.get_one::<String>("pane") {
@@ -51,13 +51,59 @@ pub(crate) fn handle_attach_command(
         }
     };
 
+    // 2. If session has no terminal window (headless), spawn a new attach window
+    //    instead of connecting from the current terminal.
+    let is_headless = session
+        .latest_agent()
+        .is_some_and(|a| a.terminal_window_id().is_none());
+
+    if is_headless {
+        info!(
+            event = "cli.attach_spawning_window",
+            branch = branch,
+            daemon_session_id = daemon_session_id.as_str()
+        );
+
+        let kild_config = kild_config::KildConfig::load_hierarchy().unwrap_or_default();
+        let config = kild_config::Config::new();
+
+        match kild_core::sessions::daemon_helpers::spawn_and_save_attach_window(
+            &mut session,
+            branch,
+            &kild_config,
+            &config.sessions_dir(),
+        ) {
+            Ok(true) => {
+                info!(event = "cli.attach_window_spawned", branch = branch);
+                return Ok(());
+            }
+            Ok(false) => {
+                // Window spawn failed (best-effort), fall through to direct attach
+                warn!(
+                    event = "cli.attach_window_spawn_failed",
+                    branch = branch,
+                    "Could not spawn attach window, falling back to direct attach"
+                );
+            }
+            Err(e) => {
+                // Session save failed after window spawn, fall through to direct attach
+                warn!(
+                    event = "cli.attach_window_save_failed",
+                    branch = branch,
+                    error = %e,
+                    "Could not save attach window info, falling back to direct attach"
+                );
+            }
+        }
+    }
+
     info!(
         event = "cli.attach_connecting",
         branch = branch,
         daemon_session_id = daemon_session_id.as_str()
     );
 
-    // 2. Connect to daemon and attach
+    // 3. Connect to daemon and attach from the current terminal
     if let Err(e) = attach_to_daemon_session(&daemon_session_id, branch) {
         eprintln!("{}", e);
         error!(event = "cli.attach_failed", branch = branch, error = %e);

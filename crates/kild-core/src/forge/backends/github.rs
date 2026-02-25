@@ -1,5 +1,6 @@
 //! GitHub forge backend implementation.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use tracing::{debug, info, warn};
@@ -7,9 +8,23 @@ use tracing::{debug, info, warn};
 use crate::forge::errors::ForgeError;
 use crate::forge::traits::ForgeBackend;
 use crate::forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
+use crate::git::naming::KILD_BRANCH_PREFIX;
 
 /// GitHub forge backend using the `gh` CLI.
 pub struct GitHubBackend;
+
+/// Ensure the branch name has the `kild/` prefix for GitHub API queries.
+///
+/// KILD pushes branches as `kild/<branch>`, so `gh pr view` needs the full ref.
+/// Callers should always pass the full ref, but this normalizes defensively to
+/// prevent "no pull requests found" errors from short branch names.
+fn normalize_branch(branch: &str) -> Cow<'_, str> {
+    if branch.starts_with(KILD_BRANCH_PREFIX) {
+        Cow::Borrowed(branch)
+    } else {
+        Cow::Owned(crate::git::naming::kild_branch_name(branch))
+    }
+}
 
 impl ForgeBackend for GitHubBackend {
     fn name(&self) -> &'static str {
@@ -25,15 +40,16 @@ impl ForgeBackend for GitHubBackend {
     }
 
     fn is_pr_merged(&self, worktree_path: &Path, branch: &str) -> Result<bool, ForgeError> {
+        let branch = normalize_branch(branch);
         debug!(
             event = "core.forge.pr_merge_check_started",
-            branch = branch,
+            branch = %branch,
             worktree_path = %worktree_path.display()
         );
 
         let output = std::process::Command::new("gh")
             .current_dir(worktree_path)
-            .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
+            .args(["pr", "view", &branch, "--json", "state", "-q", ".state"])
             .output();
 
         match output {
@@ -44,7 +60,7 @@ impl ForgeBackend for GitHubBackend {
                 let merged = state == "MERGED";
                 debug!(
                     event = "core.forge.pr_merge_check_completed",
-                    branch = branch,
+                    branch = %branch,
                     state = %state,
                     merged = merged
                 );
@@ -57,7 +73,7 @@ impl ForgeBackend for GitHubBackend {
                     || stderr.contains("Could not resolve")
                     || stderr.contains("no open pull requests")
                 {
-                    debug!(event = "core.forge.pr_merge_check_no_pr", branch = branch,);
+                    debug!(event = "core.forge.pr_merge_check_no_pr", branch = %branch);
                     Ok(false)
                 } else {
                     Err(ForgeError::CliError {
@@ -74,9 +90,10 @@ impl ForgeBackend for GitHubBackend {
     }
 
     fn check_pr_exists(&self, worktree_path: &Path, branch: &str) -> PrCheckResult {
+        let branch = normalize_branch(branch);
         debug!(
             event = "core.forge.pr_exists_check_started",
-            branch = branch
+            branch = %branch
         );
 
         if !worktree_path.exists() {
@@ -89,7 +106,7 @@ impl ForgeBackend for GitHubBackend {
 
         let output = std::process::Command::new("gh")
             .current_dir(worktree_path)
-            .args(["pr", "view", branch, "--json", "state"])
+            .args(["pr", "view", &branch, "--json", "state"])
             .output();
 
         match output {
@@ -104,7 +121,7 @@ impl ForgeBackend for GitHubBackend {
                 } else {
                     warn!(
                         event = "core.forge.pr_exists_check_error",
-                        branch = branch,
+                        branch = %branch,
                         exit_code = output.status.code(),
                         stderr = %stderr.trim(),
                         "gh CLI error - PR status unavailable"
@@ -128,9 +145,10 @@ impl ForgeBackend for GitHubBackend {
         worktree_path: &Path,
         branch: &str,
     ) -> Result<Option<PrInfo>, ForgeError> {
+        let branch = normalize_branch(branch);
         debug!(
             event = "core.forge.pr_info_fetch_started",
-            branch = branch,
+            branch = %branch,
             worktree_path = %worktree_path.display()
         );
 
@@ -139,7 +157,7 @@ impl ForgeBackend for GitHubBackend {
             .args([
                 "pr",
                 "view",
-                branch,
+                &branch,
                 "--json",
                 "number,url,state,statusCheckRollup,reviews,isDraft",
             ])
@@ -148,7 +166,7 @@ impl ForgeBackend for GitHubBackend {
         match output {
             Ok(output) if output.status.success() => {
                 let json_str = String::from_utf8_lossy(&output.stdout);
-                Ok(parse_gh_pr_json(&json_str, branch))
+                Ok(parse_gh_pr_json(&json_str, &branch))
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -156,7 +174,7 @@ impl ForgeBackend for GitHubBackend {
                     || stderr.contains("Could not resolve")
                     || stderr.contains("no open pull requests")
                 {
-                    debug!(event = "core.forge.pr_info_fetch_no_pr", branch = branch,);
+                    debug!(event = "core.forge.pr_info_fetch_no_pr", branch = %branch);
                     Ok(None)
                 } else {
                     Err(ForgeError::CliError {
@@ -402,6 +420,26 @@ mod tests {
         let backend = GitHubBackend;
         assert_eq!(backend.name(), "github");
         assert_eq!(backend.display_name(), "GitHub");
+    }
+
+    #[test]
+    fn test_normalize_branch_adds_prefix() {
+        let result = normalize_branch("my-feature");
+        assert_eq!(result.as_ref(), "kild/my-feature");
+    }
+
+    #[test]
+    fn test_normalize_branch_preserves_existing_prefix() {
+        let result = normalize_branch("kild/my-feature");
+        assert_eq!(result.as_ref(), "kild/my-feature");
+        // Should borrow, not allocate
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_normalize_branch_nested_slashes() {
+        let result = normalize_branch("feature/auth");
+        assert_eq!(result.as_ref(), "kild/feature/auth");
     }
 
     #[test]
