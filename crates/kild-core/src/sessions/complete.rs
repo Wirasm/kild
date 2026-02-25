@@ -305,15 +305,18 @@ fn complete_no_merge(
             Some(true) => {
                 steps.push("PR is already merged".to_string());
                 steps.push("Delete remote branch".to_string());
+                steps.push("Destroy worktree and session".to_string());
             }
             Some(false) => {
                 steps.push("PR is not merged — remote branch preserved".to_string());
+                steps.push("Destroy worktree and session".to_string());
             }
             None => {
-                steps.push("PR merge status unknown — remote branch preserved".to_string());
+                steps.push(
+                    "PR merge status unknown — would abort (session NOT destroyed)".to_string(),
+                );
             }
         }
-        steps.push("Destroy worktree and session".to_string());
         return Ok(CompleteResult::DryRun { steps });
     }
 
@@ -398,17 +401,17 @@ pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge:
     let forge_override = load_forge_override();
     let backend = crate::forge::get_forge_backend(worktree_path, forge_override)?;
 
-    match backend.fetch_pr_info(worktree_path, branch) {
-        Ok(pr_info) => pr_info,
-        Err(e) => {
+    backend
+        .fetch_pr_info(worktree_path, branch)
+        .inspect_err(|e| {
             warn!(
                 event = "core.session.pr_info_fetch_failed",
                 branch = branch,
                 error = %e,
             );
-            None
-        }
-    }
+        })
+        .ok()
+        .flatten()
 }
 
 /// Read PR info for a session from the sidecar file.

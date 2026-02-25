@@ -130,9 +130,8 @@ fn shell_command() -> String {
 fn resolve_pane_status(daemon_session_id: &str) -> (String, String, String) {
     let (status, pid, exit_code) = ipc::get_session_status(daemon_session_id);
     let pane_dead_str = match status {
-        SessionStatus::Running | SessionStatus::Creating => "0",
         SessionStatus::Stopped => "1",
-        // #[non_exhaustive]: unknown future statuses default to alive
+        // #[non_exhaustive]: all other statuses (Running, Creating, future) are alive
         _ => "0",
     };
     let pane_pid = pid.map(|p| p.to_string()).unwrap_or_default();
