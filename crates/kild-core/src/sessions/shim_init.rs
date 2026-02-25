@@ -5,9 +5,8 @@ use kild_paths::KildPaths;
 /// Creates `~/.kild/shim/<session_id>/panes.json` with the leader pane
 /// registered as `%0`. Idempotent: overwrites existing state.
 pub(super) fn init_pane_registry(session_id: &str, daemon_session_id: &str) -> Result<(), String> {
-    let shim_dir = KildPaths::resolve()
-        .map_err(|e| e.to_string())?
-        .shim_session_dir(session_id);
+    let paths = KildPaths::resolve().map_err(|e| e.to_string())?;
+    let shim_dir = paths.shim_session_dir(session_id);
     std::fs::create_dir_all(&shim_dir)
         .map_err(|e| format!("failed to create shim state directory: {}", e))?;
 
@@ -31,14 +30,13 @@ pub(super) fn init_pane_registry(session_id: &str, daemon_session_id: &str) -> R
         }
     });
 
-    let lock_path = shim_dir.join("panes.lock");
-    std::fs::File::create(&lock_path)
+    std::fs::File::create(paths.shim_lock_file(session_id))
         .map_err(|e| format!("failed to create shim lock file: {}", e))?;
 
-    let panes_path = shim_dir.join("panes.json");
     let json = serde_json::to_string_pretty(&initial_state)
         .map_err(|e| format!("failed to serialize shim state: {}", e))?;
-    std::fs::write(&panes_path, json).map_err(|e| format!("failed to write shim state: {}", e))?;
+    std::fs::write(paths.shim_panes_file(session_id), json)
+        .map_err(|e| format!("failed to write shim state: {}", e))?;
 
     Ok(())
 }
