@@ -293,12 +293,12 @@ fn new_config(now_ms: u64) -> serde_json::Value {
 /// - `~/.claude/teams/honryu/inboxes/<branch>.json` (inbox file)
 /// - The member entry from `~/.claude/teams/honryu/config.json`
 ///
-/// No-op if fleet mode is not active, the agent is not claude, or the files
-/// don't exist.
+/// No-op if the Claude config directory cannot be resolved (HOME not set),
+/// or if the files don't exist. Agent type and fleet-mode checks are
+/// intentionally skipped — the session is already being destroyed and its
+/// agent type is unavailable. Cleanup is opportunistic: if the files exist,
+/// they are removed.
 pub fn remove_fleet_member(branch: &str) {
-    // Guard: only claude agents participate in the inbox/team protocol.
-    // We can't check the agent type here (session is already being destroyed),
-    // so we just check if the inbox file exists — if it does, clean it up.
     let Some(dir) = team_dir() else {
         return;
     };
@@ -325,7 +325,12 @@ pub fn remove_fleet_member(branch: &str) {
             warn!(
                 event = "core.session.fleet.inbox_remove_check_failed",
                 branch = branch,
+                path = %inbox.display(),
                 error = %e,
+            );
+            eprintln!(
+                "Warning: Failed to check fleet inbox for '{}': {}",
+                branch, e
             );
         }
     }
@@ -336,8 +341,17 @@ pub fn remove_fleet_member(branch: &str) {
 
 fn remove_from_team_config(branch: &str, dir: &Path) {
     let config_path = dir.join("config.json");
-    if !config_path.exists() {
-        return;
+    match config_path.try_exists() {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            warn!(
+                event = "core.session.fleet.config_exists_check_failed",
+                branch = branch,
+                error = %e,
+            );
+            return;
+        }
     }
 
     let raw = match std::fs::read_to_string(&config_path) {
@@ -388,7 +402,12 @@ fn remove_from_team_config(branch: &str, dir: &Path) {
                 warn!(
                     event = "core.session.fleet.config_write_failed",
                     branch = branch,
+                    path = %config_path.display(),
                     error = %e,
+                );
+                eprintln!(
+                    "Warning: Failed to update fleet config for '{}': {}",
+                    branch, e
                 );
             }
         }
@@ -397,6 +416,10 @@ fn remove_from_team_config(branch: &str, dir: &Path) {
                 event = "core.session.fleet.config_serialize_failed",
                 branch = branch,
                 error = %e,
+            );
+            eprintln!(
+                "Warning: Failed to serialize fleet config for '{}': {}",
+                branch, e
             );
         }
     }
@@ -741,6 +764,56 @@ mod tests {
                 .join("worker-b.json");
             assert!(!inbox_a.exists());
             assert!(inbox_b.exists());
+        });
+    }
+
+    #[test]
+    fn remove_fleet_member_removes_brain_entry() {
+        with_team_dir("remove_brain", |base| {
+            ensure_fleet_member(BRAIN_BRANCH, std::path::Path::new("/tmp/brain"), "claude");
+
+            let config_path = base.join("teams").join(BRAIN_BRANCH).join("config.json");
+            let config: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(config["members"].as_array().unwrap().len(), 1);
+
+            remove_fleet_member(BRAIN_BRANCH);
+
+            let config: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(
+                config["members"].as_array().unwrap().len(),
+                0,
+                "brain's team-lead entry should be removed"
+            );
+        });
+    }
+
+    #[test]
+    fn remove_fleet_member_removes_config_when_inbox_already_gone() {
+        with_team_dir("config_only_remove", |base| {
+            ensure_fleet_member("worker", std::path::Path::new("/tmp/wt"), "claude");
+
+            // Simulate inbox already consumed/removed.
+            let inbox = base
+                .join("teams")
+                .join(BRAIN_BRANCH)
+                .join("inboxes")
+                .join("worker.json");
+            fs::remove_file(&inbox).unwrap();
+            assert!(!inbox.exists());
+
+            let config_path = base.join("teams").join(BRAIN_BRANCH).join("config.json");
+
+            remove_fleet_member("worker");
+
+            let config: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(
+                config["members"].as_array().unwrap().len(),
+                0,
+                "config entry should be removed even when inbox was already absent"
+            );
         });
     }
 
