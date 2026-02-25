@@ -180,7 +180,11 @@ fn handle_all_prime(
         // Fleet table is shared across workers — print once with a fleet-wide header.
         let inner = contexts[0].to_status_markdown();
         // Strip the per-branch header line and replace with a fleet-wide one.
-        let body = inner.split_once('\n').map_or(inner.as_str(), |x| x.1);
+        let body = if let Some((_header, rest)) = inner.split_once('\n') {
+            rest
+        } else {
+            inner.as_str()
+        };
         print!("# Fleet Status{body}");
     } else {
         for (i, ctx) in contexts.iter().enumerate() {
@@ -212,15 +216,14 @@ fn handle_all_prime(
 }
 
 fn prime_output_from_context(ctx: &PrimeContext) -> PrimeOutput {
-    let (task_id, task_content, ack, report) = if let Some(state) = &ctx.dropbox_state {
-        (
+    let (task_id, task_content, ack, report) = match &ctx.dropbox_state {
+        Some(state) => (
             state.task_id,
             state.task_content.clone(),
             state.ack,
             state.report.clone(),
-        )
-    } else {
-        (None, None, None, None)
+        ),
+        None => (None, None, None, None),
     };
 
     let acked = task_id.is_some() && task_id == ack;
