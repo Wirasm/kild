@@ -440,7 +440,7 @@ mod tests {
     /// Create a temp dir with `~/.claude/teams/honryu/` already present and set
     /// `CLAUDE_CONFIG_DIR` to point at it. Calls `f` while holding the env lock.
     fn with_team_dir(test_name: &str, f: impl FnOnce(&std::path::Path)) {
-        let _lock = super::ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().unwrap();
         let base = std::env::temp_dir().join(format!(
             "kild_fleet_test_{}_{}",
             test_name,
@@ -449,7 +449,7 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         let team_dir = base.join("teams").join(BRAIN_BRANCH);
         fs::create_dir_all(&team_dir).unwrap();
-        // SAFETY: super::ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
+        // SAFETY: ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
         unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
         f(&base);
         let _ = fs::remove_dir_all(&base);
@@ -459,7 +459,7 @@ mod tests {
 
     /// Create a temp dir WITHOUT the team directory (fleet not yet started).
     fn without_team_dir(test_name: &str, f: impl FnOnce(&std::path::Path)) {
-        let _lock = super::ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().unwrap();
         let base = std::env::temp_dir().join(format!(
             "kild_fleet_no_dir_{}_{}",
             test_name,
@@ -467,7 +467,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
-        // SAFETY: super::ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
+        // SAFETY: ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
         unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
         f(&base);
         let _ = fs::remove_dir_all(&base);
