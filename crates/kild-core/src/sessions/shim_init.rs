@@ -6,8 +6,7 @@ use kild_paths::KildPaths;
 /// registered as `%0`. Idempotent: overwrites existing state.
 pub(super) fn init_pane_registry(session_id: &str, daemon_session_id: &str) -> Result<(), String> {
     let paths = KildPaths::resolve().map_err(|e| e.to_string())?;
-    let shim_dir = paths.shim_session_dir(session_id);
-    std::fs::create_dir_all(&shim_dir)
+    std::fs::create_dir_all(paths.shim_session_dir(session_id))
         .map_err(|e| format!("failed to create shim state directory: {}", e))?;
 
     let initial_state = serde_json::json!({
