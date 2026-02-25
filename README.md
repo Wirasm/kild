@@ -318,6 +318,15 @@ kild prime <branch> --status
 
 # Machine-readable JSON output
 kild prime <branch> --json
+
+# Fleet-wide: concatenated prime blobs for all fleet sessions
+kild prime --all
+
+# Fleet-wide: single deduplicated fleet status table
+kild prime --all --status
+
+# Fleet-wide: JSON array of per-session prime contexts
+kild prime --all --json
 ```
 
 **Note**: Returns an error if fleet mode is not active. Designed for use in brain→worker injection: `kild inject worker "$(kild prime worker)"`.

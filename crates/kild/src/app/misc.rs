@@ -127,13 +127,20 @@ pub fn prime_command() -> Command {
             Arg::new("branch")
                 .help("Branch name of the kild to prime")
                 .index(1)
-                .required(true),
+                .required_unless_present("all"),
         )
         .arg(
             Arg::new("json")
                 .long("json")
                 .help("Output in JSON format")
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("all")
+                .long("all")
+                .help("Generate fleet context for all fleet kilds")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("branch"),
         )
         .arg(
             Arg::new("status")
