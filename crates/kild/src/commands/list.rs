@@ -80,7 +80,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                             latest_agent.and_then(|a| a.terminal_type().map(|t| t.to_string()));
 
                         let worktree_status_ref =
-                            &git_stats.as_ref().and_then(|g| g.worktree_status.clone());
+                            git_stats.as_ref().and_then(|g| g.worktree_status.as_ref());
                         let merge_readiness = branch_health.as_ref().map(|h| {
                             kild_core::MergeReadiness::compute(
                                 h,

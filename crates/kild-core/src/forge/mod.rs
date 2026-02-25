@@ -8,4 +8,4 @@ pub mod types;
 pub use errors::ForgeError;
 pub use registry::{detect_forge, get_backend, get_forge_backend};
 pub use traits::ForgeBackend;
-pub use types::ForgeType;
+pub use types::{ForgeType, MergeReadiness};

@@ -37,11 +37,11 @@ pub use kild_protocol::{
 
 // Re-export config types from kild-config
 pub use editor::{EditorBackend, EditorError, EditorType};
-pub use forge::types::{CiStatus, PrCheckResult, PrInfo, PrState, ReviewStatus};
+pub use forge::types::{CiStatus, MergeReadiness, PrCheckResult, PrInfo, PrState, ReviewStatus};
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
 pub use git::types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,
-    FileOverlap, GitStats, MergeReadiness, OverlapReport, UncommittedDetails, WorktreeStatus,
+    FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
 };
 pub use kild_config::ConfigError;
 pub use kild_config::{
