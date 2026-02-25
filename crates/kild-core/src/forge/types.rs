@@ -160,7 +160,7 @@ impl MergeReadiness {
     /// 6. Ready / ReadyLocal — all checks passed
     pub fn compute(
         health: &BranchHealth,
-        worktree_status: &Option<WorktreeStatus>,
+        worktree_status: Option<&WorktreeStatus>,
         pr_info: Option<&PrInfo>,
     ) -> Self {
         match health.conflict_status {
@@ -178,9 +178,8 @@ impl MergeReadiness {
         }
 
         // Check if there are unpushed commits
-        let has_unpushed = worktree_status
-            .as_ref()
-            .is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
+        let has_unpushed =
+            worktree_status.is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
 
         if has_unpushed {
             return Self::NeedsPush;
@@ -201,14 +200,14 @@ impl MergeReadiness {
 impl std::fmt::Display for MergeReadiness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MergeReadiness::Ready => write!(f, "Ready"),
-            MergeReadiness::NeedsPush => write!(f, "Needs push"),
-            MergeReadiness::NeedsRebase => write!(f, "Needs rebase"),
-            MergeReadiness::HasConflicts => write!(f, "Has conflicts"),
-            MergeReadiness::ConflictCheckFailed => write!(f, "Conflict check failed"),
-            MergeReadiness::NeedsPr => write!(f, "Needs PR"),
-            MergeReadiness::CiFailing => write!(f, "CI failing"),
-            MergeReadiness::ReadyLocal => write!(f, "Ready (local)"),
+            Self::Ready => write!(f, "Ready"),
+            Self::NeedsPush => write!(f, "Needs push"),
+            Self::NeedsRebase => write!(f, "Needs rebase"),
+            Self::HasConflicts => write!(f, "Has conflicts"),
+            Self::ConflictCheckFailed => write!(f, "Conflict check failed"),
+            Self::NeedsPr => write!(f, "Needs PR"),
+            Self::CiFailing => write!(f, "CI failing"),
+            Self::ReadyLocal => write!(f, "Ready (local)"),
         }
     }
 }
@@ -440,7 +439,7 @@ mod tests {
     fn test_readiness_has_conflicts() {
         let h = make_health(ConflictStatus::Conflicts, 0, true);
         assert_eq!(
-            MergeReadiness::compute(&h, &None, None),
+            MergeReadiness::compute(&h, None, None),
             MergeReadiness::HasConflicts
         );
     }
@@ -449,7 +448,7 @@ mod tests {
     fn test_readiness_conflict_check_failed() {
         let h = make_health(ConflictStatus::Unknown, 0, true);
         assert_eq!(
-            MergeReadiness::compute(&h, &None, None),
+            MergeReadiness::compute(&h, None, None),
             MergeReadiness::ConflictCheckFailed
         );
     }
@@ -458,7 +457,7 @@ mod tests {
     fn test_readiness_needs_rebase() {
         let h = make_health(ConflictStatus::Clean, 5, true);
         assert_eq!(
-            MergeReadiness::compute(&h, &None, None),
+            MergeReadiness::compute(&h, None, None),
             MergeReadiness::NeedsRebase
         );
     }
@@ -467,7 +466,7 @@ mod tests {
     fn test_readiness_ready_local() {
         let h = make_health(ConflictStatus::Clean, 0, false);
         assert_eq!(
-            MergeReadiness::compute(&h, &None, None),
+            MergeReadiness::compute(&h, None, None),
             MergeReadiness::ReadyLocal
         );
     }
@@ -481,7 +480,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), None),
+            MergeReadiness::compute(&h, Some(&ws), None),
             MergeReadiness::NeedsPush
         );
     }
@@ -495,7 +494,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), None),
+            MergeReadiness::compute(&h, Some(&ws), None),
             MergeReadiness::NeedsPush
         );
     }
@@ -509,7 +508,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), None),
+            MergeReadiness::compute(&h, Some(&ws), None),
             MergeReadiness::NeedsPr
         );
     }
@@ -533,7 +532,7 @@ mod tests {
             updated_at: "2026-02-09T12:00:00Z".to_string(),
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::CiFailing
         );
     }
@@ -557,7 +556,7 @@ mod tests {
             updated_at: "2026-02-09T12:00:00Z".to_string(),
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::Ready
         );
     }
@@ -611,7 +610,7 @@ mod tests {
             updated_at: "2026-02-09T12:00:00Z".to_string(),
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::Ready
         );
     }
@@ -635,7 +634,7 @@ mod tests {
             updated_at: "2026-02-09T12:00:00Z".to_string(),
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::Ready
         );
     }
@@ -659,7 +658,7 @@ mod tests {
             updated_at: "2026-02-09T12:00:00Z".to_string(),
         };
         assert_eq!(
-            MergeReadiness::compute(&h, &Some(ws), Some(&pr)),
+            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
             MergeReadiness::Ready
         );
     }
