@@ -143,11 +143,14 @@ pub fn create_session(
     persistence::ensure_sessions_directory(&config.sessions_dir())?;
 
     // Check for existing session before hitting the git layer
-    if let Some(_existing) =
-        persistence::find_session_by_name(&config.sessions_dir(), &validated.name)?
-    {
+    if persistence::find_session_by_name(&config.sessions_dir(), &validated.name)?.is_some() {
+        warn!(
+            event = "core.session.create_failed",
+            branch = %validated.name,
+            reason = "already_exists",
+        );
         return Err(SessionError::AlreadyExists {
-            name: validated.name.to_string(),
+            name: validated.name.into_inner(),
         });
     }
 
