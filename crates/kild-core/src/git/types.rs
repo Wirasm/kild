@@ -1,4 +1,3 @@
-use crate::forge::types::{CiStatus, PrInfo};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -254,96 +253,6 @@ pub struct BranchHealth {
     pub conflict_status: ConflictStatus,
     /// Whether any remote is configured. When false, PR-based readiness is skipped.
     pub has_remote: bool,
-}
-
-/// Computed merge readiness status for a branch.
-///
-/// Combines git health metrics with forge/PR data to determine
-/// whether a branch is ready to merge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MergeReadiness {
-    /// Clean, pushed, PR open, CI passing
-    Ready,
-    /// Has unpushed commits
-    NeedsPush,
-    /// Behind base branch significantly
-    NeedsRebase,
-    /// Cannot merge cleanly into base
-    HasConflicts,
-    /// Conflict detection failed — status unknown, treat as blocked
-    ConflictCheckFailed,
-    /// Pushed but no PR exists
-    NeedsPr,
-    /// PR exists but CI is failing
-    CiFailing,
-    /// Ready to merge locally (no remote configured)
-    ReadyLocal,
-}
-
-impl MergeReadiness {
-    /// Compute merge readiness from git health metrics, worktree status, and optional PR info.
-    ///
-    /// Priority order (highest severity first):
-    /// 1. HasConflicts / ConflictCheckFailed — blocks merge entirely
-    /// 2. NeedsRebase — behind base, conflicts likely if not rebased
-    /// 3. NeedsPush — local-only commits, PR can't be created/updated
-    /// 4. NeedsPr — pushed but no tracking PR exists
-    /// 5. CiFailing — PR exists but not passing checks
-    /// 6. Ready / ReadyLocal — all checks passed
-    pub fn compute(
-        health: &BranchHealth,
-        worktree_status: &Option<WorktreeStatus>,
-        pr_info: Option<&PrInfo>,
-    ) -> Self {
-        match health.conflict_status {
-            ConflictStatus::Conflicts => return Self::HasConflicts,
-            ConflictStatus::Unknown => return Self::ConflictCheckFailed,
-            ConflictStatus::Clean => {}
-        }
-
-        if health.drift.behind > 0 {
-            return Self::NeedsRebase;
-        }
-
-        if !health.has_remote {
-            return Self::ReadyLocal;
-        }
-
-        // Check if there are unpushed commits
-        let has_unpushed = worktree_status
-            .as_ref()
-            .is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
-
-        if has_unpushed {
-            return Self::NeedsPush;
-        }
-
-        let Some(pr) = pr_info else {
-            return Self::NeedsPr;
-        };
-
-        if pr.ci_status == CiStatus::Failing {
-            return Self::CiFailing;
-        }
-
-        Self::Ready
-    }
-}
-
-impl std::fmt::Display for MergeReadiness {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MergeReadiness::Ready => write!(f, "Ready"),
-            MergeReadiness::NeedsPush => write!(f, "Needs push"),
-            MergeReadiness::NeedsRebase => write!(f, "Needs rebase"),
-            MergeReadiness::HasConflicts => write!(f, "Has conflicts"),
-            MergeReadiness::ConflictCheckFailed => write!(f, "Conflict check failed"),
-            MergeReadiness::NeedsPr => write!(f, "Needs PR"),
-            MergeReadiness::CiFailing => write!(f, "CI failing"),
-            MergeReadiness::ReadyLocal => write!(f, "Ready (local)"),
-        }
-    }
 }
 
 /// A single file that is modified by multiple kilds.

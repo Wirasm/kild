@@ -28,7 +28,7 @@ pub use removal::{
 pub use status::{collect_git_stats, get_diff_stats, get_worktree_status};
 pub use types::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,
-    FileOverlap, GitStats, MergeReadiness, OverlapReport, UncommittedDetails, WorktreeStatus,
+    FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
 };
 pub use validation::{
     get_current_branch, is_valid_git_directory, should_use_current_branch, validate_branch_name,
