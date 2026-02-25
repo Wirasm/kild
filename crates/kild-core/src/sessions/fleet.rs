@@ -216,11 +216,7 @@ fn update_team_config(branch: &str, cwd: &Path, dir: &Path) {
         }
     };
 
-    let agent_id = if branch == BRAIN_BRANCH {
-        format!("{BRAIN_BRANCH}@{TEAM_NAME}")
-    } else {
-        format!("{branch}@{TEAM_NAME}")
-    };
+    let agent_id = fleet_agent_id(branch);
 
     // Skip if already present.
     if members
@@ -274,6 +270,14 @@ fn update_team_config(branch: &str, cwd: &Path, dir: &Path) {
             );
         }
     }
+}
+
+/// Returns the agent ID string for a branch in the honryu team.
+///
+/// Both brain and worker branches use the same `<branch>@<team>` format.
+/// Since `TEAM_NAME == BRAIN_BRANCH`, the result is always `"<branch>@honryu"`.
+fn fleet_agent_id(branch: &str) -> String {
+    format!("{branch}@{TEAM_NAME}")
 }
 
 fn new_config(now_ms: u64) -> serde_json::Value {
@@ -383,11 +387,7 @@ fn remove_from_team_config(branch: &str, dir: &Path) {
         None => return,
     };
 
-    let agent_id = if branch == BRAIN_BRANCH {
-        format!("{BRAIN_BRANCH}@{TEAM_NAME}")
-    } else {
-        format!("{branch}@{TEAM_NAME}")
-    };
+    let agent_id = fleet_agent_id(branch);
 
     let before = members.len();
     members.retain(|m| m.get("agentId").and_then(|v| v.as_str()) != Some(&agent_id));
