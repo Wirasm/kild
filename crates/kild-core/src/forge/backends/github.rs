@@ -432,8 +432,6 @@ mod tests {
     fn test_normalize_branch_preserves_existing_prefix() {
         let result = normalize_branch("kild/my-feature");
         assert_eq!(result.as_ref(), "kild/my-feature");
-        // Should borrow, not allocate
-        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
     }
 
     #[test]

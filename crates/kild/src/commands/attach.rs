@@ -51,11 +51,15 @@ pub(crate) fn handle_attach_command(
         }
     };
 
-    // 2. If session has no terminal window (headless), spawn a new attach window
-    //    instead of connecting from the current terminal.
-    let is_headless = session
-        .latest_agent()
-        .is_some_and(|a| a.terminal_window_id().is_none());
+    // 2. If session is a running daemon session with no terminal window (headless),
+    //    spawn a new attach window instead of connecting from the current terminal.
+    //    Skip when --pane is specified — pane attach always uses direct connection
+    //    since spawn_attach_window connects to the leader, not the teammate pane.
+    let is_headless = matches.get_one::<String>("pane").is_none()
+        && session.runtime_mode == Some(kild_core::RuntimeMode::Daemon)
+        && session
+            .latest_agent()
+            .is_some_and(|a| a.terminal_window_id().is_none());
 
     if is_headless {
         info!(
@@ -64,7 +68,7 @@ pub(crate) fn handle_attach_command(
             daemon_session_id = daemon_session_id.as_str()
         );
 
-        let kild_config = kild_config::KildConfig::load_hierarchy().unwrap_or_default();
+        let kild_config = helpers::load_config_with_warning();
         let config = kild_config::Config::new();
 
         match kild_core::sessions::daemon_helpers::spawn_and_save_attach_window(
