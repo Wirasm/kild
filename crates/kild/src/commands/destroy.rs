@@ -23,6 +23,21 @@ pub(crate) fn handle_destroy_command(
         .get_one::<String>("branch")
         .ok_or("Branch argument is required (or use --all)")?;
 
+    // Warn if destroying own session
+    if let Some(self_br) = super::helpers::resolve_self_branch()
+        && self_br == branch.as_str()
+    {
+        eprintln!(
+            "{} You are about to destroy your own session ({}).",
+            color::warning("Warning:"),
+            color::ice(branch),
+        );
+        eprintln!(
+            "  {}",
+            color::hint("This will kill the agent and remove the session."),
+        );
+    }
+
     info!(
         event = "cli.destroy_started",
         branch = branch,
@@ -108,16 +123,44 @@ pub(crate) fn handle_destroy_command(
 fn handle_destroy_all(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.destroy_all_started", force = force);
 
-    let sessions = session_ops::list_sessions()?;
+    let self_branch = super::helpers::resolve_self_branch();
+
+    let mut sessions = session_ops::list_sessions()?;
+
+    // Filter out the calling session to prevent self-destruction
+    let skipped_self = if let Some(ref self_br) = self_branch {
+        let before = sessions.len();
+        sessions.retain(|s| s.branch.as_ref() != self_br.as_str());
+        before > sessions.len()
+    } else {
+        false
+    };
 
     if sessions.is_empty() {
-        println!("No kilds to destroy.");
+        if skipped_self {
+            println!("No other kilds to destroy (skipped self).");
+        } else {
+            println!("No kilds to destroy.");
+        }
         info!(
             event = "cli.destroy_all_completed",
             destroyed = 0,
             failed = 0
         );
         return Ok(());
+    }
+
+    if skipped_self && let Some(ref self_br) = self_branch {
+        info!(
+            event = "cli.destroy_all_self_skipped",
+            branch = self_br.as_str()
+        );
+        eprintln!(
+            "{} Skipping self ({}) — use `kild destroy {}` explicitly.",
+            color::warning("Note:"),
+            color::ice(self_br),
+            self_br,
+        );
     }
 
     // Confirmation prompt unless --force is specified
