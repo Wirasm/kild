@@ -65,39 +65,68 @@ A kild can host multiple agents (for agent teams), but each agent is tracked ind
 
 ## Fleet Communication
 
+Communication uses two channels that work together. You don't need to think about which channel — `kild inject` and `kild inbox` handle the routing.
+
+### The full task cycle
+
+```
+1. You inject a task      →  kild inject <branch> "do X"
+2. Worker receives it     →  (automatic — Claude inbox + dropbox task.md)
+3. Worker acknowledges    →  (automatic — writes ack file)
+4. Worker executes        →  (working...)
+5. Worker writes results  →  (writes report.md to dropbox)
+6. Worker goes idle       →  (automatic — [EVENT] arrives in your inbox)
+7. You read the report    →  kild inbox <branch>
+8. You decide next step   →  inject next task / rebase / complete / escalate
+```
+
 ### Sending instructions to workers
 
 ```bash
-# To a running worker — delivers via Claude Code inbox or PTY stdin
+# To a running worker
 kild inject <branch> "Your next task: <clear instruction>"
 
-# To a stopped worker — resume + deliver instruction on startup
+# To a stopped worker — resume + deliver on startup
 kild open <branch> --resume --initial-prompt "<instruction>"
 ```
 
-**How inject works:** For Claude Code workers, `kild inject` writes to `~/.claude/teams/honryu/inboxes/<branch>.json`. Claude Code polls this file every ~1 second and delivers the message as a new conversation turn. For other agents (Codex, Kiro, etc.), it writes directly to the PTY stdin.
+`kild inject` delivers via **both** channels simultaneously:
+- **Claude Code inbox** — message appears as a new conversation turn within ~1 second
+- **Dropbox** — writes `task.md` + increments `task-id` for protocol state tracking
 
-**Never use `kild stop` to deliver messages.** Stopping kills the agent process. Use `kild inject` for running workers or `kild open --resume --initial-prompt` for stopped ones.
+For non-Claude agents (Codex, Kiro, etc.), inject writes to PTY stdin + dropbox.
+
+**Never use `kild stop` to deliver messages.** Stopping kills the agent process.
 
 ### Receiving events from workers
 
-The claude-status hook fires automatically when a Claude Code worker finishes a turn. It writes to your inbox at `~/.claude/teams/honryu/inboxes/honryu.json`. Events arrive as messages like:
+Workers report back via **two** channels:
 
-```
-[EVENT] feature-auth Stop: Completed JWT implementation. Tests pass. PR opened.
-```
+1. **[EVENT] messages** (fast, automatic) — The claude-status hook fires when a worker finishes a turn. Events arrive as messages like:
+   ```
+   [EVENT] feature-auth Stop: Completed JWT implementation. Tests pass. PR opened.
+   ```
+   These give you a quick summary. They arrive within ~1 second of a worker going idle.
 
-**After injecting a task: stop and wait.** Do not poll. Do not sleep. Do not run `kild list` in a loop. Workers report back automatically. You receive events within ~1 second of a worker going idle.
+2. **Dropbox reports** (detailed, worker-written) — Workers write their full results to `report.md` in their dropbox. Read these with:
+   ```bash
+   kild inbox <branch>            # Full dropbox state for one worker
+   kild inbox <branch> --report   # Just the report content
+   kild inbox --all               # All workers at a glance
+   ```
+
+**After injecting a task: stop and wait.** Do not poll. Do not sleep. Do not run `kild list` in a loop. Workers report back automatically via [EVENT] messages.
 
 A single `kild list --json` right after inject is fine to confirm the session started. After that: just wait.
 
 ### Responding to events
 
-1. Acknowledge briefly
-2. Check if you need more info (`kild diff <branch>`, `kild stats <branch>`)
-3. Decide: inject next task / rebase / escalate / destroy
-4. Act
-5. Log if significant
+1. Read the [EVENT] message for a quick summary
+2. If you need details: `kild inbox <branch>` to read the full report
+3. If you need more context: `kild diff <branch>`, `kild stats <branch>`
+4. Decide: inject next task / rebase / escalate / destroy
+5. Act
+6. Log if significant
 
 ### Detecting stuck workers
 

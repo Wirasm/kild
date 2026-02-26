@@ -98,9 +98,13 @@ pub(crate) fn handle_inject_command(
         None
     });
 
+    // Sanitize branch name for inbox path: refactor/foo → refactor-foo.
+    // Must match fleet_safe_name() in kild-core to write to the same file
+    // that Claude Code reads from (based on --agent-name).
+    let inbox_name = branch.replace('/', "-");
     let result = match method {
         InjectMethod::Pty => write_to_pty(&session, text),
-        InjectMethod::ClaudeInbox => write_to_inbox(DEFAULT_TEAM, branch, text),
+        InjectMethod::ClaudeInbox => write_to_inbox(DEFAULT_TEAM, &inbox_name, text),
     };
 
     if let Err(e) = result {
