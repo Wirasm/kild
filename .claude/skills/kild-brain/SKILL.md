@@ -8,6 +8,7 @@ description: |
   - "start my fleet manager", "boot honryu", "wake up the brain", "start honryu for me"
   - "assess the fleet", "what's the fleet doing", "fleet status"
   - "plan the next wave", "what should we work on next", "spin up more kilds"
+  - "start the next wave", "execute the wave", "launch the wave", "run the wave plan"
   - "merge queue", "what's ready to merge", "land the PRs"
   - "direct the workers", "what should <branch> do next"
   - "honryu", "brain", "ask the brain"
@@ -24,6 +25,10 @@ Your task: $ARGUMENTS
 ## Current Fleet State
 
 !`kild list --json 2>/dev/null || echo '{"sessions":[],"fleet_summary":{"total":0}}'`
+
+## Wave Plan
+
+!`cat .kild/wave-plan.json 2>/dev/null || echo 'No wave plan found.'`
 
 ## Brain Memory
 
@@ -51,13 +56,13 @@ case "$STATUS" in
     # Exists but stopped — reopen headlessly and orient.
     # --initial-prompt delivers the orientation via PTY stdin on startup.
     # No sleep needed — PTY stdin is kernel-buffered until the agent reads it.
-    kild open honryu --no-attach --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, and today's session log. Then greet the Tōryō and summarize the fleet state."
+    kild open honryu --no-attach --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
     echo "Honryū restarted."
     ;;
   *)
     # No session — create fresh on main branch.
     # --initial-prompt delivers the first instruction via PTY stdin on startup.
-    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json and today's session log if they exist. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
+    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
     echo "Honryū initialized."
     ;;
 esac

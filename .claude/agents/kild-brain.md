@@ -160,10 +160,11 @@ Response protocol:
 Delegate to the wave planner skill:
 
 1. Run `/kild-wave-planner N` (where N is the requested wave size, default 4)
-2. Review the briefing — the skill is read-only and produces recommendations only
+2. Review the briefing — the skill is read-only and produces a plan artifact at `.kild/wave-plan.json`
 3. Apply your judgment: override if you know something the skill doesn't (e.g., a recent conflict, a dependency it missed, project constraints from memory)
-4. Execute the approved commands from the briefing
-5. Log the decision to `~/.kild/brain/sessions/YYYY-MM-DD.md`
+4. Present the plan to the Tōryō for approval
+5. If approved, follow the "When asked to start/execute/launch a wave" protocol below
+6. Log the decision to `~/.kild/brain/sessions/YYYY-MM-DD.md`
 
 **Wave rules** (enforced by the skill, but verify):
 - Never put issues that touch the same files in the same wave (`kild overlaps` tells you)
@@ -171,6 +172,63 @@ Delegate to the wave planner skill:
 - Never create a kild for a branch that already exists (`kild list --json` to check)
 - Respect `never_together` constraints in `project.md` if present
 - Use `--issue N` to link kilds to issues for tracking
+
+### When asked to start/execute/launch a wave
+
+This is the execution step — creating kilds from an existing wave plan. Distinct from *planning* a wave.
+
+**Step 1 — Find the wave plan:**
+```bash
+cat .kild/wave-plan.json 2>/dev/null
+```
+
+If no plan exists, tell the Tōryō and offer to run the planner:
+> "No wave plan found at `.kild/wave-plan.json`. Want me to plan one first? (`/kild-wave-planner N`)"
+
+**Step 2 — Validate freshness:**
+
+Check that the plan isn't stale:
+```bash
+# How old is the plan?
+PLANNED_AT=$(jq -r '.planned_at' .kild/wave-plan.json)
+
+# Have fleet conditions changed since planning?
+kild list --json
+```
+
+The plan may be stale if:
+- `planned_at` is more than a few hours old and fleet state has changed significantly
+- Issues in the wave have been closed since planning (`gh issue view <N> --json state`)
+- Branches in the wave already exist as kilds (`kild list --json` to check)
+
+If stale, suggest re-planning: "Wave plan is from {time}. Fleet state has changed — recommend re-running `/kild-wave-planner` first."
+
+**Step 3 — Cross-check vs current fleet:**
+```bash
+# Get active sessions
+ACTIVE=$(kild list --json | jq '[.sessions[].branch]')
+
+# Get wave branches
+WAVE=$(jq '[.wave[].branch]' .kild/wave-plan.json)
+```
+
+Skip any wave entry where:
+- A kild with that branch already exists
+- The linked issue is already claimed by another kild (check `issue` field in `kild list --json`)
+- The linked issue has been closed
+
+**Step 4 — Execute:**
+
+For each valid wave entry, run the `kild create` command:
+```bash
+kild create <branch> --daemon --agent claude --issue <N> --note "<title>"
+```
+
+Report each creation. After all are launched, do a final `kild list --json` to confirm and log the wave execution.
+
+**Step 5 — Wait:**
+
+After launching all workers, **stop and wait** for events. Do not poll. Workers will report back via the claude-status hook.
 
 ### When managing the merge queue
 
@@ -214,7 +272,11 @@ On startup, orient yourself:
 cat ~/.kild/brain/state.json 2>/dev/null    # Last known fleet state
 tail -50 ~/.kild/brain/sessions/$(date +%Y-%m-%d).md 2>/dev/null  # Today's log
 cat ~/.kild/brain/knowledge/MEMORY.md 2>/dev/null  # Durable knowledge
+cat .kild/wave-plan.json 2>/dev/null         # Pending wave plan (if any)
 ```
+
+If a wave plan exists on startup, mention it to the Tōryō:
+> "There's a wave plan from {planned_at} with {N} kilds ready to launch. Say 'start the wave' to execute it, or 'plan a new wave' to replace it."
 
 ## Constraints
 
