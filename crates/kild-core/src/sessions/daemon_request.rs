@@ -161,12 +161,29 @@ pub(super) fn deliver_initial_prompt_for_session(
 
     let skip_pty = dropbox_wrote && super::fleet::is_claude_fleet_agent(agent);
     if skip_pty {
+        // Write to Claude Code inbox so the agent receives the prompt as a user turn.
+        // The dropbox task.md alone is not polled by Claude Code — the inbox file is
+        // what actually delivers the message (~1s polling interval).
+        let safe_name = super::fleet::fleet_safe_name(branch);
+        if let Err(e) = super::fleet::write_to_inbox(super::fleet::BRAIN_BRANCH, &safe_name, prompt)
+        {
+            warn!(
+                event = "core.session.initial_prompt_inbox_failed",
+                branch = %branch,
+                error = %e,
+            );
+            eprintln!(
+                "Warning: Failed to write initial prompt to inbox for '{}': {}",
+                branch, e,
+            );
+        }
+
         super::dropbox::clear_idle_gate(project_id, branch);
         info!(
-            event = "core.session.initial_prompt_pty_skipped",
+            event = "core.session.initial_prompt_delivered",
             branch = %branch,
-            reason = "fleet_claude_session",
-            "Skipping PTY delivery — dropbox task.md handles initial prompt for fleet claude sessions"
+            method = "dropbox+inbox",
+            "Initial prompt delivered via dropbox task.md + Claude Code inbox"
         );
     } else if let Some(dsid) = daemon_session_id {
         let delivered = deliver_initial_prompt(dsid, prompt);

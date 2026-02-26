@@ -11,8 +11,13 @@
 ///
 /// Fleet mode is opt-in: it activates when the honryu team directory exists
 /// (~/.claude/teams/honryu/) or when the brain session itself is being created.
+use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
+use nix::fcntl::{Flock, FlockArg};
+use serde_json::json;
 use tracing::warn;
 
 use crate::agents::types::AgentType;
@@ -313,6 +318,69 @@ fn update_team_config(branch: &str, cwd: &Path, dir: &Path) {
 fn fleet_agent_id(branch: &str) -> String {
     let safe_name = fleet_safe_name(branch);
     format!("{safe_name}@{TEAM_NAME}")
+}
+
+/// Write a message to a Claude Code inbox file.
+///
+/// Claude Code polls `~/.claude/teams/<team>/inboxes/<agent>.json` every ~1 second
+/// and delivers unread messages as user turns. The session must have been started
+/// with `--agent-id <agent>@<team> --agent-name <agent> --team-name <team>`.
+///
+/// Uses an exclusive flock on `<agent>.lock` to prevent concurrent writes from
+/// the hook script (which fires on every worker Stop event) from racing and
+/// overwriting each other's messages.
+pub fn write_to_inbox(team: &str, agent: &str, text: &str) -> Result<(), String> {
+    let base = claude_config_dir()
+        .ok_or("HOME directory not found — cannot locate Claude config directory")?;
+
+    let inbox_dir = base.join("teams").join(team).join("inboxes");
+    fs::create_dir_all(&inbox_dir).map_err(|e| format!("failed to create inbox dir: {}", e))?;
+
+    let inbox_path = inbox_dir.join(format!("{}.json", agent));
+    let lock_path = inbox_dir.join(format!("{}.lock", agent));
+
+    // Acquire exclusive file lock to prevent concurrent hook invocations from
+    // racing on the read-modify-write below. Held until _lock drops at end of fn.
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("failed to open inbox lock: {}", e))?;
+    let _lock = Flock::lock(lock_file, FlockArg::LockExclusive)
+        .map_err(|(_, e)| format!("failed to lock inbox: {}", e))?;
+
+    // Read existing messages (preserving history for the session).
+    let mut messages: Vec<serde_json::Value> = if inbox_path.exists() {
+        let raw = fs::read_to_string(&inbox_path)
+            .map_err(|e| format!("failed to read inbox {}: {}", inbox_path.display(), e))?;
+        serde_json::from_str(&raw).map_err(|e| {
+            format!(
+                "inbox at {} is corrupt ({}). Delete it and retry.",
+                inbox_path.display(),
+                e,
+            )
+        })?
+    } else {
+        Vec::new()
+    };
+
+    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    messages.push(json!({
+        "from": team,
+        "text": text,
+        "timestamp": timestamp,
+        "read": false
+    }));
+
+    fs::write(
+        &inbox_path,
+        serde_json::to_string_pretty(&messages)
+            .map_err(|e| format!("failed to serialize inbox: {}", e))?,
+    )
+    .map_err(|e| format!("failed to write inbox {}: {}", inbox_path.display(), e))?;
+
+    Ok(())
 }
 
 fn new_config(now_ms: u64) -> serde_json::Value {
@@ -953,6 +1021,62 @@ mod tests {
                 config["members"].as_array().unwrap().len(),
                 0,
                 "config entry should be removed even when inbox was already absent"
+            );
+        });
+    }
+
+    // --- update_team_config error handling ---
+
+    // --- write_to_inbox ---
+
+    #[test]
+    fn write_to_inbox_creates_valid_json_message() {
+        with_team_dir("inbox_write_basic", |base| {
+            write_to_inbox("honryu", "my-worker", "hello from brain").unwrap();
+
+            let inbox = base.join("teams/honryu/inboxes/my-worker.json");
+            assert!(inbox.exists());
+            let raw = fs::read_to_string(&inbox).unwrap();
+            let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+            assert_eq!(msgs.len(), 1);
+            assert_eq!(msgs[0]["text"], "hello from brain");
+            assert_eq!(msgs[0]["from"], "honryu");
+            assert_eq!(msgs[0]["read"], false);
+            assert!(
+                msgs[0]["timestamp"].as_str().is_some(),
+                "timestamp should be present"
+            );
+        });
+    }
+
+    #[test]
+    fn write_to_inbox_appends_without_overwriting() {
+        with_team_dir("inbox_write_append", |base| {
+            write_to_inbox("honryu", "worker", "msg 1").unwrap();
+            write_to_inbox("honryu", "worker", "msg 2").unwrap();
+
+            let raw = fs::read_to_string(base.join("teams/honryu/inboxes/worker.json")).unwrap();
+            let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+            assert_eq!(msgs.len(), 2, "both messages should be present");
+            assert_eq!(msgs[0]["text"], "msg 1");
+            assert_eq!(msgs[1]["text"], "msg 2");
+        });
+    }
+
+    #[test]
+    fn write_to_inbox_returns_error_on_corrupt_inbox() {
+        with_team_dir("inbox_write_corrupt", |base| {
+            let inbox_dir = base.join("teams/honryu/inboxes");
+            fs::create_dir_all(&inbox_dir).unwrap();
+            fs::write(inbox_dir.join("worker.json"), "not valid json {{").unwrap();
+
+            let result = write_to_inbox("honryu", "worker", "text");
+            assert!(result.is_err(), "should error on corrupt inbox");
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("corrupt"),
+                "error should mention corruption, got: {}",
+                msg
             );
         });
     }

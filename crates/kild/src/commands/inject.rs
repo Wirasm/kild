@@ -1,19 +1,10 @@
-use std::fs;
-use std::fs::OpenOptions;
-
-use chrono::Utc;
 use clap::ArgMatches;
-use nix::fcntl::{Flock, FlockArg};
-use serde_json::json;
 use tracing::{error, info, warn};
 
 use kild_core::agents::{InjectMethod, get_inject_method};
-use kild_core::sessions::fleet::fleet_safe_name;
+use kild_core::sessions::fleet;
 
 use super::helpers;
-
-/// Default team name for fleet mode.
-const DEFAULT_TEAM: &str = "honryu";
 
 pub(crate) fn handle_inject_command(
     matches: &ArgMatches,
@@ -99,10 +90,12 @@ pub(crate) fn handle_inject_command(
         None
     });
 
-    let inbox_name = fleet_safe_name(branch);
+    let inbox_name = fleet::fleet_safe_name(branch);
     let result = match method {
         InjectMethod::Pty => write_to_pty(&session, text),
-        InjectMethod::ClaudeInbox => write_to_inbox(DEFAULT_TEAM, &inbox_name, text),
+        InjectMethod::ClaudeInbox => {
+            fleet::write_to_inbox(fleet::BRAIN_BRANCH, &inbox_name, text).map_err(|e| e.into())
+        }
     };
 
     if let Err(e) = result {
@@ -165,158 +158,4 @@ fn write_to_pty(
 
     kild_core::daemon::client::write_stdin(daemon_session_id, b"\r")
         .map_err(|e| format!("PTY write failed (enter): {}", e).into())
-}
-
-/// Write a message to a Claude Code inbox file.
-///
-/// Claude Code polls `~/.claude/teams/<team>/inboxes/<agent>.json` every 1 second
-/// and delivers unread messages as user turns. The session must have been started
-/// with `--agent-id <agent>@<team> --agent-name <agent> --team-name <team>`.
-///
-/// Uses an exclusive flock on `<agent>.lock` to prevent concurrent writes from
-/// the hook script (which fires on every worker Stop event) from racing and
-/// overwriting each other's messages.
-pub(crate) fn write_to_inbox(
-    team: &str,
-    agent: &str,
-    text: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let base = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(std::path::PathBuf::from)
-        .ok()
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
-        .ok_or("HOME directory not found — cannot locate Claude config directory")?;
-
-    let inbox_dir = base.join("teams").join(team).join("inboxes");
-    fs::create_dir_all(&inbox_dir)?;
-
-    let inbox_path = inbox_dir.join(format!("{}.json", agent));
-    let lock_path = inbox_dir.join(format!("{}.lock", agent));
-
-    // Acquire exclusive file lock to prevent concurrent hook invocations from
-    // racing on the read-modify-write below. Held until _lock drops at end of fn.
-    let lock_file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    let _lock = Flock::lock(lock_file, FlockArg::LockExclusive)
-        .map_err(|(_, e)| format!("failed to lock inbox: {}", e))?;
-
-    // Read existing messages (preserving history for the session).
-    let mut messages: Vec<serde_json::Value> = if inbox_path.exists() {
-        let raw = fs::read_to_string(&inbox_path)
-            .map_err(|e| format!("failed to read inbox {}: {}", inbox_path.display(), e))?;
-        serde_json::from_str(&raw).map_err(|e| {
-            format!(
-                "inbox at {} is corrupt ({}). Delete it and retry.",
-                inbox_path.display(),
-                e
-            )
-        })?
-    } else {
-        Vec::new()
-    };
-
-    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    messages.push(json!({
-        "from": team,
-        "text": text,
-        "timestamp": timestamp,
-        "read": false
-    }));
-
-    fs::write(&inbox_path, serde_json::to_string_pretty(&messages)?)
-        .map_err(|e| format!("failed to write inbox {}: {}", inbox_path.display(), e))?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use super::*;
-
-    /// Serialize tests that mutate CLAUDE_CONFIG_DIR — env vars are process-global.
-    static INJECT_ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn temp_claude_dir(name: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("kild_inject_test_{}_{}", name, std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    #[test]
-    fn write_to_inbox_creates_valid_json_message() {
-        let _lock = INJECT_ENV_LOCK.lock().unwrap();
-        let base = temp_claude_dir("write_basic");
-        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
-
-        write_to_inbox("honryu", "my-worker", "hello from brain").unwrap();
-
-        let inbox = base.join("teams/honryu/inboxes/my-worker.json");
-        assert!(inbox.exists());
-        let raw = std::fs::read_to_string(&inbox).unwrap();
-        let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["text"], "hello from brain");
-        assert_eq!(msgs[0]["from"], "honryu");
-        assert_eq!(msgs[0]["read"], false);
-        assert!(
-            msgs[0]["timestamp"].as_str().is_some(),
-            "timestamp should be present"
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-        // SAFETY: restoring env; lock still held.
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
-    }
-
-    #[test]
-    fn write_to_inbox_appends_without_overwriting_existing_messages() {
-        let _lock = INJECT_ENV_LOCK.lock().unwrap();
-        let base = temp_claude_dir("write_append");
-        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
-
-        write_to_inbox("honryu", "worker", "msg 1").unwrap();
-        write_to_inbox("honryu", "worker", "msg 2").unwrap();
-
-        let raw = std::fs::read_to_string(base.join("teams/honryu/inboxes/worker.json")).unwrap();
-        let msgs: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
-        assert_eq!(msgs.len(), 2, "both messages should be present");
-        assert_eq!(msgs[0]["text"], "msg 1");
-        assert_eq!(msgs[1]["text"], "msg 2");
-
-        let _ = std::fs::remove_dir_all(&base);
-        // SAFETY: restoring env; lock still held.
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
-    }
-
-    #[test]
-    fn write_to_inbox_returns_error_on_corrupt_inbox() {
-        let _lock = INJECT_ENV_LOCK.lock().unwrap();
-        let base = temp_claude_dir("write_corrupt");
-        // SAFETY: INJECT_ENV_LOCK serializes all CLAUDE_CONFIG_DIR mutations in this module.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &base) };
-        let inbox_dir = base.join("teams/honryu/inboxes");
-        std::fs::create_dir_all(&inbox_dir).unwrap();
-        std::fs::write(inbox_dir.join("worker.json"), "not valid json {{").unwrap();
-
-        let result = write_to_inbox("honryu", "worker", "text");
-        assert!(result.is_err(), "should error on corrupt inbox");
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("corrupt"),
-            "error should mention corruption, got: {}",
-            msg
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-        // SAFETY: restoring env; lock still held.
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
-    }
 }
