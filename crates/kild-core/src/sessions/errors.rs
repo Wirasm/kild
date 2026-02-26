@@ -7,6 +7,11 @@ pub enum SessionError {
     )]
     AlreadyExists { name: String },
 
+    #[error(
+        "Kild '{name}' already has a running agent.\n  To view it:             kild attach {name}\n  To send a message:      kild inject {name} \"...\"\n  To stop and reopen:     kild stop {name} && kild open {name}"
+    )]
+    AlreadyActive { name: String },
+
     #[error("Session '{name}' not found")]
     NotFound { name: String },
 
@@ -137,6 +142,7 @@ impl KildError for SessionError {
     fn error_code(&self) -> &'static str {
         match self {
             SessionError::AlreadyExists { .. } => "SESSION_ALREADY_EXISTS",
+            SessionError::AlreadyActive { .. } => "SESSION_ALREADY_ACTIVE",
             SessionError::NotFound { .. } => "SESSION_NOT_FOUND",
             SessionError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
             SessionError::InvalidName => "INVALID_SESSION_NAME",
@@ -177,6 +183,7 @@ impl KildError for SessionError {
         matches!(
             self,
             SessionError::AlreadyExists { .. }
+                | SessionError::AlreadyActive { .. }
                 | SessionError::NotFound { .. }
                 | SessionError::WorktreeNotFound { .. }
                 | SessionError::InvalidName
@@ -216,6 +223,19 @@ mod tests {
         assert!(display.contains("kild open test"));
         assert!(display.contains("kild destroy test"));
         assert_eq!(error.error_code(), "SESSION_ALREADY_EXISTS");
+        assert!(error.is_user_error());
+    }
+
+    #[test]
+    fn already_active_error_includes_actionable_alternatives() {
+        let error = SessionError::AlreadyActive {
+            name: "feature-auth".to_string(),
+        };
+        assert!(error.to_string().contains("already has a running agent"));
+        assert!(error.to_string().contains("kild attach feature-auth"));
+        assert!(error.to_string().contains("kild inject feature-auth"));
+        assert!(error.to_string().contains("kild stop feature-auth"));
+        assert_eq!(error.error_code(), "SESSION_ALREADY_ACTIVE");
         assert!(error.is_user_error());
     }
 
