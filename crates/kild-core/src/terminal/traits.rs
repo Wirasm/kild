@@ -121,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_basic_methods() {
+    fn mock_terminal_backend_name_and_availability_are_accessible() {
         let backend = MockBackend;
         assert_eq!(backend.name(), "mock");
         assert_eq!(backend.display_name(), "Mock Terminal");

@@ -33,6 +33,7 @@ hex = { workspace = true }
 
 [dev-dependencies]
 temp-env.workspace = true
+paste.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 xcap.workspace = true

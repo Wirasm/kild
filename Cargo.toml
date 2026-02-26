@@ -29,6 +29,7 @@ walkdir = "2"
 tempfile = "3"
 notify = "8.0"
 which = "7"
+paste = "1"
 uuid = { version = "1", features = ["v4"] }
 
 # CLI-only dependencies

@@ -3557,6 +3557,7 @@ dependencies = [
  "kild-paths",
  "kild-protocol",
  "nix 0.29.0",
+ "paste",
  "rustls",
  "serde",
  "serde_json",

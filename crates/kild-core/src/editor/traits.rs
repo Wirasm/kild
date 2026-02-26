@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn test_editor_backend_basic_methods() {
+    fn mock_editor_backend_is_available_and_not_a_terminal_editor() {
         let backend = MockBackend;
         assert_eq!(backend.name(), "mock");
         assert_eq!(backend.display_name(), "Mock Editor");
