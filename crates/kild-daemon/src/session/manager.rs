@@ -208,6 +208,14 @@ impl SessionManager {
         pty.resize(rows, cols)
     }
 
+    /// Get the current PTY dimensions for a session.
+    pub fn pty_size(&self, session_id: &str) -> Option<(u16, u16)> {
+        self.pty_manager.get(session_id).map(|pty| {
+            let size = pty.size();
+            (size.rows, size.cols)
+        })
+    }
+
     /// Write data to a session's PTY stdin.
     pub fn write_stdin(&self, session_id: &str, data: &[u8]) -> Result<(), DaemonError> {
         let pty = self
@@ -581,6 +589,32 @@ mod tests {
         assert_eq!(mgr.next_client_id(), 1);
         assert_eq!(mgr.next_client_id(), 2);
         assert_eq!(mgr.next_client_id(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_pty_size_returns_current_dimensions() {
+        let (mut mgr, _rx) = test_manager();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let wd = tmpdir.path().to_str().unwrap();
+
+        mgr.create_session("s1", wd, "sleep", &["10".to_string()], &[], 24, 80, false)
+            .unwrap();
+
+        // Initial size matches creation args
+        assert_eq!(mgr.pty_size("s1"), Some((24, 80)));
+
+        // After resize, size updates
+        mgr.resize_pty("s1", 50, 200).unwrap();
+        assert_eq!(mgr.pty_size("s1"), Some((50, 200)));
+
+        // Cleanup
+        let _ = mgr.destroy_session("s1", true);
+    }
+
+    #[test]
+    fn test_pty_size_returns_none_for_unknown_session() {
+        let (mgr, _rx) = test_manager();
+        assert_eq!(mgr.pty_size("nonexistent"), None);
     }
 
     #[test]

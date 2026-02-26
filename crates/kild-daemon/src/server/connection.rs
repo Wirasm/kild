@@ -160,6 +160,11 @@ where
             let (rx, scrollback, resize_failed) = {
                 let mut mgr = session_manager.write().await;
 
+                // Read current PTY size before resize to detect dimension changes.
+                // Scrollback rendered at different dimensions produces garbled output
+                // when replayed — skip replay if the resize actually changed the size.
+                let old_size = mgr.pty_size(&session_id);
+
                 // Resize to client dimensions
                 let resize_failed = if let Err(e) = mgr.resize_pty(&session_id, rows, cols) {
                     warn!(
@@ -174,6 +179,8 @@ where
                     false
                 };
 
+                let size_changed = old_size.is_none_or(|(r, c)| r != rows || c != cols);
+
                 // Subscribe to broadcast BEFORE capturing scrollback to avoid
                 // losing output produced between capture and stream start.
                 let rx = match mgr.attach_client(&session_id, client_id) {
@@ -187,15 +194,32 @@ where
                     }
                 };
 
-                let scrollback = match mgr.scrollback_contents(&session_id) {
-                    Some(data) => data,
-                    None => {
-                        warn!(
-                            event = "daemon.connection.scrollback_unavailable",
+                // Skip scrollback replay when dimensions changed — the buffer contains
+                // escape sequences rendered at the old size which produce garbled output
+                // in the new terminal. The agent will re-render via SIGWINCH.
+                let scrollback = if size_changed {
+                    if !resize_failed {
+                        debug!(
+                            event = "daemon.connection.scrollback_skipped",
                             session_id = %session_id,
-                            "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
+                            old_size = ?old_size,
+                            new_rows = rows,
+                            new_cols = cols,
+                            "Skipping scrollback replay: PTY dimensions changed",
                         );
-                        Vec::new()
+                    }
+                    Vec::new()
+                } else {
+                    match mgr.scrollback_contents(&session_id) {
+                        Some(data) => data,
+                        None => {
+                            warn!(
+                                event = "daemon.connection.scrollback_unavailable",
+                                session_id = %session_id,
+                                "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
+                            );
+                            Vec::new()
+                        }
                     }
                 };
 
