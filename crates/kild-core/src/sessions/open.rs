@@ -32,10 +32,16 @@ fn resolve_effective_runtime_mode(
     }
 }
 
-/// Opens a new agent terminal in an existing kild (additive - doesn't close existing terminals).
+/// Opens a new agent in an existing kild.
 ///
-/// This is the preferred way to add agents to a kild. Unlike restart, this does NOT
-/// close existing terminals - multiple agents can run in the same kild.
+/// If the session already has a running agent, returns [`SessionError::AlreadyActive`].
+/// Use `kild attach` to view the running agent, or `kild stop` then `kild open` to restart.
+/// Bare shell opens (`OpenMode::BareShell`) bypass the active-session guard since they
+/// don't spawn agents and can't corrupt session state.
+///
+/// For daemon sessions, a liveness check distinguishes truly-active sessions from
+/// stale-active ones (daemon PTY exited without `kild stop`). Stale sessions are
+/// synced to Stopped and the open proceeds.
 ///
 /// The `runtime_mode` parameter overrides the runtime mode. Pass `None` to auto-detect
 /// from the session's stored mode, then config, then Terminal default.
@@ -52,7 +58,8 @@ pub fn open_session(
         event = "core.session.open_started",
         name = name,
         mode = ?mode,
-        yolo = yolo
+        yolo = yolo,
+        resume = resume
     );
 
     let config = Config::new();
@@ -93,11 +100,17 @@ pub fn open_session(
     }
 
     // 2b. Guard: refuse to spawn if session already has a running agent.
-    // Sync with daemon first to avoid blocking on stale-active sessions
-    // whose PTY has exited without a `kild stop`.
-    if session.status == SessionStatus::Active && session.has_agents() {
+    // Bare shell opens bypass the guard — they don't spawn agents and can't corrupt
+    // agent_session_id. For daemon sessions, sync with the daemon first: if the daemon
+    // is unreachable (crashed) or the PTY has exited, the session is marked Stopped
+    // and the reopen is allowed. Terminal sessions trust stored status only.
+    let is_agent_open = !matches!(mode, OpenMode::BareShell);
+    if is_agent_open && session.status == SessionStatus::Active && session.has_agents() {
         // For daemon sessions, verify the agent is truly running before refusing.
         // A stale-active session (daemon PTY died) should be allowed to reopen.
+        //
+        // sync_daemon_session_status returns true when it changed status to Stopped
+        // (i.e., session was stale). Negate: truly_active = daemon confirmed still running.
         let truly_active = if session
             .latest_agent()
             .and_then(|a| a.daemon_session_id())
@@ -107,6 +120,11 @@ pub fn open_session(
         } else {
             // Non-daemon (terminal) sessions: trust the stored status.
             // Terminal sessions have no reliable liveness check.
+            info!(
+                event = "core.session.open_terminal_liveness_skipped",
+                branch = name,
+                "Terminal session has no daemon session ID — trusting stored Active status"
+            );
             true
         };
 
@@ -122,18 +140,18 @@ pub fn open_session(
             });
         }
 
-        // Session was stale-active — daemon sync marked it Stopped.
-        // Persist the corrected status before proceeding with the open.
+        // Session was stale-active — daemon sync already persisted Stopped status
+        // via patch_session_json_fields(). No additional save needed here.
         info!(
             event = "core.session.open_stale_active_synced",
             branch = name,
+            session_id = %session.id,
             "Stale-active session synced to Stopped, proceeding with open"
         );
-        persistence::save_session_to_file(&session, &config.sessions_dir())?;
     }
 
     // 3. Determine agent and command based on OpenMode
-    let is_bare_shell = matches!(mode, OpenMode::BareShell);
+    let is_bare_shell = !is_agent_open;
     let (agent, agent_command) =
         match mode {
             OpenMode::BareShell => {
@@ -1133,10 +1151,10 @@ mod tests {
 
     // --- Active session guard tests (Issue #599) ---
 
-    /// Verify the active-session guard logic: Active + has_agents = reject.
+    /// Guard entry condition: Active + has_agents triggers the guard check.
+    /// Does not cover the daemon liveness branch — that requires IPC infrastructure.
     #[test]
-    fn test_active_session_guard_logic() {
-        // Simulate the guard condition
+    fn open_guard_condition_fires_when_active_with_agents() {
         let mut session = Session::new_for_test(
             "guard-test",
             std::env::temp_dir().join("kild_test_guard_worktree"),
@@ -1171,18 +1189,78 @@ mod tests {
         );
     }
 
-    /// Verify stopped sessions are not blocked by the guard.
+    /// Stopped sessions with agents are not blocked — the `&&` with Active short-circuits.
     #[test]
-    fn test_stopped_session_not_blocked() {
+    fn open_guard_allows_stopped_session_with_agents() {
         let mut session = Session::new_for_test(
             "stopped-test",
             std::env::temp_dir().join("kild_test_stopped_worktree"),
         );
         session.status = SessionStatus::Stopped;
-        // Even if agents vec is somehow non-empty, Stopped status should allow open
+
+        // Add an agent to prove the guard checks status, not just agents vec
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test_stopped-test_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude --session-id abc".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            Some("test_stopped-test_0".to_string()),
+        )
+        .unwrap();
+        session.add_agent(agent);
+
+        assert!(
+            session.has_agents(),
+            "Session should have agents for this test"
+        );
         assert!(
             !(session.status == SessionStatus::Active && session.has_agents()),
-            "Stopped session should never be blocked"
+            "Stopped session with agents should never be blocked"
+        );
+    }
+
+    /// Guard condition with BareShell bypass: agent opens on Active sessions with
+    /// agents are blocked, but bare shell opens bypass the guard entirely.
+    #[test]
+    fn open_guard_bare_shell_bypasses_active_check() {
+        let mut session = Session::new_for_test(
+            "bare-shell-test",
+            std::env::temp_dir().join("kild_test_bare_shell_worktree"),
+        );
+        session.status = SessionStatus::Active;
+
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test_bare-shell-test_0".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude --session-id abc".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            Some("test_bare-shell-test_0".to_string()),
+        )
+        .unwrap();
+        session.add_agent(agent);
+
+        // Agent open on active session with agents → guard fires
+        let is_agent_open = !matches!(OpenMode::DefaultAgent, OpenMode::BareShell);
+        assert!(
+            is_agent_open && session.status == SessionStatus::Active && session.has_agents(),
+            "Agent open should be blocked"
+        );
+
+        // Bare shell on same session → guard bypassed
+        let is_agent_open = !matches!(OpenMode::BareShell, OpenMode::BareShell);
+        assert!(
+            !(is_agent_open && session.status == SessionStatus::Active && session.has_agents()),
+            "Bare shell open should bypass guard"
         );
     }
 }

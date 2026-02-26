@@ -227,13 +227,14 @@ mod tests {
     }
 
     #[test]
-    fn test_already_active_error() {
+    fn already_active_error_includes_actionable_alternatives() {
         let error = SessionError::AlreadyActive {
             name: "feature-auth".to_string(),
         };
         assert!(error.to_string().contains("already has a running agent"));
         assert!(error.to_string().contains("kild attach feature-auth"));
         assert!(error.to_string().contains("kild inject feature-auth"));
+        assert!(error.to_string().contains("kild stop feature-auth"));
         assert_eq!(error.error_code(), "SESSION_ALREADY_ACTIVE");
         assert!(error.is_user_error());
     }
