@@ -10,6 +10,7 @@
 build/
 
 .kild/config.toml
+.kild/wave-plan.*
 .claude/PRPs/*
 !.claude/PRPs/branding/
 !.claude/PRPs/issues/
