@@ -61,6 +61,8 @@ When you `kild open --resume`, the agent restarts with its original `agent_sessi
 
 A kild can host multiple agents (for agent teams), but each agent is tracked independently. The standard workflow is one agent per kild.
 
+**Multi-agent awareness:** `kild list` shows agent count as `claude (+N)` and process count as `Run(X/Y)` where Y is total agents and X is how many are actually running. If you see `(+N)` on a kild, it has more than one agent. Be aware of this when stopping or resuming — `kild stop` kills ALL agents in a kild, and `kild open` on an already-active kild will spawn an additional agent (this is a known issue, #599). Always check `kild list` before opening a kild that might already be active.
+
 ## Fleet Communication
 
 ### Sending instructions to workers
