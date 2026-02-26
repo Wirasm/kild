@@ -68,7 +68,7 @@ impl TerminalElement {
             let y = bounds.origin.y + line.line_idx as f32 * prepaint.cell_height;
 
             for run in &line.runs {
-                let x = bounds.origin.x + run.start_col() as f32 * prepaint.cell_width;
+                let x = (bounds.origin.x + run.start_col() as f32 * prepaint.cell_width).floor();
 
                 let f = match (run.bold(), run.italic()) {
                     (true, true) => FONT_BOLD_ITALIC.clone(),

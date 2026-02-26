@@ -123,7 +123,7 @@ impl TerminalElement {
                 && end_col > bg_start_col
             {
                 let y = bounds.origin.y + bg_line as f32 * ch;
-                let x = bounds.origin.x + bg_start_col as f32 * cw;
+                let x = (bounds.origin.x + bg_start_col as f32 * cw).floor();
                 let w = (end_col - bg_start_col) as f32 * cw;
                 regions.push(PreparedBgRegion {
                     bounds: Bounds::new(point(x, y), size(w, ch)),
@@ -388,7 +388,7 @@ impl TerminalElement {
                     cols
                 };
                 if end_col > start_col {
-                    let x = bounds.origin.x + start_col as f32 * cell_width;
+                    let x = (bounds.origin.x + start_col as f32 * cell_width).floor();
                     let y = bounds.origin.y + line_idx as f32 * cell_height;
                     let w = (end_col - start_col) as f32 * cell_width;
                     selection_rects.push(PreparedBgRegion {
@@ -412,7 +412,7 @@ impl TerminalElement {
                 let cursor_line = cursor_point.line.0;
                 let cursor_col = cursor_point.column.0;
                 if cursor_line >= 0 && (cursor_line as usize) < rows && cursor_col < cols {
-                    let cx_pos = bounds.origin.x + cursor_col as f32 * cell_width;
+                    let cx_pos = (bounds.origin.x + cursor_col as f32 * cell_width).floor();
                     let cy_pos = bounds.origin.y + cursor_line as f32 * cell_height;
                     let cursor_color = Hsla::from(theme::terminal_cursor());
 
