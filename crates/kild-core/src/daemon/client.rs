@@ -3,7 +3,6 @@
 //! Delegates JSONL framing to `kild_protocol::IpcConnection`.
 //! This module provides domain-specific request helpers and error mapping.
 
-use std::cell::RefCell;
 use std::path::Path;
 use std::time::Duration;
 
@@ -12,19 +11,11 @@ use kild_protocol::{
 };
 use tracing::{debug, info, warn};
 
-// Intentionally duplicated from kild-tmux-shim/src/ipc.rs (see #517).
-// Cannot consolidate: kild-protocol is kept lean (no tracing dep), and
-// kild-core is too heavy to add as a shim dependency.
-// If liveness or timeout logic changes, update both files.
-thread_local! {
-    static CACHED_CONNECTION: RefCell<Option<IpcConnection>> = const { RefCell::new(None) };
-}
-
 /// Get a connection to the daemon, reusing a cached one if available.
 ///
-/// Uses thread-local storage to avoid lock contention. Each thread maintains
-/// its own connection — for single-threaded CLI commands, this means one
-/// connection is reused across sequential operations within the same invocation.
+/// Uses `kild_protocol::pool` for thread-local connection caching. Each thread
+/// maintains its own connection — for single-threaded CLI commands, this means
+/// one connection is reused across sequential operations within the same invocation.
 ///
 /// When `remote_host` is configured (via CLI override or config file), connects
 /// via TCP/TLS instead of Unix socket. TLS connections are never cached —
@@ -61,20 +52,7 @@ fn get_connection() -> Result<IpcConnection, DaemonClientError> {
     }
 
     let socket_path = crate::daemon::socket_path();
-
-    CACHED_CONNECTION.with(|cell| {
-        let mut cached = cell.borrow_mut();
-        if let Some(conn) = cached.take() {
-            if conn.is_alive() {
-                debug!(event = "core.daemon.connection_reused");
-                return Ok(conn);
-            }
-            debug!(event = "core.daemon.connection_stale");
-        }
-        let conn = IpcConnection::connect(&socket_path)?;
-        debug!(event = "core.daemon.connection_created");
-        Ok(conn)
-    })
+    kild_protocol::pool::take(&socket_path).map_err(Into::into)
 }
 
 /// Create a fresh TLS connection to a remote daemon.
@@ -100,18 +78,12 @@ fn get_tls_connection(
     IpcConnection::connect_tls(addr, verifier).map_err(Into::into)
 }
 
-/// Return a connection to the cache for reuse by the next call.
+/// Return a connection to the pool for reuse by the next call.
 ///
-/// Re-validates liveness before caching to prevent storing broken connections.
+/// Delegates to `kild_protocol::pool::release` which re-validates liveness
+/// before caching.
 fn return_connection(conn: IpcConnection) {
-    if !conn.is_alive() {
-        debug!(event = "core.daemon.connection_dropped_on_return");
-        return;
-    }
-    CACHED_CONNECTION.with(|cell| {
-        debug!(event = "core.daemon.connection_cached");
-        *cell.borrow_mut() = Some(conn);
-    });
+    kild_protocol::pool::release(conn);
 }
 
 use crate::errors::KildError;

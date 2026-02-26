@@ -4,6 +4,8 @@ pub mod async_client;
 pub mod client;
 pub mod env_cleanup;
 mod messages;
+#[cfg(unix)]
+pub mod pool;
 mod types;
 
 #[cfg(unix)]
