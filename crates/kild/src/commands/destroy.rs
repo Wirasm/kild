@@ -23,18 +23,32 @@ pub(crate) fn handle_destroy_command(
         .get_one::<String>("branch")
         .ok_or("Branch argument is required (or use --all)")?;
 
-    // Warn if destroying own session
+    // Block self-destroy unless --force is passed
     if let Some(self_br) = super::helpers::resolve_self_branch()
         && self_br == branch.as_str()
     {
+        if !force {
+            eprintln!(
+                "{} You are about to destroy your own session ({}).",
+                color::warning("Warning:"),
+                color::ice(branch),
+            );
+            eprintln!(
+                "  {}",
+                color::hint("This will kill the agent and remove the session."),
+            );
+            eprintln!("  {}", color::hint("Use --force to proceed."),);
+            error!(
+                event = "cli.destroy_blocked",
+                branch = branch,
+                reason = "self_destroy"
+            );
+            return Err("Self-destroy blocked. Use --force to override.".into());
+        }
         eprintln!(
-            "{} You are about to destroy your own session ({}).",
+            "{} Destroying own session ({}).",
             color::warning("Warning:"),
             color::ice(branch),
-        );
-        eprintln!(
-            "  {}",
-            color::hint("This will kill the agent and remove the session."),
         );
     }
 

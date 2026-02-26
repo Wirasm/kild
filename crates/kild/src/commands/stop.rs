@@ -26,18 +26,33 @@ pub(crate) fn handle_stop_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         .get_one::<String>("branch")
         .ok_or("Branch argument is required (or use --all)")?;
 
-    // Warn if stopping own session (prevents accidental self-destruction)
+    // Block self-stop unless --force is passed (prevents accidental self-destruction)
+    let force = matches.get_flag("force");
     if let Some(self_br) = super::helpers::resolve_self_branch()
         && self_br == branch.as_str()
     {
+        if !force {
+            eprintln!(
+                "{} You are about to stop your own session ({}).",
+                color::warning("Warning:"),
+                color::ice(branch),
+            );
+            eprintln!(
+                "  {}",
+                color::hint("This will kill the agent running this command."),
+            );
+            eprintln!("  {}", color::hint("Use --force to proceed."),);
+            error!(
+                event = "cli.stop_blocked",
+                branch = branch,
+                reason = "self_stop"
+            );
+            return Err("Self-stop blocked. Use --force to override.".into());
+        }
         eprintln!(
-            "{} You are about to stop your own session ({}).",
+            "{} Stopping own session ({}).",
             color::warning("Warning:"),
             color::ice(branch),
-        );
-        eprintln!(
-            "  {}",
-            color::hint("This will kill the agent running this command."),
         );
     }
 

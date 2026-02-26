@@ -205,6 +205,13 @@ pub fn stop_command() -> Command {
                 .conflicts_with("all")
                 .requires("branch"),
         )
+        .arg(
+            Arg::new("force")
+                .long("force")
+                .short('f')
+                .help("Force stop (required when stopping own session)")
+                .action(ArgAction::SetTrue),
+        )
 }
 
 pub fn teammates_command() -> Command {
