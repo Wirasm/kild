@@ -18,7 +18,7 @@ agent: kild-brain
 allowed-tools: Bash, Read, Write, Glob, Grep, Task
 ---
 
-Your task: $ARGUMENTS
+User request: $ARGUMENTS
 
 ---
 
@@ -26,57 +26,54 @@ Your task: $ARGUMENTS
 
 !`kild list --json 2>/dev/null || echo '{"sessions":[],"fleet_summary":{"total":0}}'`
 
-## Wave Plan
-
-!`cat .kild/wave-plan.json 2>/dev/null || echo 'No wave plan found.'`
-
-## Brain Memory
-
-!`cat ~/.kild/brain/state.json 2>/dev/null || echo 'No prior state.'`
-
-!`tail -30 ~/.kild/brain/sessions/$(date +%Y-%m-%d).md 2>/dev/null || echo 'No session log today.'`
-
 ---
 
-## If the task is to START or LAUNCH Honryū
+## Protocol
 
-When the user's intent is to start, launch, boot, or initialize Honryū as a persistent daemon session (not to ask it a question), follow this protocol:
+**Honryū ALWAYS runs as a persistent daemon kild session, never as an ad-hoc fork.**
 
-**Check current status and act:**
+This skill is a thin router. It ensures the honryu daemon session exists, delivers
+the user's request to it, and reports back. It does NOT execute brain logic itself.
+
+### Step 1: Ensure Honryū daemon is running
 
 ```bash
 STATUS=$(kild list --json 2>/dev/null | jq -r '.sessions[] | select(.branch == "honryu") | .status // empty' 2>/dev/null)
 
 case "$STATUS" in
   active)
-    # Already running — just report
     echo "Honryū is already running."
     ;;
   stopped)
-    # Exists but stopped — reopen headlessly and orient.
-    # --initial-prompt delivers the orientation via PTY stdin on startup.
-    # No sleep needed — PTY stdin is kernel-buffered until the agent reads it.
     kild open honryu --no-attach --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
     echo "Honryū restarted."
     ;;
   *)
-    # No session — create fresh on main branch.
-    # --initial-prompt delivers the first instruction via PTY stdin on startup.
     kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
     echo "Honryū initialized."
     ;;
 esac
 ```
 
-Report back what action was taken. Tell the user that Honryū is now running as a daemon session — they can monitor it by opening an attach window with `kild attach honryu` or by watching events arrive in this session.
+### Step 2: Deliver the user's request
 
----
+If the user just wanted to start/launch Honryū, skip this step — report that it's running
+and tell them to use `kild attach honryu` to see it.
 
-## Otherwise — Ad-hoc fleet query or directive
-
-Use the kild CLI and your available tools to complete the task. Log significant decisions to `~/.kild/brain/sessions/YYYY-MM-DD.md`. Update `~/.kild/brain/state.json` after fleet changes.
+If the user has a directive or question (e.g., "assess the fleet", "execute the wave",
+"tell workers to commit"), inject it into the running Honryū session:
 
 ```bash
-# Fleet overlap map (check before wave planning)
-kild overlaps 2>/dev/null || echo 'No overlaps detected.'
+kild inject honryu "<user's request here>"
 ```
+
+**IMPORTANT:** Do NOT execute brain logic (stopping workers, creating kilds, running
+overlaps, etc.) from this forked skill. All fleet operations must go through the
+persistent honryu daemon session so it maintains context and history.
+
+### Step 3: Report back
+
+Tell the user:
+- What action was taken (created / restarted / already running)
+- That the request was injected (if applicable)
+- How to monitor: `kild attach honryu`
