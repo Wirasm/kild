@@ -13,7 +13,6 @@ build/
 .kild/wave-plan.*
 .claude/PRPs/*
 !.claude/PRPs/branding/
-!.claude/PRPs/issues/
 .archon/
 .claude/skills/archon/
 ROADMAP-DISCUSSION.md
