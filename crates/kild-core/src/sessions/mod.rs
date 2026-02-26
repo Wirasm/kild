@@ -9,7 +9,7 @@ pub mod destroy;
 pub mod dropbox;
 pub mod env_cleanup;
 pub mod errors;
-pub(super) mod fleet;
+pub mod fleet;
 pub mod handler;
 pub mod info;
 mod integrations;

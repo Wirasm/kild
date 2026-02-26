@@ -30,10 +30,11 @@ const TEAM_NAME: &str = BRAIN_BRANCH;
 /// (`refactor/consolidate-ipc.json` which fails because the parent dir doesn't exist).
 ///
 /// Must be used consistently across:
-/// - `--agent-name` / `--agent-id` flags passed to Claude Code
+/// - `--agent-name` / `--agent-id` flags passed to Claude Code (`fleet_agent_flags()`)
+/// - `agentId` field construction (`fleet_agent_id()`)
 /// - Inbox file creation in `ensure_fleet_member()`
 /// - Inbox file writes in `write_to_inbox()` (inject.rs)
-/// - Config.json member entries
+/// - Config.json member `name` entries (`update_team_config()`)
 /// - Inbox file removal in `remove_fleet_member()`
 pub fn fleet_safe_name(branch: &str) -> String {
     branch.replace('/', "-")
@@ -120,7 +121,8 @@ pub fn fleet_agent_flags(branch: &str, agent: &str) -> Option<String> {
 /// Ensure the fleet team directory structure exists for this session.
 ///
 /// Creates (if not already present):
-/// - `~/.claude/teams/honryu/inboxes/<branch>.json` (initialized to empty array)
+/// - `~/.claude/teams/honryu/inboxes/<safe_name>.json` where `safe_name` is
+///   `fleet_safe_name(branch)` — e.g., `refactor/foo` → `refactor-foo.json`
 /// - `~/.claude/teams/honryu/config.json` (team membership record; appends member if not listed)
 ///
 /// Idempotent — safe to call on every create/open. Warns on failure,
@@ -282,6 +284,11 @@ fn update_team_config(branch: &str, cwd: &Path, dir: &Path) {
                     branch = branch,
                     error = %e,
                 );
+                eprintln!(
+                    "Warning: Fleet config update failed for '{}': {}",
+                    branch, e
+                );
+                eprintln!("Brain may not see this session in team config.");
             }
         }
         Err(e) => {
@@ -290,14 +297,19 @@ fn update_team_config(branch: &str, cwd: &Path, dir: &Path) {
                 branch = branch,
                 error = %e,
             );
+            eprintln!(
+                "Warning: Fleet config serialization failed for '{}': {}",
+                branch, e
+            );
         }
     }
 }
 
 /// Returns the agent ID string for a branch in the honryu team.
 ///
-/// Both brain and worker branches use the same `<branch>@<team>` format.
-/// Since `TEAM_NAME == BRAIN_BRANCH`, the result is always `"<branch>@honryu"`.
+/// Both brain and worker branches use the same `<safe_name>@<team>` format,
+/// where `safe_name` is `fleet_safe_name(branch)` (slashes replaced with dashes).
+/// Since `TEAM_NAME == BRAIN_BRANCH`, the result is always `"<safe_name>@honryu"`.
 fn fleet_agent_id(branch: &str) -> String {
     let safe_name = fleet_safe_name(branch);
     format!("{safe_name}@{TEAM_NAME}")
@@ -317,7 +329,8 @@ fn new_config(now_ms: u64) -> serde_json::Value {
 /// Remove fleet membership artifacts for a destroyed session.
 ///
 /// Removes (best-effort, never blocks destroy):
-/// - `~/.claude/teams/honryu/inboxes/<branch>.json` (inbox file)
+/// - `~/.claude/teams/honryu/inboxes/<safe_name>.json` (inbox file, where
+///   `safe_name = fleet_safe_name(branch)`)
 /// - The member entry from `~/.claude/teams/honryu/config.json`
 ///
 /// No-op if the Claude config directory cannot be resolved (HOME not set),
@@ -815,6 +828,30 @@ mod tests {
                 config["members"].as_array().unwrap().len(),
                 0,
                 "member entry should be removed from config"
+            );
+        });
+    }
+
+    #[test]
+    fn remove_fleet_member_slashed_branch_removes_flat_inbox() {
+        with_team_dir("slashed_remove", |base| {
+            ensure_fleet_member("refactor/foo", std::path::Path::new("/tmp/wt"), "claude");
+
+            let flat_inbox = base
+                .join("teams")
+                .join(BRAIN_BRANCH)
+                .join("inboxes")
+                .join("refactor-foo.json");
+            assert!(
+                flat_inbox.exists(),
+                "precondition: flat inbox exists after create"
+            );
+
+            remove_fleet_member("refactor/foo");
+
+            assert!(
+                !flat_inbox.exists(),
+                "flat inbox should be removed for slashed branch"
             );
         });
     }
