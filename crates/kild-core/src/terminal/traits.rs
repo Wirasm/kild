@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_execute_spawn() {
+    fn mock_terminal_backend_execute_spawn_returns_window_title() {
         let backend = MockBackend;
         let config = SpawnConfig::new(
             crate::terminal::types::TerminalType::Native,
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_close_window() {
+    fn mock_terminal_backend_close_window_does_not_panic() {
         let backend = MockBackend;
         // close_window returns () - just verify it doesn't panic
         backend.close_window(Some("123"));

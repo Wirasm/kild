@@ -90,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn test_editor_backend_open() {
+    fn mock_editor_backend_open_succeeds() {
         let backend = MockBackend;
         let config = KildConfig::default();
         let result = backend.open(Path::new("/tmp"), &[], &config);
