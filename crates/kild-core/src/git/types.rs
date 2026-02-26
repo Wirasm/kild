@@ -135,6 +135,13 @@ pub struct UncommittedDetails {
     pub untracked_files: usize,
 }
 
+impl WorktreeStatus {
+    /// Whether the branch has unpushed commits or has never been pushed.
+    pub fn has_unpushed(&self) -> bool {
+        self.unpushed_commit_count > 0 || !self.has_remote_branch
+    }
+}
+
 impl UncommittedDetails {
     /// Returns true if there are no uncommitted changes.
     pub fn is_empty(&self) -> bool {
@@ -220,6 +227,19 @@ pub enum ConflictStatus {
     Conflicts,
     /// Check failed — conflict status is unreliable.
     Unknown,
+}
+
+impl ConflictStatus {
+    /// Whether the merge is clean (no conflicts).
+    ///
+    /// Returns `Some(true)` for clean, `Some(false)` for conflicts, `None` for unknown.
+    pub fn is_clean(&self) -> Option<bool> {
+        match self {
+            ConflictStatus::Clean => Some(true),
+            ConflictStatus::Conflicts => Some(false),
+            ConflictStatus::Unknown => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ConflictStatus {

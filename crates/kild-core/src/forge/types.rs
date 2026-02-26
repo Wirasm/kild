@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::git::types::{BranchHealth, ConflictStatus, WorktreeStatus};
-
 pub use kild_protocol::ForgeType;
 
 /// Result of checking if a PR exists for a branch.
@@ -198,7 +196,10 @@ pub enum MergeReadiness {
 }
 
 impl MergeReadiness {
-    /// Compute merge readiness from git health metrics, worktree status, and optional PR info.
+    /// Compute merge readiness from extracted git and forge signals.
+    ///
+    /// Parameters are primitive values extracted by the caller from git/forge
+    /// data, keeping the forge module decoupled from git types.
     ///
     /// Priority order (highest severity first):
     /// 1. HasConflicts / ConflictCheckFailed — blocks merge entirely
@@ -207,28 +208,36 @@ impl MergeReadiness {
     /// 4. NeedsPr — pushed but no tracking PR exists
     /// 5. CiFailing — PR exists but not passing checks
     /// 6. Ready / ReadyLocal — all checks passed
+    ///
+    /// # Parameters
+    ///
+    /// - `merge_clean`: `Some(true)` = clean, `Some(false)` = conflicts, `None` = check failed.
+    ///   Obtained via `ConflictStatus::is_clean()`.
+    /// - `behind_base`: commits behind the base branch (from `BaseBranchDrift::behind`).
+    /// - `has_remote`: whether any remote is configured.
+    /// - `has_unpushed`: whether there are unpushed commits or the branch was never pushed.
+    ///   Obtained via `WorktreeStatus::has_unpushed()`.
+    /// - `pr_info`: optional PR metadata from the forge.
     pub fn compute(
-        health: &BranchHealth,
-        worktree_status: Option<&WorktreeStatus>,
+        merge_clean: Option<bool>,
+        behind_base: usize,
+        has_remote: bool,
+        has_unpushed: bool,
         pr_info: Option<&PrInfo>,
     ) -> Self {
-        match health.conflict_status {
-            ConflictStatus::Conflicts => return Self::HasConflicts,
-            ConflictStatus::Unknown => return Self::ConflictCheckFailed,
-            ConflictStatus::Clean => {}
+        match merge_clean {
+            Some(false) => return Self::HasConflicts,
+            None => return Self::ConflictCheckFailed,
+            Some(true) => {}
         }
 
-        if health.drift.behind > 0 {
+        if behind_base > 0 {
             return Self::NeedsRebase;
         }
 
-        if !health.has_remote {
+        if !has_remote {
             return Self::ReadyLocal;
         }
-
-        // Check if there are unpushed commits
-        let has_unpushed =
-            worktree_status.is_some_and(|ws| ws.unpushed_commit_count > 0 || !ws.has_remote_branch);
 
         if has_unpushed {
             return Self::NeedsPush;
@@ -264,8 +273,6 @@ impl std::fmt::Display for MergeReadiness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::types::{BaseBranchDrift, CommitActivity, DiffStats};
-
     #[test]
     fn test_forge_type_as_str() {
         assert_eq!(ForgeType::GitHub.as_str(), "github");
@@ -456,156 +463,92 @@ mod tests {
     }
 
     // --- MergeReadiness tests ---
+    // Tests use scalar params directly — no git type dependencies.
 
-    fn make_health(
-        conflict_status: ConflictStatus,
-        behind: usize,
-        has_remote: bool,
-    ) -> BranchHealth {
-        BranchHealth {
-            branch: "test".to_string(),
-            created_at: "2026-02-09T10:00:00Z".to_string(),
-            commit_activity: CommitActivity {
-                commits_since_base: 3,
-                last_commit_time: None,
-            },
-            drift: BaseBranchDrift {
-                ahead: 3,
-                behind,
-                base_branch: "main".to_string(),
-            },
-            diff_vs_base: Some(DiffStats {
-                insertions: 10,
-                deletions: 2,
-                files_changed: 1,
-            }),
-            conflict_status,
-            has_remote,
+    fn make_pr(ci_status: CiStatus) -> PrInfo {
+        PrInfo {
+            number: 1,
+            url: "https://example.com/pull/1".to_string(),
+            state: PrState::Open,
+            ci_status,
+            ci_summary: None,
+            review_status: ReviewStatus::Unknown,
+            review_summary: None,
+            updated_at: "2026-02-09T12:00:00Z".to_string(),
         }
     }
 
     #[test]
     fn test_readiness_has_conflicts() {
-        let h = make_health(ConflictStatus::Conflicts, 0, true);
         assert_eq!(
-            MergeReadiness::compute(&h, None, None),
+            MergeReadiness::compute(Some(false), 0, true, false, None),
             MergeReadiness::HasConflicts
         );
     }
 
     #[test]
     fn test_readiness_conflict_check_failed() {
-        let h = make_health(ConflictStatus::Unknown, 0, true);
         assert_eq!(
-            MergeReadiness::compute(&h, None, None),
+            MergeReadiness::compute(None, 0, true, false, None),
             MergeReadiness::ConflictCheckFailed
         );
     }
 
     #[test]
     fn test_readiness_needs_rebase() {
-        let h = make_health(ConflictStatus::Clean, 5, true);
         assert_eq!(
-            MergeReadiness::compute(&h, None, None),
+            MergeReadiness::compute(Some(true), 5, true, false, None),
             MergeReadiness::NeedsRebase
         );
     }
 
     #[test]
     fn test_readiness_ready_local() {
-        let h = make_health(ConflictStatus::Clean, 0, false);
         assert_eq!(
-            MergeReadiness::compute(&h, None, None),
+            MergeReadiness::compute(Some(true), 0, false, false, None),
             MergeReadiness::ReadyLocal
         );
     }
 
     #[test]
     fn test_readiness_needs_push() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 3,
-            has_remote_branch: true,
-            ..Default::default()
-        };
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), None),
+            MergeReadiness::compute(Some(true), 0, true, true, None),
             MergeReadiness::NeedsPush
         );
     }
 
     #[test]
     fn test_readiness_needs_push_never_pushed() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: false,
-            ..Default::default()
-        };
+        // has_unpushed = true covers both "unpushed commits" and "never pushed"
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), None),
+            MergeReadiness::compute(Some(true), 0, true, true, None),
             MergeReadiness::NeedsPush
         );
     }
 
     #[test]
     fn test_readiness_needs_pr() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), None),
+            MergeReadiness::compute(Some(true), 0, true, false, None),
             MergeReadiness::NeedsPr
         );
     }
 
     #[test]
     fn test_readiness_ci_failing() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
-        let pr = PrInfo {
-            number: 1,
-            url: "https://example.com/pull/1".to_string(),
-            state: PrState::Open,
-            ci_status: CiStatus::Failing,
-            ci_summary: None,
-            review_status: ReviewStatus::Unknown,
-            review_summary: None,
-            updated_at: "2026-02-09T12:00:00Z".to_string(),
-        };
+        let pr = make_pr(CiStatus::Failing);
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
+            MergeReadiness::compute(Some(true), 0, true, false, Some(&pr)),
             MergeReadiness::CiFailing
         );
     }
 
     #[test]
     fn test_readiness_ready() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
-        let pr = PrInfo {
-            number: 1,
-            url: "https://example.com/pull/1".to_string(),
-            state: PrState::Open,
-            ci_status: CiStatus::Passing,
-            ci_summary: None,
-            review_status: ReviewStatus::Approved,
-            review_summary: None,
-            updated_at: "2026-02-09T12:00:00Z".to_string(),
-        };
+        let pr = make_pr(CiStatus::Passing);
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
+            MergeReadiness::compute(Some(true), 0, true, false, Some(&pr)),
             MergeReadiness::Ready
         );
     }
@@ -642,72 +585,30 @@ mod tests {
 
     #[test]
     fn test_readiness_ready_with_pending_ci() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
-        let pr = PrInfo {
-            number: 1,
-            url: "https://example.com/pull/1".to_string(),
-            state: PrState::Open,
-            ci_status: CiStatus::Pending,
-            ci_summary: None,
-            review_status: ReviewStatus::Unknown,
-            review_summary: None,
-            updated_at: "2026-02-09T12:00:00Z".to_string(),
-        };
+        let pr = make_pr(CiStatus::Pending);
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
+            MergeReadiness::compute(Some(true), 0, true, false, Some(&pr)),
             MergeReadiness::Ready
         );
     }
 
     #[test]
     fn test_readiness_ready_with_unknown_ci() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
-        let pr = PrInfo {
-            number: 1,
-            url: "https://example.com/pull/1".to_string(),
-            state: PrState::Open,
-            ci_status: CiStatus::Unknown,
-            ci_summary: None,
-            review_status: ReviewStatus::Unknown,
-            review_summary: None,
-            updated_at: "2026-02-09T12:00:00Z".to_string(),
-        };
+        let pr = make_pr(CiStatus::Unknown);
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
+            MergeReadiness::compute(Some(true), 0, true, false, Some(&pr)),
             MergeReadiness::Ready
         );
     }
 
     #[test]
     fn test_readiness_ready_with_draft_pr() {
-        let h = make_health(ConflictStatus::Clean, 0, true);
-        let ws = WorktreeStatus {
-            unpushed_commit_count: 0,
-            has_remote_branch: true,
-            ..Default::default()
-        };
         let pr = PrInfo {
-            number: 1,
-            url: "https://example.com/pull/1".to_string(),
             state: PrState::Draft,
-            ci_status: CiStatus::Passing,
-            ci_summary: None,
-            review_status: ReviewStatus::Unknown,
-            review_summary: None,
-            updated_at: "2026-02-09T12:00:00Z".to_string(),
+            ..make_pr(CiStatus::Passing)
         };
         assert_eq!(
-            MergeReadiness::compute(&h, Some(&ws), Some(&pr)),
+            MergeReadiness::compute(Some(true), 0, true, false, Some(&pr)),
             MergeReadiness::Ready
         );
     }

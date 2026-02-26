@@ -95,7 +95,14 @@ fn handle_single_stats(
             // Compose: git health + worktree status + PR info → readiness
             let worktree_status = kild_core::git::get_worktree_status(&session.worktree_path).ok();
             let pr_info = session_ops::read_pr_info(&session.id);
-            let readiness = MergeReadiness::compute(&h, worktree_status.as_ref(), pr_info.as_ref());
+            let has_unpushed = worktree_status.as_ref().is_some_and(|ws| ws.has_unpushed());
+            let readiness = MergeReadiness::compute(
+                h.conflict_status.is_clean(),
+                h.drift.behind,
+                h.has_remote,
+                has_unpushed,
+                pr_info.as_ref(),
+            );
 
             info!(
                 event = "cli.stats_completed",
@@ -181,8 +188,14 @@ fn handle_all_stats(
                 let worktree_status =
                     kild_core::git::get_worktree_status(&session.worktree_path).ok();
                 let pr_info = session_ops::read_pr_info(&session.id);
-                let readiness =
-                    MergeReadiness::compute(&h, worktree_status.as_ref(), pr_info.as_ref());
+                let has_unpushed = worktree_status.as_ref().is_some_and(|ws| ws.has_unpushed());
+                let readiness = MergeReadiness::compute(
+                    h.conflict_status.is_clean(),
+                    h.drift.behind,
+                    h.has_remote,
+                    has_unpushed,
+                    pr_info.as_ref(),
+                );
                 results.push((h, readiness));
             }
             Err(msg) => {
