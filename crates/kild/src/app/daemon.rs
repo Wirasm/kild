@@ -16,6 +16,7 @@ pub fn daemon_command() -> Command {
                 ),
         )
         .subcommand(Command::new("stop").about("Stop the running KILD daemon"))
+        .subcommand(Command::new("restart").about("Restart the KILD daemon (stop + start)"))
         .subcommand(
             Command::new("status").about("Show daemon status").arg(
                 Arg::new("json")

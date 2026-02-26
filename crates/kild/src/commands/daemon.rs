@@ -7,6 +7,7 @@ pub(crate) fn handle_daemon_command(
     match matches.subcommand() {
         Some(("start", sub)) => handle_daemon_start(sub),
         Some(("stop", _)) => handle_daemon_stop(),
+        Some(("restart", _)) => handle_daemon_restart(),
         Some(("status", sub)) => handle_daemon_status(sub),
         _ => Err("Unknown daemon subcommand".into()),
     }
@@ -114,6 +115,91 @@ fn handle_daemon_start(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+fn handle_daemon_restart() -> Result<(), Box<dyn std::error::Error>> {
+    info!(event = "cli.daemon.restart_started");
+
+    // Stop (best-effort — if not running, that's fine)
+    let was_running = kild_core::daemon::client::ping_daemon().unwrap_or(false);
+    if was_running {
+        match kild_core::daemon::client::request_shutdown() {
+            Ok(()) => {
+                let pid_file = kild_core::daemon::pid_file_path();
+                let timeout = std::time::Duration::from_secs(5);
+                let start = std::time::Instant::now();
+                while pid_file.exists() {
+                    if start.elapsed() > timeout {
+                        return Err("Old daemon did not stop within 5s".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                println!("Daemon stopped");
+            }
+            Err(kild_core::daemon::client::DaemonClientError::NotRunning { .. }) => {}
+            Err(e) => {
+                error!(event = "cli.daemon.restart_stop_failed", error = %e);
+                return Err(e.into());
+            }
+        }
+    }
+
+    // Start fresh — reuse the start logic with an empty ArgMatches for background mode
+    let daemon_binary = kild_core::daemon::find_sibling_binary("kild-daemon")
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+    let mut child = std::process::Command::new(&daemon_binary)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to start daemon: {}", e))?;
+
+    let socket_path = kild_core::daemon::socket_path();
+    let timeout = std::time::Duration::from_secs(5);
+    let start = std::time::Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                error!(event = "cli.daemon.restart_failed", reason = "child_exited", status = %status);
+                return Err(format!(
+                    "Daemon exited with {} before becoming ready.\n\
+                     Try: kild daemon start --foreground",
+                    status
+                )
+                .into());
+            }
+            Ok(None) => {}
+            Err(e) => {
+                debug!(event = "cli.daemon.child_status_check_failed", error = %e);
+            }
+        }
+
+        let ping_ok =
+            socket_path.exists() && kild_core::daemon::client::ping_daemon().unwrap_or(false);
+        if ping_ok {
+            break;
+        }
+        if start.elapsed() > timeout {
+            return Err("Daemon started but socket not available after 5s".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    match read_daemon_pid() {
+        Ok(pid) => {
+            println!("Daemon restarted (PID: {})", pid);
+            info!(event = "cli.daemon.restart_completed", pid = pid);
+        }
+        Err(e) => {
+            warn!(event = "cli.daemon.pid_read_failed", error = %e);
+            println!("Daemon restarted (PID unknown)");
+            info!(event = "cli.daemon.restart_completed");
+        }
+    }
+
+    Ok(())
+}
+
 fn handle_daemon_stop() -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.daemon.stop_started");
 
@@ -153,6 +239,7 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
     info!(event = "cli.daemon.status_started");
 
     let running = kild_core::daemon::client::ping_daemon().unwrap_or(false);
+    let stale = running && kild_core::daemon::is_daemon_stale();
 
     if json {
         let status = if running {
@@ -166,6 +253,7 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
                 "running": true,
                 "pid": pid,
                 "socket": kild_core::daemon::socket_path().display().to_string(),
+                "stale": stale,
             })
         } else {
             serde_json::json!({
@@ -182,6 +270,10 @@ fn handle_daemon_status(matches: &ArgMatches) -> Result<(), Box<dyn std::error::
             }
         }
         println!("Socket: {}", kild_core::daemon::socket_path().display());
+        if stale {
+            eprintln!("Warning: daemon binary has been updated since it was started.");
+            eprintln!("Run 'kild daemon restart' to apply the new version.");
+        }
     } else {
         println!("Daemon: stopped");
     }

@@ -97,6 +97,10 @@ impl KildPaths {
         self.kild_dir.join("daemon.pid")
     }
 
+    pub fn daemon_bin_file(&self) -> PathBuf {
+        self.kild_dir.join("daemon.bin")
+    }
+
     pub fn projects_file(&self) -> PathBuf {
         self.kild_dir.join("projects.json")
     }
@@ -282,6 +286,14 @@ mod tests {
         assert_eq!(
             test_paths().daemon_pid_file(),
             PathBuf::from("/home/user/.kild/daemon.pid")
+        );
+    }
+
+    #[test]
+    fn test_daemon_bin_file() {
+        assert_eq!(
+            test_paths().daemon_bin_file(),
+            PathBuf::from("/home/user/.kild/daemon.bin")
         );
     }
 

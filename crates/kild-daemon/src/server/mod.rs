@@ -43,6 +43,20 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
     // Write PID file
     pid::write_pid_file(&pid_path)?;
 
+    // Write bin file (binary path + mtime for staleness detection)
+    let bin_path = config
+        .pid_path
+        .parent()
+        .map(|p| p.join("daemon.bin"))
+        .unwrap_or_else(|| pid_path.with_file_name("daemon.bin"));
+    if let Err(e) = pid::write_bin_file(&bin_path) {
+        warn!(
+            event = "daemon.server.bin_write_failed",
+            error = %e,
+            "Staleness detection will not work for this daemon instance.",
+        );
+    }
+
     // Clean up stale socket file
     if socket_path.exists() {
         std::fs::remove_file(&socket_path)?;
@@ -168,8 +182,8 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
         mgr.stop_all();
     }
 
-    // Clean up PID and socket files
-    cleanup(&pid_path, &socket_path);
+    // Clean up PID, bin, and socket files
+    cleanup(&pid_path, &bin_path, &socket_path);
 
     info!(event = "daemon.server.shutdown_completed");
 
@@ -233,14 +247,15 @@ async fn tcp_accept_loop(
     }
 }
 
-/// Clean up PID file and socket file on shutdown.
-fn cleanup(pid_path: &Path, socket_path: &Path) {
+/// Clean up PID file, bin file, and socket file on shutdown.
+fn cleanup(pid_path: &Path, bin_path: &Path, socket_path: &Path) {
     if let Err(e) = pid::remove_pid_file(pid_path) {
         error!(
             event = "daemon.server.pid_cleanup_failed",
             error = %e,
         );
     }
+    pid::remove_bin_file(bin_path);
     if socket_path.exists()
         && let Err(e) = std::fs::remove_file(socket_path)
     {
