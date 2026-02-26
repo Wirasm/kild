@@ -7,185 +7,65 @@
 //! - detect_orphaned_worktrees: Worktrees without corresponding sessions
 
 use crate::cleanup::errors::CleanupError;
+use crate::git;
 use chrono::Utc;
-use git2::{BranchType, Repository};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 pub fn validate_cleanup_request() -> Result<(), CleanupError> {
-    // Check if we're in a git repository
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-
-    Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
-
+    git::ensure_in_repo(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
     Ok(())
 }
 
-pub fn detect_orphaned_branches(repo: &Repository) -> Result<Vec<String>, CleanupError> {
-    let mut orphaned_branches = Vec::new();
-
+pub fn detect_orphaned_branches(working_dir: &Path) -> Result<Vec<String>, CleanupError> {
     // Get all local branches
     let branches =
-        repo.branches(Some(BranchType::Local))
-            .map_err(|e| CleanupError::BranchScanFailed {
-                message: format!("Failed to list branches: {}", e),
-            })?;
-
-    // Get all worktrees to check which branches are in use
-    let worktrees = repo
-        .worktrees()
-        .map_err(|e| CleanupError::WorktreeScanFailed {
-            message: format!("Failed to list worktrees: {}", e),
+        git::list_local_branch_names(working_dir).map_err(|e| CleanupError::BranchScanFailed {
+            message: format!("Failed to list branches: {}", e),
         })?;
 
-    let mut active_branches = std::collections::HashSet::new();
+    // Get branches actively checked out in worktrees (includes main HEAD)
+    let active_branches =
+        git::worktree_active_branches(working_dir).map_err(|e| CleanupError::BranchScanFailed {
+            message: format!("Failed to determine active branches: {}", e),
+        })?;
 
-    // Collect branches that are actively used by worktrees
-    for worktree_name in worktrees.iter().flatten() {
-        match repo.find_worktree(worktree_name) {
-            Ok(worktree) => {
-                // Try to get the branch name from the worktree
-                match Repository::open(worktree.path()) {
-                    Ok(worktree_repo) => match worktree_repo.head() {
-                        Ok(head) => {
-                            if let Some(branch_name) = head.shorthand() {
-                                active_branches.insert(branch_name.to_string());
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                event = "core.cleanup.worktree_head_read_failed",
-                                worktree_name = %worktree_name,
-                                error = %e,
-                                "Could not read worktree HEAD — its branch may be falsely reported as orphaned"
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        warn!(
-                            event = "core.cleanup.worktree_open_failed",
-                            worktree_name = %worktree_name,
-                            error = %e,
-                            "Could not open worktree repository — its branch may be falsely reported as orphaned"
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(
-                    event = "core.cleanup.worktree_find_failed",
-                    worktree_name = %worktree_name,
-                    error = %e,
-                    "Could not access registered worktree during branch scan — its branch may be falsely reported as orphaned"
-                );
-            }
-        }
-    }
-
-    // Also add the current branch from the main repository's HEAD
-    match repo.head() {
-        Ok(head) => {
-            if let Some(branch_name) = head.shorthand() {
-                active_branches.insert(branch_name.to_string());
-            }
-        }
-        Err(e) => {
-            warn!(
-                event = "core.cleanup.repo_head_read_failed",
-                error = %e,
-                "Could not read repository HEAD — main branch may be falsely reported as orphaned"
-            );
-        }
-    }
-
-    // Check each branch to see if it's orphaned
-    for (branch, _) in branches.flatten() {
-        match branch.name() {
-            Ok(Some(branch_name)) => {
-                // Check if this is a kild-managed branch that's not actively used by a worktree
-                let is_kild_branch = branch_name
-                    .starts_with(crate::git::naming::KILD_BRANCH_PREFIX)
-                    || branch_name.starts_with("kild_");
-                if is_kild_branch && !active_branches.contains(branch_name) {
-                    orphaned_branches.push(branch_name.to_string());
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                debug!(
-                    event = "core.cleanup.branch_name_read_failed",
-                    error = %e,
-                    "Could not read branch name — skipping from orphan detection"
-                );
-            }
-        }
-    }
+    // Filter for kild-managed branches that are not actively used
+    let orphaned_branches = branches
+        .into_iter()
+        .filter(|name| {
+            let is_kild_branch =
+                name.starts_with(git::naming::KILD_BRANCH_PREFIX) || name.starts_with("kild_");
+            is_kild_branch && !active_branches.contains(name)
+        })
+        .collect();
 
     Ok(orphaned_branches)
 }
 
-pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, CleanupError> {
-    let mut orphaned_worktrees = Vec::new();
-
-    let worktrees = repo
-        .worktrees()
-        .map_err(|e| CleanupError::WorktreeScanFailed {
+pub fn detect_orphaned_worktrees(working_dir: &Path) -> Result<Vec<PathBuf>, CleanupError> {
+    let entries =
+        git::list_worktree_entries(working_dir).map_err(|e| CleanupError::WorktreeScanFailed {
             message: format!("Failed to list worktrees: {}", e),
         })?;
 
-    for worktree_name in worktrees.iter().flatten() {
-        let worktree = match repo.find_worktree(worktree_name) {
-            Ok(wt) => wt,
-            Err(e) => {
-                warn!(
-                    event = "core.cleanup.worktree_find_failed",
-                    worktree_name = %worktree_name,
-                    error = %e,
-                    "Could not access registered worktree during orphan scan — skipping"
-                );
-                continue;
-            }
-        };
-        let worktree_path = worktree.path();
+    let mut orphaned_worktrees = Vec::new();
 
-        // Check if worktree directory exists but is in a bad state
-        if worktree_path.exists() {
-            // Try to open the worktree as a repository
-            match Repository::open(worktree_path) {
-                Ok(worktree_repo) => {
-                    // Check if HEAD is detached or in a bad state
-                    match worktree_repo.head() {
-                        Ok(head) => {
-                            if head.target().is_none() {
-                                // Detached HEAD with no target - likely orphaned
-                                orphaned_worktrees.push(worktree_path.to_path_buf());
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                event = "core.cleanup.orphaned_worktree_head_unreadable",
-                                path = %worktree_path.display(),
-                                error = %e,
-                                "Could not read worktree HEAD — marked as orphaned"
-                            );
-                            orphaned_worktrees.push(worktree_path.to_path_buf());
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        event = "core.cleanup.orphaned_worktree_open_failed",
-                        path = %worktree_path.display(),
-                        error = %e,
-                        "Could not open worktree as repository — marked as orphaned"
-                    );
-                    orphaned_worktrees.push(worktree_path.to_path_buf());
-                }
+    for entry in entries {
+        if entry.path.exists() {
+            if !git::is_worktree_valid(&entry.path) {
+                warn!(
+                    event = "core.cleanup.orphaned_worktree_invalid",
+                    path = %entry.path.display(),
+                    "Worktree has invalid HEAD — marked as orphaned"
+                );
+                orphaned_worktrees.push(entry.path);
             }
         } else {
             // Worktree registered but directory doesn't exist
-            orphaned_worktrees.push(worktree_path.to_path_buf());
+            orphaned_worktrees.push(entry.path);
         }
     }
 
@@ -200,12 +80,12 @@ pub fn detect_orphaned_worktrees(repo: &Repository) -> Result<Vec<PathBuf>, Clea
 /// 3. Have no session file with matching `worktree_path`
 ///
 /// # Arguments
-/// * `repo` - The git repository
+/// * `working_dir` - A path inside the git repository
 /// * `worktrees_dir` - Base worktrees directory (~/.kild/worktrees)
 /// * `sessions_dir` - Sessions directory (~/.kild/sessions)
 /// * `project_name` - Current project name for scoping
 pub fn detect_untracked_worktrees(
-    repo: &Repository,
+    working_dir: &Path,
     worktrees_dir: &Path,
     sessions_dir: &Path,
     project_name: &str,
@@ -216,9 +96,8 @@ pub fn detect_untracked_worktrees(
     let project_worktrees_dir = worktrees_dir.join(project_name);
 
     // Get all worktrees from git
-    let worktrees = repo
-        .worktrees()
-        .map_err(|e| CleanupError::WorktreeScanFailed {
+    let entries =
+        git::list_worktree_entries(working_dir).map_err(|e| CleanupError::WorktreeScanFailed {
             message: format!("Failed to list worktrees: {}", e),
         })?;
 
@@ -226,20 +105,8 @@ pub fn detect_untracked_worktrees(
     let session_worktree_paths = collect_session_worktree_paths(sessions_dir)?;
 
     // Check each worktree
-    for worktree_name in worktrees.iter().flatten() {
-        let worktree = match repo.find_worktree(worktree_name) {
-            Ok(wt) => wt,
-            Err(e) => {
-                warn!(
-                    event = "core.cleanup.worktree_find_failed",
-                    worktree_name = %worktree_name,
-                    error = %e,
-                    "Could not access registered worktree - it may be corrupted or inaccessible"
-                );
-                continue;
-            }
-        };
-        let worktree_path = worktree.path();
+    for entry in entries {
+        let worktree_path = &entry.path;
 
         // Only consider worktrees under our project's worktrees directory
         let canonical_worktree = worktree_path.canonicalize();
@@ -277,7 +144,7 @@ pub fn detect_untracked_worktrees(
                 .unwrap_or_else(|_| worktree_path.to_string_lossy().to_string());
 
             if !session_worktree_paths.contains(&worktree_path_str) {
-                untracked_worktrees.push(worktree_path.to_path_buf());
+                untracked_worktrees.push(worktree_path.clone());
             }
         }
     }
@@ -756,22 +623,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path();
 
-        // Initialize repo with initial commit
-        let repo = Repository::init(repo_path).unwrap();
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-        let commit = repo.find_commit(commit_oid).unwrap();
+        git::test_support::init_repo_with_commit(repo_path).unwrap();
+        git::test_support::create_branch(repo_path, "kild/test-feature").unwrap();
 
-        // Create orphaned kild/ branch (no worktree)
-        repo.branch("kild/test-feature", &commit, false).unwrap();
-
-        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        let orphaned = detect_orphaned_branches(repo_path).unwrap();
         assert_eq!(orphaned, vec!["kild/test-feature"]);
     }
 
@@ -780,21 +635,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path();
 
-        let repo = Repository::init(repo_path).unwrap();
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-        let commit = repo.find_commit(commit_oid).unwrap();
+        git::test_support::init_repo_with_commit(repo_path).unwrap();
+        git::test_support::create_branch(repo_path, "kild_old-feature").unwrap();
 
-        // Create orphaned legacy kild_ branch
-        repo.branch("kild_old-feature", &commit, false).unwrap();
-
-        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        let orphaned = detect_orphaned_branches(repo_path).unwrap();
         assert_eq!(orphaned, vec!["kild_old-feature"]);
     }
 
@@ -803,33 +647,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path();
 
-        let repo = Repository::init(repo_path).unwrap();
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-        let commit = repo.find_commit(commit_oid).unwrap();
-
-        // Create a kild/ branch
-        repo.branch("kild/active-feature", &commit, false).unwrap();
+        git::test_support::init_repo_with_commit(repo_path).unwrap();
+        git::test_support::create_branch(repo_path, "kild/active-feature").unwrap();
 
         // Create a worktree checked out on that branch
         let worktree_path = temp_dir.path().join("worktree-active");
-        let branch_ref = repo
-            .find_branch("kild/active-feature", git2::BranchType::Local)
-            .unwrap()
-            .into_reference();
-        let mut opts = git2::WorktreeAddOptions::new();
-        opts.reference(Some(&branch_ref));
-        repo.worktree("kild-active-feature", &worktree_path, Some(&opts))
-            .unwrap();
+        git::test_support::create_worktree_for_branch(
+            repo_path,
+            "kild-active-feature",
+            &worktree_path,
+            "kild/active-feature",
+        )
+        .unwrap();
 
         // Branch is actively used by a worktree — should NOT be detected as orphaned
-        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        let orphaned = detect_orphaned_branches(repo_path).unwrap();
         assert!(
             orphaned.is_empty(),
             "Active worktree branch should not be orphaned, got: {:?}",
@@ -842,22 +674,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path();
 
-        let repo = Repository::init(repo_path).unwrap();
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-        let commit = repo.find_commit(commit_oid).unwrap();
+        git::test_support::init_repo_with_commit(repo_path).unwrap();
+        git::test_support::create_branch(repo_path, "feature/auth").unwrap();
+        git::test_support::create_branch(repo_path, "worktree-old").unwrap();
 
-        // Create branches that are NOT kild-managed
-        repo.branch("feature/auth", &commit, false).unwrap();
-        repo.branch("worktree-old", &commit, false).unwrap();
-
-        let orphaned = detect_orphaned_branches(&repo).unwrap();
+        let orphaned = detect_orphaned_branches(repo_path).unwrap();
         assert!(
             orphaned.is_empty(),
             "Non-kild branches should not be detected, got: {:?}",

@@ -520,7 +520,6 @@ mod tests {
 
     #[test]
     fn test_create_session_request_project_path_affects_project_detection() {
-        use git2::Repository;
         use std::fs;
 
         let temp_dir = std::env::temp_dir().join(format!(
@@ -531,16 +530,8 @@ mod tests {
         fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
 
         // Initialize a git repo at the temp path
-        let repo = Repository::init(&temp_dir).expect("Failed to init git repo");
-        {
-            let sig = repo
-                .signature()
-                .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-            let tree_id = repo.index().unwrap().write_tree().unwrap();
-            let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .expect("Failed to create initial commit");
-        }
+        crate::git::test_support::init_repo_with_commit(&temp_dir)
+            .expect("Failed to init git repo");
 
         // Create the request with explicit project_path
         let request = CreateSessionRequest::with_project_path(

@@ -114,30 +114,27 @@ pub struct ProjectsData {
     pub load_error: Option<String>,
 }
 
-/// Check if a path is a git repository using git2.
+/// Check if a path is a git repository.
 ///
-/// Uses `git2::Repository::discover` which handles standard repos, worktrees,
-/// and bare repos. Returns `Ok(false)` if the path is not in a git repository.
+/// Delegates to `git::is_git_repo` which uses `Repository::discover` to handle
+/// standard repos, worktrees, and bare repos. Returns `Ok(false)` if the path
+/// is not in a git repository.
 ///
 /// # Errors
 ///
-/// Returns `ProjectError::Git2CheckFailed` if the git2 library encounters an
+/// Returns `ProjectError::GitCheckFailed` if the git library encounters an
 /// unexpected error (e.g., permission denied). This is distinct from returning
 /// `Ok(false)` which means "path is not a git repository".
 pub fn is_git_repo(path: &Path) -> Result<bool, ProjectError> {
-    match git2::Repository::discover(path) {
-        Ok(_) => Ok(true),
-        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
-        Err(e) => {
-            tracing::error!(
-                event = "core.projects.git2_check_failed",
-                path = %path.display(),
-                error = %e,
-                "Failed to check if path is a git repository"
-            );
-            Err(ProjectError::Git2CheckFailed { source: e })
-        }
-    }
+    crate::git::is_git_repo(path).map_err(|e| {
+        tracing::error!(
+            event = "core.projects.git_check_failed",
+            path = %path.display(),
+            error = %e,
+            "Failed to check if path is a git repository"
+        );
+        ProjectError::GitCheckFailed { source: e }
+    })
 }
 
 /// Get a human-readable display name from a path.

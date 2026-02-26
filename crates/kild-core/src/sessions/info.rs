@@ -161,46 +161,16 @@ pub fn determine_process_status(session: &Session) -> ProcessStatus {
     ProcessStatus::Stopped
 }
 
-/// Check if a worktree has uncommitted changes using git2.
+/// Check if a worktree has uncommitted changes.
 ///
 /// Returns `GitStatus::Dirty` if there are uncommitted changes,
 /// `GitStatus::Clean` if the worktree is clean, or `GitStatus::Unknown`
 /// if the status check failed.
 fn check_git_status(worktree_path: &Path) -> GitStatus {
-    let repo = match git2::Repository::open(worktree_path) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(
-                event = "core.session.git_status_error",
-                path = %worktree_path.display(),
-                error = %e,
-                "Failed to open repository for status check"
-            );
-            return GitStatus::Unknown;
-        }
-    };
-
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true);
-    opts.include_ignored(false);
-
-    match repo.statuses(Some(&mut opts)) {
-        Ok(statuses) => {
-            if statuses.is_empty() {
-                GitStatus::Clean
-            } else {
-                GitStatus::Dirty
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                event = "core.session.git_status_failed",
-                path = %worktree_path.display(),
-                error = %e,
-                "Failed to get git status"
-            );
-            GitStatus::Unknown
-        }
+    match crate::git::has_uncommitted_changes(worktree_path) {
+        Some(true) => GitStatus::Dirty,
+        Some(false) => GitStatus::Clean,
+        None => GitStatus::Unknown,
     }
 }
 

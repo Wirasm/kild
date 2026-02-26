@@ -4,11 +4,15 @@ pub mod handler;
 pub mod health;
 pub mod naming;
 pub mod overlaps;
+pub mod query;
 pub mod remote;
 pub mod removal;
 pub mod status;
 pub mod types;
 pub mod validation;
+
+#[cfg(test)]
+pub mod test_support;
 
 // Re-export commonly used types and functions
 pub use errors::GitError;
@@ -20,6 +24,11 @@ pub use naming::{
     kild_worktree_admin_name, sanitize_for_path,
 };
 pub use overlaps::collect_file_overlaps;
+pub use query::{
+    WorktreeEntry, delete_local_branch, ensure_in_repo, get_origin_url, has_any_remote,
+    has_uncommitted_changes, head_branch_name, is_git_repo, is_worktree_valid,
+    list_local_branch_names, list_worktree_entries, worktree_active_branches,
+};
 pub use remote::{fetch_remote, rebase_worktree};
 pub use removal::{
     delete_branch_if_exists, find_main_repo_root, remove_worktree, remove_worktree_by_path,

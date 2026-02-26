@@ -371,29 +371,9 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
 
 /// Check if the git repository at the given path has any remote configured.
 ///
-/// Uses git2 to enumerate remotes. Returns false on any error (graceful degradation).
+/// Delegates to `git::has_any_remote`. Returns false on any error (graceful degradation).
 pub fn has_remote_configured(worktree_path: &std::path::Path) -> bool {
-    match git2::Repository::open(worktree_path) {
-        Ok(repo) => match repo.remotes() {
-            Ok(remotes) => !remotes.is_empty(),
-            Err(e) => {
-                debug!(
-                    event = "core.session.remote_check_failed",
-                    path = %worktree_path.display(),
-                    error = %e
-                );
-                false
-            }
-        },
-        Err(e) => {
-            debug!(
-                event = "core.session.remote_check_repo_open_failed",
-                path = %worktree_path.display(),
-                error = %e
-            );
-            false
-        }
-    }
+    crate::git::has_any_remote(worktree_path)
 }
 
 /// Get safety information before destroying a kild.

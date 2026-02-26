@@ -48,47 +48,13 @@ pub fn get_backend(forge_type: &ForgeType) -> Option<&'static dyn ForgeBackend> 
 /// Opens the repository at `worktree_path`, reads the "origin" remote URL,
 /// and matches known forge hosts. Returns `None` for unknown hosts.
 pub fn detect_forge(worktree_path: &Path) -> Option<ForgeType> {
-    let repo = match git2::Repository::open(worktree_path) {
-        Ok(r) => r,
-        Err(e) => {
-            debug!(
-                event = "core.forge.detect_repo_open_failed",
-                path = %worktree_path.display(),
-                error = %e
-            );
-            return None;
-        }
-    };
-
-    let remote = match repo.find_remote("origin") {
-        Ok(r) => r,
-        Err(e) => {
-            debug!(
-                event = "core.forge.detect_no_origin",
-                path = %worktree_path.display(),
-                error = %e
-            );
-            return None;
-        }
-    };
-
-    let url = match remote.url() {
-        Some(url) => url,
-        None => {
-            debug!(
-                event = "core.forge.detect_invalid_url",
-                path = %worktree_path.display(),
-                "Remote URL is not valid UTF-8"
-            );
-            return None;
-        }
-    };
+    let url = crate::git::get_origin_url(worktree_path)?;
 
     if url.contains("github.com") {
-        debug!(event = "core.forge.detected", forge = "github", url = url);
+        debug!(event = "core.forge.detected", forge = "github", url = %url);
         Some(ForgeType::GitHub)
     } else {
-        debug!(event = "core.forge.detect_unknown_host", url = url);
+        debug!(event = "core.forge.detect_unknown_host", url = %url);
         None
     }
 }

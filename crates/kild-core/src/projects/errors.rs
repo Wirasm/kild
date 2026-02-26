@@ -1,7 +1,7 @@
 use crate::errors::KildError;
 
 /// Note: This type intentionally does not implement `Clone` because
-/// `io::Error` (in `CanonicalizationFailed`) and `git2::Error` (in `Git2CheckFailed`)
+/// `io::Error` (in `CanonicalizationFailed`) and `GitError` (in `GitCheckFailed`)
 /// are not `Clone`.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -12,9 +12,9 @@ pub enum ProjectError {
     NotAGitRepo,
 
     #[error("Git repository check failed: {source}")]
-    Git2CheckFailed {
+    GitCheckFailed {
         #[from]
-        source: git2::Error,
+        source: crate::git::GitError,
     },
 
     #[error("Cannot resolve path: {source}")]
@@ -38,7 +38,7 @@ impl KildError for ProjectError {
         match self {
             ProjectError::NotADirectory => "PROJECT_NOT_A_DIRECTORY",
             ProjectError::NotAGitRepo => "PROJECT_NOT_GIT_REPO",
-            ProjectError::Git2CheckFailed { .. } => "PROJECT_GIT2_CHECK_FAILED",
+            ProjectError::GitCheckFailed { .. } => "PROJECT_GIT_CHECK_FAILED",
             ProjectError::CanonicalizationFailed { .. } => "PROJECT_CANONICALIZATION_FAILED",
             ProjectError::NotFound => "PROJECT_NOT_FOUND",
             ProjectError::AlreadyExists => "PROJECT_ALREADY_EXISTS",
@@ -56,7 +56,7 @@ impl KildError for ProjectError {
             | ProjectError::NotFound
             | ProjectError::AlreadyExists => true,
 
-            ProjectError::Git2CheckFailed { .. }
+            ProjectError::GitCheckFailed { .. }
             | ProjectError::SaveFailed { .. }
             | ProjectError::LoadCorrupted { .. } => false,
         }
@@ -84,12 +84,14 @@ mod tests {
     }
 
     #[test]
-    fn test_project_error_git2_check_failed() {
-        let error = ProjectError::Git2CheckFailed {
-            source: git2::Error::from_str("permission denied"),
+    fn test_project_error_git_check_failed() {
+        let error = ProjectError::GitCheckFailed {
+            source: crate::git::GitError::OperationFailed {
+                message: "permission denied".to_string(),
+            },
         };
         assert!(error.to_string().contains("permission denied"));
-        assert_eq!(error.error_code(), "PROJECT_GIT2_CHECK_FAILED");
+        assert_eq!(error.error_code(), "PROJECT_GIT_CHECK_FAILED");
         assert!(!error.is_user_error());
     }
 

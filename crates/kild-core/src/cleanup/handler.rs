@@ -1,4 +1,3 @@
-use git2::{BranchType, Repository};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, warn};
 
@@ -14,12 +13,11 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     operations::validate_cleanup_request()?;
 
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-    let repo = Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
 
     let mut summary = CleanupSummary::new();
 
     // Detect orphaned branches
-    match operations::detect_orphaned_branches(&repo) {
+    match operations::detect_orphaned_branches(&current_dir) {
         Ok(orphaned_branches) => {
             info!(
                 event = "core.cleanup.scan_branches_completed",
@@ -39,7 +37,7 @@ pub fn scan_for_orphans() -> Result<CleanupSummary, CleanupError> {
     }
 
     // Detect orphaned worktrees
-    match operations::detect_orphaned_worktrees(&repo) {
+    match operations::detect_orphaned_worktrees(&current_dir) {
         Ok(orphaned_worktrees) => {
             info!(
                 event = "core.cleanup.scan_worktrees_completed",
@@ -243,11 +241,9 @@ pub fn scan_for_orphans_with_strategy(
     operations::validate_cleanup_request()?;
 
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-    let _repo = Repository::discover(&current_dir).map_err(|e| {
+    git::ensure_in_repo(&current_dir).map_err(|e| {
         error!(event = "core.cleanup.git_discovery_failed", error = %e);
-        CleanupError::GitError {
-            source: crate::git::errors::GitError::Git2Error { source: e },
-        }
+        CleanupError::GitError { source: e }
     })?;
     let config = Config::new();
 
@@ -310,17 +306,9 @@ pub fn scan_for_orphans_with_strategy(
                 CleanupError::GitError { source: e }
             })?;
 
-            // Get repo for worktree operations
-            let repo = Repository::discover(&project.path).map_err(|e| {
-                error!(event = "core.cleanup.git_discovery_failed", error = %e);
-                CleanupError::GitError {
-                    source: git::errors::GitError::Git2Error { source: e },
-                }
-            })?;
-
             // Detect untracked worktrees (in kild dir but no session)
             let untracked = operations::detect_untracked_worktrees(
-                &repo,
+                &project.path,
                 &config.worktrees_dir(),
                 &config.sessions_dir(),
                 &project.name,
@@ -344,13 +332,14 @@ pub fn scan_for_orphans_with_strategy(
             }
 
             // Also detect orphaned branches (worktree-* not checked out)
-            let orphaned_branches = operations::detect_orphaned_branches(&repo).map_err(|e| {
-                error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
-                CleanupError::StrategyFailed {
-                    strategy: "Orphans".to_string(),
-                    source: Box::new(e),
-                }
-            })?;
+            let orphaned_branches =
+                operations::detect_orphaned_branches(&project.path).map_err(|e| {
+                    error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
+                    CleanupError::StrategyFailed {
+                        strategy: "Orphans".to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
 
             for branch in orphaned_branches {
                 summary.add_branch(branch);
@@ -373,7 +362,6 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
     }
 
     let current_dir = std::env::current_dir().map_err(|e| CleanupError::IoError { source: e })?;
-    let repo = Repository::discover(&current_dir).map_err(|_| CleanupError::NotInRepository)?;
 
     let mut cleaned_branches = Vec::new();
 
@@ -383,52 +371,34 @@ fn cleanup_orphaned_branches(branches: &[String]) -> Result<Vec<String>, Cleanup
             branch = branch_name
         );
 
-        match repo.find_branch(branch_name, BranchType::Local) {
-            Ok(mut branch) => {
-                match branch.delete() {
-                    Ok(()) => {
-                        info!(
-                            event = "core.cleanup.branch_delete_completed",
-                            branch = branch_name
-                        );
-                        cleaned_branches.push(branch_name.clone());
-                    }
-                    Err(e) => {
-                        // Handle race conditions gracefully - another process might have deleted the branch
-                        let error_msg = e.to_string();
-                        if error_msg.contains("not found") || error_msg.contains("does not exist") {
-                            info!(
-                                event = "core.cleanup.branch_delete_race_condition",
-                                branch = branch_name,
-                                message = "Branch was deleted by another process - considering as cleaned"
-                            );
-                            cleaned_branches.push(branch_name.clone());
-                        } else {
-                            error!(
-                                event = "core.cleanup.branch_delete_failed",
-                                branch = branch_name,
-                                error = %e,
-                                error_type = "permission_or_lock_error"
-                            );
-                            return Err(CleanupError::CleanupFailed {
-                                name: branch_name.clone(),
-                                message: format!(
-                                    "Failed to delete branch (not a race condition): {}",
-                                    e
-                                ),
-                            });
-                        }
-                    }
-                }
+        match git::delete_local_branch(&current_dir, branch_name) {
+            Ok(true) => {
+                info!(
+                    event = "core.cleanup.branch_delete_completed",
+                    branch = branch_name
+                );
+                cleaned_branches.push(branch_name.clone());
+            }
+            Ok(false) => {
+                // Branch already gone (not found or race condition)
+                info!(
+                    event = "core.cleanup.branch_delete_race_condition",
+                    branch = branch_name,
+                    message = "Branch was already deleted - considering as cleaned"
+                );
+                cleaned_branches.push(branch_name.clone());
             }
             Err(e) => {
-                warn!(
-                    event = "core.cleanup.branch_not_found",
+                error!(
+                    event = "core.cleanup.branch_delete_failed",
                     branch = branch_name,
-                    error = %e
+                    error = %e,
+                    error_type = "permission_or_lock_error"
                 );
-                // Branch already gone, consider it cleaned
-                cleaned_branches.push(branch_name.clone());
+                return Err(CleanupError::CleanupFailed {
+                    name: branch_name.clone(),
+                    message: format!("Failed to delete branch: {}", e),
+                });
             }
         }
     }
@@ -507,7 +477,7 @@ fn cleanup_orphaned_worktrees(
                     }
                 }
                 Err(e) => {
-                    // Conservative: Repository::open() failed entirely; skip unless forced
+                    // Conservative: git status check failed entirely; skip unless forced
                     if force {
                         warn!(
                             event = "core.cleanup.worktree_status_check_failed",
@@ -1073,29 +1043,20 @@ mod tests {
         let repo_dir = tempfile::tempdir().unwrap();
         let worktree_base = tempfile::tempdir().unwrap();
 
-        let repo = git2::Repository::init(repo_dir.path()).unwrap();
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("Test", "test@test.com").unwrap());
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
-        let commit = repo.find_commit(commit_oid).unwrap();
+        git::test_support::init_repo_with_commit(repo_dir.path()).unwrap();
 
         let branch_name = format!("kild/{branch_suffix}");
         let admin_name = format!("kild-{branch_suffix}");
-        repo.branch(&branch_name, &commit, false).unwrap();
+        git::test_support::create_branch(repo_dir.path(), &branch_name).unwrap();
+
         let worktree_path = worktree_base.path().join(&admin_name);
-        let branch_ref = repo
-            .find_branch(&branch_name, git2::BranchType::Local)
-            .unwrap()
-            .into_reference();
-        let mut opts = git2::WorktreeAddOptions::new();
-        opts.reference(Some(&branch_ref));
-        repo.worktree(&admin_name, &worktree_path, Some(&opts))
-            .unwrap();
+        git::test_support::create_worktree_for_branch(
+            repo_dir.path(),
+            &admin_name,
+            &worktree_path,
+            &branch_name,
+        )
+        .unwrap();
 
         let canonical = worktree_path.canonicalize().unwrap();
         (canonical, repo_dir, worktree_base)
