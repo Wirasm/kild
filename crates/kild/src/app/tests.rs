@@ -190,6 +190,61 @@ fn test_cli_create_without_note() {
 }
 
 #[test]
+fn test_cli_create_with_issue() {
+    let app = build_cli();
+    let matches =
+        app.try_get_matches_from(vec!["kild", "create", "feature-branch", "--issue", "42"]);
+    assert!(matches.is_ok());
+
+    let matches = matches.unwrap();
+    let create_matches = matches.subcommand_matches("create").unwrap();
+    assert_eq!(create_matches.get_one::<u32>("issue").copied(), Some(42));
+}
+
+#[test]
+fn test_cli_create_with_issue_short_flag() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec!["kild", "create", "feature-branch", "-i", "7"]);
+    assert!(matches.is_ok());
+
+    let matches = matches.unwrap();
+    let create_matches = matches.subcommand_matches("create").unwrap();
+    assert_eq!(create_matches.get_one::<u32>("issue").copied(), Some(7));
+}
+
+#[test]
+fn test_cli_create_without_issue() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec!["kild", "create", "feature-branch"]);
+    assert!(matches.is_ok());
+
+    let matches = matches.unwrap();
+    let create_matches = matches.subcommand_matches("create").unwrap();
+    assert!(create_matches.get_one::<u32>("issue").is_none());
+}
+
+#[test]
+fn test_cli_create_issue_rejects_zero() {
+    let app = build_cli();
+    let matches =
+        app.try_get_matches_from(vec!["kild", "create", "feature-branch", "--issue", "0"]);
+    assert!(matches.is_err());
+}
+
+#[test]
+fn test_cli_create_issue_rejects_non_numeric() {
+    let app = build_cli();
+    let matches = app.try_get_matches_from(vec![
+        "kild",
+        "create",
+        "feature-branch",
+        "--issue",
+        "not-a-number",
+    ]);
+    assert!(matches.is_err());
+}
+
+#[test]
 fn test_cli_verbose_flag_short() {
     let app = build_cli();
     let matches = app.try_get_matches_from(vec!["kild", "-v", "list"]);

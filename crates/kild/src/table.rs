@@ -17,6 +17,7 @@ pub struct TableFormatter {
     command_width: usize,
     pr_width: usize,
     issue_width: usize,
+    show_issue: bool,
     note_width: usize,
 }
 
@@ -36,8 +37,10 @@ impl TableFormatter {
         let mut process_width = "Process".len();
         let mut command_width = "Command".len();
         let mut pr_width = "PR".len();
-        let mut issue_width = "Issue".len();
         let mut note_width = "Note".len();
+
+        let show_issue = sessions.iter().any(|s| s.issue.is_some());
+        let mut issue_width = if show_issue { "Issue".len() } else { 0 };
 
         for (i, session) in sessions.iter().enumerate() {
             branch_width = branch_width.max(display_width(&session.branch));
@@ -87,8 +90,10 @@ impl TableFormatter {
                     });
             pr_width = pr_width.max(display_width(&pr_display));
 
-            let issue_display = session.issue.map_or(String::new(), |n| format!("#{}", n));
-            issue_width = issue_width.max(display_width(&issue_display));
+            if show_issue {
+                let issue_display = session.issue.map_or(String::new(), |n| format!("#{}", n));
+                issue_width = issue_width.max(display_width(&issue_display));
+            }
 
             let note = session.note.as_deref().unwrap_or("");
             note_width = note_width.max(display_width(note));
@@ -105,6 +110,7 @@ impl TableFormatter {
             command_width,
             pr_width,
             issue_width,
+            show_issue,
             note_width,
         }
     }
@@ -162,6 +168,30 @@ impl TableFormatter {
         }
     }
 
+    fn issue_border_segment(&self) -> String {
+        if self.show_issue {
+            format!("┬{}", "─".repeat(self.issue_width + 2))
+        } else {
+            String::new()
+        }
+    }
+
+    fn issue_separator_segment(&self) -> String {
+        if self.show_issue {
+            format!("┼{}", "─".repeat(self.issue_width + 2))
+        } else {
+            String::new()
+        }
+    }
+
+    fn issue_bottom_segment(&self) -> String {
+        if self.show_issue {
+            format!("┴{}", "─".repeat(self.issue_width + 2))
+        } else {
+            String::new()
+        }
+    }
+
     fn print_header(&self) {
         println!("{}", self.top_border());
         println!("{}", self.header_row());
@@ -181,7 +211,6 @@ impl TableFormatter {
         let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
         let process_status = Self::format_process_status(session);
         let note_display = session.note.as_deref().unwrap_or("");
-        let issue_display = session.issue.map_or(String::new(), |n| format!("#{}", n));
         let activity_display =
             status_info.map_or_else(|| "-".to_string(), |i| i.status.to_string());
         let pr_display = pr_info.map_or_else(
@@ -209,8 +238,15 @@ impl TableFormatter {
         let status_str = format!("{:?}", session.status).to_lowercase();
         let sep = color::muted("│");
 
+        let issue_cell = if self.show_issue {
+            let issue_display = session.issue.map_or(String::new(), |n| format!("#{}", n));
+            format!(" {sep} {}", pad(&issue_display, self.issue_width))
+        } else {
+            String::new()
+        };
+
         println!(
-            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep}",
+            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {}{} {sep} {} {sep}",
             color::ice(&pad(&session.branch, self.branch_width)),
             color::kiri(&pad(&agent_display, self.agent_width)),
             color::status(&pad(&status_str, self.status_width)),
@@ -220,14 +256,15 @@ impl TableFormatter {
             pad(&process_status, self.process_width),
             pad(&command, self.command_width),
             pad(&pr_display, self.pr_width),
-            pad(&issue_display, self.issue_width),
+            issue_cell,
             pad(note_display, self.note_width),
         );
     }
 
     fn top_border(&self) -> String {
+        let issue = self.issue_border_segment();
         color::muted(&format!(
-            "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┐",
+            "┌{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}┬{}{}┬{}┐",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -237,15 +274,20 @@ impl TableFormatter {
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
-            "─".repeat(self.issue_width + 2),
+            issue,
             "─".repeat(self.note_width + 2),
         ))
     }
 
     fn header_row(&self) -> String {
         let sep = color::muted("│");
+        let issue_cell = if self.show_issue {
+            format!(" {sep} {}", color::bold(&pad("Issue", self.issue_width)))
+        } else {
+            String::new()
+        };
         format!(
-            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep}",
+            "{sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {} {sep} {}{} {sep} {} {sep}",
             color::bold(&pad("Branch", self.branch_width)),
             color::bold(&pad("Agent", self.agent_width)),
             color::bold(&pad("Status", self.status_width)),
@@ -255,14 +297,15 @@ impl TableFormatter {
             color::bold(&pad("Process", self.process_width)),
             color::bold(&pad("Command", self.command_width)),
             color::bold(&pad("PR", self.pr_width)),
-            color::bold(&pad("Issue", self.issue_width)),
+            issue_cell,
             color::bold(&pad("Note", self.note_width)),
         )
     }
 
     fn separator(&self) -> String {
+        let issue = self.issue_separator_segment();
         color::muted(&format!(
-            "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┤",
+            "├{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}┼{}{}┼{}┤",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -272,14 +315,15 @@ impl TableFormatter {
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
-            "─".repeat(self.issue_width + 2),
+            issue,
             "─".repeat(self.note_width + 2),
         ))
     }
 
     fn bottom_border(&self) -> String {
+        let issue = self.issue_bottom_segment();
         color::muted(&format!(
-            "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┘",
+            "└{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}┴{}{}┴{}┘",
             "─".repeat(self.branch_width + 2),
             "─".repeat(self.agent_width + 2),
             "─".repeat(self.status_width + 2),
@@ -289,7 +333,7 @@ impl TableFormatter {
             "─".repeat(self.process_width + 2),
             "─".repeat(self.command_width + 2),
             "─".repeat(self.pr_width + 2),
-            "─".repeat(self.issue_width + 2),
+            issue,
             "─".repeat(self.note_width + 2),
         ))
     }

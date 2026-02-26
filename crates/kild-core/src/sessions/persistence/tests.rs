@@ -812,7 +812,7 @@ fn test_save_load_roundtrip_all_fields() {
         10,
         Some("2024-01-15T10:30:00Z".to_string()),
         Some("Implementing auth".to_string()),
-        None,
+        Some(456),
         vec![agent],
         Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
         Some("tl_proj_feat".to_string()),
@@ -835,6 +835,7 @@ fn test_save_load_roundtrip_all_fields() {
     let agent = loaded.latest_agent().unwrap();
     assert_eq!(agent.agent(), "claude");
     assert_eq!(agent.spawn_id(), "proj_feat_0");
+    assert_eq!(loaded.issue, session.issue);
 }
 
 #[test]
