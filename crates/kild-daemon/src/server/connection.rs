@@ -157,8 +157,23 @@ where
             rows,
             cols,
         } => {
-            let (rx, scrollback, resize_failed) = {
+            let (rx, scrollback, resize_failed, size_changed) = {
                 let mut mgr = session_manager.write().await;
+
+                // Read current PTY size before resize to detect dimension changes.
+                // Both calls must occur under the same write lock to avoid a TOCTOU
+                // race where another client resizes between the two operations.
+                // Scrollback rendered at different dimensions produces garbled output
+                // when replayed — skip replay if the resize actually changed the size.
+                let old_size = mgr.pty_size(&session_id);
+
+                if old_size.is_none() {
+                    warn!(
+                        event = "daemon.connection.pty_size_unavailable",
+                        session_id = %session_id,
+                        "PTY not found when reading pre-attach size; session may have stopped mid-attach",
+                    );
+                }
 
                 // Resize to client dimensions
                 let resize_failed = if let Err(e) = mgr.resize_pty(&session_id, rows, cols) {
@@ -174,6 +189,11 @@ where
                     false
                 };
 
+                // None means PTY is already gone (session stopped / removed mid-attach);
+                // treat as changed to skip garbled replay — attach_client will surface the
+                // real error below if the session is truly invalid.
+                let size_changed = old_size.is_none_or(|(r, c)| r != rows || c != cols);
+
                 // Subscribe to broadcast BEFORE capturing scrollback to avoid
                 // losing output produced between capture and stream start.
                 let rx = match mgr.attach_client(&session_id, client_id) {
@@ -187,19 +207,36 @@ where
                     }
                 };
 
-                let scrollback = match mgr.scrollback_contents(&session_id) {
-                    Some(data) => data,
-                    None => {
-                        warn!(
-                            event = "daemon.connection.scrollback_unavailable",
-                            session_id = %session_id,
-                            "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
-                        );
-                        Vec::new()
+                // Skip scrollback replay when dimensions changed — the buffer contains
+                // escape sequences rendered at the old size which produce garbled output
+                // in the new terminal. The resize above already delivered SIGWINCH to the
+                // child (via the PTY master resize syscall), which will trigger a re-render.
+                let scrollback = if size_changed {
+                    info!(
+                        event = "daemon.connection.scrollback_skipped",
+                        session_id = %session_id,
+                        old_size = ?old_size,
+                        new_rows = rows,
+                        new_cols = cols,
+                        resize_failed = resize_failed,
+                        "Skipping scrollback replay: PTY dimensions changed",
+                    );
+                    Vec::new()
+                } else {
+                    match mgr.scrollback_contents(&session_id) {
+                        Some(data) => data,
+                        None => {
+                            warn!(
+                                event = "daemon.connection.scrollback_unavailable",
+                                session_id = %session_id,
+                                "Scrollback buffer unavailable (session may have stopped before buffer init); attaching without replay",
+                            );
+                            Vec::new()
+                        }
                     }
                 };
 
-                (rx, scrollback, resize_failed)
+                (rx, scrollback, resize_failed, size_changed)
             };
 
             // Hold the writer lock for ack + scrollback + buffered drain so
@@ -221,16 +258,39 @@ where
 
                 // Notify client if resize failed (non-fatal, no flush)
                 if resize_failed {
+                    let msg = if size_changed {
+                        "Terminal resize failed and scrollback was skipped due to dimension mismatch. \
+                         The agent will re-render when resize succeeds."
+                    } else {
+                        "Terminal resize failed. Display may be garbled. Try detaching and reattaching."
+                    };
                     let resize_warning = DaemonMessage::SessionEvent {
                         event: "resize_failed".to_string(),
                         session_id: session_id.clone(),
-                        details: Some(serde_json::json!({
-                            "message": "Terminal resize failed. Display may be garbled. Try detaching and reattaching."
-                        })),
+                        details: Some(serde_json::json!({ "message": msg })),
                     };
                     if let Err(e) = write_message(&mut *w, &resize_warning).await {
                         warn!(
                             event = "daemon.connection.resize_warning_write_failed",
+                            session_id = %session_id,
+                            client_id = client_id,
+                            error = %e,
+                        );
+                    }
+                }
+
+                // Notify client when scrollback was skipped due to dimension change
+                if size_changed && !resize_failed {
+                    let skip_notice = DaemonMessage::SessionEvent {
+                        event: "scrollback_skipped".to_string(),
+                        session_id: session_id.clone(),
+                        details: Some(serde_json::json!({
+                            "message": "Scrollback replay skipped: terminal dimensions changed. The agent will re-render output."
+                        })),
+                    };
+                    if let Err(e) = write_message(&mut *w, &skip_notice).await {
+                        warn!(
+                            event = "daemon.connection.scrollback_skip_notice_write_failed",
                             session_id = %session_id,
                             client_id = client_id,
                             error = %e,
