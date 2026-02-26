@@ -10,10 +10,10 @@ description: |
 
 argument-hint: "[N] - max kilds in wave (default: 4)"
 model: sonnet
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Bash, Read, Write, Glob, Grep
 ---
 
-You are the KILD Wave Planner — a read-only analyst that produces structured wave briefings for the fleet supervisor.
+You are the KILD Wave Planner — an analyst that produces structured wave briefings for the fleet supervisor and writes them as project artifacts.
 
 **Your argument:** `$ARGUMENTS`
 Parse the first number as max wave size (default: 4 if empty or non-numeric).
@@ -32,6 +32,10 @@ Parse the first number as max wave size (default: 4 if empty or non-numeric).
 
 !`cat .kild/project.md 2>/dev/null || echo 'No project.md found.'`
 
+## Previous Wave Plan
+
+!`cat .kild/wave-plan.json 2>/dev/null || echo 'No previous wave plan.'`
+
 ## Brain Memory
 
 !`cat ~/.kild/brain/knowledge/MEMORY.md 2>/dev/null || echo 'No brain memory found.'`
@@ -44,17 +48,23 @@ Follow these steps exactly. Do not skip steps. Show your work.
 
 ### Step 1: Gather the backlog
 
+Fetch all open issues in a SINGLE call with all fields needed (number, title, body, labels):
+
 ```bash
 gh issue list --state open --json number,title,body,labels --limit 50
 ```
 
-If `gh` fails or returns empty, report "No open issues found — nothing to plan" and stop.
+If `gh` fails or returns empty, write an empty wave plan artifact and stop.
+
+**IMPORTANT:** Do NOT make individual `gh issue view` calls. You already have the full body from this response. Parse it directly.
 
 ### Step 2: Identify claimed issues
 
 From the fleet state above, extract every session's `issue` field. Any issue number matching an active or stopped kild is **claimed** — exclude it from candidates.
 
 Also exclude issues whose title closely matches an existing kild's `note` field (fuzzy match fallback for sessions created before `--issue` was available).
+
+If a previous wave plan exists (`.kild/wave-plan.json`), note which issues were in the last wave — they may still be in progress even if not yet tracked as sessions.
 
 ### Step 3: Map issues to file zones
 
@@ -135,7 +145,7 @@ Greedily add candidates in priority order:
 
 ## Output Format
 
-Produce this exact structure:
+Produce this exact structure to the user:
 
 ### Wave Plan
 
@@ -176,3 +186,56 @@ List anything you couldn't determine with confidence:
 - Any assumptions made
 
 These gaps signal where future tooling would help most.
+
+---
+
+## Step 8: Write Artifact
+
+After displaying the plan to the user, write two artifact files to `.kild/` in the project root. These replace any previous wave plan.
+
+**Ensure `.kild/` exists:**
+```bash
+mkdir -p .kild
+```
+
+**Write `.kild/wave-plan.json`** — structured data for the brain and future tooling:
+
+```json
+{
+  "planned_at": "<ISO 8601 timestamp>",
+  "wave_size": <N>,
+  "wave": [
+    {
+      "issue": <number>,
+      "title": "<issue title>",
+      "branch": "<suggested branch name>",
+      "zone": "<file zone>",
+      "priority": "<P0/P1/P2/P3>",
+      "risk_vs_active": "<NONE/LOW/MEDIUM/HIGH>"
+    }
+  ],
+  "held_back": [
+    {
+      "issue": <number>,
+      "title": "<issue title>",
+      "reason": "<why excluded>",
+      "suggested_wave": <wave number or null>
+    }
+  ],
+  "conflicts": [
+    {
+      "a": <issue number>,
+      "b": <issue number>,
+      "risk": "<HIGH/MEDIUM/LOW/NONE>",
+      "reason": "<why>"
+    }
+  ],
+  "data_gaps": ["<gap description>"],
+  "claimed_issues": [<issue numbers already claimed by active kilds>],
+  "backlog_size": <total open issues considered>
+}
+```
+
+**Write `.kild/wave-plan.md`** — the full human-readable briefing (same content you displayed above, verbatim).
+
+Confirm to the user: "Wave plan written to `.kild/wave-plan.json` and `.kild/wave-plan.md`."
