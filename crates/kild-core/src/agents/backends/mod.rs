@@ -1,12 +1,45 @@
 //! Agent backend implementations.
 //!
 //! All backends are defined via the `define_agent_backend!` macro, which generates
-//! the struct, `AgentBackend` trait impl, and tests from a declarative one-liner.
+//! the struct, `AgentBackend` trait impl, and uniquely named tests. Each invocation
+//! requires a `test_prefix` identifier used to produce descriptive test function
+//! names via `paste`.
+
+/// Shared test body for both macro arms. Generates the four tests common to all
+/// backends; the yolo-specific test is added by each arm individually.
+#[cfg(test)]
+macro_rules! define_agent_backend_tests {
+    ($struct_name:ident, $prefix:ident, $name:expr, $display:expr, $cmd:expr, [$($pat:expr),+]) => {
+        paste::paste! {
+            #[test]
+            fn [<$prefix _backend_returns_correct_name>]() {
+                assert_eq!($struct_name.name(), $name);
+            }
+
+            #[test]
+            fn [<$prefix _backend_returns_correct_display_name>]() {
+                assert_eq!($struct_name.display_name(), $display);
+            }
+
+            #[test]
+            fn [<$prefix _backend_returns_correct_default_command>]() {
+                assert_eq!($struct_name.default_command(), $cmd);
+            }
+
+            #[test]
+            fn [<$prefix _backend_returns_expected_process_patterns>]() {
+                let patterns = $struct_name.process_patterns();
+                $(assert!(patterns.contains(&$pat.to_string()));)+
+            }
+        }
+    };
+}
 
 macro_rules! define_agent_backend {
     // Arm with yolo_flags (agents that support autonomous mode)
     (
         $struct_name:ident,
+        test_prefix: $prefix:ident,
         name: $name:expr,
         display_name: $display:expr,
         binary: $binary:expr,
@@ -47,36 +80,20 @@ macro_rules! define_agent_backend {
             use super::*;
             use crate::agents::traits::AgentBackend;
 
-            #[test]
-            fn test_name() {
-                assert_eq!($struct_name.name(), $name);
-            }
+            define_agent_backend_tests!($struct_name, $prefix, $name, $display, $cmd, [$($pat),+]);
 
-            #[test]
-            fn test_display_name() {
-                assert_eq!($struct_name.display_name(), $display);
-            }
-
-            #[test]
-            fn test_default_command() {
-                assert_eq!($struct_name.default_command(), $cmd);
-            }
-
-            #[test]
-            fn test_process_patterns() {
-                let patterns = $struct_name.process_patterns();
-                $(assert!(patterns.contains(&$pat.to_string()));)+
-            }
-
-            #[test]
-            fn test_yolo_flags() {
-                assert_eq!($struct_name.yolo_flags(), Some($yolo));
+            paste::paste! {
+                #[test]
+                fn [<$prefix _backend_returns_correct_yolo_flags>]() {
+                    assert_eq!($struct_name.yolo_flags(), Some($yolo));
+                }
             }
         }
     };
     // Arm without yolo_flags (agents that don't support autonomous mode)
     (
         $struct_name:ident,
+        test_prefix: $prefix:ident,
         name: $name:expr,
         display_name: $display:expr,
         binary: $binary:expr,
@@ -112,30 +129,13 @@ macro_rules! define_agent_backend {
             use super::*;
             use crate::agents::traits::AgentBackend;
 
-            #[test]
-            fn test_name() {
-                assert_eq!($struct_name.name(), $name);
-            }
+            define_agent_backend_tests!($struct_name, $prefix, $name, $display, $cmd, [$($pat),+]);
 
-            #[test]
-            fn test_display_name() {
-                assert_eq!($struct_name.display_name(), $display);
-            }
-
-            #[test]
-            fn test_default_command() {
-                assert_eq!($struct_name.default_command(), $cmd);
-            }
-
-            #[test]
-            fn test_process_patterns() {
-                let patterns = $struct_name.process_patterns();
-                $(assert!(patterns.contains(&$pat.to_string()));)+
-            }
-
-            #[test]
-            fn test_yolo_flags() {
-                assert_eq!($struct_name.yolo_flags(), None);
+            paste::paste! {
+                #[test]
+                fn [<$prefix _backend_returns_no_yolo_flags>]() {
+                    assert_eq!($struct_name.yolo_flags(), None);
+                }
             }
         }
     };
@@ -143,6 +143,7 @@ macro_rules! define_agent_backend {
 
 mod amp {
     define_agent_backend!(AmpBackend,
+        test_prefix: amp,
         name: "amp",
         display_name: "Amp",
         binary: "amp",
@@ -154,6 +155,7 @@ mod amp {
 
 mod claude {
     define_agent_backend!(ClaudeBackend,
+        test_prefix: claude,
         name: "claude",
         display_name: "Claude Code",
         binary: "claude",
@@ -165,6 +167,7 @@ mod claude {
 
 mod codex {
     define_agent_backend!(CodexBackend,
+        test_prefix: codex,
         name: "codex",
         display_name: "Codex CLI",
         binary: "codex",
@@ -176,6 +179,7 @@ mod codex {
 
 mod gemini {
     define_agent_backend!(GeminiBackend,
+        test_prefix: gemini,
         name: "gemini",
         display_name: "Gemini CLI",
         binary: "gemini",
@@ -187,6 +191,7 @@ mod gemini {
 
 mod kiro {
     define_agent_backend!(KiroBackend,
+        test_prefix: kiro,
         name: "kiro",
         display_name: "Kiro CLI",
         binary: "kiro-cli",
@@ -198,6 +203,7 @@ mod kiro {
 
 mod opencode {
     define_agent_backend!(OpenCodeBackend,
+        test_prefix: opencode,
         name: "opencode",
         display_name: "OpenCode",
         binary: "opencode",

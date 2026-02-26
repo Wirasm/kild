@@ -60,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_backend_basic_methods() {
+    fn mock_agent_backend_delegates_name_display_and_yolo_correctly() {
         let backend = MockBackend;
         assert_eq!(backend.name(), "mock");
         assert_eq!(backend.display_name(), "Mock Agent");

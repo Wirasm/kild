@@ -121,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_basic_methods() {
+    fn mock_terminal_backend_name_and_availability_are_accessible() {
         let backend = MockBackend;
         assert_eq!(backend.name(), "mock");
         assert_eq!(backend.display_name(), "Mock Terminal");
@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_execute_spawn() {
+    fn mock_terminal_backend_execute_spawn_returns_window_title() {
         let backend = MockBackend;
         let config = SpawnConfig::new(
             crate::terminal::types::TerminalType::Native,
@@ -142,9 +142,9 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_backend_close_window() {
+    fn mock_terminal_backend_close_window_does_not_panic() {
         let backend = MockBackend;
-        // close_window returns () - just verify it doesn't panic
+        // Verify fire-and-forget close does not panic
         backend.close_window(Some("123"));
     }
 }

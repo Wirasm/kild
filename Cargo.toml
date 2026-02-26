@@ -90,3 +90,4 @@ owo-colors = { version = "4", features = ["supports-colors"] }
 
 # Dev/test dependencies
 temp-env = "0.3"
+paste = "1"
