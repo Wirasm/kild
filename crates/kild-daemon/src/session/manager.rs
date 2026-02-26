@@ -208,12 +208,18 @@ impl SessionManager {
         pty.resize(rows, cols)
     }
 
-    /// Get the current PTY dimensions for a session.
+    /// Get the cached PTY dimensions for a session.
+    ///
+    /// Returns `Some((rows, cols))` if the session has an active PTY.
+    /// Returns `None` if no PTY is registered for `session_id` (e.g. the session
+    /// was never started, has already been stopped, or was removed mid-flight).
+    ///
+    /// Returns the dimensions last successfully set via [`resize_pty`], which
+    /// match the PTY creation size initially. Does **not** query the kernel.
     pub fn pty_size(&self, session_id: &str) -> Option<(u16, u16)> {
-        self.pty_manager.get(session_id).map(|pty| {
-            let size = pty.size();
-            (size.rows, size.cols)
-        })
+        self.pty_manager
+            .get(session_id)
+            .map(|pty| (pty.size().rows, pty.size().cols))
     }
 
     /// Write data to a session's PTY stdin.

@@ -9,6 +9,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use base64::Engine;
+use kild_daemon::DaemonMessage;
+
 use kild_daemon::client::DaemonClient;
 use kild_daemon::types::DaemonConfig;
 
@@ -721,6 +724,170 @@ async fn test_invalid_json_does_not_crash_server() {
     assert!(sessions.is_empty());
 
     client.shutdown().await.unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(3), server_handle).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_attach_skips_scrollback_when_dimensions_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+    let socket_path = config.socket_path.clone();
+
+    let server_handle = tokio::spawn(async move { kild_daemon::run_server(config).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut client = DaemonClient::connect(&socket_path).await.unwrap();
+
+    // Create session at 24x80 running a command that produces output
+    let working_dir = dir.path().to_string_lossy().to_string();
+    client
+        .create_session(
+            "scroll-test",
+            &working_dir,
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+            false,
+        )
+        .await
+        .unwrap();
+
+    // Write some output to build scrollback
+    let mut writer_client = DaemonClient::connect(&socket_path).await.unwrap();
+    writer_client.attach("scroll-test", 24, 80).await.unwrap();
+    writer_client
+        .write_stdin("scroll-test", b"echo scrollback-content\n")
+        .await
+        .unwrap();
+
+    // Wait for output to arrive in scrollback buffer
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Attach with DIFFERENT dimensions (40x120 vs 24x80)
+    let mut attach_client = DaemonClient::connect(&socket_path).await.unwrap();
+    attach_client.attach("scroll-test", 40, 120).await.unwrap();
+
+    // Read messages — expect a scrollback_skipped SessionEvent, NOT a PtyOutput with scrollback
+    let read_result = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut got_scrollback_output = false;
+        let mut got_skip_notice = false;
+        for _ in 0..10 {
+            match attach_client.read_next().await {
+                Ok(Some(DaemonMessage::PtyOutput { data, .. })) => {
+                    // Decode base64 and check if it contains our scrollback content
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        if String::from_utf8_lossy(&bytes).contains("scrollback-content") {
+                            got_scrollback_output = true;
+                        }
+                    }
+                }
+                Ok(Some(DaemonMessage::SessionEvent { event, .. })) => {
+                    if event == "scrollback_skipped" {
+                        got_skip_notice = true;
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        (got_scrollback_output, got_skip_notice)
+    })
+    .await;
+
+    let (got_scrollback, got_notice) = read_result.unwrap_or((false, false));
+    assert!(
+        !got_scrollback,
+        "Scrollback should NOT be replayed when dimensions changed"
+    );
+    assert!(
+        got_notice,
+        "Should receive scrollback_skipped SessionEvent when dimensions changed"
+    );
+
+    // Clean up
+    let mut admin = DaemonClient::connect(&socket_path).await.unwrap();
+    admin.stop_session("scroll-test").await.unwrap();
+    admin.shutdown().await.unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(3), server_handle).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_attach_replays_scrollback_when_dimensions_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+    let socket_path = config.socket_path.clone();
+
+    let server_handle = tokio::spawn(async move { kild_daemon::run_server(config).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut client = DaemonClient::connect(&socket_path).await.unwrap();
+
+    // Create session at 24x80
+    let working_dir = dir.path().to_string_lossy().to_string();
+    client
+        .create_session(
+            "replay-test",
+            &working_dir,
+            "/bin/sh",
+            &[],
+            &HashMap::new(),
+            24,
+            80,
+            false,
+        )
+        .await
+        .unwrap();
+
+    // Write some output to build scrollback
+    let mut writer_client = DaemonClient::connect(&socket_path).await.unwrap();
+    writer_client.attach("replay-test", 24, 80).await.unwrap();
+    writer_client
+        .write_stdin("replay-test", b"echo replay-marker\n")
+        .await
+        .unwrap();
+
+    // Wait for output to arrive in scrollback buffer
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Attach with SAME dimensions (24x80)
+    let mut attach_client = DaemonClient::connect(&socket_path).await.unwrap();
+    attach_client.attach("replay-test", 24, 80).await.unwrap();
+
+    // Read messages — expect PtyOutput containing our scrollback content
+    let read_result = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut got_scrollback = false;
+        for _ in 0..10 {
+            match attach_client.read_next().await {
+                Ok(Some(DaemonMessage::PtyOutput { data, .. })) => {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        if String::from_utf8_lossy(&bytes).contains("replay-marker") {
+                            got_scrollback = true;
+                            break;
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        got_scrollback
+    })
+    .await;
+
+    assert!(
+        read_result.unwrap_or(false),
+        "Scrollback SHOULD be replayed when dimensions match"
+    );
+
+    // Clean up
+    let mut admin = DaemonClient::connect(&socket_path).await.unwrap();
+    admin.stop_session("replay-test").await.unwrap();
+    admin.shutdown().await.unwrap();
 
     let result = tokio::time::timeout(Duration::from_secs(3), server_handle).await;
     assert!(result.is_ok());
