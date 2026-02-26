@@ -1,4 +1,5 @@
 use super::*;
+use crate::forge::types::PrCheckResult;
 use std::path::PathBuf;
 
 #[test]

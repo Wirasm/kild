@@ -1,4 +1,4 @@
-pub use crate::forge::types::PrCheckResult;
+use crate::forge::types::PrCheckResult;
 use crate::git::types::WorktreeStatus;
 
 /// Safety information for a destroy operation.

@@ -1,6 +1,7 @@
 use kild_paths::KildPaths;
 use tracing::{debug, error, info, warn};
 
+use crate::forge::types::PrCheckResult;
 use crate::git;
 use crate::git::get_worktree_status;
 use crate::sessions::{errors::SessionError, persistence, types::*};
