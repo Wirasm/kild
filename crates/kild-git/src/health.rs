@@ -3,13 +3,13 @@ use std::path::Path;
 use git2::{Oid, Repository};
 use tracing::{debug, warn};
 
-use crate::git::naming::kild_branch_name;
-use crate::git::types::{BaseBranchDrift, BranchHealth, CommitActivity, ConflictStatus, DiffStats};
+use crate::naming::kild_branch_name;
+use crate::types::{BaseBranchDrift, BranchHealth, CommitActivity, ConflictStatus, DiffStats};
 
 /// Find the merge base between two commits.
 ///
 /// Returns `None` if no common ancestor exists (e.g., unrelated histories).
-pub(super) fn find_merge_base(repo: &Repository, oid_a: Oid, oid_b: Oid) -> Option<Oid> {
+pub fn find_merge_base(repo: &Repository, oid_a: Oid, oid_b: Oid) -> Option<Oid> {
     match repo.merge_base(oid_a, oid_b) {
         Ok(oid) => Some(oid),
         Err(e) => {
@@ -26,7 +26,7 @@ pub(super) fn find_merge_base(repo: &Repository, oid_a: Oid, oid_b: Oid) -> Opti
 ///
 /// Returns 0 on revwalk failure (errors are logged as warnings).
 /// Callers cannot distinguish between "no commits" and "check failed".
-pub(super) fn count_commits_since(repo: &Repository, branch_oid: Oid, base_oid: Oid) -> usize {
+pub fn count_commits_since(repo: &Repository, branch_oid: Oid, base_oid: Oid) -> usize {
     let mut walk = match repo.revwalk() {
         Ok(rw) => rw,
         Err(e) => {
@@ -82,7 +82,7 @@ fn get_last_commit_time(repo: &Repository) -> Option<String> {
 ///
 /// Shows the total changes introduced by the branch (how big the PR will be).
 /// Returns `None` if commits cannot be resolved or diff computation fails (logged as warnings).
-pub(super) fn diff_against_base(
+pub fn diff_against_base(
     repo: &Repository,
     branch_oid: Oid,
     merge_base_oid: Oid,
@@ -172,7 +172,7 @@ fn check_conflicts(repo: &Repository, branch_oid: Oid, base_oid: Oid) -> Conflic
 }
 
 /// Count commits ahead and behind between branch tip and base branch tip.
-pub(super) fn count_base_drift(
+pub fn count_base_drift(
     repo: &Repository,
     branch_oid: Oid,
     base_oid: Oid,
@@ -188,7 +188,7 @@ pub(super) fn count_base_drift(
 }
 
 /// Resolve a branch name to its OID, trying local first then remote.
-pub(super) fn resolve_branch_oid(repo: &Repository, branch_name: &str) -> Option<Oid> {
+pub fn resolve_branch_oid(repo: &Repository, branch_name: &str) -> Option<Oid> {
     // Try local branch first
     match repo.find_branch(branch_name, git2::BranchType::Local) {
         Ok(branch) => {

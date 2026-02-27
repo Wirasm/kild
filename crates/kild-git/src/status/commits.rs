@@ -1,7 +1,7 @@
 use git2::Repository;
 use tracing::{debug, warn};
 
-use crate::git::types::CommitCounts;
+use crate::types::CommitCounts;
 
 /// Count unpushed and behind commits and check if remote tracking branch exists.
 pub(super) fn count_unpushed_commits(repo: &Repository) -> CommitCounts {

@@ -3,7 +3,7 @@ use std::path::Path;
 use git2::Repository;
 use tracing::warn;
 
-use crate::git::types::{BaseBranchDrift, DiffStats, GitStats};
+use crate::types::{BaseBranchDrift, DiffStats, GitStats};
 
 use super::{get_diff_stats, get_worktree_status};
 
@@ -79,8 +79,8 @@ pub(super) fn compute_base_metrics(
         }
     };
 
-    let kild_branch = crate::git::naming::kild_branch_name(branch);
-    let branch_oid = match super::super::health::resolve_branch_oid(&repo, &kild_branch) {
+    let kild_branch = crate::naming::kild_branch_name(branch);
+    let branch_oid = match crate::health::resolve_branch_oid(&repo, &kild_branch) {
         Some(oid) => oid,
         None => {
             warn!(
@@ -90,7 +90,7 @@ pub(super) fn compute_base_metrics(
             return (None, None);
         }
     };
-    let base_oid = match super::super::health::resolve_branch_oid(&repo, base_branch) {
+    let base_oid = match crate::health::resolve_branch_oid(&repo, base_branch) {
         Some(oid) => oid,
         None => {
             warn!(
@@ -102,16 +102,16 @@ pub(super) fn compute_base_metrics(
         }
     };
 
-    let drift = Some(super::super::health::count_base_drift(
+    let drift = Some(crate::health::count_base_drift(
         &repo,
         branch_oid,
         base_oid,
         base_branch,
     ));
 
-    let merge_base = super::super::health::find_merge_base(&repo, branch_oid, base_oid);
+    let merge_base = crate::health::find_merge_base(&repo, branch_oid, base_oid);
     let diff_vs_base = match merge_base {
-        Some(mb) => super::super::health::diff_against_base(&repo, branch_oid, mb),
+        Some(mb) => crate::health::diff_against_base(&repo, branch_oid, mb),
         None => None,
     };
 

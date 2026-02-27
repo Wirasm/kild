@@ -4,10 +4,9 @@ use std::path::PathBuf;
 use git2::{Oid, Repository};
 use tracing::{info, warn};
 
-use crate::git::naming::kild_branch_name;
-use crate::git::types::{CleanKild, FileOverlap, OverlapReport};
-
-use super::health::{find_merge_base, resolve_branch_oid};
+use kild_git::health::{find_merge_base, resolve_branch_oid};
+use kild_git::naming::kild_branch_name;
+use kild_git::types::{CleanKild, FileOverlap, OverlapReport};
 
 /// Get list of changed file paths between merge base and branch tip.
 ///

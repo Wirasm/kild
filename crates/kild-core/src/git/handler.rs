@@ -3,9 +3,14 @@ use std::path::Path;
 use tracing::{debug, error, info, warn};
 
 use crate::files;
-use crate::git::{errors::GitError, naming, types::*, validation};
 use kild_config::GitConfig;
 use kild_config::KildConfig;
+use kild_git::{
+    errors::GitError,
+    naming,
+    types::{ProjectInfo, WorktreeInfo},
+    validation,
+};
 
 // Helper function to reduce boilerplate
 fn io_error(e: std::io::Error) -> GitError {
@@ -60,107 +65,6 @@ fn add_git_worktree_with_retry(
             Err(e) => return Err(git2_error(e)),
         }
     }
-}
-
-pub fn detect_project() -> Result<ProjectInfo, GitError> {
-    info!(event = "core.git.project.detect_started");
-
-    let current_dir = std::env::current_dir().map_err(io_error)?;
-
-    let repo = Repository::discover(&current_dir).map_err(|_| GitError::NotInRepository)?;
-
-    let repo_path = repo.workdir().ok_or_else(|| GitError::OperationFailed {
-        message: "Repository has no working directory".to_string(),
-    })?;
-
-    let remote_url = repo
-        .find_remote("origin")
-        .ok()
-        .and_then(|remote| remote.url().map(|s| s.to_string()));
-
-    let project_name = if let Some(ref url) = remote_url {
-        naming::derive_project_name_from_remote(url)
-    } else {
-        naming::derive_project_name_from_path(repo_path)
-    };
-
-    let project_id = naming::generate_project_id(repo_path);
-
-    let project = ProjectInfo::new(
-        project_id.to_string(),
-        project_name.clone(),
-        repo_path.to_path_buf(),
-        remote_url.clone(),
-    );
-
-    info!(
-        event = "core.git.project.detect_completed",
-        project_id = %project_id,
-        project_name = project_name,
-        repo_path = %repo_path.display(),
-        remote_url = remote_url.as_deref().unwrap_or("none")
-    );
-
-    Ok(project)
-}
-
-/// Detect project from a specific path (for UI usage).
-///
-/// Unlike `detect_project()` which uses current directory, this function
-/// uses the provided path to discover the git repository. The path can be
-/// anywhere within the repository - `Repository::discover` will walk up
-/// the directory tree to find the repository root.
-///
-/// # Errors
-///
-/// Returns `GitError::NotInRepository` if the path is not within a git repository.
-/// Returns `GitError::OperationFailed` if the repository has no working directory (bare repo).
-pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
-    info!(event = "core.git.project.detect_at_started", path = %path.display());
-
-    let repo = Repository::discover(path).map_err(|e| {
-        debug!(
-            event = "core.git.project.discover_failed",
-            path = %path.display(),
-            error = %e,
-            "Repository discovery failed - path may not be in a git repository"
-        );
-        GitError::NotInRepository
-    })?;
-
-    let repo_path = repo.workdir().ok_or_else(|| GitError::OperationFailed {
-        message: "Repository has no working directory".to_string(),
-    })?;
-
-    let remote_url = repo
-        .find_remote("origin")
-        .ok()
-        .and_then(|remote| remote.url().map(|s| s.to_string()));
-
-    let project_name = if let Some(ref url) = remote_url {
-        naming::derive_project_name_from_remote(url)
-    } else {
-        naming::derive_project_name_from_path(repo_path)
-    };
-
-    let project_id = naming::generate_project_id(repo_path);
-
-    let project = ProjectInfo::new(
-        project_id.to_string(),
-        project_name.clone(),
-        repo_path.to_path_buf(),
-        remote_url.clone(),
-    );
-
-    info!(
-        event = "core.git.project.detect_at_completed",
-        project_id = %project_id,
-        project_name = project_name,
-        repo_path = %repo_path.display(),
-        remote_url = remote_url.as_deref().unwrap_or("none")
-    );
-
-    Ok(project)
 }
 
 pub fn create_worktree(
@@ -230,11 +134,7 @@ pub fn create_worktree(
         let remote_exists = repo.find_remote(git_config.remote()).is_ok();
 
         if git_config.fetch_before_create() && remote_exists {
-            super::remote::fetch_remote(
-                &project.path,
-                git_config.remote(),
-                git_config.base_branch(),
-            )?;
+            kild_git::fetch_remote(&project.path, git_config.remote(), git_config.base_branch())?;
         } else if git_config.fetch_before_create() && !remote_exists {
             info!(
                 event = "core.git.fetch_skipped",
@@ -399,26 +299,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    #[test]
-    fn test_detect_project_not_in_repo() {
-        // This test assumes we're not in a git repo at /tmp
-        let original_dir = std::env::current_dir().unwrap();
-
-        // Try to change to a non-git directory for testing
-        if std::env::set_current_dir("/tmp").is_ok() {
-            let result = detect_project();
-            // Should fail if /tmp is not a git repo
-            if result.is_err() {
-                assert!(matches!(result.unwrap_err(), GitError::NotInRepository));
-            }
-
-            // Restore original directory
-            let _ = std::env::set_current_dir(original_dir);
-        }
-    }
-
-    /// Test helper: Create a temporary directory with unique name.
-    /// Returns a PathBuf that will be cleaned up when dropped.
     fn create_temp_test_dir(prefix: &str) -> PathBuf {
         let temp_dir = std::env::temp_dir().join(format!("{}_{}", prefix, std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -436,75 +316,6 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
             .expect("Failed to create initial commit");
-    }
-
-    #[test]
-    fn test_detect_project_at_not_in_repo() {
-        let temp_dir = create_temp_test_dir("shards_test_not_a_repo");
-
-        let result = detect_project_at(&temp_dir);
-
-        assert!(result.is_err());
-        assert!(
-            matches!(result.unwrap_err(), GitError::NotInRepository),
-            "Expected NotInRepository error for non-git directory"
-        );
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_detect_project_at_uses_provided_path_not_cwd() {
-        let temp_dir = create_temp_test_dir("shards_test_project_at");
-        init_test_repo(&temp_dir);
-
-        let result = detect_project_at(&temp_dir);
-
-        assert!(
-            result.is_ok(),
-            "detect_project_at should succeed for valid git repo"
-        );
-
-        let project = result.unwrap();
-
-        // Verify the project path matches the temp dir, not the cwd.
-        // Canonicalize both paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS).
-        let expected_path = temp_dir.canonicalize().unwrap();
-        let actual_path = project.path.canonicalize().unwrap();
-        assert_eq!(
-            actual_path, expected_path,
-            "ProjectInfo.path should match the provided path, not cwd"
-        );
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_detect_project_at_discovers_from_subdirectory() {
-        let temp_dir = create_temp_test_dir("shards_test_subdir");
-        init_test_repo(&temp_dir);
-
-        let subdir = temp_dir.join("src").join("nested").join("deep");
-        std::fs::create_dir_all(&subdir).expect("Failed to create subdirectory");
-
-        let result = detect_project_at(&subdir);
-
-        assert!(
-            result.is_ok(),
-            "detect_project_at should discover repo from subdirectory"
-        );
-
-        let project = result.unwrap();
-
-        // Verify the project path is the repo root, not the subdirectory.
-        let expected_path = temp_dir.canonicalize().unwrap();
-        let actual_path = project.path.canonicalize().unwrap();
-        assert_eq!(
-            actual_path, expected_path,
-            "ProjectInfo.path should be repo root, not subdirectory"
-        );
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -605,30 +416,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::remove_dir_all(&base_dir);
-    }
-
-    #[test]
-    fn test_detect_project_at_project_id_consistent() {
-        let temp_dir = create_temp_test_dir("shards_test_consistent_id");
-        init_test_repo(&temp_dir);
-
-        let subdir = temp_dir.join("src");
-        std::fs::create_dir_all(&subdir).expect("Failed to create subdirectory");
-
-        let project_from_root = detect_project_at(&temp_dir).unwrap();
-        let project_from_subdir = detect_project_at(&subdir).unwrap();
-
-        assert_eq!(
-            project_from_root.id, project_from_subdir.id,
-            "Project ID should be consistent regardless of path within repo"
-        );
-
-        assert_eq!(
-            project_from_root.path, project_from_subdir.path,
-            "Project path should be repo root regardless of input path"
-        );
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

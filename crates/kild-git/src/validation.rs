@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tracing::debug;
 
-use crate::git::errors::GitError;
+use crate::errors::GitError;
 
 pub fn validate_branch_name(branch: &str) -> Result<kild_protocol::BranchName, GitError> {
     let trimmed = branch.trim();

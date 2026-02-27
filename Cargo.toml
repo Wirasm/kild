@@ -72,6 +72,7 @@ hex = "0.4"
 # Internal workspace dependencies
 kild-config = { path = "crates/kild-config" }
 kild-core = { path = "crates/kild-core" }
+kild-git = { path = "crates/kild-git" }
 kild-daemon = { path = "crates/kild-daemon" }
 kild-paths = { path = "crates/kild-paths" }
 kild-peek-core = { path = "crates/kild-peek-core" }

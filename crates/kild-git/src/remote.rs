@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::git::errors::GitError;
+use crate::errors::GitError;
 
 /// Fetch a specific branch from a remote using git CLI.
 ///

@@ -3,8 +3,8 @@ use std::path::Path;
 use git2::{Repository, Status, StatusOptions};
 use tracing::warn;
 
-use crate::git::errors::GitError;
-use crate::git::types::{DiffStats, UncommittedDetails, WorktreeStatus};
+use crate::errors::GitError;
+use crate::types::{DiffStats, UncommittedDetails, WorktreeStatus};
 
 use super::count_unpushed_commits;
 

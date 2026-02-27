@@ -1,45 +1,30 @@
-pub mod cli;
-pub mod errors;
+// Local modules that depend on kild-core internals
 pub mod handler;
-pub mod health;
-pub mod naming;
 pub mod overlaps;
-pub mod query;
-pub mod remote;
-pub mod removal;
-pub mod status;
-pub mod types;
-pub mod validation;
+
+// Re-export kild-git submodules for consumer compatibility
+pub use kild_git::{
+    cli, errors, health, naming, project, query, remote, removal, status, types, validation,
+};
 
 #[cfg(test)]
-pub mod test_support;
+pub use kild_git::test_support;
 
-// Re-export commonly used types and functions
-pub use errors::GitError;
-pub use handler::{create_worktree, detect_project, detect_project_at};
-pub use health::collect_branch_health;
-pub use naming::{
-    KILD_BRANCH_PREFIX, calculate_worktree_path, derive_project_name_from_path,
-    derive_project_name_from_remote, generate_project_id, kild_branch_name,
-    kild_worktree_admin_name, sanitize_for_path,
-};
-pub use overlaps::collect_file_overlaps;
-pub use query::{
-    WorktreeEntry, delete_local_branch, ensure_in_repo, get_origin_url, has_any_remote,
-    has_uncommitted_changes, head_branch_name, is_git_repo, is_worktree_valid,
-    list_local_branch_names, list_worktree_entries, worktree_active_branches,
-};
-pub use remote::{fetch_remote, rebase_worktree};
-pub use removal::{
-    delete_branch_if_exists, find_main_repo_root, remove_worktree, remove_worktree_by_path,
-    remove_worktree_force,
-};
-pub use status::{collect_git_stats, get_diff_stats, get_worktree_status};
-pub use types::{
+// Re-export commonly used types and functions from kild-git
+pub use kild_git::{
     BaseBranchDrift, BranchHealth, CleanKild, CommitActivity, ConflictStatus, DiffStats,
-    FileOverlap, GitStats, OverlapReport, UncommittedDetails, WorktreeStatus,
+    FileOverlap, GitError, GitStats, KILD_BRANCH_PREFIX, OverlapReport, UncommittedDetails,
+    WorktreeEntry, WorktreeStatus, calculate_worktree_path, collect_branch_health,
+    collect_git_stats, delete_branch_if_exists, delete_local_branch, derive_project_name_from_path,
+    derive_project_name_from_remote, detect_project, detect_project_at, ensure_in_repo,
+    fetch_remote, find_main_repo_root, generate_project_id, get_current_branch, get_diff_stats,
+    get_origin_url, get_worktree_status, has_any_remote, has_uncommitted_changes, head_branch_name,
+    is_git_repo, is_valid_git_directory, is_worktree_valid, kild_branch_name,
+    kild_worktree_admin_name, list_local_branch_names, list_worktree_entries, rebase_worktree,
+    remove_worktree, remove_worktree_by_path, remove_worktree_force, sanitize_for_path,
+    should_use_current_branch, validate_branch_name, validate_git_arg, worktree_active_branches,
 };
-pub use validation::{
-    get_current_branch, is_valid_git_directory, should_use_current_branch, validate_branch_name,
-    validate_git_arg,
-};
+
+// Local re-exports
+pub use handler::create_worktree;
+pub use overlaps::collect_file_overlaps;

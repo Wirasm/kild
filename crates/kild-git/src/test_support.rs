@@ -7,7 +7,7 @@ use std::path::Path;
 
 use git2::{BranchType, Repository, WorktreeAddOptions};
 
-use crate::git::errors::GitError;
+use crate::errors::GitError;
 
 /// Initialize a new git repository at the given path with an initial commit.
 pub fn init_repo_with_commit(path: &Path) -> Result<(), GitError> {

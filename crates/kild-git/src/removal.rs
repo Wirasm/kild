@@ -2,7 +2,7 @@ use git2::{BranchType, Repository};
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
-use crate::git::{errors::GitError, naming};
+use crate::{errors::GitError, naming};
 
 /// Safety check: refuse to delete a path that is a main git repository checkout.
 ///
@@ -28,7 +28,7 @@ fn assert_not_main_repo(worktree_path: &Path) -> Result<(), GitError> {
 }
 
 pub fn remove_worktree(
-    project: &crate::git::types::ProjectInfo,
+    project: &crate::types::ProjectInfo,
     worktree_path: &Path,
 ) -> Result<(), GitError> {
     info!(

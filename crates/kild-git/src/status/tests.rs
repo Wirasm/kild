@@ -245,7 +245,7 @@ fn test_get_diff_stats_untracked_files_not_included() {
 
 #[test]
 fn test_diff_stats_has_changes() {
-    use crate::git::types::DiffStats;
+    use crate::types::DiffStats;
 
     let no_changes = DiffStats::default();
     assert!(!no_changes.has_changes());

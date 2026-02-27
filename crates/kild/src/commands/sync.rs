@@ -41,7 +41,7 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let session = helpers::require_session(branch, "cli.sync_failed")?;
 
     // Fetch from remote — use the project repo path (worktrees share the same .git)
-    let project = kild_core::git::handler::detect_project()?;
+    let project = kild_core::git::detect_project()?;
     if let Err(e) = kild_core::git::remote::fetch_remote(&project.path, remote, base_branch) {
         error!(
             event = "cli.sync_fetch_failed",
@@ -96,7 +96,7 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
     let remote = config.git.remote();
 
     // Fetch once at repo level (all worktrees share the same .git)
-    let project = kild_core::git::handler::detect_project()?;
+    let project = kild_core::git::detect_project()?;
     if let Err(e) = kild_core::git::remote::fetch_remote(&project.path, remote, base_branch) {
         error!(
             event = "cli.sync_all_fetch_failed",

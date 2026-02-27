@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use git2::{BranchType, Repository};
 use tracing::{debug, warn};
 
-use crate::git::errors::GitError;
+use crate::errors::GitError;
 
 /// Check if a path is inside a git repository.
 ///

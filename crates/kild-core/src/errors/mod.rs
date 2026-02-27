@@ -14,6 +14,45 @@ pub trait KildError: Error + Send + Sync + 'static {
 /// Common result type for the application
 pub type KildResult<T> = Result<T, Box<dyn KildError>>;
 
+impl KildError for kild_git::GitError {
+    fn error_code(&self) -> &'static str {
+        match self {
+            kild_git::GitError::NotInRepository => "NOT_IN_REPOSITORY",
+            kild_git::GitError::RepositoryNotFound { .. } => "REPOSITORY_NOT_FOUND",
+            kild_git::GitError::BranchAlreadyExists { .. } => "BRANCH_ALREADY_EXISTS",
+            kild_git::GitError::BranchNotFound { .. } => "BRANCH_NOT_FOUND",
+            kild_git::GitError::WorktreeAlreadyExists { .. } => "WORKTREE_ALREADY_EXISTS",
+            kild_git::GitError::WorktreeNotFound { .. } => "WORKTREE_NOT_FOUND",
+            kild_git::GitError::WorktreeRemovalFailed { .. } => "WORKTREE_REMOVAL_FAILED",
+            kild_git::GitError::InvalidPath { .. } => "INVALID_PATH",
+            kild_git::GitError::OperationFailed { .. } => "GIT_OPERATION_FAILED",
+            kild_git::GitError::FetchFailed { .. } => "GIT_FETCH_FAILED",
+            kild_git::GitError::RebaseConflict { .. } => "GIT_REBASE_CONFLICT",
+            kild_git::GitError::RebaseAbortFailed { .. } => "GIT_REBASE_ABORT_FAILED",
+            kild_git::GitError::RemoteBranchDeleteFailed { .. } => {
+                "GIT_REMOTE_BRANCH_DELETE_FAILED"
+            }
+            kild_git::GitError::DiffFailed { .. } => "GIT_DIFF_FAILED",
+            kild_git::GitError::MergeAnalysisFailed { .. } => "GIT_MERGE_ANALYSIS_FAILED",
+            kild_git::GitError::LogFailed { .. } => "GIT_LOG_FAILED",
+            kild_git::GitError::Git2Error { .. } => "GIT2_ERROR",
+            kild_git::GitError::IoError { .. } => "GIT_IO_ERROR",
+        }
+    }
+
+    fn is_user_error(&self) -> bool {
+        matches!(
+            self,
+            kild_git::GitError::NotInRepository
+                | kild_git::GitError::BranchAlreadyExists { .. }
+                | kild_git::GitError::BranchNotFound { .. }
+                | kild_git::GitError::WorktreeAlreadyExists { .. }
+                | kild_git::GitError::RebaseConflict { .. }
+                | kild_git::GitError::RemoteBranchDeleteFailed { .. }
+        )
+    }
+}
+
 impl KildError for kild_config::ConfigError {
     fn error_code(&self) -> &'static str {
         match self {

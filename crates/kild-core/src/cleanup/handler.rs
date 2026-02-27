@@ -263,7 +263,7 @@ pub fn scan_for_orphans_with_strategy(
         }
         CleanupStrategy::Orphans => {
             // Get current project info for scoping
-            let project = git::handler::detect_project().map_err(|e| {
+            let project = git::detect_project().map_err(|e| {
                 error!(event = "core.cleanup.strategy_failed", strategy = "Orphans", error = %e);
                 CleanupError::GitError { source: e }
             })?;

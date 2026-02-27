@@ -109,9 +109,9 @@ pub fn create_session(
                 event = "core.session.project_path_explicit_provided",
                 path = %path.display()
             );
-            git::handler::detect_project_at(path)
+            git::detect_project_at(path)
         }
-        None => git::handler::detect_project(),
+        None => git::detect_project(),
     }
     .map_err(|e| SessionError::GitError { source: e })?;
 
@@ -549,8 +549,8 @@ mod tests {
         assert_eq!(request.project_path.as_ref().unwrap(), &temp_dir);
 
         let project = match &request.project_path {
-            Some(path) => git::handler::detect_project_at(path),
-            None => git::handler::detect_project(),
+            Some(path) => git::detect_project_at(path),
+            None => git::detect_project(),
         };
 
         assert!(project.is_ok(), "Project detection should succeed");

@@ -3554,6 +3554,7 @@ dependencies = [
  "hex",
  "ignore",
  "kild-config",
+ "kild-git",
  "kild-paths",
  "kild-protocol",
  "nix 0.29.0",
@@ -3598,6 +3599,20 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
+name = "kild-git"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "git2",
+ "kild-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
