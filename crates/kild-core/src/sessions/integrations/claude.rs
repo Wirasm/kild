@@ -42,42 +42,33 @@ esac
 # Skip if this session IS the brain to prevent self-referential feedback loops.
 # Gate file ($KILD_DROPBOX/.idle_sent) deduplicates: only the first idle event
 # per task cycle fires an inject. Cleared by `kild inject` when writing a new task.
-# Filtering (#553): only forward brain-actionable events.
-# - Stop: always (worker finished)
-# - Notification: always (permission prompts, idle prompts)
-# - SubagentStop: only on failure (error/fail/exception/panic in summary)
-# - TeammateIdle, TaskCompleted: never (internal worker lifecycle noise)
+# Event tagging (#611): events use semantic tags for the brain.
+# By default only primary agent events (Stop, Notification) are forwarded.
+# Set KILD_HOOK_VERBOSE=1 to forward all events including subagent/teammate noise.
 LAST_MSG=$(echo "$INPUT" | grep -o '"transcript_summary":"[^"]*"' | head -1 | sed 's/"transcript_summary":"//;s/"//')
+TAG=""
 FORWARD=""
 SKIP_GATE=""
 case "$EVENT" in
-  Stop)
-    FORWARD="[DONE] $BRANCH${LAST_MSG:+: $LAST_MSG}"
-    ;;
-  SubagentStop)
-    if echo "$LAST_MSG" | grep -qi 'error\|fail\|exception\|panic'; then
-      FORWARD="[ERROR] $BRANCH subagent failed${LAST_MSG:+: $LAST_MSG}"
-    fi
-    ;;
+  Stop)           TAG="agent.stop";     FORWARD=1 ;;
+  SubagentStop)   TAG="subagent.stop";  [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
+  TeammateIdle)   TAG="teammate.idle";  [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
+  TaskCompleted)  TAG="task.completed"; [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
   Notification)
     case "$NTYPE" in
-      permission_prompt)
-        FORWARD="[WAITING] $BRANCH: needs approval"
-        SKIP_GATE=1
-        ;;
-      idle_prompt)
-        FORWARD="[IDLE] $BRANCH${LAST_MSG:+: $LAST_MSG}"
-        ;;
+      permission_prompt) TAG="agent.waiting"; FORWARD=1; SKIP_GATE=1 ;;
+      idle_prompt)       TAG="agent.idle";    FORWARD=1 ;;
     esac
     ;;
 esac
 if [ -n "$FORWARD" ]; then
+  MSG="[EVENT] $BRANCH $TAG${LAST_MSG:+: $LAST_MSG}"
   GATE="${KILD_DROPBOX:+$KILD_DROPBOX/.idle_sent}"
   if [ "$BRANCH" != "honryu" ] && \
      [ "$BRANCH" != "unknown" ] && \
      { [ -n "$SKIP_GATE" ] || [ -z "$GATE" ] || [ ! -f "$GATE" ]; } && \
      kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' > /dev/null 2>&1; then
-    if kild inject honryu "$FORWARD"; then
+    if kild inject honryu "$MSG"; then
       if [ -z "$SKIP_GATE" ] && [ -n "$GATE" ]; then
         touch "$GATE" || echo "[kild] Warning: failed to write idle gate $GATE" >&2
       fi
@@ -337,48 +328,56 @@ mod tests {
             "Script must allow inject when KILD_DROPBOX is not set (no-dropbox fallback)"
         );
 
-        // Event filtering assertions (#553)
+        // Event tagging assertions (#611)
         assert!(
             content.contains("transcript_summary"),
             "Script should extract transcript_summary from JSON payload"
         );
         assert!(
-            content.contains("[DONE] $BRANCH"),
-            "Script should forward Stop events with [DONE] tag"
+            content.contains("KILD_HOOK_VERBOSE"),
+            "Script should support KILD_HOOK_VERBOSE env var"
         );
         assert!(
-            content.contains("[WAITING] $BRANCH"),
-            "Script should forward permission_prompt with [WAITING] tag"
+            content.contains("[EVENT] $BRANCH $TAG"),
+            "Script should use unified [EVENT] $BRANCH $TAG format"
         );
         assert!(
-            content.contains("[IDLE] $BRANCH"),
-            "Script should forward idle_prompt with [IDLE] tag"
+            content.contains(r#"TAG="agent.stop""#),
+            "Stop events should be tagged agent.stop"
         );
         assert!(
-            content.contains("[ERROR] $BRANCH subagent failed"),
-            "Script should forward SubagentStop failures with [ERROR] tag"
+            content.contains(r#"TAG="subagent.stop""#),
+            "SubagentStop events should be tagged subagent.stop"
+        );
+        assert!(
+            content.contains(r#"TAG="teammate.idle""#),
+            "TeammateIdle events should be tagged teammate.idle"
+        );
+        assert!(
+            content.contains(r#"TAG="task.completed""#),
+            "TaskCompleted events should be tagged task.completed"
+        );
+        assert!(
+            content.contains(r#"TAG="agent.waiting""#),
+            "Notification(permission_prompt) should be tagged agent.waiting"
+        );
+        assert!(
+            content.contains(r#"TAG="agent.idle""#),
+            "Notification(idle_prompt) should be tagged agent.idle"
         );
         assert!(
             content.contains("SKIP_GATE"),
             "Script should bypass gate for permission_prompt events"
         );
-        assert!(
-            content.contains("error\\|fail\\|exception\\|panic"),
-            "Script should check for failure indicators in SubagentStop"
-        );
-        // TeammateIdle and TaskCompleted must not appear in the forward block
-        // (they're filtered out; only appear in the agent-status case and comments above FORWARD="")
+        // Default forwarding: SubagentStop, TeammateIdle, TaskCompleted are verbose-only
+        // (gated on KILD_HOOK_VERBOSE=1), while Stop and Notification forward unconditionally
         let forward_block = content
-            .split("FORWARD=\"\"")
+            .split("TAG=\"\"")
             .nth(1)
-            .expect("Should have FORWARD assignment");
+            .expect("Should have TAG initialization");
         assert!(
-            !forward_block.contains("TeammateIdle"),
-            "TeammateIdle must not be in the forward block"
-        );
-        assert!(
-            !forward_block.contains("TaskCompleted"),
-            "TaskCompleted must not be in the forward block"
+            forward_block.contains("SubagentStop") && forward_block.contains("TeammateIdle"),
+            "SubagentStop and TeammateIdle should appear in the forward block with verbose gating"
         );
 
         #[cfg(unix)]
