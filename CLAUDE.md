@@ -295,13 +295,15 @@ info!(event = "core.git.worktree.create_completed", path = %worktree_path.displa
 ```rust
 pub trait TerminalBackend: Send + Sync {
     fn name(&self) -> &'static str;
+    fn display_name(&self) -> &'static str;
     fn is_available(&self) -> bool;
     fn execute_spawn(&self, config: &SpawnConfig, window_title: Option<&str>)
         -> Result<Option<String>, TerminalError>;
-    fn focus_window(&self, window_id: Option<&str>) -> Result<(), TerminalError>;
+    fn close_window_by_id(&self, window_id: &str);
+    fn focus_window(&self, window_id: &str) -> Result<(), TerminalError>;
     fn hide_window(&self, window_id: &str) -> Result<(), TerminalError>;
-    fn close_window(&self, window_id: Option<&str>);
-    fn is_window_open(&self, window_id: &str) -> Result<Option<bool>, TerminalError>;
+    fn close_window(&self, window_id: Option<&str>) { /* default: require_window_id + delegate */ }
+    fn is_window_open(&self, window_id: &str) -> Result<Option<bool>, TerminalError> { /* default: Ok(None) */ }
 }
 ```
 

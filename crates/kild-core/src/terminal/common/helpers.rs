@@ -26,7 +26,7 @@ pub fn require_window_id<'a>(window_id: Option<&'a str>, terminal_name: &str) ->
 
 /// Generate platform-not-supported stub methods for a terminal backend.
 ///
-/// This macro generates `execute_spawn`, `close_window`, `focus_window`, and
+/// This macro generates `execute_spawn`, `close_window_by_id`, `focus_window`, and
 /// `hide_window` stubs that are conditionally compiled when the backend's
 /// target platform is not active. Must be invoked inside an
 /// `impl TerminalBackend for ...` block.
@@ -52,7 +52,7 @@ macro_rules! platform_unsupported {
         }
 
         #[cfg($cfg_pred)]
-        fn close_window(&self, _window_id: Option<&str>) {
+        fn close_window_by_id(&self, _window_id: &str) {
             tracing::debug!(
                 event = "core.terminal.close_not_supported",
                 platform = std::env::consts::OS

@@ -101,19 +101,14 @@ impl TerminalBackend for AlacrittyBackend {
     }
 
     #[cfg(target_os = "linux")]
-    fn close_window(&self, window_id: Option<&str>) {
-        let Some(id) = crate::terminal::common::helpers::require_window_id(window_id, self.name())
-        else {
-            return;
-        };
-
+    fn close_window_by_id(&self, window_id: &str) {
         debug!(
             event = "core.terminal.close_alacritty_started",
-            window_title = %id
+            window_title = %window_id
         );
 
         // Use Hyprland IPC to close the window by title
-        hyprland::close_window_by_title(id);
+        hyprland::close_window_by_title(window_id);
     }
 
     #[cfg(target_os = "linux")]

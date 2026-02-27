@@ -1,4 +1,11 @@
 //! AppleScript execution utilities for terminal backends.
+//!
+//! Two layers of helpers:
+//! - **Low-level**: `execute_spawn_script`, `close_applescript_window`, `focus_applescript_window`,
+//!   `hide_applescript_window` — execute a fully-formed AppleScript string via osascript.
+//! - **High-level**: `spawn_via_applescript`, `close_via_applescript`, `focus_via_applescript`,
+//!   `hide_via_applescript` — accept a script template with `{window_id}` or `{command}`
+//!   placeholders, perform substitution, then delegate to the low-level helpers.
 
 use crate::terminal::errors::TerminalError;
 #[cfg(target_os = "macos")]
@@ -245,6 +252,88 @@ pub fn hide_applescript_window(
 #[cfg(not(target_os = "macos"))]
 pub fn hide_applescript_window(
     _script: &str,
+    _terminal_name: &str,
+    _window_id: &str,
+) -> Result<(), TerminalError> {
+    Err(TerminalError::HideFailed {
+        message: "Hide not supported on this platform".to_string(),
+    })
+}
+
+// --- High-level helpers ---
+// These combine script template substitution with the low-level helpers above,
+// reducing boilerplate in AppleScript-based terminal backends (iTerm, Terminal.app).
+
+/// Spawn a terminal window using an AppleScript template with `{command}` placeholder.
+///
+/// Builds a `cd <dir> && <cmd>` shell command from `config`, escapes it for AppleScript,
+/// substitutes it into the script template, then executes via `execute_spawn_script`.
+#[cfg(target_os = "macos")]
+pub fn spawn_via_applescript(
+    spawn_script: &str,
+    terminal_name: &str,
+    config: &crate::terminal::types::SpawnConfig,
+) -> Result<Option<String>, TerminalError> {
+    let cd_command = super::escape::build_cd_command(config.working_directory(), config.command());
+    let script = spawn_script.replace("{command}", &crate::escape::applescript_escape(&cd_command));
+    execute_spawn_script(&script, terminal_name)
+}
+
+/// Close a window using an AppleScript template with `{window_id}` placeholder.
+#[cfg(target_os = "macos")]
+pub fn close_via_applescript(close_script: &str, terminal_name: &str, window_id: &str) {
+    let script = close_script.replace("{window_id}", window_id);
+    close_applescript_window(&script, terminal_name, window_id);
+}
+
+/// Focus a window using an AppleScript template with `{window_id}` placeholder.
+#[cfg(target_os = "macos")]
+pub fn focus_via_applescript(
+    focus_script: &str,
+    terminal_name: &str,
+    window_id: &str,
+) -> Result<(), TerminalError> {
+    let script = focus_script.replace("{window_id}", window_id);
+    focus_applescript_window(&script, terminal_name, window_id)
+}
+
+/// Hide/minimize a window using an AppleScript template with `{window_id}` placeholder.
+#[cfg(target_os = "macos")]
+pub fn hide_via_applescript(
+    hide_script: &str,
+    terminal_name: &str,
+    window_id: &str,
+) -> Result<(), TerminalError> {
+    let script = hide_script.replace("{window_id}", window_id);
+    hide_applescript_window(&script, terminal_name, window_id)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn spawn_via_applescript(
+    _spawn_script: &str,
+    _terminal_name: &str,
+    _config: &crate::terminal::types::SpawnConfig,
+) -> Result<Option<String>, TerminalError> {
+    Ok(None)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn close_via_applescript(_close_script: &str, _terminal_name: &str, _window_id: &str) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn focus_via_applescript(
+    _focus_script: &str,
+    _terminal_name: &str,
+    _window_id: &str,
+) -> Result<(), TerminalError> {
+    Err(TerminalError::FocusFailed {
+        message: "Focus not supported on this platform".to_string(),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn hide_via_applescript(
+    _hide_script: &str,
     _terminal_name: &str,
     _window_id: &str,
 ) -> Result<(), TerminalError> {
