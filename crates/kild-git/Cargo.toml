@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Git worktree operations and queries for KILD"
 
+[features]
+testing = []
+
 [dependencies]
 git2.workspace = true
 kild-protocol.workspace = true

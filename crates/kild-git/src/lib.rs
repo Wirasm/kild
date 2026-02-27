@@ -10,6 +10,7 @@ pub mod status;
 pub mod types;
 pub mod validation;
 
+#[cfg(any(test, feature = "testing"))]
 pub mod test_support;
 
 // Re-export commonly used types and functions

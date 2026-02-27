@@ -33,6 +33,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
+kild-git = { workspace = true, features = ["testing"] }
 temp-env.workspace = true
 paste.workspace = true
 

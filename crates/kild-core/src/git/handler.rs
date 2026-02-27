@@ -5,7 +5,12 @@ use tracing::{debug, error, info, warn};
 use crate::files;
 use kild_config::GitConfig;
 use kild_config::KildConfig;
-use kild_git::{errors::GitError, naming, types::*, validation};
+use kild_git::{
+    errors::GitError,
+    naming,
+    types::{ProjectInfo, WorktreeInfo},
+    validation,
+};
 
 // Helper function to reduce boilerplate
 fn io_error(e: std::io::Error) -> GitError {
