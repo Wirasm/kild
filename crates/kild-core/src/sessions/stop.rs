@@ -168,7 +168,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     }
 
     // 3. Delete PID files so next open() won't read stale PIDs (best-effort)
-    crate::process::cleanup_session_pid_files(&session, config.kild_dir(), "stop");
+    crate::process::cleanup_pid_files(&session.pid_keys(), config.kild_dir(), "stop");
 
     // 4. Backfill runtime_mode for sessions created before this field existed.
     // Infer from agents: if any agent has daemon_session_id, session was daemon-managed.

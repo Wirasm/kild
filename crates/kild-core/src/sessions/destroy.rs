@@ -348,7 +348,7 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     }
 
     // 7. Clean up PID files (best-effort, don't fail if missing)
-    crate::process::cleanup_session_pid_files(&session, config.kild_dir(), "destroy");
+    crate::process::cleanup_pid_files(&session.pid_keys(), config.kild_dir(), "destroy");
 
     // 8. Remove session directory (includes kild.json, status sidecar, pr sidecar)
     persistence::remove_session_file(&config.sessions_dir(), &session.id)?;

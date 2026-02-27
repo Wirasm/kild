@@ -4,7 +4,7 @@ pub mod operations;
 pub mod pid_file;
 pub mod types;
 
-pub(crate) use cleanup::cleanup_session_pid_files;
+pub(crate) use cleanup::cleanup_pid_files;
 pub use errors::ProcessError;
 pub use operations::{
     find_process_by_name, find_processes_in_directory, get_process_info, get_process_metrics,
