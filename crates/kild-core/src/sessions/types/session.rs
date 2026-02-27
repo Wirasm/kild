@@ -180,23 +180,29 @@ impl Session {
 
     /// PID file keys for all agents in this session.
     ///
-    /// Multi-agent sessions use per-agent spawn IDs as keys. Legacy sessions
-    /// (pre-multi-agent, no tracked agents) fall back to the session ID.
+    /// Multi-agent sessions use per-agent spawn IDs as keys. Agents with an
+    /// empty `spawn_id` (created before per-agent tracking) fall back to the
+    /// session ID, which may produce duplicates. Sessions with no tracked
+    /// agents at all fall back to a single session-ID key.
     pub fn pid_keys(&self) -> Vec<String> {
-        if self.has_agents() {
-            self.agents
-                .iter()
-                .map(|agent| {
-                    if agent.spawn_id().is_empty() {
-                        self.id.to_string()
-                    } else {
-                        agent.spawn_id().to_string()
-                    }
-                })
-                .collect()
-        } else {
-            vec![self.id.to_string()]
+        if self.agents.is_empty() {
+            tracing::warn!(
+                event = "core.session.pid_cleanup_no_agents",
+                session_id = %self.id,
+                "Session has no tracked agents, falling back to session-level PID file cleanup"
+            );
+            return vec![self.id.to_string()];
         }
+        self.agents
+            .iter()
+            .map(|agent| {
+                if agent.spawn_id().is_empty() {
+                    self.id.to_string()
+                } else {
+                    agent.spawn_id().to_string()
+                }
+            })
+            .collect()
     }
 
     /// Number of tracked agents.
