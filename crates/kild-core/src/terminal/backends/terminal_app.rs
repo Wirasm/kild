@@ -6,11 +6,8 @@ use crate::terminal::{common::detection::app_exists_macos, traits::TerminalBacke
 use crate::terminal::{errors::TerminalError, types::SpawnConfig};
 
 #[cfg(target_os = "macos")]
-use crate::escape::applescript_escape;
-#[cfg(target_os = "macos")]
-use crate::terminal::common::{
-    applescript::{close_applescript_window, execute_spawn_script, hide_applescript_window},
-    escape::build_cd_command,
+use crate::terminal::common::applescript::{
+    close_via_applescript, focus_via_applescript, hide_via_applescript, spawn_via_applescript,
 };
 
 /// AppleScript template for Terminal.app window launching (with window ID capture).
@@ -65,37 +62,22 @@ impl TerminalBackend for TerminalAppBackend {
         config: &SpawnConfig,
         _window_title: Option<&str>,
     ) -> Result<Option<String>, TerminalError> {
-        let cd_command = build_cd_command(config.working_directory(), config.command());
-        let script = TERMINAL_SCRIPT.replace("{command}", &applescript_escape(&cd_command));
-
-        execute_spawn_script(&script, self.display_name())
+        spawn_via_applescript(TERMINAL_SCRIPT, self.display_name(), config)
     }
 
     #[cfg(target_os = "macos")]
-    fn close_window(&self, window_id: Option<&str>) {
-        let Some(id) = crate::terminal::common::helpers::require_window_id(window_id, self.name())
-        else {
-            return;
-        };
-
-        let script = TERMINAL_CLOSE_SCRIPT.replace("{window_id}", id);
-        close_applescript_window(&script, self.name(), id);
+    fn close_window_by_id(&self, window_id: &str) {
+        close_via_applescript(TERMINAL_CLOSE_SCRIPT, self.name(), window_id);
     }
 
     #[cfg(target_os = "macos")]
     fn focus_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        let script = TERMINAL_FOCUS_SCRIPT.replace("{window_id}", window_id);
-        crate::terminal::common::applescript::focus_applescript_window(
-            &script,
-            self.display_name(),
-            window_id,
-        )
+        focus_via_applescript(TERMINAL_FOCUS_SCRIPT, self.display_name(), window_id)
     }
 
     #[cfg(target_os = "macos")]
     fn hide_window(&self, window_id: &str) -> Result<(), TerminalError> {
-        let script = TERMINAL_HIDE_SCRIPT.replace("{window_id}", window_id);
-        hide_applescript_window(&script, self.display_name(), window_id)
+        hide_via_applescript(TERMINAL_HIDE_SCRIPT, self.display_name(), window_id)
     }
 
     crate::terminal::common::helpers::platform_unsupported!(
@@ -142,6 +124,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn test_terminal_script_command_substitution() {
+        use crate::escape::applescript_escape;
+        use crate::terminal::common::escape::build_cd_command;
         use std::path::PathBuf;
         let cd_command = build_cd_command(&PathBuf::from("/tmp"), "echo hello");
         let script = TERMINAL_SCRIPT.replace("{command}", &applescript_escape(&cd_command));

@@ -52,7 +52,7 @@ macro_rules! platform_unsupported {
         }
 
         #[cfg($cfg_pred)]
-        fn close_window(&self, _window_id: Option<&str>) {
+        fn close_window_by_id(&self, _window_id: &str) {
             tracing::debug!(
                 event = "core.terminal.close_not_supported",
                 platform = std::env::consts::OS
