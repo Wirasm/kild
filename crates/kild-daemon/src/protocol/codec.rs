@@ -65,7 +65,7 @@ where
 mod tests {
     use super::*;
     use crate::protocol::messages::{ClientMessage, DaemonMessage};
-    use crate::types::SessionInfo;
+    use crate::types::DaemonSessionStatus;
 
     #[tokio::test]
     async fn test_roundtrip_client_message() {
@@ -148,7 +148,7 @@ mod tests {
     async fn test_roundtrip_complex_message() {
         let msg = DaemonMessage::SessionCreated {
             id: "req-1".to_string(),
-            session: SessionInfo {
+            session: DaemonSessionStatus {
                 id: "myapp_feature-auth".into(),
                 working_directory: "/tmp/wt".to_string(),
                 command: "claude".to_string(),

@@ -194,7 +194,7 @@ mod tests {
     use super::*;
     use crate::views::main_view::keybindings::UiKeybindings;
     use kild_core::Session;
-    use kild_core::sessions::SessionInfo;
+    use kild_core::sessions::SessionSnapshot;
 
     fn default_kb() -> UiKeybindings {
         UiKeybindings::default_bindings()
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_compute_alerts_max_truncation() {
-        let infos: Vec<SessionInfo> = (0..5)
+        let infos: Vec<SessionSnapshot> = (0..5)
             .map(|i| {
                 make_info(
                     &format!("dirty-{}", i),
@@ -249,7 +249,7 @@ mod tests {
             })
             .collect();
 
-        let refs: Vec<&SessionInfo> = infos.iter().collect();
+        let refs: Vec<&SessionSnapshot> = infos.iter().collect();
         let alerts = compute_alerts_from_displays(&refs, &std::collections::HashMap::new());
         assert_eq!(alerts.len(), 5);
         // Rendering would show MAX_ALERTS (2) + "+3 more"
@@ -348,7 +348,7 @@ mod tests {
 
     /// Testable alert computation without AppState dependency.
     fn compute_alerts_from_displays(
-        displays: &[&SessionInfo],
+        displays: &[&SessionSnapshot],
         errors: &std::collections::HashMap<String, crate::state::errors::OperationError>,
     ) -> Vec<Alert> {
         let mut alerts = Vec::new();
@@ -380,7 +380,7 @@ mod tests {
         branch: &str,
         process_status: ProcessStatus,
         git_status: GitStatus,
-    ) -> SessionInfo {
+    ) -> SessionSnapshot {
         let json = serde_json::json!({
             "id": format!("test-{}", branch),
             "project_id": "test-project",
@@ -391,7 +391,7 @@ mod tests {
             "created_at": "2026-01-01T00:00:00Z",
         });
         let session: Session = serde_json::from_value(json).unwrap();
-        SessionInfo {
+        SessionSnapshot {
             session,
             process_status,
             git_status,

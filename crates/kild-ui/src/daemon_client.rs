@@ -22,8 +22,8 @@ use futures::io::BufReader;
 use futures_rustls::TlsConnector;
 use kild_config::KildConfig;
 use kild_protocol::{
-    AsyncIpcClient, ClientMessage, DaemonMessage, ErrorCode, IpcError, SessionId, SessionInfo,
-    SessionStatus,
+    AsyncIpcClient, ClientMessage, DaemonMessage, DaemonSessionStatus, ErrorCode, IpcError,
+    SessionId, SessionStatus,
 };
 use smol::Async;
 use smol::io::split;
@@ -243,7 +243,7 @@ pub async fn ping_daemon_async() -> Result<bool, DaemonClientError> {
 
 /// List all daemon sessions.
 #[allow(dead_code)]
-pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError> {
+pub async fn list_sessions_async() -> Result<Vec<DaemonSessionStatus>, DaemonClientError> {
     debug!(event = "ui.daemon.list_sessions_started");
 
     let mut client = connect_for_config().await?;
@@ -270,7 +270,7 @@ pub async fn list_sessions_async() -> Result<Vec<SessionInfo>, DaemonClientError
 /// Temporary convenience for the Ctrl+D toggle flow. Phase 3 (layout shell)
 /// replaces this with explicit sidebar-driven session selection.
 #[allow(dead_code)]
-pub async fn find_first_running_session() -> Result<SessionInfo, DaemonClientError> {
+pub async fn find_first_running_session() -> Result<DaemonSessionStatus, DaemonClientError> {
     let sessions = list_sessions_async().await?;
     sessions
         .into_iter()
@@ -283,7 +283,9 @@ pub async fn find_first_running_session() -> Result<SessionInfo, DaemonClientErr
 /// Returns `Ok(Some(session))` if found, `Ok(None)` if the session doesn't
 /// exist in the daemon. Mirrors the sync client pattern from kild-core.
 #[allow(dead_code)]
-pub async fn get_session_async(session_id: &str) -> Result<Option<SessionInfo>, DaemonClientError> {
+pub async fn get_session_async(
+    session_id: &str,
+) -> Result<Option<DaemonSessionStatus>, DaemonClientError> {
     debug!(
         event = "ui.daemon.get_session_started",
         session_id = session_id
@@ -660,7 +662,7 @@ mod tests {
             assert_eq!(&*session.id, "test-sess");
             assert_eq!(session.status, SessionStatus::Running);
         } else {
-            panic!("expected SessionInfo");
+            panic!("expected session_info response");
         }
     }
 

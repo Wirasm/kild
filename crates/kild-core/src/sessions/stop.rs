@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_stop_removes_agent_status_sidecar() {
-        use crate::sessions::types::AgentStatusInfo;
+        use crate::sessions::types::AgentStatusRecord;
         use kild_protocol::AgentStatus;
         use std::fs;
 
@@ -697,7 +697,7 @@ mod tests {
         persistence::save_session_to_file(&session, &sessions_dir).expect("Failed to save");
 
         // Write agent status sidecar file
-        let status_info = AgentStatusInfo {
+        let status_info = AgentStatusRecord {
             status: AgentStatus::Working,
             updated_at: chrono::Utc::now().to_rfc3339(),
         };

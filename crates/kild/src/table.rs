@@ -2,7 +2,7 @@ use unicode_width::UnicodeWidthStr;
 
 use kild_core::PullRequest;
 use kild_core::Session;
-use kild_core::sessions::types::AgentStatusInfo;
+use kild_core::sessions::types::AgentStatusRecord;
 
 use crate::color;
 
@@ -24,7 +24,7 @@ pub struct TableFormatter {
 impl TableFormatter {
     pub fn new(
         sessions: &[Session],
-        statuses: &[Option<AgentStatusInfo>],
+        statuses: &[Option<AgentStatusRecord>],
         pr_infos: &[Option<PullRequest>],
     ) -> Self {
         // Minimum widths = header label lengths
@@ -118,7 +118,7 @@ impl TableFormatter {
     pub fn print_table(
         &self,
         sessions: &[Session],
-        statuses: &[Option<AgentStatusInfo>],
+        statuses: &[Option<AgentStatusRecord>],
         pr_infos: &[Option<PullRequest>],
     ) {
         self.print_header();
@@ -205,7 +205,7 @@ impl TableFormatter {
     fn print_row(
         &self,
         session: &Session,
-        status_info: Option<&AgentStatusInfo>,
+        status_info: Option<&AgentStatusRecord>,
         pr_info: Option<&PullRequest>,
     ) {
         let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);

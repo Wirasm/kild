@@ -159,7 +159,7 @@ impl PaneGrid {
     /// Auto-populate empty slots from active displays that have terminals.
     pub fn auto_populate(
         &mut self,
-        displays: &[kild_core::SessionInfo],
+        displays: &[kild_core::SessionSnapshot],
         terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
     ) {
         for display in displays {

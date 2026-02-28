@@ -123,7 +123,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             } else {
                 println!("{}", color::bold("Active kilds:"));
                 // Read sidecar statuses for table display
-                let statuses: Vec<Option<kild_core::sessions::types::AgentStatusInfo>> = sessions
+                let statuses: Vec<Option<kild_core::sessions::types::AgentStatusRecord>> = sessions
                     .iter()
                     .map(|s| session_ops::read_agent_status(&s.id))
                     .collect();

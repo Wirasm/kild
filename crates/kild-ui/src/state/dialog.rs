@@ -1,4 +1,4 @@
-use kild_core::DestroySafetyInfo;
+use kild_core::DestroySafety;
 
 /// Dialog state for the application.
 ///
@@ -21,7 +21,7 @@ pub enum DialogState {
         branch: String,
         /// Safety information for the destroy operation.
         /// None if the safety check failed (proceed without warnings).
-        safety_info: Option<DestroySafetyInfo>,
+        safety_info: Option<DestroySafety>,
         error: Option<String>,
     },
     /// Add project dialog is open.
@@ -53,7 +53,7 @@ impl DialogState {
     }
 
     /// Open the confirm dialog for destroying a branch.
-    pub fn open_confirm(branch: String, safety_info: Option<DestroySafetyInfo>) -> Self {
+    pub fn open_confirm(branch: String, safety_info: Option<DestroySafety>) -> Self {
         DialogState::Confirm {
             branch,
             safety_info,

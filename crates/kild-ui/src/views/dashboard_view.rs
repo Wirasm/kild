@@ -126,7 +126,7 @@ pub fn render_dashboard(
 
 /// Render a single kild card for the dashboard grid.
 fn render_card(
-    display: &kild_core::SessionInfo,
+    display: &kild_core::SessionSnapshot,
     ix: usize,
     terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
     teammate_count: usize,

@@ -397,9 +397,9 @@ pub fn has_remote_configured(worktree_path: &std::path::Path) -> bool {
 /// * `name` - Branch name or kild identifier (without the `kild/` prefix)
 ///
 /// # Returns
-/// * `Ok(DestroySafetyInfo)` - Safety information (always succeeds if session found)
+/// * `Ok(DestroySafety)` - Safety information (always succeeds if session found)
 /// * `Err(SessionError::NotFound)` - Session doesn't exist
-pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionError> {
+pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafety, SessionError> {
     info!(event = "core.session.safety_check_started", name = name);
 
     let config = Config::new();
@@ -487,7 +487,7 @@ pub fn get_destroy_safety_info(name: &str) -> Result<DestroySafetyInfo, SessionE
         pr_status = ?pr_status
     );
 
-    let safety_info = DestroySafetyInfo {
+    let safety_info = DestroySafety {
         git_status,
         pr_status,
     };
@@ -527,10 +527,10 @@ mod tests {
 
     #[test]
     fn test_complete_blocks_on_uncommitted_via_safety_info() {
-        // Verify that DestroySafetyInfo with uncommitted changes would block complete.
+        // Verify that DestroySafety with uncommitted changes would block complete.
         use crate::git::types::WorktreeStatus;
 
-        let dirty = DestroySafetyInfo {
+        let dirty = DestroySafety {
             git_status: WorktreeStatus {
                 has_uncommitted_changes: true,
                 ..Default::default()
@@ -539,7 +539,7 @@ mod tests {
         };
         assert!(dirty.should_block());
 
-        let clean = DestroySafetyInfo {
+        let clean = DestroySafety {
             git_status: WorktreeStatus {
                 has_uncommitted_changes: false,
                 ..Default::default()
@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn test_destroy_safety_info_default_does_not_block() {
-        let info = DestroySafetyInfo::default();
+        let info = DestroySafety::default();
         assert!(!info.should_block());
     }
 
@@ -642,7 +642,7 @@ mod tests {
     fn test_destroy_safety_info_fully_clean_no_warnings() {
         use crate::git::types::WorktreeStatus;
 
-        let info = DestroySafetyInfo {
+        let info = DestroySafety {
             git_status: WorktreeStatus {
                 has_uncommitted_changes: false,
                 unpushed_commit_count: 0,
@@ -661,7 +661,7 @@ mod tests {
     fn test_has_warnings_each_condition_independently() {
         use crate::git::types::WorktreeStatus;
 
-        let uncommitted = DestroySafetyInfo {
+        let uncommitted = DestroySafety {
             git_status: WorktreeStatus {
                 has_uncommitted_changes: true,
                 has_remote_branch: true,
@@ -671,7 +671,7 @@ mod tests {
         };
         assert!(uncommitted.has_warnings());
 
-        let unpushed = DestroySafetyInfo {
+        let unpushed = DestroySafety {
             git_status: WorktreeStatus {
                 unpushed_commit_count: 3,
                 has_remote_branch: true,
@@ -681,7 +681,7 @@ mod tests {
         };
         assert!(unpushed.has_warnings());
 
-        let no_remote = DestroySafetyInfo {
+        let no_remote = DestroySafety {
             git_status: WorktreeStatus {
                 has_remote_branch: false,
                 ..Default::default()
@@ -690,7 +690,7 @@ mod tests {
         };
         assert!(no_remote.has_warnings());
 
-        let no_pr = DestroySafetyInfo {
+        let no_pr = DestroySafety {
             git_status: WorktreeStatus {
                 has_remote_branch: true,
                 ..Default::default()
@@ -699,7 +699,7 @@ mod tests {
         };
         assert!(no_pr.has_warnings());
 
-        let status_failed = DestroySafetyInfo {
+        let status_failed = DestroySafety {
             git_status: WorktreeStatus {
                 status_check_failed: true,
                 has_remote_branch: true,
@@ -714,7 +714,7 @@ mod tests {
     fn test_warning_messages_severity_order() {
         use crate::git::types::WorktreeStatus;
 
-        let info = DestroySafetyInfo {
+        let info = DestroySafety {
             git_status: WorktreeStatus {
                 has_uncommitted_changes: true,
                 unpushed_commit_count: 2,

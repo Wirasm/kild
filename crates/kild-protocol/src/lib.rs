@@ -14,6 +14,6 @@ pub use async_client::AsyncIpcClient;
 pub use client::{IpcConnection, IpcError};
 pub use messages::{ClientMessage, DaemonMessage, ErrorCode};
 pub use types::{
-    AgentMode, AgentStatus, BranchName, ForgeType, OpenMode, ProjectId, RuntimeMode, SessionId,
-    SessionInfo, SessionStatus,
+    AgentMode, AgentStatus, BranchName, DaemonSessionStatus, ForgeType, OpenMode, ProjectId,
+    RuntimeMode, SessionId, SessionStatus,
 };

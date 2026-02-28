@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::errors::DaemonError;
 use crate::protocol::codec::{read_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
-use crate::types::SessionInfo;
+use crate::types::DaemonSessionStatus;
 
 /// Client for communicating with the daemon over IPC.
 ///
@@ -100,7 +100,7 @@ impl DaemonClient {
         rows: u16,
         cols: u16,
         use_login_shell: bool,
-    ) -> Result<SessionInfo, DaemonError> {
+    ) -> Result<DaemonSessionStatus, DaemonError> {
         let id = self.next_id();
         let msg = ClientMessage::CreateSession {
             id,
@@ -233,7 +233,7 @@ impl DaemonClient {
     pub async fn list_sessions(
         &mut self,
         project_id: Option<&str>,
-    ) -> Result<Vec<SessionInfo>, DaemonError> {
+    ) -> Result<Vec<DaemonSessionStatus>, DaemonError> {
         let id = self.next_id();
         let msg = ClientMessage::ListSessions {
             id,
@@ -253,7 +253,10 @@ impl DaemonClient {
     }
 
     /// Get details for a single session.
-    pub async fn get_session(&mut self, session_id: &str) -> Result<SessionInfo, DaemonError> {
+    pub async fn get_session(
+        &mut self,
+        session_id: &str,
+    ) -> Result<DaemonSessionStatus, DaemonError> {
         let id = self.next_id();
         let msg = ClientMessage::GetSession {
             id,

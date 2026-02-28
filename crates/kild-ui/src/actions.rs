@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use kild_core::{Command, CoreStore, Event, KildConfig, OpenMode, Store, session_ops};
 
-use kild_core::SessionInfo;
+use kild_core::SessionSnapshot;
 
 /// Load config and create a CoreStore instance.
 ///
@@ -82,14 +82,14 @@ pub fn create_kild(
 /// Refresh the list of sessions from disk.
 ///
 /// Returns `(displays, error)` where `error` is `Some` if session loading failed.
-pub fn refresh_sessions() -> (Vec<SessionInfo>, Option<String>) {
+pub fn refresh_sessions() -> (Vec<SessionSnapshot>, Option<String>) {
     tracing::info!(event = "ui.refresh_sessions.started");
 
     match session_ops::list_sessions() {
         Ok(sessions) => {
             let displays = sessions
                 .into_iter()
-                .map(SessionInfo::from_session)
+                .map(SessionSnapshot::from_session)
                 .collect();
             tracing::info!(event = "ui.refresh_sessions.completed");
             (displays, None)
@@ -217,11 +217,11 @@ pub fn dispatch_set_active_project(path: Option<PathBuf>) -> Result<Vec<Event>, 
 #[cfg(test)]
 mod tests {
     use kild_core::sessions::types::SessionStatus;
-    use kild_core::{GitStatus, ProcessStatus, Session, SessionInfo};
+    use kild_core::{GitStatus, ProcessStatus, Session, SessionSnapshot};
     use std::path::PathBuf;
 
     /// Get branches of all stopped kilds (for testing filtering logic).
-    fn get_stopped_branches(displays: &[SessionInfo]) -> Vec<String> {
+    fn get_stopped_branches(displays: &[SessionSnapshot]) -> Vec<String> {
         displays
             .iter()
             .filter(|d| d.process_status == ProcessStatus::Stopped)
@@ -230,7 +230,7 @@ mod tests {
     }
 
     /// Get branches of all running kilds (for testing filtering logic).
-    fn get_running_branches(displays: &[SessionInfo]) -> Vec<String> {
+    fn get_running_branches(displays: &[SessionSnapshot]) -> Vec<String> {
         displays
             .iter()
             .filter(|d| d.process_status == ProcessStatus::Running)
@@ -260,8 +260,8 @@ mod tests {
         )
     }
 
-    fn make_display(id: &str, branch: &str, process_status: ProcessStatus) -> SessionInfo {
-        SessionInfo {
+    fn make_display(id: &str, branch: &str, process_status: ProcessStatus) -> SessionSnapshot {
+        SessionSnapshot {
             session: make_session(id, branch),
             process_status,
             git_status: GitStatus::Unknown,
@@ -349,14 +349,14 @@ mod tests {
 
     #[test]
     fn test_get_stopped_branches_empty_input() {
-        let displays: Vec<SessionInfo> = vec![];
+        let displays: Vec<SessionSnapshot> = vec![];
         let stopped = get_stopped_branches(&displays);
         assert!(stopped.is_empty());
     }
 
     #[test]
     fn test_get_running_branches_empty_input() {
-        let displays: Vec<SessionInfo> = vec![];
+        let displays: Vec<SessionSnapshot> = vec![];
         let running = get_running_branches(&displays);
         assert!(running.is_empty());
     }

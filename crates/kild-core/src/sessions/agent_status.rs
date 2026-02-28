@@ -33,7 +33,7 @@ pub fn update_agent_status(
 
     // Write sidecar file with current timestamp
     let now = chrono::Utc::now().to_rfc3339();
-    let status_info = super::types::AgentStatusInfo {
+    let status_info = super::types::AgentStatusRecord {
         status,
         updated_at: now.clone(),
     };
@@ -70,7 +70,7 @@ pub fn update_agent_status(
 /// Read agent status for a session from the sidecar file.
 ///
 /// Returns `None` if no status has been reported yet.
-pub fn read_agent_status(session_id: &str) -> Option<super::types::AgentStatusInfo> {
+pub fn read_agent_status(session_id: &str) -> Option<super::types::AgentStatusRecord> {
     let config = Config::new();
     persistence::read_agent_status(&config.sessions_dir(), session_id)
 }

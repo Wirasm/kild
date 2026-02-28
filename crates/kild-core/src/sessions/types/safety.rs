@@ -12,14 +12,14 @@ use crate::git::types::WorktreeStatus;
 /// is degraded. When degraded, the fallback is conservative (assumes dirty)
 /// and a warning message is included.
 #[derive(Debug, Clone, Default)]
-pub struct DestroySafetyInfo {
+pub struct DestroySafety {
     /// Git worktree status (uncommitted changes, unpushed commits, etc.)
     pub git_status: WorktreeStatus,
     /// PR check result for the kild's branch.
     pub pr_status: PrCheckResult,
 }
 
-impl DestroySafetyInfo {
+impl DestroySafety {
     /// Returns true if the destroy should be blocked (requires --force).
     ///
     /// Blocks on:

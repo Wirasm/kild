@@ -141,7 +141,7 @@ impl std::fmt::Display for SessionStatus {
 /// `DaemonSession`. The daemon knows about PTYs and processes, not about
 /// git worktrees or agents — those concepts live in kild-core.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionInfo {
+pub struct DaemonSessionStatus {
     pub id: SessionId,
     pub working_directory: String,
     pub command: String,
@@ -252,8 +252,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_session_info_serde() {
-        let info = SessionInfo {
+    fn test_daemon_session_status_serde() {
+        let info = DaemonSessionStatus {
             id: SessionId::new("myapp_feature-auth"),
             working_directory: "/tmp/worktrees/feature-auth".to_string(),
             command: "claude".to_string(),
@@ -265,7 +265,7 @@ mod tests {
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains(r#""status":"running""#));
-        let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
+        let parsed: DaemonSessionStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, info.id);
         assert_eq!(parsed.command, "claude");
         assert_eq!(parsed.status, SessionStatus::Running);
@@ -273,8 +273,8 @@ mod tests {
     }
 
     #[test]
-    fn test_session_info_optional_fields_omitted() {
-        let info = SessionInfo {
+    fn test_daemon_session_status_optional_fields_omitted() {
+        let info = DaemonSessionStatus {
             id: SessionId::new("test"),
             working_directory: "/tmp".to_string(),
             command: "bash".to_string(),
@@ -291,8 +291,8 @@ mod tests {
     }
 
     #[test]
-    fn test_session_info_with_exit_code() {
-        let info = SessionInfo {
+    fn test_daemon_session_status_with_exit_code() {
+        let info = DaemonSessionStatus {
             id: SessionId::new("test"),
             working_directory: "/tmp".to_string(),
             command: "bash".to_string(),
@@ -307,8 +307,8 @@ mod tests {
     }
 
     #[test]
-    fn test_session_info_exit_code_roundtrip() {
-        let info = SessionInfo {
+    fn test_daemon_session_status_exit_code_roundtrip() {
+        let info = DaemonSessionStatus {
             id: SessionId::new("test"),
             working_directory: "/tmp".to_string(),
             command: "bash".to_string(),
@@ -319,7 +319,7 @@ mod tests {
             exit_code: Some(127),
         };
         let json = serde_json::to_string(&info).unwrap();
-        let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
+        let parsed: DaemonSessionStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.exit_code, Some(127));
     }
 

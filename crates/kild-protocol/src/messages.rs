@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{ProjectId, SessionId, SessionInfo};
+use crate::types::{DaemonSessionStatus, ProjectId, SessionId};
 
 /// Error codes returned by the daemon in error responses.
 ///
@@ -168,7 +168,10 @@ pub enum ClientMessage {
 #[serde(tag = "type")]
 pub enum DaemonMessage {
     #[serde(rename = "session_created")]
-    SessionCreated { id: String, session: SessionInfo },
+    SessionCreated {
+        id: String,
+        session: DaemonSessionStatus,
+    },
 
     /// Streaming PTY output. No `id` — pushed after attach.
     #[serde(rename = "pty_output")]
@@ -197,11 +200,14 @@ pub enum DaemonMessage {
     #[serde(rename = "session_list")]
     SessionList {
         id: String,
-        sessions: Vec<SessionInfo>,
+        sessions: Vec<DaemonSessionStatus>,
     },
 
     #[serde(rename = "session_info")]
-    SessionInfo { id: String, session: SessionInfo },
+    SessionInfo {
+        id: String,
+        session: DaemonSessionStatus,
+    },
 
     #[serde(rename = "scrollback_contents")]
     ScrollbackContents {
@@ -386,7 +392,7 @@ mod tests {
     fn test_daemon_message_session_created_roundtrip() {
         let msg = DaemonMessage::SessionCreated {
             id: "req-001".to_string(),
-            session: SessionInfo {
+            session: DaemonSessionStatus {
                 id: crate::SessionId::new("myapp_feature-auth"),
                 working_directory: "/tmp/worktrees/feature-auth".to_string(),
                 command: "claude".to_string(),

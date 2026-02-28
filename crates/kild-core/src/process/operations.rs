@@ -4,7 +4,7 @@ use sysinfo::{Pid as SysinfoPid, ProcessesToUpdate, System};
 use tracing::{debug, error};
 
 use crate::process::errors::ProcessError;
-use crate::process::types::{Pid, ProcessInfo, ProcessMetrics, ProcessStatus};
+use crate::process::types::{Pid, ProcessMetrics, ProcessSnapshot, ProcessStatus};
 
 // CPU usage reporting requires a System that has seen a prior snapshot; reusing
 // the same instance per thread gives sysinfo the delta it needs for a meaningful
@@ -117,13 +117,13 @@ pub fn kill_process(
 }
 
 /// Get basic information about a process
-pub fn get_process_info(pid: u32) -> Result<ProcessInfo, ProcessError> {
+pub fn get_process_info(pid: u32) -> Result<ProcessSnapshot, ProcessError> {
     let mut system = System::new();
     let pid_obj = SysinfoPid::from_u32(pid);
     system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
 
     match system.process(pid_obj) {
-        Some(process) => Ok(ProcessInfo {
+        Some(process) => Ok(ProcessSnapshot {
             pid: Pid::from_raw(pid),
             name: process.name().to_string_lossy().to_string(),
             status: ProcessStatus::from(process.status()),
@@ -234,7 +234,7 @@ pub fn find_process_by_name(
     name_pattern: &str,
     command_pattern: Option<&str>,
     additional_patterns: Option<&[String]>,
-) -> Result<Option<ProcessInfo>, ProcessError> {
+) -> Result<Option<ProcessSnapshot>, ProcessError> {
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::All, true);
 
@@ -275,7 +275,7 @@ pub fn find_process_by_name(
             }
         }
 
-        return Ok(Some(ProcessInfo {
+        return Ok(Some(ProcessSnapshot {
             pid: Pid::from_raw(pid.as_u32()),
             name: process_name.to_string(),
             status: ProcessStatus::from(process.status()),

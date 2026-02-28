@@ -1,4 +1,4 @@
-use kild_core::SessionInfo;
+use kild_core::SessionSnapshot;
 use kild_core::projects::{Project, ProjectManager};
 
 use crate::state::dialog::DialogState;
@@ -238,7 +238,7 @@ impl AppState {
     /// Filters kilds where `session.project_id` matches the derived ID of the active project path.
     /// Uses path-based hashing that matches kild-core's `generate_project_id`.
     /// If no active project is set, returns all displays (unfiltered).
-    pub fn filtered_displays(&self) -> Vec<&SessionInfo> {
+    pub fn filtered_displays(&self) -> Vec<&SessionSnapshot> {
         self.sessions
             .filtered_by_project(self.active_project_id().as_deref())
     }
@@ -258,7 +258,7 @@ impl AppState {
     ///
     /// Returns `None` if no kild is selected or if the selected kild no longer
     /// exists in the current display list (e.g., after being destroyed externally).
-    pub fn selected_kild(&self) -> Option<&SessionInfo> {
+    pub fn selected_kild(&self) -> Option<&SessionSnapshot> {
         let id = self.selection.id()?;
 
         match self
@@ -436,7 +436,7 @@ impl AppState {
     // =========================================================================
 
     /// Get all session displays.
-    pub fn displays(&self) -> &[SessionInfo] {
+    pub fn displays(&self) -> &[SessionSnapshot] {
         self.sessions.displays()
     }
 

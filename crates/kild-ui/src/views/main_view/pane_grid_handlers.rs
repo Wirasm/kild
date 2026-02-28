@@ -11,7 +11,8 @@ impl MainView {
         self.workspaces = vec![super::super::pane_grid::PaneGrid::new()];
         self.active_workspace = 0;
         let displays = self.state.filtered_displays();
-        let displays_owned: Vec<kild_core::SessionInfo> = displays.into_iter().cloned().collect();
+        let displays_owned: Vec<kild_core::SessionSnapshot> =
+            displays.into_iter().cloned().collect();
         self.workspaces[0].auto_populate(&displays_owned, &self.terminal_tabs);
     }
 

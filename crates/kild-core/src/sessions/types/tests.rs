@@ -330,13 +330,13 @@ fn test_is_worktree_valid_with_missing_path() {
     assert!(!session.is_worktree_valid());
 }
 
-// --- DestroySafetyInfo tests ---
+// --- DestroySafety tests ---
 
 #[test]
 fn test_should_block_on_uncommitted_changes() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: true,
             ..Default::default()
@@ -350,7 +350,7 @@ fn test_should_block_on_uncommitted_changes() {
 fn test_should_not_block_on_unpushed_only() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: false,
             unpushed_commit_count: 5,
@@ -368,7 +368,7 @@ fn test_should_block_on_status_check_failed() {
     use crate::git::types::WorktreeStatus;
 
     // When status check fails, has_uncommitted_changes defaults to true (conservative)
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: true,
             status_check_failed: true,
@@ -382,7 +382,7 @@ fn test_should_block_on_status_check_failed() {
 
 #[test]
 fn test_has_warnings_no_pr() {
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         pr_status: PrCheckResult::NotFound,
         ..Default::default()
     };
@@ -394,7 +394,7 @@ fn test_has_warnings_pr_unavailable_no_warning() {
     use crate::git::types::WorktreeStatus;
 
     // When gh CLI unavailable, we shouldn't warn about PR
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         pr_status: PrCheckResult::Unavailable,
         git_status: WorktreeStatus {
             has_remote_branch: true,
@@ -408,7 +408,7 @@ fn test_has_warnings_pr_unavailable_no_warning() {
 fn test_has_warnings_never_pushed() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_remote_branch: false,
             unpushed_commit_count: 0,
@@ -423,7 +423,7 @@ fn test_has_warnings_never_pushed() {
 fn test_warning_messages_uncommitted_with_details() {
     use crate::git::types::{UncommittedDetails, WorktreeStatus};
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: true,
             uncommitted_details: Some(UncommittedDetails {
@@ -446,7 +446,7 @@ fn test_warning_messages_uncommitted_with_details() {
 fn test_warning_messages_singular_commit() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             unpushed_commit_count: 1,
             has_remote_branch: true,
@@ -464,7 +464,7 @@ fn test_warning_messages_singular_commit() {
 fn test_warning_messages_plural_commits() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             unpushed_commit_count: 3,
             has_remote_branch: true,
@@ -481,7 +481,7 @@ fn test_warning_messages_never_pushed_not_shown_with_unpushed() {
     use crate::git::types::WorktreeStatus;
 
     // When there are unpushed commits, "never pushed" is redundant
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             unpushed_commit_count: 5,
             has_remote_branch: false,
@@ -498,7 +498,7 @@ fn test_warning_messages_never_pushed_not_shown_with_unpushed() {
 fn test_warning_messages_status_check_failed() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: true,
             status_check_failed: true,
@@ -517,7 +517,7 @@ fn test_warning_messages_status_check_failed() {
 fn test_warning_messages_no_warnings() {
     use crate::git::types::WorktreeStatus;
 
-    let info = DestroySafetyInfo {
+    let info = DestroySafety {
         git_status: WorktreeStatus {
             has_uncommitted_changes: false,
             unpushed_commit_count: 0,
@@ -779,13 +779,13 @@ fn test_session_with_corrupted_agent_fails_to_deserialize() {
 }
 
 #[test]
-fn test_agent_status_info_serde_roundtrip() {
-    let info = AgentStatusInfo {
+fn test_agent_status_record_serde_roundtrip() {
+    let info = AgentStatusRecord {
         status: AgentStatus::Working,
         updated_at: "2026-02-05T12:00:00Z".to_string(),
     };
     let json = serde_json::to_string(&info).unwrap();
-    let parsed: AgentStatusInfo = serde_json::from_str(&json).unwrap();
+    let parsed: AgentStatusRecord = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, info);
 }
 

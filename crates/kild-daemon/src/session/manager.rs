@@ -8,7 +8,7 @@ use crate::errors::DaemonError;
 use crate::pty::manager::PtyManager;
 use crate::pty::output::{PtyExitEvent, spawn_pty_reader};
 use crate::session::state::{ClientId, DaemonSession, SessionState};
-use crate::types::{DaemonConfig, SessionInfo};
+use crate::types::{DaemonConfig, DaemonSessionStatus};
 
 /// Orchestrates session lifecycle within the daemon.
 ///
@@ -64,7 +64,7 @@ impl SessionManager {
         rows: u16,
         cols: u16,
         use_login_shell: bool,
-    ) -> Result<SessionInfo, DaemonError> {
+    ) -> Result<DaemonSessionStatus, DaemonError> {
         if self.sessions.contains_key(session_id) {
             return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
         }
@@ -127,7 +127,7 @@ impl SessionManager {
         // Transition session to Running
         session.set_running(output_tx, pty_pid)?;
 
-        let info = session.to_session_info();
+        let info = session.to_daemon_session_status();
         self.sessions.insert(session_id.to_string(), session);
 
         info!(
@@ -329,15 +329,17 @@ impl SessionManager {
     }
 
     /// Get session info by ID.
-    pub fn get_session(&self, session_id: &str) -> Option<SessionInfo> {
-        self.sessions.get(session_id).map(|s| s.to_session_info())
+    pub fn get_session(&self, session_id: &str) -> Option<DaemonSessionStatus> {
+        self.sessions
+            .get(session_id)
+            .map(|s| s.to_daemon_session_status())
     }
 
     /// List all sessions.
-    pub fn list_sessions(&self) -> Vec<SessionInfo> {
+    pub fn list_sessions(&self) -> Vec<DaemonSessionStatus> {
         self.sessions
             .values()
-            .map(|s| s.to_session_info())
+            .map(|s| s.to_daemon_session_status())
             .collect()
     }
 

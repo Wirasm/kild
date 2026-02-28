@@ -7,7 +7,7 @@ use tracing::error;
 
 use crate::errors::DaemonError;
 use crate::pty::output::ScrollbackBuffer;
-use crate::types::{SessionInfo, SessionStatus};
+use crate::types::{DaemonSessionStatus, SessionStatus};
 
 /// Unique identifier for a connected client.
 pub type ClientId = u64;
@@ -211,14 +211,14 @@ impl DaemonSession {
         self.scrollback.clone()
     }
 
-    /// Convert to wire format `SessionInfo`.
-    pub fn to_session_info(&self) -> SessionInfo {
+    /// Convert to wire format `DaemonSessionStatus`.
+    pub fn to_daemon_session_status(&self) -> DaemonSessionStatus {
         let status = match self.state {
             SessionState::Creating => SessionStatus::Creating,
             SessionState::Running => SessionStatus::Running,
             SessionState::Stopped => SessionStatus::Stopped,
         };
-        SessionInfo {
+        DaemonSessionStatus {
             id: self.id.clone().into(),
             working_directory: self.working_directory.clone(),
             command: self.command.clone(),
@@ -314,12 +314,12 @@ mod tests {
     }
 
     #[test]
-    fn test_to_session_info() {
+    fn test_daemon_session_status() {
         let mut session = test_session();
         session.attach_client(1);
         session.attach_client(2);
 
-        let info = session.to_session_info();
+        let info = session.to_daemon_session_status();
         assert_eq!(&*info.id, "myapp_feature");
         assert_eq!(info.working_directory, "/tmp/wt");
         assert_eq!(info.command, "claude");
@@ -387,20 +387,20 @@ mod tests {
     }
 
     #[test]
-    fn test_exit_code_in_session_info() {
+    fn test_exit_code_in_daemon_session_status() {
         let mut session = test_session();
         let (tx, _) = broadcast::channel(16);
         session.set_running(tx, Some(123)).unwrap();
         session.set_exit_code(Some(1));
 
-        let info = session.to_session_info();
+        let info = session.to_daemon_session_status();
         assert_eq!(info.exit_code, Some(1));
     }
 
     #[test]
-    fn test_exit_code_none_in_session_info() {
+    fn test_exit_code_none_in_daemon_session_status() {
         let session = test_session();
-        let info = session.to_session_info();
+        let info = session.to_daemon_session_status();
         assert_eq!(info.exit_code, None);
     }
 }

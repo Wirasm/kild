@@ -14,4 +14,4 @@ pub use pid_file::{
     delete_pid_file, ensure_pid_dir, get_pid_file_path, read_pid_file_with_retry,
     wrap_command_with_pid_capture,
 };
-pub use types::{Pid, ProcessInfo, ProcessMetadata, ProcessStatus};
+pub use types::{Pid, ProcessMetadata, ProcessSnapshot, ProcessStatus};

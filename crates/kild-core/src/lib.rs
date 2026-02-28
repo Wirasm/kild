@@ -53,10 +53,10 @@ pub use kild_config::{
 pub use kild_config::{CopyOptions, IncludeConfig, PatternRule};
 pub use projects::{Project, ProjectError, ProjectManager, ProjectsData};
 pub use sessions::agent_status::AgentStatusResult;
-pub use sessions::info::SessionInfo;
+pub use sessions::info::SessionSnapshot;
 pub use sessions::types::{
-    AgentProcess, AgentStatusInfo, CompleteRequest, CompleteResult, CreateSessionRequest,
-    DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatusRecord, CompleteRequest, CompleteResult, CreateSessionRequest,
+    DestroySafety, GitStatus, ProcessStatus, Session, SessionStatus,
 };
 pub use state::{Command, CoreStore, DispatchError, Event, Store};
 

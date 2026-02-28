@@ -1,15 +1,15 @@
-use kild_core::SessionInfo;
+use kild_core::SessionSnapshot;
 
 /// Encapsulates session display data with refresh tracking.
 ///
 /// Provides a clean API for managing kild displays, filtering by project,
 /// and tracking refresh timestamps. Encapsulates:
-/// - `displays`: The list of SessionInfo items
+/// - `displays`: The list of `SessionSnapshot` items
 /// - `load_error`: Error from last refresh attempt
 /// - `last_refresh`: Timestamp of last successful refresh
 pub struct SessionStore {
     /// List of kild displays (private to enforce invariants).
-    displays: Vec<SessionInfo>,
+    displays: Vec<SessionSnapshot>,
     /// Error from last refresh attempt, if any.
     load_error: Option<String>,
     /// Timestamp of last successful status refresh.
@@ -29,7 +29,7 @@ impl SessionStore {
 
     /// Create a session store with provided data (for testing).
     #[cfg(test)]
-    pub fn from_data(displays: Vec<SessionInfo>, load_error: Option<String>) -> Self {
+    pub fn from_data(displays: Vec<SessionSnapshot>, load_error: Option<String>) -> Self {
         Self {
             displays,
             load_error,
@@ -39,13 +39,13 @@ impl SessionStore {
 
     /// Set displays directly (for testing).
     #[cfg(test)]
-    pub fn set_displays(&mut self, displays: Vec<SessionInfo>) {
+    pub fn set_displays(&mut self, displays: Vec<SessionSnapshot>) {
         self.displays = displays;
     }
 
     /// Get mutable access to displays (for testing status updates).
     #[cfg(test)]
-    pub fn displays_mut(&mut self) -> &mut Vec<SessionInfo> {
+    pub fn displays_mut(&mut self) -> &mut Vec<SessionSnapshot> {
         &mut self.displays
     }
 
@@ -100,7 +100,7 @@ impl SessionStore {
     }
 
     /// Get all displays.
-    pub fn displays(&self) -> &[SessionInfo] {
+    pub fn displays(&self) -> &[SessionSnapshot] {
         &self.displays
     }
 
@@ -108,7 +108,7 @@ impl SessionStore {
     ///
     /// Returns all displays where `session.project_id` matches the given ID.
     /// If `project_id` is `None`, returns all displays (unfiltered).
-    pub fn filtered_by_project(&self, project_id: Option<&str>) -> Vec<&SessionInfo> {
+    pub fn filtered_by_project(&self, project_id: Option<&str>) -> Vec<&SessionSnapshot> {
         match project_id {
             Some(id) => self
                 .displays
@@ -186,7 +186,7 @@ mod tests {
             None,
         );
 
-        let display = SessionInfo::from_session(session);
+        let display = SessionSnapshot::from_session(session);
         assert_eq!(display.process_status, ProcessStatus::Stopped);
         // Non-existent path should result in Unknown git status
         assert_eq!(display.git_status, GitStatus::Unknown);
@@ -231,7 +231,7 @@ mod tests {
             None,
         );
 
-        let display = SessionInfo::from_session(session);
+        let display = SessionSnapshot::from_session(session);
         // With window detection fallback, should attempt to check window
         // In test environment without Ghostty running, will fall back to Stopped
         assert!(
@@ -300,7 +300,7 @@ mod tests {
             None,
         );
 
-        let display = SessionInfo::from_session(session);
+        let display = SessionSnapshot::from_session(session);
 
         assert_eq!(display.git_status, GitStatus::Dirty);
         assert!(
@@ -417,19 +417,19 @@ mod tests {
 
         let mut store = SessionStore::from_data(Vec::new(), None);
         store.set_displays(vec![
-            SessionInfo {
+            SessionSnapshot {
                 session: session_with_dead_pid,
                 process_status: ProcessStatus::Running, // Start as Running (incorrect)
                 git_status: GitStatus::Unknown,
                 uncommitted_diff: None,
             },
-            SessionInfo {
+            SessionSnapshot {
                 session: session_with_live_pid,
                 process_status: ProcessStatus::Stopped, // Start as Stopped (incorrect)
                 git_status: GitStatus::Unknown,
                 uncommitted_diff: None,
             },
-            SessionInfo {
+            SessionSnapshot {
                 session: session_no_pid,
                 process_status: ProcessStatus::Stopped, // Start as Stopped (correct)
                 git_status: GitStatus::Unknown,

@@ -58,7 +58,7 @@ impl From<sysinfo::ProcessStatus> for ProcessStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProcessInfo {
+pub struct ProcessSnapshot {
     pub pid: Pid,
     pub name: String,
     pub status: ProcessStatus,
@@ -71,8 +71,8 @@ pub struct ProcessMetadata {
     pub start_time: u64,
 }
 
-impl From<&ProcessInfo> for ProcessMetadata {
-    fn from(info: &ProcessInfo) -> Self {
+impl From<&ProcessSnapshot> for ProcessMetadata {
+    fn from(info: &ProcessSnapshot) -> Self {
         Self {
             name: info.name.clone(),
             start_time: info.start_time,
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_process_metadata_from_process_info() {
-        let info = ProcessInfo {
+        let info = ProcessSnapshot {
             pid: Pid::from_raw(1234),
             name: "claude".to_string(),
             status: ProcessStatus::Running,
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_process_metadata_from_ref_preserves_original() {
-        let info = ProcessInfo {
+        let info = ProcessSnapshot {
             pid: Pid::from_raw(5678),
             name: "kiro".to_string(),
             status: ProcessStatus::Sleeping,

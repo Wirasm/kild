@@ -12,7 +12,7 @@ use super::session_files::{cleanup_temp_file, session_dir};
 pub fn write_agent_status(
     sessions_dir: &Path,
     session_id: &str,
-    status_info: &crate::sessions::types::AgentStatusInfo,
+    status_info: &crate::sessions::types::AgentStatusRecord,
 ) -> Result<(), SessionError> {
     let dir = session_dir(sessions_dir, session_id);
     fs::create_dir_all(&dir).map_err(|e| {
@@ -43,7 +43,7 @@ pub fn write_agent_status(
 pub fn read_agent_status(
     sessions_dir: &Path,
     session_id: &str,
-) -> Option<crate::sessions::types::AgentStatusInfo> {
+) -> Option<crate::sessions::types::AgentStatusRecord> {
     let sidecar_file = session_dir(sessions_dir, session_id).join("status");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,

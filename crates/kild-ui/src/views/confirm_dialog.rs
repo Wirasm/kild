@@ -4,7 +4,7 @@
 //! Shows git-aware warnings about uncommitted changes, unpushed commits, etc.
 
 use gpui::{Context, IntoElement, div, prelude::*, px};
-use kild_core::DestroySafetyInfo;
+use kild_core::DestroySafety;
 
 use gpui_component::ActiveTheme;
 use gpui_component::Disableable;
@@ -192,7 +192,7 @@ pub fn render_confirm_dialog(
 ///
 /// Uses red styling for blocking warnings (uncommitted changes),
 /// amber styling for non-blocking warnings (unpushed commits, etc.).
-fn render_safety_warnings(info: &DestroySafetyInfo) -> impl IntoElement {
+fn render_safety_warnings(info: &DestroySafety) -> impl IntoElement {
     let warnings = info.warning_messages();
     let is_blocking = info.should_block();
 

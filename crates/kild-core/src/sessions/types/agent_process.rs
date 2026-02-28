@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// be `Some` or all be `None`. This ensures PID reuse protection always has
 /// the metadata it needs.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(into = "AgentProcessData")]
+#[serde(into = "AgentProcessDto")]
 pub struct AgentProcess {
     agent: String,
     /// Unique identifier for this agent spawn within the session.
@@ -41,7 +41,7 @@ pub struct AgentProcess {
 /// Internal serde representation that routes through [`AgentProcess::new`]
 /// on deserialization to enforce the PID metadata invariant.
 #[derive(Serialize, Deserialize)]
-struct AgentProcessData {
+struct AgentProcessDto {
     agent: String,
     /// See [`AgentProcess`] `spawn_id` field. Defaults to empty for backward compat.
     #[serde(default)]
@@ -57,7 +57,7 @@ struct AgentProcessData {
     daemon_session_id: Option<String>,
 }
 
-impl From<AgentProcess> for AgentProcessData {
+impl From<AgentProcess> for AgentProcessDto {
     fn from(ap: AgentProcess) -> Self {
         Self {
             agent: ap.agent,
@@ -74,10 +74,10 @@ impl From<AgentProcess> for AgentProcessData {
     }
 }
 
-impl TryFrom<AgentProcessData> for AgentProcess {
+impl TryFrom<AgentProcessDto> for AgentProcess {
     type Error = String;
 
-    fn try_from(data: AgentProcessData) -> Result<Self, Self::Error> {
+    fn try_from(data: AgentProcessDto) -> Result<Self, Self::Error> {
         AgentProcess::new(
             data.agent,
             data.spawn_id,
@@ -99,7 +99,7 @@ impl<'de> Deserialize<'de> for AgentProcess {
     where
         D: serde::Deserializer<'de>,
     {
-        let data = AgentProcessData::deserialize(deserializer)?;
+        let data = AgentProcessDto::deserialize(deserializer)?;
         AgentProcess::try_from(data).map_err(serde::de::Error::custom)
     }
 }

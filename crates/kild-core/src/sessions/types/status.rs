@@ -53,7 +53,7 @@ impl std::fmt::Display for SessionStatus {
 /// Stored as `{session_id}.status` alongside the session `.json` file.
 /// Written by `kild agent-status`, read by `kild list` and `kild status`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentStatusInfo {
+pub struct AgentStatusRecord {
     pub status: AgentStatus,
     pub updated_at: String,
 }

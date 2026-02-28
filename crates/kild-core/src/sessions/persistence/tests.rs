@@ -670,7 +670,7 @@ fn test_patch_session_json_fields_preserves_unknown_fields() {
 #[test]
 fn test_write_and_read_agent_status() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = AgentStatusInfo {
+    let info = AgentStatusRecord {
         status: AgentStatus::Working,
         updated_at: "2026-02-05T12:00:00Z".to_string(),
     };
@@ -697,7 +697,7 @@ fn test_read_agent_status_corrupt_json() {
 #[test]
 fn test_remove_agent_status_file_exists() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = AgentStatusInfo {
+    let info = AgentStatusRecord {
         status: AgentStatus::Idle,
         updated_at: "2026-02-05T12:00:00Z".to_string(),
     };

@@ -1,6 +1,6 @@
 //! Session enrichment types and detection logic.
 //!
-//! Provides `SessionInfo`, which combines a `Session` with computed
+//! Provides `SessionSnapshot`, which combines a `Session` with computed
 //! process status, git status, and diff statistics. This is the enriched
 //! view of a session used by UI and CLI consumers.
 
@@ -14,7 +14,7 @@ use crate::terminal::is_terminal_window_open;
 
 /// Enriched session data combining a `Session` with computed status fields.
 ///
-/// Created via `SessionInfo::from_session()`, which runs process detection,
+/// Created via `SessionSnapshot::from_session()`, which runs process detection,
 /// git status checks, and diff stat computation.
 ///
 /// Status fields reflect state at construction time and become stale as
@@ -23,15 +23,15 @@ use crate::terminal::is_terminal_window_open;
 ///
 /// Invariant: `uncommitted_diff` is `Some` only when `git_status` is `Dirty`.
 #[derive(Clone)]
-pub struct SessionInfo {
+pub struct SessionSnapshot {
     pub session: Session,
     pub process_status: ProcessStatus,
     pub git_status: GitStatus,
     pub uncommitted_diff: Option<DiffStats>,
 }
 
-impl SessionInfo {
-    /// Create a `SessionInfo` by enriching a `Session` with computed status.
+impl SessionSnapshot {
+    /// Create a `SessionSnapshot` by enriching a `Session` with computed status.
     ///
     /// Runs process detection, git status check, and diff stat computation.
     pub fn from_session(session: Session) -> Self {
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_from_session_nonexistent_path() {
         let session = make_session(PathBuf::from("/tmp/nonexistent-test-path"));
-        let info = SessionInfo::from_session(session);
+        let info = SessionSnapshot::from_session(session);
         assert_eq!(info.process_status, ProcessStatus::Stopped);
         assert_eq!(info.git_status, GitStatus::Unknown);
     }
@@ -475,7 +475,7 @@ mod tests {
         std::fs::write(path.join("test.txt"), "line1\nline2\nline3\n").unwrap();
 
         let session = make_session(path.to_path_buf());
-        let info = SessionInfo::from_session(session);
+        let info = SessionSnapshot::from_session(session);
 
         assert_eq!(info.git_status, GitStatus::Dirty);
         assert!(info.uncommitted_diff.is_some());

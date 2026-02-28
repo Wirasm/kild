@@ -31,8 +31,8 @@ pub use complete::{complete_session, fetch_pr_info, read_pr_info};
 pub use destroy::{destroy_session, get_destroy_safety_info, has_remote_configured};
 pub use errors::SessionError;
 pub use handler::{create_session, get_session, list_sessions, open_session, stop_session};
-pub use info::SessionInfo;
+pub use info::SessionSnapshot;
 pub use types::{
-    AgentProcess, AgentStatus, AgentStatusInfo, CompleteRequest, CompleteResult,
-    CreateSessionRequest, DestroySafetyInfo, GitStatus, ProcessStatus, Session, SessionStatus,
+    AgentProcess, AgentStatus, AgentStatusRecord, CompleteRequest, CompleteResult,
+    CreateSessionRequest, DestroySafety, GitStatus, ProcessStatus, Session, SessionStatus,
 };
