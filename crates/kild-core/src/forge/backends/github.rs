@@ -7,7 +7,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::forge::errors::ForgeError;
 use crate::forge::traits::ForgeBackend;
-use crate::forge::types::{CiStatus, MergeStrategy, PrCheckResult, PrInfo, PrState, ReviewStatus};
+use crate::forge::types::{
+    CiStatus, MergeStrategy, PrCheckResult, PrState, PullRequest, ReviewStatus,
+};
 use crate::git::naming::{KILD_BRANCH_PREFIX, kild_branch_name};
 
 /// GitHub forge backend using the `gh` CLI.
@@ -144,7 +146,7 @@ impl ForgeBackend for GitHubBackend {
         &self,
         worktree_path: &Path,
         branch: &str,
-    ) -> Result<Option<PrInfo>, ForgeError> {
+    ) -> Result<Option<PullRequest>, ForgeError> {
         let branch = normalize_branch(branch);
         debug!(
             event = "core.forge.pr_info_fetch_started",
@@ -236,11 +238,11 @@ impl ForgeBackend for GitHubBackend {
     }
 }
 
-/// Parse the JSON output from `gh pr view` into a `PrInfo`.
+/// Parse the JSON output from `gh pr view` into a `PullRequest`.
 ///
 /// Expects JSON with fields: number, url, state, isDraft, statusCheckRollup, reviews.
 /// Returns `None` if JSON is malformed or required fields are missing (logged as warnings).
-fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<PrInfo> {
+fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<PullRequest> {
     let value: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => {
@@ -321,7 +323,7 @@ fn parse_gh_pr_json(json_str: &str, branch: &str) -> Option<PrInfo> {
         review_status = %review_status
     );
 
-    Some(PrInfo {
+    Some(PullRequest {
         number,
         url,
         state,

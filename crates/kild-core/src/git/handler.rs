@@ -8,7 +8,7 @@ use kild_config::KildConfig;
 use kild_git::{
     errors::GitError,
     naming,
-    types::{ProjectInfo, WorktreeInfo},
+    types::{GitProjectState, WorktreeState},
     validation,
 };
 
@@ -69,11 +69,11 @@ fn add_git_worktree_with_retry(
 
 pub fn create_worktree(
     base_dir: &Path,
-    project: &ProjectInfo,
+    project: &GitProjectState,
     branch: &str,
     config: Option<&KildConfig>,
     git_config: &GitConfig,
-) -> Result<WorktreeInfo, GitError> {
+) -> Result<WorktreeState, GitError> {
     let validated_branch = validation::validate_branch_name(branch)?;
 
     info!(
@@ -175,7 +175,7 @@ pub fn create_worktree(
 
     add_git_worktree_with_retry(&repo, &worktree_name, &worktree_path, &opts)?;
 
-    let worktree_info = WorktreeInfo::new(
+    let worktree_info = WorktreeState::new(
         worktree_path.clone(),
         validated_branch.to_string(),
         project.id.clone(),
@@ -323,7 +323,7 @@ mod tests {
         let temp_dir = create_temp_test_dir("kild_test_no_orphan");
         init_test_repo(&temp_dir);
 
-        let project = ProjectInfo::new(
+        let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
             temp_dir.clone(),
@@ -373,7 +373,7 @@ mod tests {
         let temp_dir = create_temp_test_dir("kild_test_slashed");
         init_test_repo(&temp_dir);
 
-        let project = ProjectInfo::new(
+        let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
             temp_dir.clone(),
@@ -480,7 +480,7 @@ mod tests {
         let temp_dir = create_temp_test_dir("kild_test_fetch_fail");
         init_test_repo(&temp_dir);
 
-        let project = ProjectInfo::new(
+        let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
             temp_dir.clone(),
@@ -511,7 +511,7 @@ mod tests {
         let temp_dir = create_temp_test_dir("kild_test_no_remote");
         init_test_repo(&temp_dir);
 
-        let project = ProjectInfo::new(
+        let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
             temp_dir.clone(),
@@ -548,7 +548,7 @@ mod tests {
         let temp_dir = create_temp_test_dir("kild_test_skip_fetch");
         init_test_repo(&temp_dir);
 
-        let project = ProjectInfo::new(
+        let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
             temp_dir.clone(),
@@ -595,7 +595,7 @@ mod tests {
                 let branch = branch.to_string();
 
                 thread::spawn(move || {
-                    let project = ProjectInfo::new(
+                    let project = GitProjectState::new(
                         "test-id".to_string(),
                         "test-project".to_string(),
                         (*temp_dir).clone(),

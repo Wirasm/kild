@@ -397,7 +397,10 @@ fn load_forge_override() -> Option<crate::forge::ForgeType> {
 /// and calls its `fetch_pr_info()` method.
 ///
 /// Returns `None` if no forge detected, CLI unavailable, no PR, or fetch error.
-pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge::types::PrInfo> {
+pub fn fetch_pr_info(
+    worktree_path: &Path,
+    branch: &str,
+) -> Option<crate::forge::types::PullRequest> {
     let forge_override = load_forge_override();
     let backend = crate::forge::get_forge_backend(worktree_path, forge_override)?;
 
@@ -417,7 +420,7 @@ pub fn fetch_pr_info(worktree_path: &Path, branch: &str) -> Option<crate::forge:
 /// Read PR info for a session from the sidecar file.
 ///
 /// Returns `None` if no PR info has been cached yet.
-pub fn read_pr_info(session_id: &str) -> Option<crate::forge::types::PrInfo> {
+pub fn read_pr_info(session_id: &str) -> Option<crate::forge::types::PullRequest> {
     let config = Config::new();
     persistence::read_pr_info(&config.sessions_dir(), session_id)
 }

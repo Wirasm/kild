@@ -545,7 +545,7 @@ pub trait ForgeBackend: Send + Sync {
     fn is_available(&self) -> bool;
     fn is_pr_merged(&self, worktree_path: &Path, branch: &str) -> bool;
     fn check_pr_exists(&self, worktree_path: &Path, branch: &str) -> PrCheckResult;
-    fn fetch_pr_info(&self, worktree_path: &Path, branch: &str) -> Option<PrInfo>;
+    fn fetch_pr_info(&self, worktree_path: &Path, branch: &str) -> Option<PullRequest>;
 }
 ```
 
@@ -554,7 +554,7 @@ Backends registered in `forge/registry.rs`. Forge detection via `detect_forge()`
 - GitHub (via `gh` CLI)
 - Future: GitLab, Bitbucket, Gitea
 
-Override auto-detection with `[git] forge = "github"` in config. PR types (PrInfo, PrState, CiStatus, ReviewStatus) defined in `forge/types.rs`.
+Override auto-detection with `[git] forge = "github"` in config. PR types (PullRequest, PrState, CiStatus, ReviewStatus) defined in `forge/types.rs`.
 
 ## Configuration Hierarchy
 

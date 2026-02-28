@@ -12,7 +12,7 @@ use core_foundation::boolean::CFBoolean;
 use core_foundation::string::CFString;
 use tracing::{debug, warn};
 
-use super::types::NativeWindowInfo;
+use super::types::NativeWindow;
 use crate::terminal::errors::TerminalError;
 
 /// Timeout for AX messaging (seconds)
@@ -25,7 +25,7 @@ const AX_MESSAGING_TIMEOUT: f32 = 1.0;
 pub fn find_window(
     app_name: &str,
     title_contains: &str,
-) -> Result<Option<NativeWindowInfo>, TerminalError> {
+) -> Result<Option<NativeWindow>, TerminalError> {
     debug!(
         event = "core.terminal.native.find_window_started",
         app_name = app_name,
@@ -113,7 +113,7 @@ pub fn find_window(
             is_minimized = is_minimized
         );
 
-        return Ok(Some(NativeWindowInfo {
+        return Ok(Some(NativeWindow {
             id,
             title: w_title,
             app_name: w_app,
@@ -135,10 +135,7 @@ pub fn find_window(
 ///
 /// Enumerates all visible windows, filters to those belonging to `app_name`
 /// with matching PID.
-pub fn find_window_by_pid(
-    app_name: &str,
-    pid: u32,
-) -> Result<Option<NativeWindowInfo>, TerminalError> {
+pub fn find_window_by_pid(app_name: &str, pid: u32) -> Result<Option<NativeWindow>, TerminalError> {
     debug!(
         event = "core.terminal.native.find_window_by_pid_started",
         app_name = app_name,
@@ -222,7 +219,7 @@ pub fn find_window_by_pid(
             pid = w_pid
         );
 
-        return Ok(Some(NativeWindowInfo {
+        return Ok(Some(NativeWindow {
             id,
             title,
             app_name: w_app,
@@ -248,7 +245,7 @@ pub fn find_window_by_pid(
 ///
 /// If the Accessibility API fails (Ghostty may not expose AX windows due to
 /// GPU rendering), falls back to `tell application "Ghostty" to activate`.
-pub fn focus_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
+pub fn focus_window(window: &NativeWindow) -> Result<(), TerminalError> {
     let pid = window.pid.ok_or_else(|| TerminalError::NativeWindowError {
         message: "Cannot focus window: no PID available".to_string(),
     })?;
@@ -318,7 +315,7 @@ pub fn focus_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
 /// then sets kAXMinimizedAttribute to true on the matching window.
 ///
 /// If the Accessibility API fails, falls back to hiding the app via System Events.
-pub fn minimize_window(window: &NativeWindowInfo) -> Result<(), TerminalError> {
+pub fn minimize_window(window: &NativeWindow) -> Result<(), TerminalError> {
     let pid = window.pid.ok_or_else(|| TerminalError::NativeWindowError {
         message: "Cannot minimize window: no PID available".to_string(),
     })?;

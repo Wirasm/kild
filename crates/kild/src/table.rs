@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
-use kild_core::PrInfo;
+use kild_core::PullRequest;
 use kild_core::Session;
 use kild_core::sessions::types::AgentStatusInfo;
 
@@ -25,7 +25,7 @@ impl TableFormatter {
     pub fn new(
         sessions: &[Session],
         statuses: &[Option<AgentStatusInfo>],
-        pr_infos: &[Option<PrInfo>],
+        pr_infos: &[Option<PullRequest>],
     ) -> Self {
         // Minimum widths = header label lengths
         let mut branch_width = "Branch".len();
@@ -119,7 +119,7 @@ impl TableFormatter {
         &self,
         sessions: &[Session],
         statuses: &[Option<AgentStatusInfo>],
-        pr_infos: &[Option<PrInfo>],
+        pr_infos: &[Option<PullRequest>],
     ) {
         self.print_header();
         for (i, session) in sessions.iter().enumerate() {
@@ -206,7 +206,7 @@ impl TableFormatter {
         &self,
         session: &Session,
         status_info: Option<&AgentStatusInfo>,
-        pr_info: Option<&PrInfo>,
+        pr_info: Option<&PullRequest>,
     ) {
         let port_range = format!("{}-{}", session.port_range_start, session.port_range_end);
         let process_status = Self::format_process_status(session);

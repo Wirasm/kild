@@ -28,7 +28,7 @@ fn assert_not_main_repo(worktree_path: &Path) -> Result<(), GitError> {
 }
 
 pub fn remove_worktree(
-    project: &crate::types::ProjectInfo,
+    project: &crate::types::GitProjectState,
     worktree_path: &Path,
 ) -> Result<(), GitError> {
     info!(

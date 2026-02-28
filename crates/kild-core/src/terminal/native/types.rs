@@ -6,7 +6,7 @@
 /// call sites (e.g., empty title guard in `find_window`, PID availability
 /// check in `focus_window`/`minimize_window`).
 #[derive(Debug, Clone)]
-pub struct NativeWindowInfo {
+pub struct NativeWindow {
     /// Core Graphics window ID
     pub id: u32,
     /// Window title

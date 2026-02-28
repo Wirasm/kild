@@ -716,9 +716,9 @@ fn test_remove_agent_status_file_missing_is_noop() {
 
 #[test]
 fn test_write_and_read_pr_info() {
-    use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+    use crate::forge::types::{CiStatus, PrState, PullRequest, ReviewStatus};
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = PrInfo {
+    let info = PullRequest {
         number: 42,
         url: "https://github.com/org/repo/pull/42".to_string(),
         state: PrState::Open,
@@ -750,9 +750,9 @@ fn test_read_pr_info_corrupt_json() {
 
 #[test]
 fn test_remove_pr_info_file_exists() {
-    use crate::forge::types::{CiStatus, PrInfo, PrState, ReviewStatus};
+    use crate::forge::types::{CiStatus, PrState, PullRequest, ReviewStatus};
     let tmp = tempfile::TempDir::new().unwrap();
-    let info = PrInfo {
+    let info = PullRequest {
         number: 1,
         url: "https://github.com/org/repo/pull/1".to_string(),
         state: PrState::Open,

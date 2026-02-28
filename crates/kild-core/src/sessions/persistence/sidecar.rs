@@ -88,7 +88,7 @@ pub fn remove_agent_status_file(sessions_dir: &Path, session_id: &str) {
 pub fn write_pr_info(
     sessions_dir: &Path,
     session_id: &str,
-    pr_info: &crate::forge::types::PrInfo,
+    pr_info: &crate::forge::types::PullRequest,
 ) -> Result<(), SessionError> {
     let dir = session_dir(sessions_dir, session_id);
     fs::create_dir_all(&dir).map_err(|e| {
@@ -116,7 +116,10 @@ pub fn write_pr_info(
 }
 
 /// Read PR info from sidecar file. Returns None if file doesn't exist or is corrupt.
-pub fn read_pr_info(sessions_dir: &Path, session_id: &str) -> Option<crate::forge::types::PrInfo> {
+pub fn read_pr_info(
+    sessions_dir: &Path,
+    session_id: &str,
+) -> Option<crate::forge::types::PullRequest> {
     let sidecar_file = session_dir(sessions_dir, session_id).join("pr");
     let content = match fs::read_to_string(&sidecar_file) {
         Ok(c) => c,

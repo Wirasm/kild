@@ -4,7 +4,7 @@ use tracing::{debug, info};
 
 use crate::{errors::GitError, naming, types::*};
 
-pub fn detect_project() -> Result<ProjectInfo, GitError> {
+pub fn detect_project() -> Result<GitProjectState, GitError> {
     info!(event = "core.git.project.detect_started");
 
     let current_dir = std::env::current_dir().map_err(|e| GitError::IoError { source: e })?;
@@ -28,7 +28,7 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
 
     let project_id = naming::generate_project_id(repo_path);
 
-    let project = ProjectInfo::new(
+    let project = GitProjectState::new(
         project_id.to_string(),
         project_name.clone(),
         repo_path.to_path_buf(),
@@ -57,7 +57,7 @@ pub fn detect_project() -> Result<ProjectInfo, GitError> {
 ///
 /// Returns `GitError::NotInRepository` if the path is not within a git repository.
 /// Returns `GitError::OperationFailed` if the repository has no working directory (bare repo).
-pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
+pub fn detect_project_at(path: &Path) -> Result<GitProjectState, GitError> {
     info!(event = "core.git.project.detect_at_started", path = %path.display());
 
     let repo = Repository::discover(path).map_err(|e| {
@@ -87,7 +87,7 @@ pub fn detect_project_at(path: &Path) -> Result<ProjectInfo, GitError> {
 
     let project_id = naming::generate_project_id(repo_path);
 
-    let project = ProjectInfo::new(
+    let project = GitProjectState::new(
         project_id.to_string(),
         project_name.clone(),
         repo_path.to_path_buf(),
@@ -175,7 +175,7 @@ mod tests {
         let actual_path = project.path.canonicalize().unwrap();
         assert_eq!(
             actual_path, expected_path,
-            "ProjectInfo.path should match the provided path, not cwd"
+            "GitProjectState.path should match the provided path, not cwd"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -202,7 +202,7 @@ mod tests {
         let actual_path = project.path.canonicalize().unwrap();
         assert_eq!(
             actual_path, expected_path,
-            "ProjectInfo.path should be repo root, not subdirectory"
+            "GitProjectState.path should be repo root, not subdirectory"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);

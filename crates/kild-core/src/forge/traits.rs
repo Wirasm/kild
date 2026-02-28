@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::forge::errors::ForgeError;
-use crate::forge::types::{MergeStrategy, PrCheckResult, PrInfo};
+use crate::forge::types::{MergeStrategy, PrCheckResult, PullRequest};
 
 /// Trait defining the interface for forge (code hosting) backends.
 ///
@@ -36,7 +36,7 @@ pub trait ForgeBackend: Send + Sync {
         &self,
         worktree_path: &Path,
         branch: &str,
-    ) -> Result<Option<PrInfo>, ForgeError>;
+    ) -> Result<Option<PullRequest>, ForgeError>;
 
     /// Merge a PR using the specified strategy.
     ///
@@ -84,7 +84,7 @@ mod tests {
             &self,
             _worktree_path: &Path,
             _branch: &str,
-        ) -> Result<Option<PrInfo>, ForgeError> {
+        ) -> Result<Option<PullRequest>, ForgeError> {
             Ok(None)
         }
 

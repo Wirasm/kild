@@ -150,7 +150,7 @@ fn is_ghostty_process(pid: u32) -> bool {
 #[cfg(target_os = "macos")]
 fn find_ghostty_native_window(
     window_id: &str,
-) -> Result<Option<crate::terminal::native::NativeWindowInfo>, TerminalError> {
+) -> Result<Option<crate::terminal::native::NativeWindow>, TerminalError> {
     use crate::terminal::native;
 
     debug!(
@@ -580,9 +580,9 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_native_window_info_fields() {
-        use crate::terminal::native::NativeWindowInfo;
-        let info = NativeWindowInfo {
+    fn test_native_window_fields() {
+        use crate::terminal::native::NativeWindow;
+        let info = NativeWindow {
             id: 12345,
             title: "test-window".to_string(),
             app_name: "Ghostty".to_string(),

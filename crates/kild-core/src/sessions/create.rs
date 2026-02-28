@@ -200,7 +200,7 @@ pub fn create_session(
             path = %project.path.display(),
             branch = %base_branch,
         );
-        git::types::WorktreeInfo {
+        git::types::WorktreeState {
             path: project.path.clone(),
             branch: base_branch,
             project_id: project.id.clone(),

@@ -117,6 +117,6 @@ pub struct EnrichedSession {
     pub agent_status_updated_at: Option<String>,
     pub terminal_window_title: Option<String>,
     pub terminal_type: Option<String>,
-    pub pr_info: Option<kild_core::PrInfo>,
+    pub pr_info: Option<kild_core::PullRequest>,
     pub overlapping_files: Option<Vec<String>>,
 }

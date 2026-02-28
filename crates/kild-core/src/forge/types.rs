@@ -159,7 +159,7 @@ impl std::str::FromStr for MergeStrategy {
 /// Fetched from a forge platform and cached locally.
 /// Refreshed on demand via `kild pr --refresh`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PrInfo {
+pub struct PullRequest {
     pub number: u32,
     pub url: String,
     pub state: PrState,
@@ -223,7 +223,7 @@ impl MergeReadiness {
         behind_base: usize,
         has_remote: bool,
         has_unpushed: bool,
-        pr_info: Option<&PrInfo>,
+        pr_info: Option<&PullRequest>,
     ) -> Self {
         match merge_clean {
             Some(false) => return Self::HasConflicts,
@@ -429,8 +429,8 @@ mod tests {
     }
 
     #[test]
-    fn test_pr_info_serde_roundtrip() {
-        let info = PrInfo {
+    fn test_pull_request_serde_roundtrip() {
+        let info = PullRequest {
             number: 45,
             url: "https://github.com/org/repo/pull/45".to_string(),
             state: PrState::Open,
@@ -441,13 +441,13 @@ mod tests {
             updated_at: "2026-02-05T12:00:00Z".to_string(),
         };
         let json = serde_json::to_string(&info).unwrap();
-        let parsed: PrInfo = serde_json::from_str(&json).unwrap();
+        let parsed: PullRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, info);
     }
 
     #[test]
-    fn test_pr_info_with_none_summaries() {
-        let info = PrInfo {
+    fn test_pull_request_with_none_summaries() {
+        let info = PullRequest {
             number: 1,
             url: "https://github.com/org/repo/pull/1".to_string(),
             state: PrState::Draft,
@@ -458,15 +458,15 @@ mod tests {
             updated_at: "2026-02-05T12:00:00Z".to_string(),
         };
         let json = serde_json::to_string(&info).unwrap();
-        let parsed: PrInfo = serde_json::from_str(&json).unwrap();
+        let parsed: PullRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, info);
     }
 
     // --- MergeReadiness tests ---
     // Tests use scalar params directly — no git type dependencies.
 
-    fn make_pr(ci_status: CiStatus) -> PrInfo {
-        PrInfo {
+    fn make_pr(ci_status: CiStatus) -> PullRequest {
+        PullRequest {
             number: 1,
             url: "https://example.com/pull/1".to_string(),
             state: PrState::Open,
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_readiness_ready_with_draft_pr() {
-        let pr = PrInfo {
+        let pr = PullRequest {
             state: PrState::Draft,
             ..make_pr(CiStatus::Passing)
         };

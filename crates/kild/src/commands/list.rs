@@ -127,7 +127,7 @@ pub(crate) fn handle_list_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                     .iter()
                     .map(|s| session_ops::read_agent_status(&s.id))
                     .collect();
-                let pr_infos: Vec<Option<kild_core::PrInfo>> = sessions
+                let pr_infos: Vec<Option<kild_core::PullRequest>> = sessions
                     .iter()
                     .map(|s| session_ops::read_pr_info(&s.id))
                     .collect();

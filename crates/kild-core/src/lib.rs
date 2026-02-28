@@ -38,7 +38,7 @@ pub use kild_protocol::{
 // Re-export config types from kild-config
 pub use editor::{EditorBackend, EditorError, EditorType};
 pub use forge::types::{
-    CiStatus, MergeReadiness, MergeStrategy, PrCheckResult, PrInfo, PrState, ReviewStatus,
+    CiStatus, MergeReadiness, MergeStrategy, PrCheckResult, PrState, PullRequest, ReviewStatus,
 };
 pub use forge::{ForgeBackend, ForgeError, ForgeType};
 pub use git::types::{
