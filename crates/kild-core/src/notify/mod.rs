@@ -3,12 +3,20 @@
 //! Best-effort notifications — failures are logged but never propagate.
 //! Used by `kild agent-status --notify` to alert when an agent enters
 //! `Waiting` or `Error` status.
+//!
+//! Notifications are dispatched via the [`NotificationBackend`] trait,
+//! with platform-specific backends registered in [`registry`].
+
+pub mod backends;
+pub mod errors;
+pub mod registry;
+pub mod traits;
+
+pub use errors::NotifyError;
+pub use traits::NotificationBackend;
 
 use kild_protocol::AgentStatus;
 use tracing::{info, warn};
-
-#[cfg(not(target_os = "macos"))]
-use tracing::debug;
 
 /// Returns `true` if a notification should be sent for the given status.
 ///
@@ -24,10 +32,7 @@ pub fn format_notification_message(agent: &str, branch: &str, status: AgentStatu
 
 /// Send a platform-native desktop notification (best-effort).
 ///
-/// - macOS: `osascript` (Notification Center)
-/// - Linux: `notify-send` (requires libnotify)
-/// - Other: no-op
-///
+/// Dispatches to the first available [`NotificationBackend`] via the registry.
 /// Failures are logged at warn level but never returned as errors.
 pub fn send_notification(title: &str, message: &str) {
     info!(
@@ -36,36 +41,10 @@ pub fn send_notification(title: &str, message: &str) {
         message = message,
     );
 
-    send_platform_notification(title, message);
-}
-
-#[cfg(target_os = "macos")]
-fn send_platform_notification(title: &str, message: &str) {
-    use crate::escape::applescript_escape;
-
-    let escaped_title = applescript_escape(title);
-    let escaped_message = applescript_escape(message);
-    let script = format!(
-        r#"display notification "{}" with title "{}""#,
-        escaped_message, escaped_title
-    );
-
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
+    match registry::send_via_backend(title, message) {
+        Ok(()) => {
             info!(event = "core.notify.send_completed", title = title);
         }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(
-                event = "core.notify.send_failed",
-                title = title,
-                stderr = %stderr,
-            );
-        }
         Err(e) => {
             warn!(
                 event = "core.notify.send_failed",
@@ -74,61 +53,6 @@ fn send_platform_notification(title: &str, message: &str) {
             );
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-fn send_platform_notification(title: &str, message: &str) {
-    match which::which("notify-send") {
-        Ok(_) => {}
-        Err(which::Error::CannotFindBinaryPath) => {
-            debug!(
-                event = "core.notify.send_skipped",
-                reason = "notify-send not found",
-            );
-            return;
-        }
-        Err(e) => {
-            warn!(
-                event = "core.notify.send_failed",
-                title = title,
-                error = %e,
-            );
-            return;
-        }
-    }
-
-    match std::process::Command::new("notify-send")
-        .arg(title)
-        .arg(message)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            info!(event = "core.notify.send_completed", title = title);
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(
-                event = "core.notify.send_failed",
-                title = title,
-                stderr = %stderr,
-            );
-        }
-        Err(e) => {
-            warn!(
-                event = "core.notify.send_failed",
-                title = title,
-                error = %e,
-            );
-        }
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn send_platform_notification(_title: &str, _message: &str) {
-    debug!(
-        event = "core.notify.send_skipped",
-        reason = "unsupported platform",
-    );
 }
 
 #[cfg(test)]

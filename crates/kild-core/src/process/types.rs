@@ -71,6 +71,15 @@ pub struct ProcessMetadata {
     pub start_time: u64,
 }
 
+impl From<&ProcessInfo> for ProcessMetadata {
+    fn from(info: &ProcessInfo) -> Self {
+        Self {
+            name: info.name.clone(),
+            start_time: info.start_time,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMetrics {
     pub cpu_usage_percent: f32,
@@ -80,5 +89,62 @@ pub struct ProcessMetrics {
 impl ProcessMetrics {
     pub fn memory_usage_mb(&self) -> u64 {
         self.memory_usage_bytes / 1_024 / 1_024
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_process_metadata_from_process_info() {
+        let info = ProcessInfo {
+            pid: Pid::from_raw(1234),
+            name: "claude".to_string(),
+            status: ProcessStatus::Running,
+            start_time: 1700000000,
+        };
+        let metadata: ProcessMetadata = ProcessMetadata::from(&info);
+        assert_eq!(metadata.name, "claude");
+        assert_eq!(metadata.start_time, 1700000000);
+    }
+
+    #[test]
+    fn test_process_metadata_from_ref_preserves_original() {
+        let info = ProcessInfo {
+            pid: Pid::from_raw(5678),
+            name: "kiro".to_string(),
+            status: ProcessStatus::Sleeping,
+            start_time: 1700001000,
+        };
+        let _metadata: ProcessMetadata = (&info).into();
+        // Original info still accessible
+        assert_eq!(info.name, "kiro");
+        assert_eq!(info.pid.as_u32(), 5678);
+    }
+
+    #[test]
+    fn test_pid_from_u32() {
+        let pid: Pid = 42u32.into();
+        assert_eq!(pid.as_u32(), 42);
+    }
+
+    #[test]
+    fn test_pid_new_rejects_zero() {
+        assert!(Pid::new(0).is_err());
+    }
+
+    #[test]
+    fn test_pid_new_accepts_nonzero() {
+        assert!(Pid::new(1).is_ok());
+    }
+
+    #[test]
+    fn test_process_metrics_memory_mb() {
+        let metrics = ProcessMetrics {
+            cpu_usage_percent: 10.0,
+            memory_usage_bytes: 1_024 * 1_024 * 256,
+        };
+        assert_eq!(metrics.memory_usage_mb(), 256);
     }
 }
