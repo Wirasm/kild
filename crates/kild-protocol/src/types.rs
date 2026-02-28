@@ -237,6 +237,16 @@ pub enum AgentMode {
     BareShell,
 }
 
+impl From<AgentMode> for OpenMode {
+    fn from(mode: AgentMode) -> Self {
+        match mode {
+            AgentMode::DefaultAgent => OpenMode::DefaultAgent,
+            AgentMode::Agent(name) => OpenMode::Agent(name),
+            AgentMode::BareShell => OpenMode::BareShell,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,6 +536,24 @@ mod tests {
             let roundtripped: OpenMode = serde_json::from_str(&json).unwrap();
             assert_eq!(mode, roundtripped);
         }
+    }
+
+    #[test]
+    fn test_agent_mode_into_open_mode_default() {
+        let open: OpenMode = AgentMode::DefaultAgent.into();
+        assert_eq!(open, OpenMode::DefaultAgent);
+    }
+
+    #[test]
+    fn test_agent_mode_into_open_mode_agent() {
+        let open: OpenMode = AgentMode::Agent("claude".to_string()).into();
+        assert_eq!(open, OpenMode::Agent("claude".to_string()));
+    }
+
+    #[test]
+    fn test_agent_mode_into_open_mode_bare_shell() {
+        let open: OpenMode = AgentMode::BareShell.into();
+        assert_eq!(open, OpenMode::BareShell);
     }
 
     #[test]

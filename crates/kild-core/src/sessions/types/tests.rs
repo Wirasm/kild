@@ -1042,6 +1042,26 @@ fn test_process_status_roundtrip() {
     }
 }
 
+// --- From<kild_protocol::SessionStatus> tests ---
+
+#[test]
+fn test_protocol_running_maps_to_active() {
+    let core_status: SessionStatus = kild_protocol::SessionStatus::Running.into();
+    assert_eq!(core_status, SessionStatus::Active);
+}
+
+#[test]
+fn test_protocol_creating_maps_to_active() {
+    let core_status: SessionStatus = kild_protocol::SessionStatus::Creating.into();
+    assert_eq!(core_status, SessionStatus::Active);
+}
+
+#[test]
+fn test_protocol_stopped_maps_to_stopped() {
+    let core_status: SessionStatus = kild_protocol::SessionStatus::Stopped.into();
+    assert_eq!(core_status, SessionStatus::Stopped);
+}
+
 #[test]
 fn test_session_new_sets_all_fields() {
     use kild_protocol::RuntimeMode;

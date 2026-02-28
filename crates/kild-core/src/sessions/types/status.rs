@@ -1,5 +1,6 @@
 use kild_protocol::AgentStatus;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -10,6 +11,31 @@ pub enum SessionStatus {
     Stopped,
     #[serde(alias = "Destroyed")]
     Destroyed,
+}
+
+/// Convert a daemon protocol `SessionStatus` into a core `SessionStatus`.
+///
+/// `Running` and `Creating` both map to `Active` (the session is alive).
+/// `Stopped` maps to `Stopped`. There is no protocol equivalent for `Destroyed`
+/// since destruction is a core-only concept.
+impl From<kild_protocol::SessionStatus> for SessionStatus {
+    fn from(status: kild_protocol::SessionStatus) -> Self {
+        match status {
+            kild_protocol::SessionStatus::Running | kild_protocol::SessionStatus::Creating => {
+                SessionStatus::Active
+            }
+            kild_protocol::SessionStatus::Stopped => SessionStatus::Stopped,
+            // SessionStatus is #[non_exhaustive]; treat unknown variants as Active
+            // (alive until proven otherwise).
+            _ => {
+                warn!(
+                    event = "core.session.status_conversion_unknown",
+                    "Unknown daemon SessionStatus variant; treating as Active"
+                );
+                SessionStatus::Active
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for SessionStatus {
