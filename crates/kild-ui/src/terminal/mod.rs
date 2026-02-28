@@ -1,3 +1,4 @@
+mod blink;
 pub mod colors;
 pub mod errors;
 pub mod input;
