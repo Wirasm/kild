@@ -580,7 +580,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_native_window_info_fields() {
+    fn test_native_window_fields() {
         use crate::terminal::native::NativeWindow;
         let info = NativeWindow {
             id: 12345,

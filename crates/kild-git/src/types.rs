@@ -331,7 +331,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_worktree_info() {
+    fn test_worktree_state() {
         let worktree = WorktreeState::new(
             PathBuf::from("/tmp/test"),
             "feature-branch".to_string(),
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_worktree_info_preserves_original_branch_name() {
+    fn test_worktree_state_preserves_original_branch_name() {
         // WorktreeState stores the original branch name (with slashes),
         // not the sanitized version used for the worktree path/directory.
         // This ensures git operations use the correct branch name.
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_info() {
+    fn test_git_project_state() {
         let project = GitProjectState::new(
             "test-id".to_string(),
             "test-project".to_string(),
@@ -380,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn test_branch_info() {
+    fn test_branch_state() {
         let branch = BranchState {
             name: "main".to_string(),
             exists: true,

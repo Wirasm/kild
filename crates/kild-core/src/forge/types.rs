@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pr_info_serde_roundtrip() {
+    fn test_pull_request_serde_roundtrip() {
         let info = PullRequest {
             number: 45,
             url: "https://github.com/org/repo/pull/45".to_string(),
@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pr_info_with_none_summaries() {
+    fn test_pull_request_with_none_summaries() {
         let info = PullRequest {
             number: 1,
             url: "https://github.com/org/repo/pull/1".to_string(),
