@@ -10,7 +10,7 @@ use crate::errors::DaemonError;
 /// Handle to a live PTY session.
 pub struct ManagedPty {
     /// Master end of the PTY. Used for resize and cloning readers.
-    /// Wrapped in Mutex for Sync: needed so SessionManager can be held in RwLock.
+    /// Wrapped in Mutex for Sync: needed so DaemonSessionStore can be held in RwLock.
     master: Mutex<Box<dyn MasterPty + Send>>,
     /// Child process handle. Used for wait/kill.
     child: Box<dyn Child + Send + Sync>,
@@ -107,11 +107,11 @@ impl ManagedPty {
 }
 
 /// Manages all live PTY instances in the daemon.
-pub struct PtyManager {
+pub struct PtyStore {
     ptys: HashMap<String, ManagedPty>,
 }
 
-impl PtyManager {
+impl PtyStore {
     pub fn new() -> Self {
         Self {
             ptys: HashMap::new(),
@@ -278,7 +278,7 @@ impl PtyManager {
     }
 }
 
-impl Default for PtyManager {
+impl Default for PtyStore {
     fn default() -> Self {
         Self::new()
     }
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_create_with_nonexistent_command_returns_error() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let tmpdir = tempfile::tempdir().unwrap();
         let result = mgr.create(
             "s1",
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_create_with_duplicate_session_id_fails() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let tmpdir = tempfile::tempdir().unwrap();
 
         mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[], false)
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_no_pty_tracked_after_failed_create() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let tmpdir = tempfile::tempdir().unwrap();
 
         let _ = mgr.create(
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_create_and_destroy_lifecycle() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let tmpdir = tempfile::tempdir().unwrap();
 
         mgr.create("s1", "sleep", &["10"], tmpdir.path(), 24, 80, &[], false)
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_create_with_login_shell_uses_default_prog() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let tmpdir = tempfile::tempdir().unwrap();
         // use_login_shell=true should succeed (uses $SHELL via new_default_prog)
         let result = mgr.create("s1", "", &[], tmpdir.path(), 24, 80, &[], true);
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_destroy_nonexistent_returns_error() {
-        let mut mgr = PtyManager::new();
+        let mut mgr = PtyStore::new();
         let result = mgr.destroy("nonexistent");
         assert!(result.is_err());
         match result.unwrap_err() {

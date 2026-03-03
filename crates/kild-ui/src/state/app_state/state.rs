@@ -1,5 +1,5 @@
 use kild_core::SessionInfo;
-use kild_core::projects::{Project, ProjectManager};
+use kild_core::projects::{Project, ProjectRegistry};
 
 use crate::state::dialog::DialogState;
 use crate::state::errors::{OperationError, OperationErrors};
@@ -26,7 +26,7 @@ pub struct AppState {
     pub(super) selection: SelectionState,
 
     /// Project management with enforced invariants.
-    pub(super) projects: ProjectManager,
+    pub(super) projects: ProjectRegistry,
 
     /// Startup errors that should be shown to the user (migration failures, load errors).
     pub(super) startup_errors: Vec<String>,
@@ -55,7 +55,7 @@ impl AppState {
         if let Some(load_error) = projects_data.load_error {
             startup_errors.push(load_error);
         }
-        let projects = ProjectManager::from_data(projects_data.projects, projects_data.active);
+        let projects = ProjectRegistry::from_data(projects_data.projects, projects_data.active);
 
         Self {
             sessions: SessionStore::new(),
@@ -407,7 +407,7 @@ impl AppState {
         if let Some(load_error) = data.load_error {
             self.startup_errors.push(load_error);
         }
-        self.projects = ProjectManager::from_data(data.projects, data.active);
+        self.projects = ProjectRegistry::from_data(data.projects, data.active);
     }
 
     /// Get the active project, if any.
@@ -464,7 +464,7 @@ impl AppState {
             dialog: DialogState::None,
             errors: OperationErrors::new(),
             selection: SelectionState::default(),
-            projects: ProjectManager::new(),
+            projects: ProjectRegistry::new(),
             startup_errors: Vec::new(),
             loading: LoadingState::new(),
         }

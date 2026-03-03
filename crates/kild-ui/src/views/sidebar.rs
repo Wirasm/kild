@@ -27,7 +27,7 @@ pub fn render_sidebar(
     state: &AppState,
     terminal_tabs: &HashMap<String, TerminalTabs>,
     pane_grid: &super::pane_grid::PaneGrid,
-    team_manager: &crate::teams::TeamManager,
+    team_manager: &crate::teams::TeamStore,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
     let active_project_name = state
