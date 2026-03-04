@@ -41,9 +41,11 @@ pub fn ensure_pid_dir(kild_dir: &Path) -> Result<PathBuf, ProcessError> {
 ///
 /// The PID file is written by `echo $$ > file && exec cmd` before the
 /// agent process starts, so it typically appears within milliseconds.
-/// Polls at 100ms intervals with a 3s timeout.
+/// Polls at ~100ms intervals (with +/-20% jitter to prevent thundering
+/// herd when multiple `kild create` commands run simultaneously) with
+/// a 3s timeout.
 pub fn read_pid_file_with_retry(pid_file: &Path) -> Result<Option<u32>, ProcessError> {
-    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const BASE_INTERVAL_MS: u64 = 100;
     const MAX_WAIT: Duration = Duration::from_secs(3);
 
     let start = std::time::Instant::now();
@@ -82,7 +84,13 @@ pub fn read_pid_file_with_retry(pid_file: &Path) -> Result<Option<u32>, ProcessE
                 path = %pid_file.display()
             );
         }
-        std::thread::sleep(POLL_INTERVAL);
+
+        // Add +/-20% jitter using PID to decorrelate simultaneous launches
+        let jitter_range = BASE_INTERVAL_MS / 5; // 20ms
+        let pid_jitter = (std::process::id() as u64) % (jitter_range * 2 + 1);
+        let jitter = pid_jitter as i64 - jitter_range as i64;
+        let interval_ms = (BASE_INTERVAL_MS as i64 + jitter) as u64;
+        std::thread::sleep(Duration::from_millis(interval_ms));
     }
 
     // Timeout reached — surface errors encountered during polling
