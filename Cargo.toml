@@ -47,6 +47,9 @@ accessibility-sys = "0.2"
 
 # Daemon dependencies
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "signal", "time", "sync", "macros", "fs", "process"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 portable-pty = "0.8"
 alacritty_terminal = "0.25"
 vte = "0.15"
