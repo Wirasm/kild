@@ -100,8 +100,7 @@ pub(crate) fn handle_create_command(
         .with_runtime_mode(runtime_mode)
         .with_main_worktree(use_main)
         .with_initial_prompt(initial_prompt)
-        .with_rows(rows)
-        .with_cols(cols);
+        .with_pty_size(rows, cols);
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {

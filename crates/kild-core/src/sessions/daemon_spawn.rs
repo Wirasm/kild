@@ -265,20 +265,22 @@ fn read_scrollback_tail(daemon_session_id: &str) -> String {
     }
 }
 
-/// Resolve PTY dimensions using the priority chain:
-/// CLI flags > config defaults > terminal ioctl > hardcoded 80x24.
+/// Resolve PTY dimensions using the priority chain (per dimension):
+/// CLI flag > config default > terminal ioctl > hardcoded 80×24.
 fn resolve_pty_size(params: &AgentSpawnParams<'_>) -> (u16, u16) {
-    // CLI flags take precedence
-    if let (Some(cols), Some(rows)) = (params.cols, params.rows) {
-        return (cols, rows);
-    }
-    // Config defaults
     let cfg = &params.kild_config.daemon;
-    if let (Some(cols), Some(rows)) = (cfg.default_cols, cfg.default_rows) {
-        return (cols, rows);
-    }
-    // Terminal ioctl (falls back to 80x24)
-    query_terminal_size()
+    let (terminal_cols, terminal_rows) = query_terminal_size();
+
+    let cols = params.cols.or(cfg.default_cols).unwrap_or(terminal_cols);
+    let rows = params.rows.or(cfg.default_rows).unwrap_or(terminal_rows);
+
+    debug!(
+        event = "core.session.pty_size_resolved",
+        cols = cols,
+        rows = rows,
+    );
+
+    (cols, rows)
 }
 
 /// Query the calling terminal's dimensions.
@@ -296,6 +298,12 @@ fn query_terminal_size() -> (u16, u16) {
         {
             (winsize.ws_col, winsize.ws_row)
         } else {
+            debug!(
+                event = "core.session.pty_size_ioctl_fallback",
+                cols = 80,
+                rows = 24,
+                "stdout is not a TTY or returned zero dimensions, using 80x24 default"
+            );
             (80, 24)
         }
     }

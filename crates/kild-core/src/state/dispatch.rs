@@ -69,17 +69,12 @@ impl Store for CoreStore {
                 resume,
                 yolo,
             } => {
-                let session = session_ops::open_session(
-                    &branch,
-                    mode,
-                    runtime_mode,
-                    resume,
-                    yolo,
-                    false,
-                    None,
-                    None,
-                    None,
-                )?;
+                let request =
+                    crate::sessions::types::OpenSessionRequest::new(branch.to_string(), mode)
+                        .with_runtime_mode(runtime_mode)
+                        .with_resume(resume)
+                        .with_yolo(yolo);
+                let session = session_ops::open_session(&request)?;
                 Ok(vec![Event::KildOpened {
                     branch,
                     agent: session.agent,

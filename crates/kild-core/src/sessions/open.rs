@@ -43,20 +43,19 @@ fn resolve_effective_runtime_mode(
 /// stale-active ones (daemon PTY exited without `kild stop`). Stale sessions are
 /// synced to Stopped and the open proceeds.
 ///
-/// The `runtime_mode` parameter overrides the runtime mode. Pass `None` to auto-detect
+/// The `runtime_mode` field overrides the runtime mode. Leave as `None` to auto-detect
 /// from the session's stored mode, then config, then Terminal default.
-#[allow(clippy::too_many_arguments)]
-pub fn open_session(
-    name: &str,
-    mode: kild_protocol::OpenMode,
-    runtime_mode: Option<RuntimeMode>,
-    resume: bool,
-    yolo: bool,
-    no_attach: bool,
-    initial_prompt: Option<&str>,
-    rows: Option<u16>,
-    cols: Option<u16>,
-) -> Result<Session, SessionError> {
+pub fn open_session(request: &super::types::OpenSessionRequest) -> Result<Session, SessionError> {
+    let name = &request.name;
+    let mode = &request.mode;
+    let runtime_mode = request.runtime_mode.clone();
+    let resume = request.resume;
+    let yolo = request.yolo;
+    let no_attach = request.no_attach;
+    let initial_prompt = request.initial_prompt.as_deref();
+    let rows = request.rows;
+    let cols = request.cols;
+
     info!(
         event = "core.session.open_started",
         name = name,
@@ -155,79 +154,80 @@ pub fn open_session(
 
     // 3. Determine agent and command based on OpenMode
     let is_bare_shell = !is_agent_open;
-    let (agent, agent_command) =
-        match mode {
-            OpenMode::BareShell => {
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-                    let fallback = "/bin/sh".to_string();
-                    warn!(
-                        event = "core.session.shell_env_missing",
-                        fallback = %fallback,
-                        "$SHELL not set, falling back to /bin/sh"
-                    );
-                    fallback
-                });
-                info!(event = "core.session.open_shell_selected", shell = %shell);
-                ("shell".to_string(), shell)
+    let (agent, agent_command) = match mode {
+        OpenMode::BareShell => {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                let fallback = "/bin/sh".to_string();
+                warn!(
+                    event = "core.session.shell_env_missing",
+                    fallback = %fallback,
+                    "$SHELL not set, falling back to /bin/sh"
+                );
+                fallback
+            });
+            info!(event = "core.session.open_shell_selected", shell = %shell);
+            ("shell".to_string(), shell)
+        }
+        OpenMode::Agent(name) => {
+            info!(event = "core.session.open_agent_selected", agent = name);
+
+            // Warn if agent CLI is not available in PATH
+            if let Some(false) = agents::is_agent_available(name) {
+                warn!(
+                    event = "core.session.agent_not_available",
+                    agent = %name,
+                    session_id = %session.id,
+                    "Agent CLI '{}' not found in PATH - session may fail to start",
+                    name
+                );
             }
-            OpenMode::Agent(name) => {
-                info!(event = "core.session.open_agent_selected", agent = name);
 
-                // Warn if agent CLI is not available in PATH
-                if let Some(false) = agents::is_agent_available(&name) {
-                    warn!(
-                        event = "core.session.agent_not_available",
-                        agent = %name,
-                        session_id = %session.id,
-                        "Agent CLI '{}' not found in PATH - session may fail to start",
-                        name
-                    );
-                }
-
-                let command = kild_config.get_agent_command(&name).map_err(|e| {
-                    SessionError::ConfigError {
+            let command =
+                kild_config
+                    .get_agent_command(name)
+                    .map_err(|e| SessionError::ConfigError {
                         message: e.to_string(),
-                    }
-                })?;
-                (name, command)
+                    })?;
+            (name.clone(), command)
+        }
+        OpenMode::DefaultAgent => {
+            // Use session's stored agent, but fall back to config default
+            // when the session was created with --no-agent (stored as "shell").
+            // "shell" is not a registered agent, so get_agent_command would fail.
+            let agent = if session.agent == "shell" {
+                let default = kild_config.agent.default.clone();
+                info!(
+                    event = "core.session.open_agent_fallback_to_config",
+                    stored_agent = "shell",
+                    config_default = %default,
+                    "Session was created with --no-agent, falling back to config default"
+                );
+                default
+            } else {
+                session.agent.clone()
+            };
+            info!(event = "core.session.open_agent_selected", agent = agent);
+
+            // Warn if agent CLI is not available in PATH
+            if let Some(false) = agents::is_agent_available(&agent) {
+                warn!(
+                    event = "core.session.agent_not_available",
+                    agent = %agent,
+                    session_id = %session.id,
+                    "Agent CLI '{}' not found in PATH - session may fail to start",
+                    agent
+                );
             }
-            OpenMode::DefaultAgent => {
-                // Use session's stored agent, but fall back to config default
-                // when the session was created with --no-agent (stored as "shell").
-                // "shell" is not a registered agent, so get_agent_command would fail.
-                let agent = if session.agent == "shell" {
-                    let default = kild_config.agent.default.clone();
-                    info!(
-                        event = "core.session.open_agent_fallback_to_config",
-                        stored_agent = "shell",
-                        config_default = %default,
-                        "Session was created with --no-agent, falling back to config default"
-                    );
-                    default
-                } else {
-                    session.agent.clone()
-                };
-                info!(event = "core.session.open_agent_selected", agent = agent);
 
-                // Warn if agent CLI is not available in PATH
-                if let Some(false) = agents::is_agent_available(&agent) {
-                    warn!(
-                        event = "core.session.agent_not_available",
-                        agent = %agent,
-                        session_id = %session.id,
-                        "Agent CLI '{}' not found in PATH - session may fail to start",
-                        agent
-                    );
-                }
-
-                let command = kild_config.get_agent_command(&agent).map_err(|e| {
-                    SessionError::ConfigError {
+            let command =
+                kild_config
+                    .get_agent_command(&agent)
+                    .map_err(|e| SessionError::ConfigError {
                         message: e.to_string(),
-                    }
-                })?;
-                (agent, command)
-            }
-        };
+                    })?;
+            (agent, command)
+        }
+    };
 
     // 3b. Inject yolo flags into agent command
     let agent_command = if yolo && !is_bare_shell {
@@ -408,17 +408,10 @@ mod tests {
 
     #[test]
     fn test_open_session_not_found() {
-        let result = open_session(
-            "non-existent",
-            OpenMode::DefaultAgent,
-            Some(RuntimeMode::Terminal),
-            false,
-            false,
-            false,
-            None,
-            None,
-            None,
-        );
+        let request =
+            crate::sessions::types::OpenSessionRequest::new("non-existent", OpenMode::DefaultAgent)
+                .with_runtime_mode(Some(RuntimeMode::Terminal));
+        let result = open_session(&request);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SessionError::NotFound { .. }));
     }
