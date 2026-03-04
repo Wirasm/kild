@@ -103,14 +103,19 @@ pub fn kill_process(
                 });
             }
 
-            if process.kill() {
-                Ok(())
-            } else {
-                Err(ProcessError::KillFailed {
+            if !process.kill() {
+                return Err(ProcessError::KillFailed {
                     pid,
                     message: "Process kill signal failed".to_string(),
-                })
+                });
             }
+
+            // Verify the process actually terminated. process.kill() sends
+            // the signal but the process may linger briefly. Poll with a
+            // bounded timeout to avoid orphaning zombies.
+            process.wait();
+
+            Ok(())
         }
         None => Err(ProcessError::NotFound { pid }),
     }
