@@ -210,6 +210,9 @@ pub enum RuntimeMode {
     #[serde(alias = "Daemon")]
     /// Launch in a daemon-owned PTY
     Daemon,
+    #[serde(alias = "Acp")]
+    /// Launch via ACP (Agent Client Protocol) — structured JSON-RPC over stdio
+    Acp,
 }
 
 /// What to launch when opening a kild terminal.
@@ -481,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_runtime_mode_serde_roundtrip() {
-        for mode in [RuntimeMode::Terminal, RuntimeMode::Daemon] {
+        for mode in [RuntimeMode::Terminal, RuntimeMode::Daemon, RuntimeMode::Acp] {
             let json = serde_json::to_string(&mode).unwrap();
             let parsed: RuntimeMode = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, mode);
@@ -497,6 +500,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<RuntimeMode>(r#""Daemon""#).unwrap(),
             RuntimeMode::Daemon
+        );
+        assert_eq!(
+            serde_json::from_str::<RuntimeMode>(r#""Acp""#).unwrap(),
+            RuntimeMode::Acp
         );
     }
 
@@ -537,6 +544,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&RuntimeMode::Daemon).unwrap(),
             r#""daemon""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimeMode::Acp).unwrap(),
+            r#""acp""#
         );
     }
 }

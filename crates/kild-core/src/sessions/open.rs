@@ -6,7 +6,7 @@ use kild_config::{Config, KildConfig};
 use kild_protocol::{OpenMode, RuntimeMode};
 
 use super::daemon_helpers::{
-    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt_for_session,
+    AgentSpawnParams, compute_spawn_id, deliver_initial_prompt_for_session, spawn_acp_agent,
     spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
 
@@ -317,8 +317,6 @@ pub fn open_session(
         source = source
     );
 
-    let use_daemon = effective_runtime_mode == RuntimeMode::Daemon;
-
     let spawn_params = AgentSpawnParams {
         branch: &session.branch,
         agent: &agent,
@@ -331,24 +329,26 @@ pub fn open_session(
         kild_config: &kild_config,
     };
 
-    let new_agent = if use_daemon {
-        let agent_process = spawn_daemon_agent(&spawn_params)?;
+    let new_agent = match effective_runtime_mode {
+        RuntimeMode::Daemon => {
+            let agent_process = spawn_daemon_agent(&spawn_params)?;
 
-        // Open-only: deliver initial prompt after spawn.
-        // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
-        if let Some(prompt) = initial_prompt {
-            deliver_initial_prompt_for_session(
-                &session.project_id,
-                &session.branch,
-                &agent,
-                agent_process.daemon_session_id(),
-                prompt,
-            );
+            // Open-only: deliver initial prompt after spawn.
+            // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
+            if let Some(prompt) = initial_prompt {
+                deliver_initial_prompt_for_session(
+                    &session.project_id,
+                    &session.branch,
+                    &agent,
+                    agent_process.daemon_session_id(),
+                    prompt,
+                );
+            }
+
+            agent_process
         }
-
-        agent_process
-    } else {
-        spawn_terminal_agent(&spawn_params)?
+        RuntimeMode::Acp => spawn_acp_agent(&spawn_params)?,
+        RuntimeMode::Terminal => spawn_terminal_agent(&spawn_params)?,
     };
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -375,8 +375,7 @@ pub fn open_session(
     }
 
     // Update runtime mode so future opens auto-detect correctly
-    let is_daemon = effective_runtime_mode == RuntimeMode::Daemon;
-    session.runtime_mode = Some(effective_runtime_mode);
+    session.runtime_mode = Some(effective_runtime_mode.clone());
 
     // 6. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
@@ -384,7 +383,8 @@ pub fn open_session(
     // 7. Spawn attach window (best-effort) and update session with terminal info.
     // Skipped when no_attach is set — for programmatic opens (e.g. brain reopening workers)
     // where a Ghostty window popping up is undesirable.
-    if is_daemon && !no_attach {
+    // ACP sessions don't need attach windows — they have no PTY output.
+    if effective_runtime_mode == RuntimeMode::Daemon && !no_attach {
         spawn_and_save_attach_window(&mut session, name, &kild_config, &config.sessions_dir())?;
     }
 

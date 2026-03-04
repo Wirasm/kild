@@ -8,7 +8,7 @@ use kild_protocol::{AgentMode, RuntimeMode};
 
 use super::daemon_helpers::{
     AgentSpawnParams, compute_spawn_id, deliver_initial_prompt_for_session, ensure_shim_binary,
-    spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
+    spawn_acp_agent, spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
 
 pub fn create_session(
@@ -241,6 +241,7 @@ pub fn create_session(
 
     let initial_agent = match request.runtime_mode {
         RuntimeMode::Terminal => spawn_terminal_agent(&spawn_params)?,
+        RuntimeMode::Acp => spawn_acp_agent(&spawn_params)?,
         RuntimeMode::Daemon => {
             // Create-only: ensure tmux shim binary is installed at ~/.kild/bin/tmux
             if let Err(msg) = ensure_shim_binary() {

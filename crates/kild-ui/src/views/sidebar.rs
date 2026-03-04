@@ -117,6 +117,8 @@ pub fn render_sidebar(
                         );
 
                         let teammate_count = team_manager.teammates_for_session(&session_id).len();
+                        let is_acp =
+                            display.session.runtime_mode == Some(kild_core::RuntimeMode::Acp);
 
                         let sid_for_add = session_id.to_string();
                         active_elements.push(
@@ -130,6 +132,7 @@ pub fn render_sidebar(
                                     is_selected,
                                     &time_meta,
                                     teammate_count,
+                                    is_acp,
                                     cx.listener(move |view, _, window, cx| {
                                         view.on_kild_select(&session_id_for_click, window, cx);
                                     }),
@@ -180,6 +183,8 @@ pub fn render_sidebar(
                                 _ => Status::Crashed,
                             };
 
+                            let is_acp =
+                                display.session.runtime_mode == Some(kild_core::RuntimeMode::Acp);
                             let sid_for_add = session_id.to_string();
                             stopped_elements.push(
                                 div()
@@ -192,6 +197,7 @@ pub fn render_sidebar(
                                         is_selected,
                                         &time_meta,
                                         0, // no badge for stopped kilds
+                                        is_acp,
                                         cx.listener(move |view, _, window, cx| {
                                             view.on_kild_select(&session_id_for_click, window, cx);
                                         }),
@@ -272,6 +278,7 @@ fn render_section_header(title: &str, count: usize, count_color: Rgba) -> impl I
 }
 
 /// Render a clean kild row with status dot, branch name, and time meta.
+#[allow(clippy::too_many_arguments)]
 fn render_kild_row(
     id: impl Into<gpui::ElementId>,
     branch: &str,
@@ -279,6 +286,7 @@ fn render_kild_row(
     is_selected: bool,
     time_meta: &str,
     teammate_count: usize,
+    is_acp: bool,
     on_click: impl Fn(&gpui::MouseUpEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
@@ -331,6 +339,16 @@ fn render_kild_row(
                     .text_size(px(theme::TEXT_BADGE))
                     .text_color(theme::aurora())
                     .child(format!("[{}]", teammate_count)),
+            )
+        })
+        // ACP badge
+        .when(is_acp, |row| {
+            row.child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(theme::TEXT_BADGE))
+                    .text_color(theme::ice())
+                    .child("ACP"),
             )
         })
 }

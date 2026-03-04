@@ -157,6 +157,36 @@ pub enum ClientMessage {
 
     #[serde(rename = "ping")]
     Ping { id: String },
+
+    /// Create a new ACP (Agent Client Protocol) session.
+    ///
+    /// Unlike PTY sessions, ACP sessions use raw stdio (no PTY allocation).
+    /// The daemon spawns the agent process and relays bytes between the
+    /// client and the agent's stdin/stdout.
+    #[serde(rename = "create_acp_session")]
+    CreateAcpSession {
+        id: String,
+        session_id: SessionId,
+        working_directory: String,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env_vars: HashMap<String, String>,
+    },
+
+    /// Relay bytes to an ACP session's stdin.
+    #[serde(rename = "acp_relay")]
+    AcpRelay {
+        id: String,
+        session_id: SessionId,
+        /// Base64-encoded bytes to write to agent stdin.
+        data: String,
+    },
+
+    /// Destroy an ACP session and kill its agent process.
+    #[serde(rename = "destroy_acp_session")]
+    DestroyAcpSession { id: String, session_id: SessionId },
 }
 
 /// Daemon -> Client response and streaming messages.
@@ -219,6 +249,25 @@ pub enum DaemonMessage {
 
     #[serde(rename = "ack")]
     Ack { id: String },
+
+    /// ACP session created successfully.
+    #[serde(rename = "acp_session_created")]
+    AcpSessionCreated { id: String, session: SessionInfo },
+
+    /// Streaming ACP stdout relay. No `id` — pushed after session creation.
+    #[serde(rename = "acp_relay")]
+    AcpRelay {
+        session_id: SessionId,
+        /// Base64-encoded bytes from agent stdout.
+        data: String,
+    },
+
+    /// ACP agent process exited.
+    #[serde(rename = "acp_session_exited")]
+    AcpSessionExited {
+        session_id: SessionId,
+        exit_code: Option<i32>,
+    },
 }
 
 fn default_rows() -> u16 {
@@ -244,7 +293,10 @@ impl ClientMessage {
             | ClientMessage::GetSession { id, .. }
             | ClientMessage::ReadScrollback { id, .. }
             | ClientMessage::DaemonStop { id, .. }
-            | ClientMessage::Ping { id, .. } => id,
+            | ClientMessage::Ping { id, .. }
+            | ClientMessage::CreateAcpSession { id, .. }
+            | ClientMessage::AcpRelay { id, .. }
+            | ClientMessage::DestroyAcpSession { id, .. } => id,
         }
     }
 }
@@ -372,6 +424,23 @@ mod tests {
             },
             ClientMessage::Ping {
                 id: "11".to_string(),
+            },
+            ClientMessage::CreateAcpSession {
+                id: "12".to_string(),
+                session_id: SessionId::new("s"),
+                working_directory: "/tmp".to_string(),
+                command: "claude-code-acp".to_string(),
+                args: vec![],
+                env_vars: HashMap::new(),
+            },
+            ClientMessage::AcpRelay {
+                id: "13".to_string(),
+                session_id: SessionId::new("s"),
+                data: "dGVzdA==".to_string(),
+            },
+            ClientMessage::DestroyAcpSession {
+                id: "14".to_string(),
+                session_id: SessionId::new("s"),
             },
         ];
 
@@ -562,6 +631,97 @@ mod tests {
             project_id: None,
         };
         assert_eq!(msg.id(), "my-id");
+    }
+
+    #[test]
+    fn test_client_message_create_acp_session_roundtrip() {
+        let msg = ClientMessage::CreateAcpSession {
+            id: "acp-1".to_string(),
+            session_id: SessionId::new("proj_acp-test"),
+            working_directory: "/tmp/wt".to_string(),
+            command: "claude-code-acp".to_string(),
+            args: vec![],
+            env_vars: HashMap::new(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"create_acp_session"#));
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id(), "acp-1");
+    }
+
+    #[test]
+    fn test_client_message_acp_relay_roundtrip() {
+        let msg = ClientMessage::AcpRelay {
+            id: "acp-2".to_string(),
+            session_id: SessionId::new("proj_acp-test"),
+            data: "eyJqc29ucnBjIjogIjIuMCJ9".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id(), "acp-2");
+    }
+
+    #[test]
+    fn test_client_message_destroy_acp_session_roundtrip() {
+        let msg = ClientMessage::DestroyAcpSession {
+            id: "acp-3".to_string(),
+            session_id: SessionId::new("proj_acp-test"),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id(), "acp-3");
+    }
+
+    #[test]
+    fn test_daemon_message_acp_session_created_roundtrip() {
+        let msg = DaemonMessage::AcpSessionCreated {
+            id: "acp-1".to_string(),
+            session: SessionInfo {
+                id: SessionId::new("proj_acp-test"),
+                working_directory: "/tmp/wt".to_string(),
+                command: "claude-code-acp".to_string(),
+                status: crate::types::SessionStatus::Running,
+                created_at: "2026-03-04T10:00:00Z".to_string(),
+                client_count: None,
+                pty_pid: None,
+                exit_code: None,
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"acp_session_created"#));
+        let _: DaemonMessage = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_daemon_message_acp_relay_roundtrip() {
+        let msg = DaemonMessage::AcpRelay {
+            session_id: SessionId::new("proj_acp-test"),
+            data: "eyJqc29ucnBjIjogIjIuMCJ9".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"acp_relay"#));
+        let _: DaemonMessage = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_daemon_message_acp_session_exited_roundtrip() {
+        let msg = DaemonMessage::AcpSessionExited {
+            session_id: SessionId::new("proj_acp-test"),
+            exit_code: Some(0),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"acp_session_exited"#));
+        let parsed: DaemonMessage = serde_json::from_str(&json).unwrap();
+        if let DaemonMessage::AcpSessionExited {
+            session_id,
+            exit_code,
+        } = parsed
+        {
+            assert_eq!(&*session_id, "proj_acp-test");
+            assert_eq!(exit_code, Some(0));
+        } else {
+            panic!("wrong variant");
+        }
     }
 
     #[test]

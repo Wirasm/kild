@@ -83,7 +83,8 @@ pub(crate) fn handle_create_command(
 
     let daemon_flag = matches.get_flag("daemon");
     let no_daemon_flag = matches.get_flag("no-daemon");
-    let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, &config);
+    let acp_flag = matches.get_flag("acp");
+    let runtime_mode = resolve_runtime_mode(daemon_flag, no_daemon_flag, acp_flag, &config);
 
     let use_main = matches.get_flag("main");
     let initial_prompt = matches.get_one::<String>("initial-prompt").cloned();

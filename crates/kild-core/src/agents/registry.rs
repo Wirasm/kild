@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use super::backends::{
     AmpBackend, ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend, OpenCodeBackend,
 };
-use super::traits::AgentBackend;
+use super::traits::{AcpCommandInfo, AgentBackend};
 use super::types::{AgentType, InjectMethod};
 
 /// Global registry of all supported agent backends.
@@ -141,6 +141,18 @@ pub fn get_all_process_patterns(name: &str) -> Vec<String> {
     patterns.sort();
     patterns.dedup();
     patterns
+}
+
+/// Get the ACP command info for an agent by name (case-insensitive).
+///
+/// Returns `Some(AcpCommandInfo)` if the agent supports ACP, `None` otherwise.
+pub fn get_acp_command(name: &str) -> Option<AcpCommandInfo> {
+    get_agent(name).and_then(|backend| backend.acp_command())
+}
+
+/// Check if an agent supports ACP by name (case-insensitive).
+pub fn supports_acp(name: &str) -> bool {
+    get_agent(name).is_some_and(|backend| backend.acp_command().is_some())
 }
 
 /// Check if an agent's CLI is available in PATH (case-insensitive).
@@ -376,6 +388,41 @@ mod tests {
         assert_eq!(get_inject_method("kiro"), InjectMethod::Pty);
         assert_eq!(get_inject_method("opencode"), InjectMethod::Pty);
         assert_eq!(get_inject_method("unknown"), InjectMethod::Pty);
+    }
+
+    #[test]
+    fn test_get_acp_command_supported_agents() {
+        // Claude, Gemini, and OpenCode support ACP
+        let claude_acp = get_acp_command("claude");
+        assert!(claude_acp.is_some());
+        assert_eq!(claude_acp.unwrap().binary, "claude-code-acp");
+
+        let gemini_acp = get_acp_command("gemini");
+        assert!(gemini_acp.is_some());
+        assert_eq!(gemini_acp.unwrap().binary, "gemini");
+
+        let opencode_acp = get_acp_command("opencode");
+        assert!(opencode_acp.is_some());
+        assert_eq!(opencode_acp.unwrap().binary, "opencode");
+    }
+
+    #[test]
+    fn test_get_acp_command_unsupported_agents() {
+        assert!(get_acp_command("amp").is_none());
+        assert!(get_acp_command("kiro").is_none());
+        assert!(get_acp_command("codex").is_none());
+        assert!(get_acp_command("unknown").is_none());
+    }
+
+    #[test]
+    fn test_supports_acp() {
+        assert!(supports_acp("claude"));
+        assert!(supports_acp("gemini"));
+        assert!(supports_acp("opencode"));
+        assert!(!supports_acp("amp"));
+        assert!(!supports_acp("kiro"));
+        assert!(!supports_acp("codex"));
+        assert!(!supports_acp("unknown"));
     }
 
     #[test]
