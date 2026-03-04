@@ -1007,8 +1007,8 @@ mod tests {
 
         git::test_support::init_repo_with_commit(repo_dir.path()).unwrap();
 
-        let branch_name = format!("kild/{branch_suffix}");
-        let admin_name = format!("kild-{branch_suffix}");
+        let branch_name = git::naming::kild_branch_name(branch_suffix);
+        let admin_name = git::naming::kild_worktree_admin_name(branch_suffix);
         git::test_support::create_branch(repo_dir.path(), &branch_name).unwrap();
 
         let worktree_path = worktree_base.path().join(&admin_name);

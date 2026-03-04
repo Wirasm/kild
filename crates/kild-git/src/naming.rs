@@ -16,7 +16,7 @@ pub fn sanitize_for_path(s: &str) -> String {
 pub const KILD_BRANCH_PREFIX: &str = "kild/";
 
 /// The worktree admin name prefix used for `.git/worktrees/<name>` directories.
-pub const WORKTREE_ADMIN_PREFIX: &str = "kild-";
+pub(crate) const WORKTREE_ADMIN_PREFIX: &str = "kild-";
 
 /// Constructs the KILD branch name for a given user branch name.
 ///

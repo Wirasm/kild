@@ -283,7 +283,7 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
-        let kild_branch = format!("kild/{}", branch);
+        let kild_branch = crate::git::naming::kild_branch_name(branch);
         Command::new("git")
             .args(["checkout", "-b", &kild_branch])
             .current_dir(dir)

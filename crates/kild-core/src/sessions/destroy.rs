@@ -69,6 +69,8 @@ fn kill_tracked_agents(session: &Session, force: bool) -> Result<(), SessionErro
                     error = %e,
                     force = force,
                 );
+                // Daemon cleanup failure is non-fatal — the kild session file
+                // is being removed regardless. Do NOT add to kill_errors.
             }
 
             // Close the attach terminal window (if tracked)
