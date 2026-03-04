@@ -160,6 +160,16 @@ pub struct DaemonRuntimeConfig {
     /// Default: true
     pub auto_start: Option<bool>,
 
+    /// Default PTY rows for daemon sessions when terminal size cannot be detected.
+    /// Used when creating from a non-TTY context (e.g. Claude Code, scripts).
+    /// Overridden by `--rows` CLI flag.
+    pub default_rows: Option<u16>,
+
+    /// Default PTY columns for daemon sessions when terminal size cannot be detected.
+    /// Used when creating from a non-TTY context (e.g. Claude Code, scripts).
+    /// Overridden by `--cols` CLI flag.
+    pub default_cols: Option<u16>,
+
     /// Remote daemon address. If set, CLI and UI connect via TCP/TLS instead of Unix socket.
     /// Format: "host:port" — e.g. "build-server:7432"
     pub remote_host: Option<String>,
@@ -202,6 +212,8 @@ impl DaemonRuntimeConfig {
         Self {
             enabled: override_config.enabled.or(base.enabled),
             auto_start: override_config.auto_start.or(base.auto_start),
+            default_rows: override_config.default_rows.or(base.default_rows),
+            default_cols: override_config.default_cols.or(base.default_cols),
             remote_host: override_config
                 .remote_host
                 .clone()

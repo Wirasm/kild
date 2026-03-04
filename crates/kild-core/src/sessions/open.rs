@@ -45,6 +45,7 @@ fn resolve_effective_runtime_mode(
 ///
 /// The `runtime_mode` parameter overrides the runtime mode. Pass `None` to auto-detect
 /// from the session's stored mode, then config, then Terminal default.
+#[allow(clippy::too_many_arguments)]
 pub fn open_session(
     name: &str,
     mode: kild_protocol::OpenMode,
@@ -53,6 +54,8 @@ pub fn open_session(
     yolo: bool,
     no_attach: bool,
     initial_prompt: Option<&str>,
+    rows: Option<u16>,
+    cols: Option<u16>,
 ) -> Result<Session, SessionError> {
     info!(
         event = "core.session.open_started",
@@ -329,6 +332,8 @@ pub fn open_session(
         task_list_id: new_task_list_id.as_deref(),
         project_id: &session.project_id,
         kild_config: &kild_config,
+        rows,
+        cols,
     };
 
     let new_agent = if use_daemon {
@@ -410,6 +415,8 @@ mod tests {
             false,
             false,
             false,
+            None,
+            None,
             None,
         );
         assert!(result.is_err());

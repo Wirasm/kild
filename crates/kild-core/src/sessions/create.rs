@@ -237,6 +237,8 @@ pub fn create_session(
         task_list_id: task_list_id.as_deref(),
         project_id: &project_id,
         kild_config,
+        rows: request.rows,
+        cols: request.cols,
     };
 
     let initial_agent = match request.runtime_mode {

@@ -103,6 +103,18 @@ pub fn create_command() -> Command {
                 .conflicts_with("no-agent")
                 .conflicts_with("no-daemon"),
         )
+        .arg(
+            Arg::new("rows")
+                .long("rows")
+                .help("Initial PTY rows (daemon sessions only, overrides config)")
+                .value_parser(clap::value_parser!(u16).range(1..)),
+        )
+        .arg(
+            Arg::new("cols")
+                .long("cols")
+                .help("Initial PTY columns (daemon sessions only, overrides config)")
+                .value_parser(clap::value_parser!(u16).range(1..)),
+        )
 }
 
 pub fn open_command() -> Command {
@@ -178,6 +190,18 @@ pub fn open_command() -> Command {
                 .conflicts_with("no-agent")
                 .conflicts_with("no-daemon")
                 .conflicts_with("all"),
+        )
+        .arg(
+            Arg::new("rows")
+                .long("rows")
+                .help("Initial PTY rows (daemon sessions only, overrides config)")
+                .value_parser(clap::value_parser!(u16).range(1..)),
+        )
+        .arg(
+            Arg::new("cols")
+                .long("cols")
+                .help("Initial PTY columns (daemon sessions only, overrides config)")
+                .value_parser(clap::value_parser!(u16).range(1..)),
         )
 }
 

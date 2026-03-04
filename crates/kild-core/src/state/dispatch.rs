@@ -77,6 +77,8 @@ impl Store for CoreStore {
                     yolo,
                     false,
                     None,
+                    None,
+                    None,
                 )?;
                 Ok(vec![Event::KildOpened {
                     branch,

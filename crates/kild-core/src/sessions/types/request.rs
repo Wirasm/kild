@@ -36,6 +36,12 @@ pub struct CreateSessionRequest {
     /// Best-effort: session creation succeeds even if prompt delivery fails.
     /// May block up to 20s waiting for the agent's TUI to stabilize before injecting.
     pub initial_prompt: Option<String>,
+    /// Override initial PTY rows (daemon sessions only).
+    /// Takes precedence over config `[daemon] default_rows` and terminal ioctl.
+    pub rows: Option<u16>,
+    /// Override initial PTY columns (daemon sessions only).
+    /// Takes precedence over config `[daemon] default_cols` and terminal ioctl.
+    pub cols: Option<u16>,
 }
 
 impl CreateSessionRequest {
@@ -51,6 +57,8 @@ impl CreateSessionRequest {
             runtime_mode: RuntimeMode::Terminal,
             use_main_worktree: false,
             initial_prompt: None,
+            rows: None,
+            cols: None,
         }
     }
 
@@ -72,6 +80,8 @@ impl CreateSessionRequest {
             runtime_mode: RuntimeMode::Terminal,
             use_main_worktree: false,
             initial_prompt: None,
+            rows: None,
+            cols: None,
         }
     }
 
@@ -102,6 +112,16 @@ impl CreateSessionRequest {
 
     pub fn with_initial_prompt(mut self, prompt: Option<String>) -> Self {
         self.initial_prompt = prompt;
+        self
+    }
+
+    pub fn with_rows(mut self, rows: Option<u16>) -> Self {
+        self.rows = rows;
+        self
+    }
+
+    pub fn with_cols(mut self, cols: Option<u16>) -> Self {
+        self.cols = cols;
         self
     }
 }

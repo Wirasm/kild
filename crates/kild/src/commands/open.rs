@@ -20,6 +20,8 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let yolo = matches.get_flag("yolo");
     let no_attach = matches.get_flag("no-attach");
     let initial_prompt = matches.get_one::<String>("initial-prompt");
+    let rows = matches.get_one::<u16>("rows").copied();
+    let cols = matches.get_one::<u16>("cols").copied();
 
     // Check for --all flag first
     if matches.get_flag("all") {
@@ -41,6 +43,8 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
         yolo,
         no_attach,
         initial_prompt.map(|s| s.as_str()),
+        rows,
+        cols,
     ) {
         Ok(session) => {
             match mode {
@@ -139,6 +143,8 @@ fn handle_open_all(
             resume,
             yolo,
             false,
+            None,
+            None,
             None,
         ) {
             Ok(s) => {

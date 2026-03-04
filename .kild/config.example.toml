@@ -157,6 +157,13 @@ enabled = false
 # Default: true
 auto_start = true
 
+# Default PTY dimensions for daemon sessions when terminal size cannot be detected
+# (e.g. when creating from Claude Code or scripts without a TTY).
+# When running from a real terminal, the terminal's actual size is used instead.
+# Overridden by --rows/--cols CLI flags.
+# default_rows = 50
+# default_cols = 200
+
 # Advanced daemon settings (optional, sensible defaults used if omitted)
 # socket_path = "~/.kild/daemon.sock"   # Unix socket location
 # pid_path = "~/.kild/daemon.pid"       # PID file location

@@ -90,13 +90,18 @@ pub(crate) fn handle_create_command(
     let initial_prompt_for_warning = initial_prompt.clone();
     let issue = matches.get_one::<u32>("issue").copied();
 
+    let rows = matches.get_one::<u16>("rows").copied();
+    let cols = matches.get_one::<u16>("cols").copied();
+
     let request = CreateSessionRequest::new(branch.clone(), agent_mode, note)
         .with_issue(issue)
         .with_base_branch(base_branch)
         .with_no_fetch(no_fetch)
         .with_runtime_mode(runtime_mode)
         .with_main_worktree(use_main)
-        .with_initial_prompt(initial_prompt);
+        .with_initial_prompt(initial_prompt)
+        .with_rows(rows)
+        .with_cols(cols);
 
     match session_ops::create_session(request, &config) {
         Ok(session) => {
