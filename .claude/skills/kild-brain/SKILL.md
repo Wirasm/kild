@@ -43,11 +43,15 @@ case "$STATUS" in
     echo "Honryū is already running."
     ;;
   stopped)
-    kild open honryu --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
+    kild open honryu --resume
+    sleep 5
+    kild inject honryu "You've been restarted by the Tōryō. Orient yourself: check kild list --json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
     echo "Honryū restarted."
     ;;
   *)
-    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
+    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor"
+    sleep 5
+    kild inject honryu "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, check today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state."
     echo "Honryū initialized."
     ;;
 esac

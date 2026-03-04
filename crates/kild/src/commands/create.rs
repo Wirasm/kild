@@ -137,16 +137,32 @@ pub(crate) fn handle_create_command(
                 color::status(&status_str)
             );
 
-            // Warn fleet claude sessions about --initial-prompt deprecation.
-            // Deliver the prompt via the reliable inbox path instead.
+            // General deprecation warning for --initial-prompt.
+            if initial_prompt_for_warning.is_some() {
+                eprintln!();
+                eprintln!(
+                    "{}",
+                    color::warning(
+                        "Warning: --initial-prompt is deprecated and will be removed in a future release."
+                    )
+                );
+                eprintln!(
+                    "  {}",
+                    color::hint(&format!(
+                        "Use instead: kild create {} && sleep 5 && kild inject {} \"...\"",
+                        session.branch, session.branch
+                    ))
+                );
+            }
+
+            // Additional fleet-specific warning with inbox fallback.
             if let Some(ref prompt) = initial_prompt_for_warning
                 && fleet::fleet_mode_active(&session.branch)
                 && fleet::is_claude_fleet_agent(&session.agent)
             {
-                eprintln!();
                 eprintln!(
                     "{}",
-                    color::warning("Warning: --initial-prompt is unreliable for fleet sessions.")
+                    color::warning("Fleet sessions: prompt delivered via inbox as fallback.")
                 );
                 eprintln!(
                     "  {}",
