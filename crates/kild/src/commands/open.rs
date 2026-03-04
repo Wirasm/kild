@@ -69,13 +69,24 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 println!("  PID:   {}", pid);
             }
 
-            // Warn fleet claude sessions about --initial-prompt deprecation.
+            // General deprecation warning for --initial-prompt.
+            if initial_prompt.is_some() {
+                eprintln!();
+                eprintln!(
+                    "Warning: --initial-prompt is deprecated and will be removed in a future release."
+                );
+                eprintln!(
+                    "  Use instead: kild open {} && sleep 5 && kild inject {} \"...\"",
+                    session.branch, session.branch
+                );
+            }
+
+            // Additional fleet-specific warning with inbox fallback.
             if let Some(prompt) = initial_prompt
                 && fleet::fleet_mode_active(&session.branch)
                 && fleet::is_claude_fleet_agent(&session.agent)
             {
-                eprintln!();
-                eprintln!("Warning: --initial-prompt is unreliable for fleet sessions.");
+                eprintln!("Fleet sessions: prompt delivered via inbox as fallback.");
                 eprintln!(
                     "  Use instead: kild inject {} \"<your message>\"",
                     session.branch
