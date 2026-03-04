@@ -158,7 +158,7 @@ impl MainView {
 
         for display in self.state.displays() {
             let session_id = &display.session.id;
-            let teammates = self.team_manager.teammates_for_session(session_id);
+            let teammates = self.team_store.teammates_for_session(session_id);
             if teammates.is_empty() {
                 continue;
             }

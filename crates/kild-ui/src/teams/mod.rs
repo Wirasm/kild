@@ -6,7 +6,7 @@
 
 mod state;
 
-pub use state::TeamManager;
+pub use state::TeamStore;
 
 use crate::theme;
 use gpui::Rgba;

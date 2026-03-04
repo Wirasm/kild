@@ -102,7 +102,7 @@ pub mod test_helpers {
 /// This is a **data transfer type** for persistence only. Fields are public
 /// for serialization and direct use by persistence/action code.
 /// All business logic (invariant enforcement, active-index tracking) belongs
-/// in [`super::ProjectManager`].
+/// in [`super::ProjectRegistry`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectsData {
     pub projects: Vec<Project>,

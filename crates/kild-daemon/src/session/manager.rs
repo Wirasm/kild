@@ -5,36 +5,36 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 use crate::errors::DaemonError;
-use crate::pty::manager::PtyManager;
+use crate::pty::manager::PtyStore;
 use crate::pty::output::{PtyExitEvent, spawn_pty_reader};
 use crate::session::state::{ClientId, DaemonSession, SessionState};
 use crate::types::{DaemonConfig, DaemonSessionStatus};
 
 /// Orchestrates session lifecycle within the daemon.
 ///
-/// Manages the map of `DaemonSession` instances, delegates to `PtyManager`
+/// Manages the map of `DaemonSession` instances, delegates to [`PtyStore`]
 /// for PTY allocation, and handles client attach/detach tracking.
 ///
 /// Lock discipline: methods taking `&self` are safe to call under a read lock
-/// on the outer `RwLock<SessionManager>`; methods taking `&mut self` require a
+/// on the outer `RwLock<DaemonSessionStore>`; methods taking `&mut self` require a
 /// write lock.
-pub struct SessionManager {
+pub struct DaemonSessionStore {
     sessions: HashMap<String, DaemonSession>,
-    pty_manager: PtyManager,
+    pty_store: PtyStore,
     config: DaemonConfig,
     next_client_id: ClientId,
     /// Sender for PTY exit notifications. Passed to each PTY reader task.
     pty_exit_tx: tokio::sync::mpsc::UnboundedSender<PtyExitEvent>,
 }
 
-impl SessionManager {
+impl DaemonSessionStore {
     pub fn new(
         config: DaemonConfig,
         pty_exit_tx: tokio::sync::mpsc::UnboundedSender<PtyExitEvent>,
     ) -> Self {
         Self {
             sessions: HashMap::new(),
-            pty_manager: PtyManager::new(),
+            pty_store: PtyStore::new(),
             config,
             next_client_id: 1,
             pty_exit_tx,
@@ -89,7 +89,7 @@ impl SessionManager {
         // Create the PTY and spawn the command
         let working_dir = std::path::Path::new(working_directory);
         let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let managed_pty = self.pty_manager.create(
+        let managed_pty = self.pty_store.create(
             session_id,
             command,
             &args_refs,
@@ -201,7 +201,7 @@ impl SessionManager {
         cols: u16,
     ) -> Result<(), DaemonError> {
         let pty = self
-            .pty_manager
+            .pty_store
             .get_mut(session_id)
             .ok_or_else(|| DaemonError::SessionNotFound(session_id.to_string()))?;
 
@@ -217,7 +217,7 @@ impl SessionManager {
     /// Returns the dimensions last successfully set via [`resize_pty`], which
     /// match the PTY creation size initially. Does **not** query the kernel.
     pub fn pty_size(&self, session_id: &str) -> Option<(u16, u16)> {
-        self.pty_manager
+        self.pty_store
             .get(session_id)
             .map(|pty| (pty.size().rows, pty.size().cols))
     }
@@ -225,7 +225,7 @@ impl SessionManager {
     /// Write data to a session's PTY stdin.
     pub fn write_stdin(&self, session_id: &str, data: &[u8]) -> Result<(), DaemonError> {
         let pty = self
-            .pty_manager
+            .pty_store
             .get(session_id)
             .ok_or_else(|| DaemonError::SessionNotFound(session_id.to_string()))?;
 
@@ -254,7 +254,7 @@ impl SessionManager {
         }
 
         // Destroy PTY (may already be gone if process exited naturally)
-        match self.pty_manager.destroy(session_id) {
+        match self.pty_store.destroy(session_id) {
             Ok(()) => {}
             Err(DaemonError::SessionNotFound(_)) => {
                 // Expected: PTY already removed (process exited naturally)
@@ -293,8 +293,8 @@ impl SessionManager {
         );
 
         // Kill PTY if it exists
-        let pty_error = if self.pty_manager.get(session_id).is_some() {
-            self.pty_manager.destroy(session_id).err()
+        let pty_error = if self.pty_store.get(session_id).is_some() {
+            self.pty_store.destroy(session_id).err()
         } else {
             None
         };
@@ -357,7 +357,7 @@ impl SessionManager {
 
     /// Number of active PTYs.
     pub fn active_pty_count(&self) -> usize {
-        self.pty_manager.count()
+        self.pty_store.count()
     }
 
     /// Detach a client from all sessions (called on connection close).
@@ -372,7 +372,7 @@ impl SessionManager {
     /// (so the caller can broadcast a session_event notification).
     pub fn handle_pty_exit(&mut self, session_id: &str) -> Option<broadcast::Sender<Bytes>> {
         // Clean up PTY resources and capture exit code
-        let exit_code = match self.pty_manager.remove(session_id) {
+        let exit_code = match self.pty_store.remove(session_id) {
             Some(mut pty) => {
                 // Child has already exited (reader got EOF), so wait() returns immediately
                 let code = match pty.wait() {
@@ -472,12 +472,12 @@ mod tests {
     use crate::types::DaemonConfig;
 
     fn test_manager() -> (
-        SessionManager,
+        DaemonSessionStore,
         tokio::sync::mpsc::UnboundedReceiver<PtyExitEvent>,
     ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let config = DaemonConfig::default();
-        (SessionManager::new(config, tx), rx)
+        (DaemonSessionStore::new(config, tx), rx)
     }
 
     #[tokio::test]
