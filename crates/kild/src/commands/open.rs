@@ -15,7 +15,8 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
     let mode = resolve_open_mode(matches);
     let daemon_flag = matches.get_flag("daemon");
     let no_daemon_flag = matches.get_flag("no-daemon");
-    let runtime_mode = resolve_explicit_runtime_mode(daemon_flag, no_daemon_flag);
+    let acp_flag = matches.get_flag("acp");
+    let runtime_mode = resolve_explicit_runtime_mode(daemon_flag, no_daemon_flag, acp_flag);
     let resume = matches.get_flag("resume");
     let yolo = matches.get_flag("yolo");
     let no_attach = matches.get_flag("no-attach");
@@ -173,6 +174,7 @@ fn handle_open_all(
             let mode_label = match runtime_mode {
                 Some(kild_core::RuntimeMode::Daemon) => " [daemon]",
                 Some(kild_core::RuntimeMode::Terminal) => " [terminal]",
+                Some(kild_core::RuntimeMode::Acp) => " [acp]",
                 None => "",
             };
             println!("  {} ({}){}", branch, agent, mode_label);

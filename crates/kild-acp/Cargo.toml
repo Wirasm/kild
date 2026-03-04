@@ -1,0 +1,32 @@
+[package]
+name = "kild-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "KILD ACP client library - wraps agent-client-protocol SDK behind a Send+Sync API"
+
+[dependencies]
+# ACP SDK — the core protocol implementation
+agent-client-protocol = "0.9"
+
+# Async runtime — single-threaded for !Send ACP futures
+tokio = { workspace = true, features = ["rt", "sync", "process", "macros", "io-util"] }
+
+# Bridge tokio <-> futures_io traits (ACP SDK uses futures_io)
+tokio-util = { workspace = true, features = ["compat"] }
+
+# Serialization (ACP messages are JSON-RPC)
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Futures — needed for LocalBoxFuture type used by ACP SDK spawn callback
+futures.workspace = true
+
+# Error types
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

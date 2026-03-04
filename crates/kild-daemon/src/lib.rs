@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod client;
 pub mod errors;
 pub mod pid;

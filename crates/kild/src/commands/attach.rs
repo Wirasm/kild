@@ -20,6 +20,21 @@ pub(crate) fn handle_attach_command(
     // 1. Look up session to get daemon_session_id
     let mut session = helpers::require_session(branch, "cli.attach_failed")?;
 
+    // ACP sessions don't have PTY output to attach to
+    if session.runtime_mode == Some(kild_core::RuntimeMode::Acp) {
+        let msg = format!(
+            "'{}' is an ACP session. Use the UI to interact with ACP agents.",
+            branch
+        );
+        eprintln!("{}", msg);
+        error!(
+            event = "cli.attach_failed",
+            branch = branch,
+            error = msg.as_str()
+        );
+        return Err(msg.into());
+    }
+
     // If --pane is specified, look up that pane's daemon session ID
     let daemon_session_id = if let Some(pane_id) = matches.get_one::<String>("pane") {
         pane_daemon_session_id(&session.id, pane_id, branch)?

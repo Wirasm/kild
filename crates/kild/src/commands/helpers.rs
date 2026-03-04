@@ -211,13 +211,16 @@ pub fn format_partial_failure_error(operation: &str, failed: usize, total: usize
 
 /// Resolve runtime mode from CLI flags and config.
 ///
-/// Priority: --daemon / --no-daemon flags > [daemon] enabled config > Terminal default
+/// Priority: --acp / --daemon / --no-daemon flags > [daemon] enabled config > Terminal default
 pub fn resolve_runtime_mode(
     daemon_flag: bool,
     no_daemon_flag: bool,
+    acp_flag: bool,
     config: &KildConfig,
 ) -> kild_core::RuntimeMode {
-    if daemon_flag {
+    if acp_flag {
+        kild_core::RuntimeMode::Acp
+    } else if daemon_flag {
         kild_core::RuntimeMode::Daemon
     } else if no_daemon_flag {
         kild_core::RuntimeMode::Terminal
@@ -230,16 +233,19 @@ pub fn resolve_runtime_mode(
 
 /// Resolve runtime mode from explicit CLI flags only.
 ///
-/// Returns `None` when neither `--daemon` nor `--no-daemon` was passed,
+/// Returns `None` when no runtime mode flag was passed,
 /// signaling that `open_session` should auto-detect from the session's
 /// stored runtime mode.
 ///
-/// Priority: --daemon flag > --no-daemon flag > None (auto-detect)
+/// Priority: --acp flag > --daemon flag > --no-daemon flag > None (auto-detect)
 pub fn resolve_explicit_runtime_mode(
     daemon_flag: bool,
     no_daemon_flag: bool,
+    acp_flag: bool,
 ) -> Option<kild_core::RuntimeMode> {
-    if daemon_flag {
+    if acp_flag {
+        Some(kild_core::RuntimeMode::Acp)
+    } else if daemon_flag {
         Some(kild_core::RuntimeMode::Daemon)
     } else if no_daemon_flag {
         Some(kild_core::RuntimeMode::Terminal)
@@ -521,53 +527,66 @@ mod tests {
     #[test]
     fn test_resolve_runtime_mode_daemon_flag_wins() {
         let config = KildConfig::default();
-        let mode = resolve_runtime_mode(true, false, &config);
+        let mode = resolve_runtime_mode(true, false, false, &config);
         assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
     }
 
     #[test]
     fn test_resolve_runtime_mode_no_daemon_flag_wins() {
         let config = config_with_daemon_enabled();
-        let mode = resolve_runtime_mode(false, true, &config);
+        let mode = resolve_runtime_mode(false, true, false, &config);
         assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_acp_flag_wins() {
+        let config = config_with_daemon_enabled();
+        let mode = resolve_runtime_mode(false, false, true, &config);
+        assert!(matches!(mode, kild_core::RuntimeMode::Acp));
     }
 
     #[test]
     fn test_resolve_runtime_mode_config_enabled() {
         let config = config_with_daemon_enabled();
-        let mode = resolve_runtime_mode(false, false, &config);
+        let mode = resolve_runtime_mode(false, false, false, &config);
         assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
     }
 
     #[test]
     fn test_resolve_runtime_mode_default_terminal() {
         let config = KildConfig::default();
-        let mode = resolve_runtime_mode(false, false, &config);
+        let mode = resolve_runtime_mode(false, false, false, &config);
         assert!(matches!(mode, kild_core::RuntimeMode::Terminal));
     }
 
     #[test]
     fn test_resolve_runtime_mode_both_flags_daemon_wins() {
         let config = KildConfig::default();
-        let mode = resolve_runtime_mode(true, true, &config);
+        let mode = resolve_runtime_mode(true, true, false, &config);
         assert!(matches!(mode, kild_core::RuntimeMode::Daemon));
     }
 
     #[test]
     fn test_resolve_explicit_runtime_mode_daemon_flag() {
-        let mode = resolve_explicit_runtime_mode(true, false);
+        let mode = resolve_explicit_runtime_mode(true, false, false);
         assert_eq!(mode, Some(kild_core::RuntimeMode::Daemon));
     }
 
     #[test]
     fn test_resolve_explicit_runtime_mode_no_daemon_flag() {
-        let mode = resolve_explicit_runtime_mode(false, true);
+        let mode = resolve_explicit_runtime_mode(false, true, false);
         assert_eq!(mode, Some(kild_core::RuntimeMode::Terminal));
     }
 
     #[test]
+    fn test_resolve_explicit_runtime_mode_acp_flag() {
+        let mode = resolve_explicit_runtime_mode(false, false, true);
+        assert_eq!(mode, Some(kild_core::RuntimeMode::Acp));
+    }
+
+    #[test]
     fn test_resolve_explicit_runtime_mode_no_flags() {
-        let mode = resolve_explicit_runtime_mode(false, false);
+        let mode = resolve_explicit_runtime_mode(false, false, false);
         assert_eq!(mode, None);
     }
 }

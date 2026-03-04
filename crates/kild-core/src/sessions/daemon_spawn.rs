@@ -148,6 +148,94 @@ pub(super) fn spawn_daemon_agent(
     )
 }
 
+/// Spawn an agent via ACP (Agent Client Protocol) in the daemon.
+///
+/// Similar to `spawn_daemon_agent` but uses `CreateAcpSession` instead of `CreateSession`.
+/// The daemon spawns the agent with plain stdio pipes (no PTY) and acts as a
+/// transparent byte relay for ACP JSON-RPC messages.
+///
+/// The ACP binary and arguments come from the agent's `acp_command()` method,
+/// not the default PTY command.
+pub(super) fn spawn_acp_agent(params: &AgentSpawnParams<'_>) -> Result<AgentProcess, SessionError> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 1. Verify agent supports ACP
+    let acp_info =
+        crate::agents::get_acp_command(params.agent).ok_or_else(|| SessionError::ConfigError {
+            message: format!(
+                "Agent '{}' does not support ACP. Supported: claude, gemini, opencode.",
+                params.agent
+            ),
+        })?;
+
+    // 2. Auto-start daemon if not running
+    crate::daemon::ensure_daemon_running(params.kild_config)?;
+
+    // 3. Fleet member + dropbox setup (file-based, works for ACP too)
+    fleet::ensure_fleet_member(params.branch, params.worktree_path, params.agent);
+    dropbox::ensure_dropbox(params.project_id, params.branch, params.agent);
+
+    // 4. Build env vars (no tmux shim vars for ACP sessions)
+    let mut env_vars: Vec<(String, String)> = Vec::new();
+
+    // Task list env vars
+    if let Some(tlid) = params.task_list_id {
+        env_vars.extend(agents::resume::task_list_env_vars(params.agent, tlid));
+    }
+
+    // Agent-specific env vars (branch name, etc.)
+    env_vars.extend(agents::resume::codex_env_vars(params.agent, params.branch));
+    env_vars.extend(agents::resume::claude_env_vars(params.agent, params.branch));
+
+    // Dropbox env vars
+    dropbox::inject_dropbox_env_vars(
+        &mut env_vars,
+        params.project_id,
+        params.branch,
+        params.agent,
+    );
+
+    // 5. Build ACP command args
+    let acp_args: Vec<String> = acp_info.args.iter().map(|s| s.to_string()).collect();
+
+    // 6. Create ACP session via daemon IPC
+    let daemon_request = crate::daemon::client::DaemonAcpCreateRequest {
+        request_id: params.spawn_id,
+        session_id: params.spawn_id,
+        working_directory: params.worktree_path,
+        command: acp_info.binary,
+        args: &acp_args,
+        env_vars: &env_vars,
+    };
+    let daemon_result =
+        crate::daemon::client::create_acp_session(&daemon_request).map_err(|e| {
+            SessionError::DaemonError {
+                message: e.to_string(),
+            }
+        })?;
+
+    // 7. Construct the display command for the session record
+    let display_command = if acp_args.is_empty() {
+        acp_info.binary.to_string()
+    } else {
+        format!("{} {}", acp_info.binary, acp_args.join(" "))
+    };
+
+    // 8. Return AgentProcess (no PID, no terminal — daemon manages the process)
+    AgentProcess::new(
+        params.agent.to_string(),
+        params.spawn_id.to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        display_command,
+        now,
+        Some(daemon_result.daemon_session_id),
+    )
+}
+
 /// Spawn an agent in an external terminal window.
 ///
 /// Handles the shared terminal spawn sequence: agent hook setup, env prefix

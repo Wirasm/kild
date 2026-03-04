@@ -473,6 +473,75 @@ where
             Some(DaemonMessage::Ack { id })
         }
 
+        ClientMessage::CreateAcpSession {
+            id,
+            session_id,
+            working_directory,
+            command,
+            args,
+            env_vars,
+        } => {
+            let mut mgr = session_manager.write().await;
+            let env_pairs: Vec<(String, String)> = env_vars.into_iter().collect();
+
+            match mgr.create_acp_session(
+                &session_id,
+                &working_directory,
+                &command,
+                &args,
+                &env_pairs,
+            ) {
+                Ok(session_info) => Some(DaemonMessage::AcpSessionCreated {
+                    id,
+                    session: session_info,
+                }),
+                Err(e) => Some(DaemonMessage::Error {
+                    id,
+                    code: ErrorCode::from_code(e.error_code()),
+                    message: e.to_string(),
+                }),
+            }
+        }
+
+        ClientMessage::AcpRelay {
+            id,
+            session_id,
+            data,
+        } => {
+            let decoded = match base64::engine::general_purpose::STANDARD.decode(&data) {
+                Ok(d) => d,
+                Err(e) => {
+                    return Some(DaemonMessage::Error {
+                        id,
+                        code: ErrorCode::Base64DecodeError,
+                        message: e.to_string(),
+                    });
+                }
+            };
+
+            let mgr = session_manager.read().await;
+            match mgr.write_acp_stdin(&session_id, decoded) {
+                Ok(()) => Some(DaemonMessage::Ack { id }),
+                Err(e) => Some(DaemonMessage::Error {
+                    id,
+                    code: ErrorCode::from_code(e.error_code()),
+                    message: e.to_string(),
+                }),
+            }
+        }
+
+        ClientMessage::DestroyAcpSession { id, session_id } => {
+            let mut mgr = session_manager.write().await;
+            match mgr.destroy_session(&session_id, true) {
+                Ok(()) => Some(DaemonMessage::Ack { id }),
+                Err(e) => Some(DaemonMessage::Error {
+                    id,
+                    code: ErrorCode::from_code(e.error_code()),
+                    message: e.to_string(),
+                }),
+            }
+        }
+
         ClientMessage::Ping { id } => Some(DaemonMessage::Ack { id }),
 
         other => {

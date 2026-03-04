@@ -11,7 +11,9 @@
 pub(super) use super::daemon_request::compute_spawn_id;
 
 // Shared spawn sequences
-pub(super) use super::daemon_spawn::{AgentSpawnParams, spawn_daemon_agent, spawn_terminal_agent};
+pub(super) use super::daemon_spawn::{
+    AgentSpawnParams, spawn_acp_agent, spawn_daemon_agent, spawn_terminal_agent,
+};
 
 // Initial prompt delivery
 pub(super) use super::daemon_request::deliver_initial_prompt_for_session;

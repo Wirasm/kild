@@ -248,6 +248,82 @@ pub fn create_pty_session(
     }
 }
 
+/// Parameters for creating an ACP session in the daemon.
+///
+/// Unlike PTY sessions, ACP sessions don't use a PTY — the daemon spawns the
+/// agent as a subprocess with plain stdio pipes and acts as a transparent byte relay.
+#[derive(Debug, Clone)]
+pub struct DaemonAcpCreateRequest<'a> {
+    /// Unique request ID for response correlation.
+    pub request_id: &'a str,
+    /// Unique daemon session identifier.
+    pub session_id: &'a str,
+    /// Working directory for the agent process.
+    pub working_directory: &'a Path,
+    /// ACP binary to execute (e.g., "claude-code-acp", "opencode").
+    pub command: &'a str,
+    /// Arguments for the ACP binary (e.g., &["acp"]).
+    pub args: &'a [String],
+    /// Environment variables for the agent process.
+    pub env_vars: &'a [(String, String)],
+}
+
+/// Create a new ACP session in the daemon.
+///
+/// Sends a `CreateAcpSession` JSONL message to the daemon. The daemon spawns
+/// the agent as a subprocess with stdio pipes (no PTY) and acts as a transparent
+/// byte relay for ACP JSON-RPC messages.
+pub fn create_acp_session(
+    request: &DaemonAcpCreateRequest<'_>,
+) -> Result<DaemonCreateResult, DaemonClientError> {
+    info!(
+        event = "core.daemon.create_acp_session_started",
+        request_id = request.request_id,
+        session_id = request.session_id,
+        command = request.command,
+    );
+
+    let msg = ClientMessage::CreateAcpSession {
+        id: request.request_id.to_string(),
+        session_id: SessionId::new(request.session_id),
+        working_directory: request.working_directory.to_string_lossy().to_string(),
+        command: request.command.to_string(),
+        args: request.args.to_vec(),
+        env_vars: request.env_vars.iter().cloned().collect(),
+    };
+
+    let mut conn = get_connection()?;
+    let response = conn.send(&msg);
+
+    match response {
+        Ok(DaemonMessage::AcpSessionCreated { session, .. }) => {
+            return_connection(conn);
+            info!(
+                event = "core.daemon.create_acp_session_completed",
+                daemon_session_id = %session.id
+            );
+            Ok(DaemonCreateResult {
+                daemon_session_id: session.id.into_inner(),
+            })
+        }
+        Ok(_) => Err(DaemonClientError::ProtocolError {
+            message: "Expected AcpSessionCreated response".to_string(),
+        }),
+        Err(IpcError::DaemonError { code, message }) => {
+            return_connection(conn);
+            Err(DaemonClientError::DaemonError { code, message })
+        }
+        Err(e) => {
+            warn!(
+                event = "core.daemon.create_acp_session_failed",
+                request_id = request.request_id,
+                error = %e,
+            );
+            Err(e.into())
+        }
+    }
+}
+
 /// Stop a daemon-managed session (kill the PTY process).
 pub fn stop_daemon_session(daemon_session_id: &str) -> Result<(), DaemonClientError> {
     info!(

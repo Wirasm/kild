@@ -41,6 +41,14 @@ impl MainView {
             Self::stop_daemon_session_async(daemon_id, cx);
         }
 
+        // ACP sessions don't have PTY output — skip terminal tab attachment
+        if matches!(runtime_mode, Some(kild_core::RuntimeMode::Acp)) {
+            self.state.select_kild(id);
+            self.active_view = ActiveView::Detail;
+            cx.notify();
+            return;
+        }
+
         if self.terminal_tabs.get(&id).is_none_or(|t| t.is_empty()) {
             if matches!(runtime_mode, Some(kild_core::RuntimeMode::Daemon))
                 && display.process_status == kild_core::ProcessStatus::Running
