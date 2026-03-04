@@ -21,7 +21,7 @@ const MAX_NOTE_LENGTH: usize = 50;
 pub fn render_dashboard(
     state: &AppState,
     terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
-    team_manager: &crate::teams::TeamStore,
+    team_store: &crate::teams::TeamStore,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     let displays = state.filtered_displays();
@@ -110,9 +110,7 @@ pub fn render_dashboard(
         .child({
             let mut cards = Vec::new();
             for (ix, display) in displays.iter().enumerate() {
-                let teammate_count = team_manager
-                    .teammates_for_session(&display.session.id)
-                    .len();
+                let teammate_count = team_store.teammates_for_session(&display.session.id).len();
                 cards.push(render_card(display, ix, terminal_tabs, teammate_count, cx));
             }
             div()

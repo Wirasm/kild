@@ -17,13 +17,13 @@ pub struct ProjectRegistry {
 }
 
 impl ProjectRegistry {
-    /// Create a new empty project manager.
+    /// Create a new empty registry.
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create a project manager from existing data.
+    /// Create a registry from existing data.
     ///
     /// If `active_path` doesn't match any project, sets active_index to None.
     pub fn from_data(projects: Vec<Project>, active_path: Option<PathBuf>) -> Self {
@@ -145,7 +145,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_project_manager_new_is_empty() {
+    fn test_project_registry_new_is_empty() {
         let pm = ProjectRegistry::new();
         assert!(pm.is_empty());
         assert_eq!(pm.len(), 0);
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_add_first_project_becomes_active() {
+    fn test_project_registry_add_first_project_becomes_active() {
         let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_add_duplicate_returns_error() {
+    fn test_project_registry_add_duplicate_returns_error() {
         let mut pm = ProjectRegistry::new();
         let project1 = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_select_all_clears_active() {
+    fn test_project_registry_select_all_clears_active() {
         let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_select_valid_path() {
+    fn test_project_registry_select_valid_path() {
         let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_select_invalid_path_returns_error() {
+    fn test_project_registry_select_invalid_path_returns_error() {
         let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_remove_active_selects_first() {
+    fn test_project_registry_remove_active_selects_first() {
         let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_remove_non_active_preserves_selection() {
+    fn test_project_registry_remove_non_active_preserves_selection() {
         let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_remove_last_clears_active() {
+    fn test_project_registry_remove_last_clears_active() {
         let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
@@ -285,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_remove_before_active_adjusts_index() {
+    fn test_project_registry_remove_before_active_adjusts_index() {
         let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_from_data_with_valid_active() {
+    fn test_project_registry_from_data_with_valid_active() {
         let projects = vec![
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string()),
             Project::new_unchecked(PathBuf::from("/path/to/project-b"), "Project B".to_string()),
@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_from_data_with_invalid_active() {
+    fn test_project_registry_from_data_with_invalid_active() {
         let projects = vec![Project::new_unchecked(
             PathBuf::from("/path/to/project-a"),
             "Project A".to_string(),
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_manager_iter() {
+    fn test_project_registry_iter() {
         let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
