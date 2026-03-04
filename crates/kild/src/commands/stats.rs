@@ -135,7 +135,7 @@ fn handle_single_stats(
                     "HEALTH_UNAVAILABLE",
                 ));
             }
-            eprintln!("Could not compute branch health for '{}': {}", branch, msg);
+            super::helpers::display_operation_error("compute branch health for", branch, &msg);
             Err(format!("Branch health unavailable for '{}'", branch).into())
         }
     }

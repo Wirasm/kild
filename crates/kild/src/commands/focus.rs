@@ -68,7 +68,7 @@ pub(crate) fn handle_focus_command(matches: &ArgMatches) -> Result<(), Box<dyn s
             Ok(())
         }
         Err(e) => {
-            eprintln!("Could not focus '{}': {}", branch, e);
+            super::helpers::display_operation_error("focus", branch, &e);
             error!(event = "cli.focus_failed", branch = branch, error = %e);
             Err(e.into())
         }

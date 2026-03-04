@@ -37,7 +37,7 @@ pub(crate) fn handle_diff_command(matches: &ArgMatches) -> Result<(), Box<dyn st
 
     // 2. Execute git diff via kild-core (output appears directly in terminal)
     if let Err(e) = kild_core::git::cli::show_diff(&session.worktree_path, staged) {
-        eprintln!("Diff failed: {}", e);
+        eprintln!("{} {}", crate::color::error("Diff failed:"), e);
         eprintln!(
             "  Hint: Check that the worktree at {} is a valid git repository.",
             shorten_home_path(&session.worktree_path)
