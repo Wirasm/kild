@@ -103,7 +103,7 @@ fn run_health_once(
                 if json_output {
                     return Err(super::helpers::print_json_error(&e, e.error_code()));
                 }
-                eprintln!("Health check failed for '{}': {}", branch_name, e);
+                super::helpers::display_operation_error("check health of", branch_name, &e);
                 Err(e.into())
             }
         }
@@ -131,7 +131,7 @@ fn run_health_once(
                 if json_output {
                     return Err(super::helpers::print_json_error(&e, e.error_code()));
                 }
-                eprintln!("Health check failed: {}", e);
+                eprintln!("{} {}", crate::color::error("Health check failed:"), e);
                 Err(e.into())
             }
         }

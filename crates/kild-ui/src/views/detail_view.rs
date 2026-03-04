@@ -204,7 +204,7 @@ pub fn render_detail_view(
                         .child(render_detail_row("Created", &created_at, theme::text()))
                         .child(render_detail_row(
                             "Branch",
-                            &format!("kild/{}", branch),
+                            &kild_core::git::kild_branch_name(&branch),
                             theme::text(),
                         ))
                         .child(render_detail_row("Runtime", &runtime_text, theme::text())),

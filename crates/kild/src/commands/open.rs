@@ -101,7 +101,7 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
-            eprintln!("Could not open '{}': {}", branch, e);
+            super::helpers::display_operation_error("open", branch, &e);
             error!(event = "cli.open_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())

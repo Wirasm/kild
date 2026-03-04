@@ -54,7 +54,7 @@ pub(crate) fn handle_hide_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             Ok(())
         }
         Err(e) => {
-            eprintln!("Could not hide '{}': {}", branch, e);
+            super::helpers::display_operation_error("hide", branch, &e);
             error!(event = "cli.hide_failed", branch = branch, error = %e);
             events::log_app_error(&e);
             Err(e.into())

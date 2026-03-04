@@ -48,7 +48,11 @@ pub(crate) fn handle_teammates_command(
         Err(e) => {
             error!(event = "cli.teammates_failed", branch = branch, error = %e);
             events::log_app_error(&e);
-            eprintln!("Failed to read pane registry: {}", e);
+            eprintln!(
+                "{} {}",
+                crate::color::error("Failed to read pane registry:"),
+                e
+            );
             return Err(e.into());
         }
     };

@@ -49,7 +49,12 @@ pub(crate) fn handle_sync_command(matches: &ArgMatches) -> Result<(), Box<dyn st
             remote = remote,
             error = %e
         );
-        eprintln!("Fetch failed from remote '{}': {}", remote, e);
+        eprintln!(
+            "{} from remote '{}': {}",
+            crate::color::error("Fetch failed"),
+            remote,
+            e
+        );
         eprintln!("  Cannot sync without fetching. Check your network and remote config.");
         eprintln!(
             "  Hint: Use 'kild rebase {}' to rebase onto local state without fetching.",
@@ -103,7 +108,12 @@ fn handle_sync_all(base_override: Option<String>) -> Result<(), Box<dyn std::err
             remote = remote,
             error = %e
         );
-        eprintln!("Fetch failed from remote '{}': {}", remote, e);
+        eprintln!(
+            "{} from remote '{}': {}",
+            crate::color::error("Fetch failed"),
+            remote,
+            e
+        );
         eprintln!("  Cannot sync kilds without fetching. Check your network and remote config.");
         eprintln!(
             "  Hint: Use 'kild rebase --all' to rebase all kilds onto local state without fetching."

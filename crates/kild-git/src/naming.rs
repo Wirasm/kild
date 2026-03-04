@@ -15,11 +15,14 @@ pub fn sanitize_for_path(s: &str) -> String {
 /// The git branch namespace prefix used by KILD for worktree branches.
 pub const KILD_BRANCH_PREFIX: &str = "kild/";
 
+/// The worktree admin name prefix used for `.git/worktrees/<name>` directories.
+pub(crate) const WORKTREE_ADMIN_PREFIX: &str = "kild-";
+
 /// Constructs the KILD branch name for a given user branch name.
 ///
 /// Example: `"my-feature"` → `"kild/my-feature"`
 pub fn kild_branch_name(branch: &str) -> String {
-    format!("kild/{branch}")
+    format!("{}{branch}", KILD_BRANCH_PREFIX)
 }
 
 /// Constructs the worktree admin name (flat, filesystem-safe) for a given user branch name.
@@ -31,7 +34,7 @@ pub fn kild_branch_name(branch: &str) -> String {
 /// - `"my-feature"` → `"kild-my-feature"`
 /// - `"feature/auth"` → `"kild-feature-auth"`
 pub fn kild_worktree_admin_name(branch: &str) -> String {
-    format!("kild-{}", sanitize_for_path(branch))
+    format!("{}{}", WORKTREE_ADMIN_PREFIX, sanitize_for_path(branch))
 }
 
 pub fn calculate_worktree_path(base_dir: &Path, project_name: &str, branch: &str) -> PathBuf {

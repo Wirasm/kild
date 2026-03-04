@@ -38,6 +38,200 @@ pub fn cleanup_task_list(session_id: &str, task_list_id: &str, home_dir: &std::p
     }
 }
 
+/// Kill all tracked agents for a session, closing their terminal windows or daemon PTYs.
+///
+/// Returns `Ok(())` if all agents were killed (or if `force` is true).
+/// Returns `Err(ProcessKillFailed)` if any agent could not be killed and `force` is false.
+fn kill_tracked_agents(session: &Session, force: bool) -> Result<(), SessionError> {
+    if !session.has_agents() {
+        warn!(
+            event = "core.session.destroy_no_agents",
+            session_id = %session.id,
+            branch = %session.branch,
+            "Session has no tracked agents — skipping process/terminal cleanup"
+        );
+        return Ok(());
+    }
+
+    let mut kill_errors: Vec<(u32, String)> = Vec::with_capacity(session.agent_count());
+    for agent_proc in session.agents() {
+        if let Some(daemon_sid) = agent_proc.daemon_session_id() {
+            // Daemon-managed: destroy via IPC
+            info!(
+                event = "core.session.destroy_daemon_session",
+                daemon_session_id = daemon_sid,
+                agent = agent_proc.agent()
+            );
+            if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, force) {
+                warn!(
+                    event = "core.session.destroy_daemon_failed_continue",
+                    daemon_session_id = daemon_sid,
+                    error = %e,
+                    force = force,
+                );
+                // Daemon cleanup failure is non-fatal — the kild session file
+                // is being removed regardless. Do NOT add to kill_errors.
+            }
+
+            // Close the attach terminal window (if tracked)
+            if let (Some(terminal_type), Some(window_id)) =
+                (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+            {
+                info!(
+                    event = "core.session.destroy_close_attach_window",
+                    terminal_type = ?terminal_type,
+                    agent = agent_proc.agent(),
+                );
+                terminal::handler::close_terminal(terminal_type, Some(window_id));
+            }
+        } else {
+            // Terminal-managed: close window + kill process
+            if let (Some(terminal_type), Some(window_id)) =
+                (agent_proc.terminal_type(), agent_proc.terminal_window_id())
+            {
+                info!(
+                    event = "core.session.destroy_close_terminal",
+                    terminal_type = ?terminal_type,
+                    agent = agent_proc.agent(),
+                );
+                terminal::handler::close_terminal(terminal_type, Some(window_id));
+            }
+
+            let Some(pid) = agent_proc.process_id() else {
+                continue;
+            };
+
+            info!(
+                event = "core.session.destroy_kill_started",
+                pid = pid,
+                agent = agent_proc.agent()
+            );
+
+            let result = crate::process::kill_process(
+                pid,
+                agent_proc.process_name(),
+                agent_proc.process_start_time(),
+            );
+
+            match result {
+                Ok(()) => {
+                    info!(event = "core.session.destroy_kill_completed", pid = pid);
+                }
+                Err(crate::process::ProcessError::NotFound { .. }) => {
+                    info!(event = "core.session.destroy_kill_already_dead", pid = pid);
+                }
+                Err(e) if force => {
+                    warn!(
+                        event = "core.session.destroy_kill_failed_force_continue",
+                        pid = pid,
+                        error = %e
+                    );
+                }
+                Err(e) => {
+                    kill_errors.push((pid, e.to_string()));
+                }
+            }
+        }
+    }
+
+    if !kill_errors.is_empty() && !force {
+        for (pid, err) in &kill_errors {
+            error!(
+                event = "core.session.destroy_kill_failed",
+                pid = pid,
+                error = %err
+            );
+        }
+
+        let &(first_pid, ref first_msg) = kill_errors.first().unwrap();
+        let error_count = kill_errors.len();
+
+        let message = if error_count == 1 {
+            format!(
+                "Process still running. Kill it manually or use --force flag: {}",
+                first_msg
+            )
+        } else {
+            let pids: String = kill_errors
+                .iter()
+                .map(|(p, _)| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{} processes still running (PIDs: {}). Kill them manually or use --force flag.",
+                error_count, pids
+            )
+        };
+
+        return Err(SessionError::ProcessKillFailed {
+            pid: first_pid,
+            message,
+        });
+    }
+
+    Ok(())
+}
+
+/// Sweep for untracked daemon sessions created by the UI.
+///
+/// UI-created daemon sessions use the naming pattern `{kild_id}_ui_shell_{counter}`
+/// and are not tracked in the session file. Queries the daemon for all sessions
+/// with a matching prefix and destroys any remaining ones.
+fn sweep_ui_daemon_sessions(session_id: &str) {
+    let prefix = format!("{}_ui_shell_", session_id);
+    match crate::daemon::client::list_daemon_sessions() {
+        Ok(sessions) => {
+            let ui_sessions: Vec<_> = sessions
+                .iter()
+                .filter(|s| s.id.starts_with(&prefix))
+                .collect();
+
+            if !ui_sessions.is_empty() {
+                info!(
+                    event = "core.session.destroy_ui_sessions_sweep_started",
+                    session_id = session_id,
+                    count = ui_sessions.len()
+                );
+            }
+
+            for daemon_session in ui_sessions {
+                info!(
+                    event = "core.session.destroy_ui_session",
+                    daemon_session_id = %daemon_session.id,
+                );
+                if let Err(e) =
+                    crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
+                {
+                    warn!(
+                        event = "core.session.destroy_ui_session_failed",
+                        daemon_session_id = %daemon_session.id,
+                        error = %e,
+                    );
+                    eprintln!(
+                        "Warning: Failed to clean up UI terminal session {}: {}",
+                        daemon_session.id, e
+                    );
+                }
+            }
+        }
+        Err(crate::daemon::client::DaemonClientError::NotRunning { .. }) => {
+            debug!(
+                event = "core.session.destroy_ui_sessions_sweep_skipped",
+                session_id = session_id,
+                reason = "daemon_not_running"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event = "core.session.destroy_ui_sessions_sweep_failed",
+                session_id = session_id,
+                error = %e,
+                "Could not query daemon for orphaned UI sessions"
+            );
+        }
+    }
+}
+
 /// Destroys a kild by removing its worktree, killing the process, and deleting the session file.
 ///
 /// # Arguments
@@ -79,194 +273,10 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     );
 
     // 2. Close all terminal windows and kill all processes
-    {
-        if !session.has_agents() {
-            warn!(
-                event = "core.session.destroy_no_agents",
-                session_id = %session.id,
-                branch = name,
-                "Session has no tracked agents — skipping process/terminal cleanup"
-            );
-        }
-
-        // Kill/stop all tracked agents — branch on daemon vs terminal
-        let mut kill_errors: Vec<(u32, String)> = Vec::with_capacity(session.agent_count());
-        for agent_proc in session.agents() {
-            if let Some(daemon_sid) = agent_proc.daemon_session_id() {
-                // Daemon-managed: destroy via IPC
-                info!(
-                    event = "core.session.destroy_daemon_session",
-                    daemon_session_id = daemon_sid,
-                    agent = agent_proc.agent()
-                );
-                if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, force) {
-                    warn!(
-                        event = "core.session.destroy_daemon_failed_continue",
-                        daemon_session_id = daemon_sid,
-                        error = %e,
-                        force = force,
-                    );
-                    // Don't add to kill_errors — daemon cleanup failure is non-fatal.
-                    // The kild session file is being removed regardless.
-                }
-
-                // Close the attach terminal window (if tracked)
-                if let (Some(terminal_type), Some(window_id)) =
-                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-                {
-                    info!(
-                        event = "core.session.destroy_close_attach_window",
-                        terminal_type = ?terminal_type,
-                        agent = agent_proc.agent(),
-                    );
-                    terminal::handler::close_terminal(terminal_type, Some(window_id));
-                }
-            } else {
-                // Terminal-managed: close window + kill process
-                if let (Some(terminal_type), Some(window_id)) =
-                    (agent_proc.terminal_type(), agent_proc.terminal_window_id())
-                {
-                    info!(
-                        event = "core.session.destroy_close_terminal",
-                        terminal_type = ?terminal_type,
-                        agent = agent_proc.agent(),
-                    );
-                    terminal::handler::close_terminal(terminal_type, Some(window_id));
-                }
-
-                let Some(pid) = agent_proc.process_id() else {
-                    continue;
-                };
-
-                info!(
-                    event = "core.session.destroy_kill_started",
-                    pid = pid,
-                    agent = agent_proc.agent()
-                );
-
-                let result = crate::process::kill_process(
-                    pid,
-                    agent_proc.process_name(),
-                    agent_proc.process_start_time(),
-                );
-
-                match result {
-                    Ok(()) => {
-                        info!(event = "core.session.destroy_kill_completed", pid = pid);
-                    }
-                    Err(crate::process::ProcessError::NotFound { .. }) => {
-                        info!(event = "core.session.destroy_kill_already_dead", pid = pid);
-                    }
-                    Err(e) if force => {
-                        warn!(
-                            event = "core.session.destroy_kill_failed_force_continue",
-                            pid = pid,
-                            error = %e
-                        );
-                    }
-                    Err(e) => {
-                        kill_errors.push((pid, e.to_string()));
-                    }
-                }
-            }
-        }
-
-        if !kill_errors.is_empty() && !force {
-            for (pid, err) in &kill_errors {
-                error!(
-                    event = "core.session.destroy_kill_failed",
-                    pid = pid,
-                    error = %err
-                );
-            }
-
-            let &(first_pid, ref first_msg) = kill_errors.first().unwrap();
-            let error_count = kill_errors.len();
-
-            let message = if error_count == 1 {
-                format!(
-                    "Process still running. Kill it manually or use --force flag: {}",
-                    first_msg
-                )
-            } else {
-                let pids: String = kill_errors
-                    .iter()
-                    .map(|(p, _)| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "{} processes still running (PIDs: {}). Kill them manually or use --force flag.",
-                    error_count, pids
-                )
-            };
-
-            return Err(SessionError::ProcessKillFailed {
-                pid: first_pid,
-                message,
-            });
-        }
-    }
+    kill_tracked_agents(&session, force)?;
 
     // 3a. Sweep for untracked daemon sessions (e.g., UI-created shells)
-    //
-    // UI-created daemon sessions use the naming pattern `{kild_id}_ui_shell_{counter}`
-    // and are not tracked in the session file. Query the daemon for all sessions
-    // with a matching prefix and destroy any remaining ones.
-    {
-        let prefix = format!("{}_ui_shell_", session.id);
-        match crate::daemon::client::list_daemon_sessions() {
-            Ok(sessions) => {
-                let ui_sessions: Vec<_> = sessions
-                    .iter()
-                    .filter(|s| s.id.starts_with(&prefix))
-                    .collect();
-
-                if !ui_sessions.is_empty() {
-                    info!(
-                        event = "core.session.destroy_ui_sessions_sweep_started",
-                        session_id = %session.id,
-                        count = ui_sessions.len()
-                    );
-                }
-
-                for daemon_session in ui_sessions {
-                    info!(
-                        event = "core.session.destroy_ui_session",
-                        daemon_session_id = %daemon_session.id,
-                    );
-                    if let Err(e) =
-                        crate::daemon::client::destroy_daemon_session(&daemon_session.id, true)
-                    {
-                        warn!(
-                            event = "core.session.destroy_ui_session_failed",
-                            daemon_session_id = %daemon_session.id,
-                            error = %e,
-                        );
-                        eprintln!(
-                            "Warning: Failed to clean up UI terminal session {}: {}",
-                            daemon_session.id, e
-                        );
-                    }
-                }
-            }
-            Err(crate::daemon::client::DaemonClientError::NotRunning { .. }) => {
-                // Daemon not running — no UI sessions to clean up
-                debug!(
-                    event = "core.session.destroy_ui_sessions_sweep_skipped",
-                    session_id = %session.id,
-                    reason = "daemon_not_running"
-                );
-            }
-            Err(e) => {
-                warn!(
-                    event = "core.session.destroy_ui_sessions_sweep_failed",
-                    session_id = %session.id,
-                    error = %e,
-                    "Could not query daemon for orphaned UI sessions"
-                );
-            }
-        }
-    }
+    sweep_ui_daemon_sessions(&session.id);
 
     // 3b. Clean up tmux shim state and destroy child shim panes
     match KildPaths::resolve() {
