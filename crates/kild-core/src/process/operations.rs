@@ -110,10 +110,15 @@ pub fn kill_process(
                 });
             }
 
-            // Verify the process actually terminated. process.kill() sends
-            // the signal but the process may linger briefly. Poll with a
-            // bounded timeout to avoid orphaning zombies.
-            process.wait();
+            // Best-effort wait: give the process up to 500ms to exit after
+            // SIGKILL. Avoids blocking indefinitely on uninterruptible sleep.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            while std::time::Instant::now() < deadline {
+                if !is_process_running(pid).unwrap_or(false) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
 
             Ok(())
         }

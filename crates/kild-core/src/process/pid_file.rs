@@ -85,13 +85,10 @@ pub fn read_pid_file_with_retry(pid_file: &Path) -> Result<Option<u32>, ProcessE
             );
         }
 
-        // Add +/-20% jitter to prevent thundering herd
+        // Add +/-20% jitter using PID to decorrelate simultaneous launches
         let jitter_range = BASE_INTERVAL_MS / 5; // 20ms
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-        let jitter = (nanos as u64 % (jitter_range * 2 + 1)) as i64 - jitter_range as i64;
+        let pid_jitter = (std::process::id() as u64) % (jitter_range * 2 + 1);
+        let jitter = pid_jitter as i64 - jitter_range as i64;
         let interval_ms = (BASE_INTERVAL_MS as i64 + jitter) as u64;
         std::thread::sleep(Duration::from_millis(interval_ms));
     }

@@ -29,15 +29,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         e
     })?;
 
-    // The daemon is I/O-bound with low concurrency (PTY reads + IPC),
-    // so a single-threaded runtime avoids the overhead of a thread pool.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| {
-            error!(event = "daemon.runtime_init_failed", error = %e);
-            e
-        })?;
+    let rt = tokio::runtime::Runtime::new().map_err(|e| {
+        error!(event = "daemon.runtime_init_failed", error = %e);
+        e
+    })?;
 
     rt.block_on(async {
         kild_daemon::run_server(config).await.map_err(|e| {
