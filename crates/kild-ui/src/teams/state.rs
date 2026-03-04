@@ -9,7 +9,7 @@ use kild_teams::{TeamMember, TeamState, TeamWatcher};
 
 /// Manages team state for the UI, providing cached team data
 /// and file-watching for live updates.
-pub struct TeamManager {
+pub struct TeamStore {
     /// Cached team states keyed by kild session_id.
     team_states: HashMap<String, TeamState>,
     /// File watcher for team config and shim registry changes.
@@ -18,7 +18,7 @@ pub struct TeamManager {
     team_to_session: HashMap<String, String>,
 }
 
-impl TeamManager {
+impl TeamStore {
     pub fn new() -> Self {
         let watcher = TeamWatcher::new_default();
         if watcher.is_some() {

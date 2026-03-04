@@ -10,7 +10,7 @@ use kild_core::errors::KildError;
 
 use crate::protocol::codec::{read_message, write_message, write_message_flush};
 use crate::protocol::messages::{ClientMessage, DaemonMessage, ErrorCode};
-use crate::session::manager::SessionManager;
+use crate::session::manager::DaemonSessionStore;
 use crate::session::state::ClientId;
 
 /// Handle a single client connection.
@@ -22,7 +22,7 @@ use crate::session::state::ClientId;
 /// and sends responses back. For `attach` requests, enters streaming mode.
 pub async fn handle_connection<S>(
     stream: S,
-    session_manager: Arc<RwLock<SessionManager>>,
+    session_manager: Arc<RwLock<DaemonSessionStore>>,
     shutdown: tokio_util::sync::CancellationToken,
 ) where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -106,7 +106,7 @@ pub async fn handle_connection<S>(
 async fn dispatch_message<W>(
     msg: ClientMessage,
     client_id: ClientId,
-    session_manager: &Arc<RwLock<SessionManager>>,
+    session_manager: &Arc<RwLock<DaemonSessionStore>>,
     writer: Arc<Mutex<W>>,
     shutdown: &tokio_util::sync::CancellationToken,
 ) -> Option<DaemonMessage>
@@ -386,7 +386,7 @@ where
                 }
             };
 
-            // read() is sufficient: SessionManager::write_stdin takes &self.
+            // read() is sufficient: `DaemonSessionStore::write_stdin` takes &self.
             // Actual write exclusion is handled by Arc<Mutex<Writer>> inside ManagedPty.
             let mgr = session_manager.read().await;
             match mgr.write_stdin(&session_id, &decoded) {

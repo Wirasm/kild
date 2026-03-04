@@ -246,8 +246,8 @@ KILD_SHIM_LOG=1 cargo run -p kild-tmux-shim -- <command>  # Enable file-based lo
 **Key modules in kild-daemon:**
 
 - `protocol/` - JSONL IPC protocol (ClientMessage, DaemonMessage, codec)
-- `pty/` - PTY lifecycle management (PtyManager, ManagedPty via portable-pty, output broadcasting)
-- `session/` - Daemon session state machine (SessionManager, DaemonSession, SessionState enum)
+- `pty/` - PTY lifecycle management (PtyStore, ManagedPty via portable-pty, output broadcasting)
+- `session/` - Daemon session state machine (DaemonSessionStore, DaemonSession, SessionState enum)
 - `server/` - Unix socket server (async connection handling, message dispatch, signal-based shutdown)
 - `client/` - Daemon client for typed IPC operations (DaemonClient with connection pooling)
 

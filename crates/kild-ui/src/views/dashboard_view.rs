@@ -21,7 +21,7 @@ const MAX_NOTE_LENGTH: usize = 50;
 pub fn render_dashboard(
     state: &AppState,
     terminal_tabs: &std::collections::HashMap<String, TerminalTabs>,
-    team_manager: &crate::teams::TeamManager,
+    team_manager: &crate::teams::TeamStore,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     let displays = state.filtered_displays();

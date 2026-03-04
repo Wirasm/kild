@@ -9,14 +9,14 @@ use super::types::Project;
 /// or is `None` (meaning "all projects" view). This invariant is maintained
 /// automatically when projects are added or removed.
 #[derive(Clone, Debug, Default)]
-pub struct ProjectManager {
+pub struct ProjectRegistry {
     /// List of registered projects (private to enforce invariants).
     projects: Vec<Project>,
     /// Index of the active project, or None for "all projects" view.
     active_index: Option<usize>,
 }
 
-impl ProjectManager {
+impl ProjectRegistry {
     /// Create a new empty project manager.
     #[allow(dead_code)]
     pub fn new() -> Self {
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_new_is_empty() {
-        let pm = ProjectManager::new();
+        let pm = ProjectRegistry::new();
         assert!(pm.is_empty());
         assert_eq!(pm.len(), 0);
         assert!(pm.active().is_none());
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_add_first_project_becomes_active() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
             "Test Project".to_string(),
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_add_duplicate_returns_error() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
             "Test Project".to_string(),
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_select_all_clears_active() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
             "Test Project".to_string(),
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_select_valid_path() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
         let project2 =
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_select_invalid_path_returns_error() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
             "Test Project".to_string(),
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_remove_active_selects_first() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
         let project2 =
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_remove_non_active_preserves_selection() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
         let project2 =
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_remove_last_clears_active() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project = Project::new_unchecked(
             PathBuf::from("/path/to/project"),
             "Test Project".to_string(),
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_remove_before_active_adjusts_index() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
         let project2 =
@@ -314,7 +314,7 @@ mod tests {
             Project::new_unchecked(PathBuf::from("/path/to/project-b"), "Project B".to_string()),
         ];
 
-        let pm = ProjectManager::from_data(projects, Some(PathBuf::from("/path/to/project-b")));
+        let pm = ProjectRegistry::from_data(projects, Some(PathBuf::from("/path/to/project-b")));
 
         assert_eq!(pm.len(), 2);
         assert_eq!(pm.active_path(), Some(Path::new("/path/to/project-b")));
@@ -327,7 +327,7 @@ mod tests {
             "Project A".to_string(),
         )];
 
-        let pm = ProjectManager::from_data(projects, Some(PathBuf::from("/nonexistent/path")));
+        let pm = ProjectRegistry::from_data(projects, Some(PathBuf::from("/nonexistent/path")));
 
         assert_eq!(pm.len(), 1);
         assert!(
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_project_manager_iter() {
-        let mut pm = ProjectManager::new();
+        let mut pm = ProjectRegistry::new();
         let project1 =
             Project::new_unchecked(PathBuf::from("/path/to/project-a"), "Project A".to_string());
         let project2 =
