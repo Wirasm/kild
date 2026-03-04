@@ -170,6 +170,11 @@ pub struct DaemonRuntimeConfig {
     /// Overridden by `--cols` CLI flag.
     pub default_cols: Option<u16>,
 
+    /// HTTP hook endpoint port for Claude Code `type: "http"` hooks.
+    /// Must match the daemon's `[daemon] hooks_port` setting.
+    /// Default: 19222. Set to 0 to disable HTTP hooks.
+    pub hooks_port: Option<u16>,
+
     /// Remote daemon address. If set, CLI and UI connect via TCP/TLS instead of Unix socket.
     /// Format: "host:port" — e.g. "build-server:7432"
     pub remote_host: Option<String>,
@@ -190,6 +195,11 @@ impl DaemonRuntimeConfig {
     /// Whether to auto-start the daemon if not running. Default: true.
     pub fn auto_start(&self) -> bool {
         self.auto_start.unwrap_or(true)
+    }
+
+    /// HTTP hook endpoint port. Default: 19222. 0 = disabled.
+    pub fn hooks_port(&self) -> u16 {
+        self.hooks_port.unwrap_or(19222)
     }
 
     /// Validate the remote connection fields are consistent.
@@ -214,6 +224,7 @@ impl DaemonRuntimeConfig {
             auto_start: override_config.auto_start.or(base.auto_start),
             default_rows: override_config.default_rows.or(base.default_rows),
             default_cols: override_config.default_cols.or(base.default_cols),
+            hooks_port: override_config.hooks_port.or(base.hooks_port),
             remote_host: override_config
                 .remote_host
                 .clone()

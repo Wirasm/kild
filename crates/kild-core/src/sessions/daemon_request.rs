@@ -178,7 +178,6 @@ pub(super) fn deliver_initial_prompt_for_session(
             );
         }
 
-        super::dropbox::clear_idle_gate(project_id, branch);
         info!(
             event = "core.session.initial_prompt_delivered",
             branch = %branch,
@@ -186,10 +185,7 @@ pub(super) fn deliver_initial_prompt_for_session(
             "Initial prompt delivered via dropbox task.md + Claude Code inbox"
         );
     } else if let Some(dsid) = daemon_session_id {
-        let delivered = deliver_initial_prompt(dsid, prompt);
-        if delivered {
-            super::dropbox::clear_idle_gate(project_id, branch);
-        }
+        deliver_initial_prompt(dsid, prompt);
     }
 }
 
