@@ -1,6 +1,8 @@
 use clap::ArgMatches;
 use tracing::{error, info};
 
+use crate::color;
+
 use kild_core::SessionStatus;
 use kild_core::events;
 use kild_core::session_ops;
@@ -69,27 +71,64 @@ pub(crate) fn handle_open_command(matches: &ArgMatches) -> Result<(), Box<dyn st
                 println!("  PID:   {}", pid);
             }
 
-            // Warn fleet claude sessions about --initial-prompt deprecation.
-            if let Some(prompt) = initial_prompt
-                && fleet::fleet_mode_active(&session.branch)
-                && fleet::is_claude_fleet_agent(&session.agent)
-            {
-                eprintln!();
-                eprintln!("Warning: --initial-prompt is unreliable for fleet sessions.");
-                eprintln!(
-                    "  Use instead: kild inject {} \"<your message>\"",
-                    session.branch
-                );
+            // Deprecation warning for --initial-prompt.
+            let is_fleet_claude = fleet::fleet_mode_active(&session.branch)
+                && fleet::is_claude_fleet_agent(&session.agent);
 
-                let safe_name = fleet::fleet_safe_name(&session.branch);
-                match fleet::write_to_inbox(fleet::BRAIN_BRANCH, &safe_name, prompt) {
-                    Ok(()) => {
-                        eprintln!("  → Delivered via inbox as fallback.");
+            if let Some(prompt) = initial_prompt {
+                eprintln!();
+                if is_fleet_claude {
+                    // Fleet-specific warning with inbox fallback.
+                    eprintln!(
+                        "{}",
+                        color::warning(
+                            "Warning: --initial-prompt is deprecated. Fleet sessions: prompt delivered via inbox as fallback."
+                        )
+                    );
+                    eprintln!(
+                        "  {}",
+                        color::hint(&format!(
+                            "Use instead: kild inject {} \"<your message>\"",
+                            session.branch
+                        ))
+                    );
+
+                    let safe_name = fleet::fleet_safe_name(&session.branch);
+                    match fleet::write_to_inbox(fleet::BRAIN_BRANCH, &safe_name, prompt) {
+                        Ok(()) => {
+                            eprintln!("  {} Delivered via inbox as fallback.", color::muted("→"));
+                        }
+                        Err(e) => {
+                            error!(
+                                event = "cli.open.inbox_fallback_failed",
+                                branch = %session.branch,
+                                error = %e
+                            );
+                            eprintln!("  {} Inbox fallback also failed: {}", color::error("✗"), e);
+                            eprintln!(
+                                "  {}",
+                                color::hint(&format!(
+                                    "Manually run: kild inject {} \"...\"",
+                                    session.branch
+                                ))
+                            );
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("  ✗ Inbox fallback also failed: {}", e);
-                        eprintln!("  Manually run: kild inject {} \"...\"", session.branch);
-                    }
+                } else {
+                    // General deprecation warning for non-fleet sessions.
+                    eprintln!(
+                        "{}",
+                        color::warning(
+                            "Warning: --initial-prompt is deprecated and will be removed in a future release."
+                        )
+                    );
+                    eprintln!(
+                        "  {}",
+                        color::hint(&format!(
+                            "Use instead: kild open {} && sleep 5 && kild inject {} \"...\"",
+                            session.branch, session.branch
+                        ))
+                    );
                 }
             }
 

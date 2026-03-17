@@ -98,7 +98,7 @@ pub fn create_command() -> Command {
         .arg(
             Arg::new("initial-prompt")
                 .long("initial-prompt")
-                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .help("[DEPRECATED] Inject a prompt after agent starts. Use 'kild inject' instead — it's more reliable for fleet sessions")
                 .value_name("TEXT")
                 .conflicts_with("no-agent")
                 .conflicts_with("no-daemon"),
@@ -185,7 +185,7 @@ pub fn open_command() -> Command {
         .arg(
             Arg::new("initial-prompt")
                 .long("initial-prompt")
-                .help("Write this text to the agent's PTY stdin immediately after startup (daemon sessions only)")
+                .help("[DEPRECATED] Inject a prompt after agent starts. Use 'kild inject' instead — it's more reliable for fleet sessions")
                 .value_name("TEXT")
                 .conflicts_with("no-agent")
                 .conflicts_with("no-daemon")

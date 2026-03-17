@@ -87,7 +87,6 @@ pub(crate) fn handle_create_command(
 
     let use_main = matches.get_flag("main");
     let initial_prompt = matches.get_one::<String>("initial-prompt").cloned();
-    let initial_prompt_for_warning = initial_prompt.clone();
     let issue = matches.get_one::<u32>("issue").copied();
 
     let rows = matches.get_one::<u16>("rows").copied();
@@ -99,7 +98,7 @@ pub(crate) fn handle_create_command(
         .with_no_fetch(no_fetch)
         .with_runtime_mode(runtime_mode)
         .with_main_worktree(use_main)
-        .with_initial_prompt(initial_prompt)
+        .with_initial_prompt(initial_prompt.clone())
         .with_pty_size(rows, cols);
 
     match session_ops::create_session(request, &config) {
@@ -137,41 +136,64 @@ pub(crate) fn handle_create_command(
                 color::status(&status_str)
             );
 
-            // Warn fleet claude sessions about --initial-prompt deprecation.
-            // Deliver the prompt via the reliable inbox path instead.
-            if let Some(ref prompt) = initial_prompt_for_warning
-                && fleet::fleet_mode_active(&session.branch)
-                && fleet::is_claude_fleet_agent(&session.agent)
-            {
-                eprintln!();
-                eprintln!(
-                    "{}",
-                    color::warning("Warning: --initial-prompt is unreliable for fleet sessions.")
-                );
-                eprintln!(
-                    "  {}",
-                    color::hint(&format!(
-                        "Use instead: kild inject {} \"<your message>\"",
-                        session.branch
-                    ))
-                );
+            // Deprecation warning for --initial-prompt.
+            let is_fleet_claude = fleet::fleet_mode_active(&session.branch)
+                && fleet::is_claude_fleet_agent(&session.agent);
 
-                // Best-effort: deliver via inbox (the path that actually works).
-                let safe_name = fleet::fleet_safe_name(&session.branch);
-                match fleet::write_to_inbox(fleet::BRAIN_BRANCH, &safe_name, prompt) {
-                    Ok(()) => {
-                        eprintln!("  {} Delivered via inbox as fallback.", color::muted("→"));
+            if let Some(ref prompt) = initial_prompt {
+                eprintln!();
+                if is_fleet_claude {
+                    // Fleet-specific warning with inbox fallback.
+                    eprintln!(
+                        "{}",
+                        color::warning(
+                            "Warning: --initial-prompt is deprecated. Fleet sessions: prompt delivered via inbox as fallback."
+                        )
+                    );
+                    eprintln!(
+                        "  {}",
+                        color::hint(&format!(
+                            "Use instead: kild inject {} \"<your message>\"",
+                            session.branch
+                        ))
+                    );
+
+                    let safe_name = fleet::fleet_safe_name(&session.branch);
+                    match fleet::write_to_inbox(fleet::BRAIN_BRANCH, &safe_name, prompt) {
+                        Ok(()) => {
+                            eprintln!("  {} Delivered via inbox as fallback.", color::muted("→"));
+                        }
+                        Err(e) => {
+                            error!(
+                                event = "cli.create.inbox_fallback_failed",
+                                branch = %session.branch,
+                                error = %e
+                            );
+                            eprintln!("  {} Inbox fallback also failed: {}", color::error("✗"), e);
+                            eprintln!(
+                                "  {}",
+                                color::hint(&format!(
+                                    "Manually run: kild inject {} \"...\"",
+                                    session.branch
+                                ))
+                            );
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("  {} Inbox fallback also failed: {}", color::error("✗"), e);
-                        eprintln!(
-                            "  {}",
-                            color::hint(&format!(
-                                "Manually run: kild inject {} \"...\"",
-                                session.branch
-                            ))
-                        );
-                    }
+                } else {
+                    // General deprecation warning for non-fleet sessions.
+                    eprintln!(
+                        "{}",
+                        color::warning(
+                            "Warning: --initial-prompt is deprecated and will be removed in a future release."
+                        )
+                    );
+                    eprintln!(
+                        "  {}",
+                        color::hint(&format!(
+                            "Use instead: kild create {} && sleep 5 && kild inject {} \"...\"",
+                            session.branch, session.branch
+                        ))
+                    );
                 }
             }
 

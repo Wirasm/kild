@@ -43,12 +43,26 @@ case "$STATUS" in
     echo "Honryū is already running."
     ;;
   stopped)
-    kild open honryu --resume --initial-prompt "You've been restarted by the Tōryō. Orient yourself: check kild list --json, ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
-    echo "Honryū restarted."
+    kild open honryu --resume
+    echo "Waiting for Honryū to initialize..."
+    sleep 5
+    if kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' >/dev/null 2>&1; then
+      kild inject honryu "You've been restarted by the Tōryō. Orient yourself: check kild list --json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
+      echo "Honryū restarted."
+    else
+      echo "Warning: honryu session not active after 5s. Run: kild inject honryu \"...\" once it starts." >&2
+    fi
     ;;
   *)
-    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor" --initial-prompt "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, read ~/.kild/brain/state.json, today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state. You are running on the main branch — do not create worktrees for yourself."
-    echo "Honryū initialized."
+    kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor"
+    echo "Waiting for Honryū to initialize..."
+    sleep 5
+    if kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' >/dev/null 2>&1; then
+      kild inject honryu "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, check today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state."
+      echo "Honryū initialized."
+    else
+      echo "Warning: honryu session not active after 5s. Run: kild inject honryu \"...\" once it starts." >&2
+    fi
     ;;
 esac
 ```

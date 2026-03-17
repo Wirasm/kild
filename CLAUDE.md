@@ -91,7 +91,7 @@ cargo run -p kild -- create my-branch                  # Create kild with defaul
 cargo run -p kild -- create my-branch --note "Auth"    # Create with description
 cargo run -p kild -- create my-branch --yolo           # Create with autonomous mode
 cargo run -p kild -- create my-branch --main           # Run from project root (no worktree)
-cargo run -p kild -- create my-branch --initial-prompt "Start with auth"  # Inject prompt on startup
+cargo run -p kild -- create my-branch --initial-prompt "Start with auth"  # [DEPRECATED] Use: create && sleep 5 && kild inject
 cargo run -p kild -- list                              # List all kilds
 cargo run -p kild -- list --json                       # JSON output
 cargo run -p kild -- open my-branch                    # Reopen agent in existing kild
@@ -99,7 +99,7 @@ cargo run -p kild -- open --all                        # Open all stopped kilds
 cargo run -p kild -- open my-branch --resume           # Resume previous conversation
 cargo run -p kild -- open my-branch --no-attach        # Open daemon session without attach window
 cargo run -p kild -- open my-branch --no-attach --resume  # Headless resume (brain reopening workers)
-cargo run -p kild -- open my-branch --initial-prompt "Next task: ..."  # Inject prompt on reopen
+cargo run -p kild -- open my-branch --initial-prompt "Next task: ..."  # [DEPRECATED] Use: open && sleep 5 && kild inject
 cargo run -p kild -- inject my-branch "do the thing"  # Send to worker (inbox for claude, PTY for others)
 cargo run -p kild -- inject my-branch "msg" --inbox   # Force Claude Code inbox protocol
 cargo run -p kild -- inject my-branch "msg" --queue   # Queue task for later delivery (FIFO)
@@ -459,7 +459,10 @@ Inspect dropbox state with `kild inbox <branch>` (or `--all` for all fleet sessi
 
 ```
 kild create honryu --daemon --main   # brain: runs from project root, no worktree
+sleep 5                               # wait for agent init
+kild inject honryu "Orient yourself"  # deliver initial task via inject
 kild create <worker> --daemon        # worker: auto-joins fleet with team flags
+sleep 5
 kild inject <worker> "do the thing"  # brain → worker message
 ```
 
