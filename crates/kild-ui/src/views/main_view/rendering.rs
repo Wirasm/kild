@@ -189,7 +189,7 @@ impl MainView {
             ActiveView::Dashboard => dashboard_view::render_dashboard(
                 &self.state,
                 &self.terminal_tabs,
-                &self.team_manager,
+                &self.team_store,
                 cx,
             ),
             ActiveView::Detail => {
@@ -510,7 +510,7 @@ impl Render for MainView {
                                         &self.state,
                                         &self.terminal_tabs,
                                         self.active_pane_grid(),
-                                        &self.team_manager,
+                                        &self.team_store,
                                         cx,
                                     ))
                                     // Main area (flex-1)

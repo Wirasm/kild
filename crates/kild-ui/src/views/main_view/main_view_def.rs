@@ -55,8 +55,8 @@ pub struct MainView {
     pub(super) active_workspace: usize,
     /// Parsed keybindings from `~/.kild/keybindings.toml` (or defaults).
     pub(super) keybindings: UiKeybindings,
-    /// Agent team manager (owns watcher + cached team state).
-    pub(super) team_manager: crate::teams::TeamManager,
+    /// Agent team store (owns watcher + cached team state).
+    pub(super) team_store: crate::teams::TeamStore,
     /// Handle to the team watcher task. Must be stored to prevent cancellation.
     pub(super) _team_watcher_task: Task<()>,
 }
@@ -190,7 +190,7 @@ impl MainView {
         });
         spike_task.detach();
 
-        // Team watcher task: polls TeamManager for file changes
+        // Team watcher task: polls TeamStore for file changes
         let team_watcher_task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
             tracing::debug!(event = "ui.team_watcher_task.started");
 
@@ -200,7 +200,7 @@ impl MainView {
                     .await;
 
                 if let Err(e) = this.update(cx, |view, cx| {
-                    if view.team_manager.has_pending_events() {
+                    if view.team_store.has_pending_events() {
                         tracing::info!(event = "ui.teams.refresh_triggered");
 
                         // Collect session IDs for cross-referencing
@@ -214,7 +214,7 @@ impl MainView {
                             .iter()
                             .map(|(id, branch)| (id.as_str(), branch.as_str()))
                             .collect();
-                        view.team_manager.refresh(&refs);
+                        view.team_store.refresh(&refs);
                         view.sync_teammate_tabs(cx);
                         cx.notify();
                     }
@@ -254,7 +254,7 @@ impl MainView {
             workspaces: vec![super::super::pane_grid::PaneGrid::new()],
             active_workspace: 0,
             keybindings,
-            team_manager: crate::teams::TeamManager::new(),
+            team_store: crate::teams::TeamStore::new(),
             _team_watcher_task: team_watcher_task,
         };
         view.refresh_daemon_available(cx);

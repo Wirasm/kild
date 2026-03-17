@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 use crate::errors::DaemonError;
 use crate::hooks;
 use crate::pid;
-use crate::session::manager::SessionManager;
+use crate::session::manager::DaemonSessionStore;
 use crate::tls;
 use crate::types::DaemonConfig;
 
@@ -77,7 +77,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
     // Channel for PTY exit notifications from reader tasks
     let (pty_exit_tx, mut pty_exit_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let session_manager = Arc::new(RwLock::new(SessionManager::new(
+    let session_manager = Arc::new(RwLock::new(DaemonSessionStore::new(
         config.clone(),
         pty_exit_tx,
     )));
@@ -216,7 +216,7 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
 async fn tcp_accept_loop(
     listener: TcpListener,
     acceptor: TlsAcceptor,
-    session_manager: Arc<RwLock<SessionManager>>,
+    session_manager: Arc<RwLock<DaemonSessionStore>>,
     shutdown: CancellationToken,
 ) {
     loop {

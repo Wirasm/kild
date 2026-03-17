@@ -27,7 +27,7 @@ pub fn render_sidebar(
     state: &AppState,
     terminal_tabs: &HashMap<String, TerminalTabs>,
     pane_grid: &super::pane_grid::PaneGrid,
-    team_manager: &crate::teams::TeamManager,
+    team_store: &crate::teams::TeamStore,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
     let active_project_name = state
@@ -116,7 +116,7 @@ pub fn render_sidebar(
                             cx,
                         );
 
-                        let teammate_count = team_manager.teammates_for_session(&session_id).len();
+                        let teammate_count = team_store.teammates_for_session(&session_id).len();
 
                         let sid_for_add = session_id.to_string();
                         active_elements.push(

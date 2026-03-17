@@ -171,7 +171,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `components/` - Custom UI components (StatusIndicator only; Button, TextInput, Modal from gpui-component library)
 - `state/` - Type-safe state modules with encapsulated AppState facade (app_state/ for state and tests, dialog.rs, errors.rs, loading.rs, selection.rs, sessions.rs)
 - `actions.rs` - User actions (create, open, stop, destroy, project management)
-- `teams/` - TeamManager for resolving teammate counts per session (used by sidebar for [N] badge display)
+- `teams/` - TeamStore for resolving teammate counts per session (used by sidebar for [N] badge display)
 - `views/` - GPUI components (permanent Rail | Sidebar | Main | StatusBar layout with project_rail.rs for 48px project switcher with settings gear, sidebar.rs for kild navigation grouped by Active/Stopped with nested terminal items, hover actions, and [N] teammate badge for active agent teams, ActiveView enum for Control/Dashboard/Detail tab bar, dashboard_view.rs for fleet overview cards, detail_view.rs for kild drill-down, terminal_tabs.rs for multi-terminal support, status_bar.rs for contextual alerts and keyboard hints, main_view/ for main view implementation)
 - `terminal/` - Live terminal rendering with PTY integration (state.rs for PTY lifecycle with snapshot via `sync()`/`last_content()`, types.rs for `TerminalContent` snapshot type and `IndexedCell` alias, terminal_element/ for GPUI Element implementation, terminal_view.rs for View — calls `sync()` before constructing TerminalElement to minimize FairMutex hold time during prepaint, colors.rs for ANSI mapping, input.rs for keystroke translation)
 - `daemon_client.rs` - Async daemon IPC client for GPUI. `ErasedUiClient` type erasure unifies Unix socket and TCP/TLS transports; `connect_for_config()` reads config to choose the right transport.
@@ -181,8 +181,8 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 **Key modules in kild-daemon:**
 
 - `protocol/` - JSONL IPC protocol (ClientMessage, DaemonMessage, codec with flush/no-flush variants)
-- `pty/` - PTY lifecycle management (PtyManager, ManagedPty via portable-pty, output broadcasting)
-- `session/` - Daemon session state machine (SessionManager, DaemonSession, SessionState enum)
+- `pty/` - PTY lifecycle management (PtyStore, ManagedPty via portable-pty, output broadcasting)
+- `session/` - Daemon session state machine (DaemonSessionStore, DaemonSession, SessionState enum)
 - `server/` - Unix socket server with optional TCP/TLS listener (async connection handling, message dispatch, signal-based shutdown; `handle_connection<S>` is generic over stream type)
 - `hooks/` - HTTP hook endpoint for Claude Code `type: "http"` hooks (Stop, SubagentStop). `mod.rs` contains `serve_hooks()`, `process_hook()`, `HookState`, `HookPayload`. `idle_gate.rs` provides `IdleGate` — in-memory idle deduplication replacing the old file-based `.idle_sent` gate.
 - `tls.rs` - TLS cert generation and loading (self-signed cert auto-generated at `~/.kild/certs/` on first `bind_tcp` start)

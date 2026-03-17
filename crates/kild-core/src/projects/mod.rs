@@ -5,7 +5,7 @@ pub mod types;
 
 // Re-export commonly used types at module level
 pub use errors::ProjectError;
-pub use manager::ProjectManager;
+pub use manager::ProjectRegistry;
 pub use persistence::{load_projects, migrate_projects_to_canonical, save_projects};
 pub use types::{Project, ProjectsData};
 
