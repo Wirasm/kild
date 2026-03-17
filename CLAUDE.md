@@ -102,6 +102,7 @@ cargo run -p kild -- open my-branch --no-attach --resume  # Headless resume (bra
 cargo run -p kild -- open my-branch --initial-prompt "Next task: ..."  # Inject prompt on reopen
 cargo run -p kild -- inject my-branch "do the thing"  # Send to worker (inbox for claude, PTY for others)
 cargo run -p kild -- inject my-branch "msg" --inbox   # Force Claude Code inbox protocol
+cargo run -p kild -- inject my-branch "msg" --queue   # Queue task for later delivery (FIFO)
 cargo run -p kild -- inbox my-branch                   # Show fleet dropbox state for a session
 cargo run -p kild -- inbox my-branch --json            # JSON output
 cargo run -p kild -- inbox my-branch --task            # Show only task content
@@ -109,6 +110,7 @@ cargo run -p kild -- inbox my-branch --report          # Show only report conten
 cargo run -p kild -- inbox my-branch --status          # Show only ack status line
 cargo run -p kild -- inbox --all                       # Show all fleet sessions
 cargo run -p kild -- prime my-branch                   # Generate fleet context blob for agent bootstrapping
+cargo run -p kild -- prime my-branch --self            # Resolve branch from KILD_SESSION_BRANCH
 cargo run -p kild -- prime my-branch --json            # JSON output
 cargo run -p kild -- prime my-branch --status          # Fleet status table only (compact)
 cargo run -p kild -- prime --all                       # Concatenated prime blobs for all fleet sessions
@@ -120,6 +122,8 @@ cargo run -p kild -- stop my-branch --pane %1          # Stop a single teammate 
 cargo run -p kild -- attach my-branch --pane %1        # Attach to a specific teammate pane
 cargo run -p kild -- teammates my-branch               # List all panes (leader + teammates)
 cargo run -p kild -- teammates my-branch --json        # JSON output
+cargo run -p kild -- report --self --from-hook            # Write task completion report from hook stdin
+cargo run -p kild -- check-queue --self                   # Check queue; exit 2 if task available (TeammateIdle hook)
 cargo run -p kild -- complete my-branch                # Complete kild (PR cleanup)
 ```
 
@@ -180,6 +184,7 @@ cargo run -p kild -- complete my-branch                # Complete kild (PR clean
 - `pty/` - PTY lifecycle management (PtyManager, ManagedPty via portable-pty, output broadcasting)
 - `session/` - Daemon session state machine (SessionManager, DaemonSession, SessionState enum)
 - `server/` - Unix socket server with optional TCP/TLS listener (async connection handling, message dispatch, signal-based shutdown; `handle_connection<S>` is generic over stream type)
+- `hooks/` - HTTP hook endpoint for Claude Code `type: "http"` hooks (Stop, SubagentStop). `mod.rs` contains `serve_hooks()`, `process_hook()`, `HookState`, `HookPayload`. `idle_gate.rs` provides `IdleGate` — in-memory idle deduplication replacing the old file-based `.idle_sent` gate.
 - `tls.rs` - TLS cert generation and loading (self-signed cert auto-generated at `~/.kild/certs/` on first `bind_tcp` start)
 - `client/` - Daemon client for typed IPC operations (DaemonClient)
 
@@ -357,23 +362,29 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 
 ### Claude Code Status Hook Integration
 
-**Purpose:** Auto-configures Claude Code to report agent activity states (idle/waiting) back to KILD via `agent-status` command.
+**Purpose:** Auto-configures Claude Code to report agent activity states (idle/waiting) back to KILD via `agent-status` command and the daemon HTTP hook endpoint.
 
 **How it works:**
 
 1. `kild create/open --agent claude` installs `~/.kild/hooks/claude-status` shell script
-2. Script is patched into `~/.claude/settings.json` for Stop, Notification, SubagentStop, TeammateIdle, and TaskCompleted hook events
-3. Claude Code calls the hook with JSON events on stdin
-4. Hook maps events to KILD statuses: Stop/SubagentStop/TeammateIdle/TaskCompleted → idle, Notification(permission_prompt) → waiting, Notification(idle_prompt) → idle
-5. Hook calls `kild agent-status --self <status> --notify` to update session state and send desktop notifications
-6. On Stop/idle events, hook also calls `kild inject honryu "[EVENT] <branch> <event>: <last_message>"` to forward worker state to the brain session (skipped if the session IS honryu, preventing self-loops; also skipped if honryu is not running)
+2. `~/.claude/settings.json` is patched with a mix of hook types:
+   - HTTP hooks (Stop, SubagentStop) → daemon endpoint at `http://127.0.0.1:<hooks_port>/hooks`
+   - Command hooks (TeammateIdle, TaskCompleted, Notification) → shell script (require exit-code blocking or are unsupported for HTTP)
+   - Prompt hook (Stop) → task verification before stopping
+   - Command hook (SessionStart) → `kild prime --self --raw` for auto-priming
+3. Stop/SubagentStop: daemon processes these in Rust (agent-status update, brain forwarding, in-memory idle dedup via `hooks/idle_gate.rs`)
+4. TeammateIdle: script calls `kild agent-status --self idle --notify` then `kild check-queue --self`; exits 2 if a queued task is available (blocks the idle event)
+5. TaskCompleted: script calls `kild agent-status --self idle --notify` then pipes stdin to `kild report --self --from-hook`
+6. Notification: script maps permission_prompt → waiting, idle_prompt → idle
 
 **Hook script:** `~/.kild/hooks/claude-status` (shell script, auto-generated, do not edit)
+
+**HTTP hook endpoint:** Daemon binds `http://127.0.0.1:<hooks_port>/hooks` (config key `[daemon] hooks_port`, default 19222, 0 = disabled). Processes Stop/SubagentStop events with in-memory `IdleGate` deduplication and brain forwarding.
 
 **Settings patching behavior:**
 
 - Idempotent: runs on every `create/open --agent claude` but only patches if needed
-- Respects existing user hooks: if any hook event already references the claude-status script, skips patching
+- Respects existing user hooks: if any hook event already references the claude-status script or HTTP URL, skips patching
 - Creates `~/.claude/settings.json` if missing
 - Preserves all existing settings and hooks
 
@@ -437,10 +448,11 @@ Status detection uses PID tracking by default. Ghostty uses window-based detecti
 - `report.md` - Task result (written by worker on completion)
 - `history.jsonl` - Append-only audit trail of all injections (written by KILD)
 - `protocol.md` - Protocol instructions (auto-generated by KILD, do not edit)
+- `queue/<n>.md` - FIFO task queue files (n = sequential integer). Written by `kild inject <branch> --queue`, consumed and cleared by `kild check-queue`.
 
 Inspect dropbox state with `kild inbox <branch>` (or `--all` for all fleet sessions). Generate a full fleet context blob for agent bootstrapping with `kild prime <branch>` — outputs protocol, current task, and fleet status as a composable markdown blob suitable for `kild inject worker "$(kild prime worker)"`. Use `kild prime --all` to get concatenated blobs for all fleet sessions, `--all --status` for a single deduplicated fleet table, or `--all --json` for a JSON array.
 
-**Key files:** `crates/kild-core/src/sessions/fleet.rs`, `crates/kild-core/src/sessions/dropbox.rs`, `crates/kild/src/commands/inject.rs`, `crates/kild/src/commands/inbox.rs`, `crates/kild/src/commands/prime.rs`
+**Key files:** `crates/kild-core/src/sessions/fleet.rs`, `crates/kild-core/src/sessions/dropbox.rs`, `crates/kild/src/commands/inject.rs`, `crates/kild/src/commands/inbox.rs`, `crates/kild/src/commands/prime.rs`, `crates/kild/src/commands/report.rs`, `crates/kild/src/commands/check_queue.rs`
 
 **Typical brain setup:**
 

@@ -199,7 +199,7 @@ impl DaemonRuntimeConfig {
 
     /// HTTP hook endpoint port. Default: 19222. 0 = disabled.
     pub fn hooks_port(&self) -> u16 {
-        self.hooks_port.unwrap_or(19222)
+        self.hooks_port.unwrap_or(kild_protocol::DEFAULT_HOOKS_PORT)
     }
 
     /// Validate the remote connection fields are consistent.

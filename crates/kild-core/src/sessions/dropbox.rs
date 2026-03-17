@@ -560,8 +560,8 @@ pub fn write_report(project_id: &str, branch: &str, content: &str) -> Result<(),
 
 /// Enqueue a task into the dropbox queue directory.
 ///
-/// Creates `queue/` subdirectory if needed. Tasks are numbered sequentially
-/// starting from 1. Returns the queue position number.
+/// Creates `queue/` subdirectory if needed. Tasks are numbered with a
+/// monotonically increasing sequence number. Returns the task's sequence number.
 /// No-op (returns `Ok(None)`) if fleet mode is not active.
 pub fn enqueue_task(
     project_id: &str,
@@ -1973,5 +1973,129 @@ mod tests {
         assert!(!md.contains("## Your Protocol"));
         assert!(md.contains("No task assigned."));
         assert!(md.contains("No fleet sessions."));
+    }
+
+    // --- enqueue_task / dequeue_task / peek_queue ---
+
+    #[test]
+    fn enqueue_dequeue_fifo_ordering() {
+        with_env("queue_fifo", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "first").unwrap(),
+                Some(1)
+            );
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "second").unwrap(),
+                Some(2)
+            );
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "third").unwrap(),
+                Some(3)
+            );
+
+            // FIFO: first in, first out
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("first")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("second")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("third")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap(),
+                None,
+                "queue should be empty"
+            );
+        });
+    }
+
+    #[test]
+    fn peek_queue_does_not_consume() {
+        with_env("queue_peek", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            enqueue_task("proj123", "my-branch", "task text").unwrap();
+
+            let peek1 = peek_queue("proj123", "my-branch").unwrap();
+            let peek2 = peek_queue("proj123", "my-branch").unwrap();
+            assert_eq!(peek1, peek2, "peek must be idempotent");
+            assert!(peek1.is_some());
+
+            // Item should still be dequeueable
+            assert!(dequeue_task("proj123", "my-branch").unwrap().is_some());
+        });
+    }
+
+    #[test]
+    fn dequeue_empty_queue_returns_none() {
+        with_env("queue_empty", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            assert_eq!(dequeue_task("proj123", "my-branch").unwrap(), None);
+        });
+    }
+
+    #[test]
+    fn enqueue_noop_when_fleet_not_active() {
+        with_env("queue_no_fleet", false, |_| {
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "should not enqueue").unwrap(),
+                None
+            );
+        });
+    }
+
+    #[test]
+    fn write_report_overwrites_existing() {
+        with_env("report_overwrite", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            write_report("proj123", "my-branch", "first report").unwrap();
+            write_report("proj123", "my-branch", "second report").unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let content = std::fs::read_to_string(
+                paths
+                    .fleet_dropbox_dir("proj123", "my-branch")
+                    .join("report.md"),
+            )
+            .unwrap();
+            assert_eq!(content, "second report");
+        });
+    }
+
+    #[test]
+    fn write_report_noop_when_fleet_not_active() {
+        with_env("report_no_fleet", false, |_| {
+            // Should not error, just no-op
+            write_report("proj123", "my-branch", "should not write").unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let report_path = paths
+                .fleet_dropbox_dir("proj123", "my-branch")
+                .join("report.md");
+            assert!(!report_path.exists());
+        });
+    }
+
+    // --- enqueue_task sequence number comment ---
+
+    #[test]
+    fn enqueue_task_sequence_numbers_are_monotonic() {
+        with_env("queue_seq", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            assert_eq!(enqueue_task("proj123", "my-branch", "a").unwrap(), Some(1));
+            assert_eq!(enqueue_task("proj123", "my-branch", "b").unwrap(), Some(2));
+
+            // Dequeue first, then enqueue — next should be 3, not 1
+            dequeue_task("proj123", "my-branch").unwrap();
+            assert_eq!(enqueue_task("proj123", "my-branch", "c").unwrap(), Some(3));
+        });
     }
 }

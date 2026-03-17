@@ -162,7 +162,7 @@ fn default_shutdown_timeout_secs() -> u64 {
 }
 
 fn default_hooks_port() -> u16 {
-    19222
+    kild_protocol::DEFAULT_HOOKS_PORT
 }
 
 /// Wrapper for deserializing the `[daemon]` section from a KILD config file.

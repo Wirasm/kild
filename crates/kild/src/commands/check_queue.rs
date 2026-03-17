@@ -8,16 +8,14 @@ use super::helpers;
 /// Handle `kild check-queue --self`.
 ///
 /// Checks for queued work. If a task is available:
-/// - Dequeues and writes it to the dropbox (task.md + inbox)
+/// - Dequeues and writes it to the dropbox (task.md, plus inbox for claude sessions)
 /// - Prints feedback to stderr
 /// - Exits with code 2 (blocks TeammateIdle, teammate continues working)
 ///
 /// If no work is queued: exits with code 0 (teammate goes idle normally).
 pub(crate) fn handle_check_queue_command(
-    matches: &ArgMatches,
+    _matches: &ArgMatches,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _self_flag = matches.get_flag("self");
-
     let branch = std::env::var("KILD_SESSION_BRANCH").map_err(
         |_| "KILD_SESSION_BRANCH not set — --self requires running inside a kild session",
     )?;
@@ -48,7 +46,7 @@ pub(crate) fn handle_check_queue_command(
     // Write task to dropbox (same as kild inject)
     use kild_core::sessions::dropbox::DeliveryMethod;
     let delivery_methods = vec![DeliveryMethod::Dropbox];
-    let _ = dropbox::write_task(
+    dropbox::write_task(
         &session.project_id,
         &session.branch,
         &task_text,
@@ -56,7 +54,8 @@ pub(crate) fn handle_check_queue_command(
     )
     .map_err(|e| {
         error!(event = "cli.check_queue_delivery_failed", branch = %branch, error = %e);
-    });
+        Box::<dyn std::error::Error>::from(e)
+    })?;
 
     // For claude sessions, also write to inbox
     if session.agent == "claude" {

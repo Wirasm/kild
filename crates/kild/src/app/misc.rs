@@ -159,8 +159,9 @@ pub fn prime_command() -> Command {
         .arg(
             Arg::new("raw")
                 .long("raw")
-                .help("Output plain markdown without ANSI colors or CLI chrome")
-                .action(ArgAction::SetTrue),
+                .help("Accepted for compatibility (output is always plain markdown)")
+                .action(ArgAction::SetTrue)
+                .hide(true),
         )
 }
 

@@ -1,3 +1,7 @@
+/// Default HTTP hooks port for Claude Code `type: "http"` hooks.
+/// Used by kild-daemon (bind), kild-config (config default), and kild-core (settings patching).
+pub const DEFAULT_HOOKS_PORT: u16 = 19222;
+
 #[cfg(unix)]
 pub mod async_client;
 #[cfg(unix)]

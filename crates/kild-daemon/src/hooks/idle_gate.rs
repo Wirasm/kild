@@ -4,7 +4,7 @@
 //! the gate is "armed" so subsequent idle events are suppressed until the next task
 //! write clears it.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// In-memory idle deduplication gate.
 ///
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 /// to the brain. Subsequent idle events are suppressed until `clear()` is called
 /// (typically when a new task is injected).
 pub struct IdleGate {
-    sent: HashMap<String, bool>,
+    armed: HashSet<String>,
 }
 
 impl Default for IdleGate {
@@ -24,7 +24,7 @@ impl Default for IdleGate {
 impl IdleGate {
     pub fn new() -> Self {
         Self {
-            sent: HashMap::new(),
+            armed: HashSet::new(),
         }
     }
 
@@ -32,24 +32,18 @@ impl IdleGate {
     /// event (gate was not already armed) — meaning the caller should forward it.
     /// Returns `false` if the gate was already armed (duplicate idle, suppress).
     pub fn try_arm(&mut self, branch: &str) -> bool {
-        let entry = self.sent.entry(branch.to_string()).or_insert(false);
-        if *entry {
-            false
-        } else {
-            *entry = true;
-            true
-        }
+        self.armed.insert(branch.to_string())
     }
 
     /// Clear the gate for `branch`, allowing the next idle event to be forwarded.
     pub fn clear(&mut self, branch: &str) {
-        self.sent.remove(branch);
+        self.armed.remove(branch);
     }
 
     /// Clear all gates (e.g. on daemon restart).
     #[cfg(test)]
     pub fn clear_all(&mut self) {
-        self.sent.clear();
+        self.armed.clear();
     }
 }
 

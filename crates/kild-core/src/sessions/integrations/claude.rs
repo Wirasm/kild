@@ -4,14 +4,22 @@ use kild_config::KildConfig;
 use kild_paths::KildPaths;
 use tracing::{info, warn};
 
-/// Default HTTP hooks port. Must match daemon default.
-const DEFAULT_HOOKS_PORT: u16 = 19222;
+use kild_protocol::DEFAULT_HOOKS_PORT;
 
 /// Resolve the configured hooks port from kild-config.
 fn resolve_hooks_port() -> u16 {
-    KildConfig::load_hierarchy()
-        .map(|c| c.daemon.hooks_port())
-        .unwrap_or(DEFAULT_HOOKS_PORT)
+    match KildConfig::load_hierarchy() {
+        Ok(c) => c.daemon.hooks_port(),
+        Err(e) => {
+            warn!(
+                event = "core.session.integrations.claude.config_load_failed",
+                error = %e,
+                "Falling back to default hooks port {}",
+                DEFAULT_HOOKS_PORT,
+            );
+            DEFAULT_HOOKS_PORT
+        }
+    }
 }
 
 /// Ensure the Claude Code status hook script is installed at `~/.kild/hooks/claude-status`.
@@ -139,7 +147,8 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
         serde_json::json!({})
     };
 
-    // Helper: check if a hook array already contains our script or URL
+    // Helper: check if a hook array already contains our command script or HTTP URL.
+    // Does NOT check for prompt hooks — those have their own dedicated `has_prompt_hook` check.
     let has_our_hook = |entries: &serde_json::Value| -> bool {
         if let Some(arr) = entries.as_array() {
             arr.iter().any(|entry| {
@@ -147,10 +156,6 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
                     hook_list.iter().any(|h| {
                         h.get("command").and_then(|c| c.as_str()) == Some(&hook_path_str)
                             || h.get("url").and_then(|u| u.as_str()) == Some(hooks_url.as_str())
-                            || h.get("type").and_then(|t| t.as_str()) == Some("prompt")
-                                && h.get("prompt")
-                                    .and_then(|p| p.as_str())
-                                    .is_some_and(|p| p.contains("KILD"))
                     })
                 } else {
                     false
@@ -353,7 +358,7 @@ fn which_kild_bin() -> String {
         .ok()
         .and_then(|p| {
             // current_exe may point to kild, kild-daemon, or kild-tmux-shim.
-            // Walk up to find the kild binary sibling.
+            // Check the same directory for a `kild` sibling binary.
             let parent = p.parent()?;
             let kild = parent.join("kild");
             if kild.exists() {
@@ -529,19 +534,25 @@ mod tests {
             std::env::temp_dir().join(format!("kild_test_claude_hook_idem_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_home);
 
-        let result =
-            ensure_claude_status_hook_with_paths(&KildPaths::from_dir(temp_home.join(".kild")));
+        let paths = KildPaths::from_dir(temp_home.join(".kild"));
+        let result = ensure_claude_status_hook_with_paths(&paths);
         assert!(result.is_ok());
         let hook_path = temp_home.join(".kild").join("hooks").join("claude-status");
-        let content1 = fs::read_to_string(&hook_path).unwrap();
 
-        let result =
-            ensure_claude_status_hook_with_paths(&KildPaths::from_dir(temp_home.join(".kild")));
+        // Write stale/outdated content to simulate an old hook version
+        fs::write(&hook_path, "#!/bin/sh\n# outdated hook\n").unwrap();
+
+        // Second call should overwrite with current content
+        let result = ensure_claude_status_hook_with_paths(&paths);
         assert!(result.is_ok());
-        let content2 = fs::read_to_string(&hook_path).unwrap();
-        assert_eq!(
-            content1, content2,
-            "Content should not change on second call"
+        let content = fs::read_to_string(&hook_path).unwrap();
+        assert!(
+            content.contains("TeammateIdle"),
+            "Should have been overwritten with current hook content"
+        );
+        assert!(
+            !content.contains("outdated hook"),
+            "Stale content should be gone"
         );
 
         let _ = fs::remove_dir_all(&temp_home);

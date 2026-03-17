@@ -54,16 +54,14 @@ pub(crate) fn handle_prime_command(matches: &ArgMatches) -> Result<(), Box<dyn s
     };
     let json_output = matches.get_flag("json");
     let status_only = matches.get_flag("status");
-    let raw_output = matches.get_flag("raw");
 
-    handle_single_prime(&branch, json_output, status_only, raw_output)
+    handle_single_prime(&branch, json_output, status_only)
 }
 
 fn handle_single_prime(
     branch: &str,
     json_output: bool,
     status_only: bool,
-    raw_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(event = "cli.prime_started", branch = branch);
 
@@ -101,9 +99,6 @@ fn handle_single_prime(
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if status_only {
         print!("{}", context.to_status_markdown());
-    } else if raw_output {
-        // Raw mode: plain markdown without ANSI colors. Used by SessionStart hook.
-        print!("{}", context.to_markdown());
     } else {
         print!("{}", context.to_markdown());
     }

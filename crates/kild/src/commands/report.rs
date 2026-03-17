@@ -6,7 +6,6 @@ use super::helpers;
 pub(crate) fn handle_report_command(
     matches: &ArgMatches,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _self_flag = matches.get_flag("self");
     let from_hook = matches.get_flag("from-hook");
 
     if !from_hook {
@@ -26,7 +25,10 @@ pub(crate) fn handle_report_command(
     })?;
 
     // Parse TaskCompleted JSON to extract task info
-    let parsed: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&input).map_err(|e| {
+        error!(event = "cli.report_parse_failed", branch = %branch, error = %e);
+        format!("failed to parse hook JSON: {}", e)
+    })?;
 
     let task_subject = parsed["task_subject"].as_str().unwrap_or("(unknown task)");
     let task_description = parsed["task_description"].as_str().unwrap_or("");

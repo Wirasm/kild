@@ -145,7 +145,12 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
             if let Err(e) = hooks::serve_hooks(hooks_port, hook_state, hooks_shutdown).await {
                 error!(
                     event = "daemon.hooks.http_listener_failed",
+                    port = hooks_port,
                     error = %e,
+                    "HTTP hook endpoint failed to start on port {}. Claude Code Stop/SubagentStop \
+                     hooks will not be processed. Check if port {} is already in use or set \
+                     [daemon] hooks_port to a different value in ~/.kild/config.toml.",
+                    hooks_port, hooks_port,
                 );
             }
         });
