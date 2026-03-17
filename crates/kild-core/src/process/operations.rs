@@ -112,24 +112,20 @@ pub fn kill_process(
 
             // Best-effort wait: give the process up to 500ms to exit after
             // SIGKILL. Reuses the existing `system` to avoid repeated allocations.
-            let mut exited = false;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-            while std::time::Instant::now() < deadline {
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_millis(500) {
                 system.refresh_processes(ProcessesToUpdate::Some(&[pid_obj]), true);
                 if system.process(pid_obj).is_none() {
-                    exited = true;
-                    break;
+                    return Ok(());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
 
-            if !exited {
-                debug!(
-                    event = "core.process.kill_wait_timeout",
-                    pid = pid,
-                    message = "process did not exit within 500ms after SIGKILL"
-                );
-            }
+            debug!(
+                event = "core.process.kill_wait_timeout",
+                pid = pid,
+                message = "process did not exit within 500ms after SIGKILL"
+            );
 
             Ok(())
         }

@@ -47,12 +47,11 @@ pub fn read_pid_file_with_retry(pid_file: &Path) -> Result<Option<u32>, ProcessE
     const BASE_INTERVAL_MS: u64 = 100;
     const MAX_WAIT: Duration = Duration::from_secs(3);
 
-    // Compute jitter once — deterministic per-process, varies across concurrent launches
-    let jitter_range = BASE_INTERVAL_MS / 5; // 20ms
-    let pid_jitter = (std::process::id() as u64) % (jitter_range * 2 + 1);
-    let jitter = pid_jitter as i64 - jitter_range as i64;
-    // poll_interval is in [80, 120] ms — cannot underflow
-    let poll_interval = Duration::from_millis((BASE_INTERVAL_MS as i64 + jitter) as u64);
+    // Compute jitter once — deterministic per-process, varies across concurrent launches.
+    // Maps PID to [0, 40], subtracts 20 → poll_interval in [80, 120] ms (no underflow).
+    const JITTER_RANGE_MS: u64 = BASE_INTERVAL_MS / 5; // 20ms
+    let pid_offset = (std::process::id() as u64) % (JITTER_RANGE_MS * 2 + 1);
+    let poll_interval = Duration::from_millis(BASE_INTERVAL_MS + pid_offset - JITTER_RANGE_MS);
 
     let start = std::time::Instant::now();
     let mut last_error: Option<ProcessError> = None;
