@@ -16,6 +16,7 @@ pub(crate) fn handle_inject_command(
         .get_one::<String>("text")
         .ok_or("Text argument is required")?;
     let force_inbox = matches.get_flag("inbox");
+    let queue_mode = matches.get_flag("queue");
 
     // Reject empty text — it produces a no-op inbox message or blank PTY input.
     if text.trim().is_empty() {
@@ -24,6 +25,41 @@ pub(crate) fn handle_inject_command(
     }
 
     info!(event = "cli.inject_started", branch = branch);
+
+    // Queue mode: store task for later delivery without immediate injection.
+    if queue_mode {
+        let session = helpers::require_session(branch, "cli.inject_failed")?;
+        match kild_core::sessions::dropbox::enqueue_task(&session.project_id, &session.branch, text)
+        {
+            Ok(Some(num)) => {
+                println!(
+                    "{} task to {} (queue position {})",
+                    crate::color::muted("Queued"),
+                    crate::color::ice(branch),
+                    crate::color::aurora(&num.to_string()),
+                );
+                info!(
+                    event = "cli.inject_queued",
+                    branch = branch,
+                    queue_num = num
+                );
+                return Ok(());
+            }
+            Ok(None) => {
+                let msg = format!(
+                    "Fleet mode not active for '{}' — cannot queue tasks",
+                    branch
+                );
+                eprintln!("{}", crate::color::error(&msg));
+                return Err(msg.into());
+            }
+            Err(e) => {
+                eprintln!("{}", crate::color::error(&format!("Queue failed: {}", e)));
+                error!(event = "cli.inject_queue_failed", branch = branch, error = %e);
+                return Err(e.into());
+            }
+        }
+    }
 
     let mut session = helpers::require_session(branch, "cli.inject_failed")?;
 

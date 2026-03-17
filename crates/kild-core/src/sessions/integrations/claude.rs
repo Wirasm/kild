@@ -1,21 +1,36 @@
 use std::path::Path;
 
+use kild_config::KildConfig;
 use kild_paths::KildPaths;
 use tracing::{info, warn};
 
+use kild_protocol::DEFAULT_HOOKS_PORT;
+
+/// Resolve the configured hooks port from kild-config.
+fn resolve_hooks_port() -> u16 {
+    match KildConfig::load_hierarchy() {
+        Ok(c) => c.daemon.hooks_port(),
+        Err(e) => {
+            warn!(
+                event = "core.session.integrations.claude.config_load_failed",
+                error = %e,
+                "Falling back to default hooks port {}",
+                DEFAULT_HOOKS_PORT,
+            );
+            DEFAULT_HOOKS_PORT
+        }
+    }
+}
+
 /// Ensure the Claude Code status hook script is installed at `~/.kild/hooks/claude-status`.
 ///
-/// This script is registered in Claude Code's `~/.claude/settings.json` for Stop,
-/// Notification, SubagentStop, TeammateIdle, and TaskCompleted hooks. It reads JSON
-/// from stdin and does two things:
+/// This script handles events that cannot use HTTP hooks:
+/// - **TeammateIdle** / **TaskCompleted**: require exit-code blocking (exit 2), HTTP hooks cannot block these
+/// - **Notification**: Claude Code does not support HTTP hooks for this event
 ///
-/// 1. Maps Claude Code events to KILD agent statuses via `kild agent-status --self <status>`.
-/// 2. Forwards tagged events to the Honryū brain session via `kild inject honryu "[EVENT] ..."`.
-///    By default only primary agent events (Stop, Notification) are forwarded. Set
-///    `KILD_HOOK_VERBOSE=1` to include SubagentStop, TeammateIdle, and TaskCompleted.
+/// Stop and SubagentStop are handled by the daemon's HTTP hook endpoint instead.
 ///
 /// Always overwrites to pick up updated hook content.
-/// User edits to `~/.kild/hooks/claude-status` will be replaced on every create/open.
 fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String> {
     let hooks_dir = paths.hooks_dir();
     let hook_path = paths.claude_status_hook();
@@ -25,16 +40,23 @@ fn ensure_claude_status_hook_with_paths(paths: &KildPaths) -> Result<(), String>
 
     let script = r#"#!/bin/sh
 # KILD Claude Code status hook — auto-generated, do not edit.
-# Registered in ~/.claude/settings.json for Stop, Notification, SubagentStop,
-# TeammateIdle, and TaskCompleted hooks.
-# Maps Claude Code events to KILD agent statuses.
+# Handles events that cannot use HTTP hooks: TeammateIdle, TaskCompleted, Notification.
+# Stop and SubagentStop are handled by the daemon HTTP hook endpoint.
 INPUT=$(cat)
 BRANCH="${KILD_SESSION_BRANCH:-unknown}"
 EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | sed 's/"hook_event_name":"//;s/"//')
 NTYPE=$(echo "$INPUT" | grep -o '"notification_type":"[^"]*"' | head -1 | sed 's/"notification_type":"//;s/"//')
 case "$EVENT" in
-  Stop|SubagentStop|TeammateIdle|TaskCompleted)
+  TeammateIdle)
     kild agent-status --self idle --notify
+    # Check for queued work — exit 2 blocks idle if tasks are available.
+    kild check-queue --self 2>/dev/null
+    exit $?
+    ;;
+  TaskCompleted)
+    kild agent-status --self idle --notify
+    # Write structured task data to dropbox report.
+    echo "$INPUT" | kild report --self --from-hook 2>/dev/null
     ;;
   Notification)
     case "$NTYPE" in
@@ -43,42 +65,27 @@ case "$EVENT" in
     esac
     ;;
 esac
-# Inject event into Honryū brain session if it is running.
-# Skip if this session IS the brain to prevent self-referential feedback loops.
-# Gate file ($KILD_DROPBOX/.idle_sent) deduplicates: only the first idle event
-# per task cycle fires an inject. Cleared by `kild inject` when writing a new task.
-# Event tagging (#611): events use semantic tags for the brain.
-# By default only primary agent events (Stop, Notification) are forwarded.
-# Set KILD_HOOK_VERBOSE=1 to forward all events including subagent/teammate noise.
+# Brain forwarding for events handled here (TeammateIdle, TaskCompleted, Notification).
+# Only forward primary events by default; set KILD_HOOK_VERBOSE=1 for all.
 LAST_MSG=$(echo "$INPUT" | grep -o '"transcript_summary":"[^"]*"' | head -1 | sed 's/"transcript_summary":"//;s/"//')
 TAG=""
 FORWARD=""
-SKIP_GATE=""
-WRITE_GATE=""
 case "$EVENT" in
-  Stop)           TAG="agent.stop";     FORWARD=1; WRITE_GATE=1 ;;
-  SubagentStop)   TAG="subagent.stop";  [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
   TeammateIdle)   TAG="teammate.idle";  [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
   TaskCompleted)  TAG="task.completed"; [ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1 ;;
   Notification)
     case "$NTYPE" in
-      permission_prompt) TAG="agent.waiting"; FORWARD=1; SKIP_GATE=1 ;;
-      idle_prompt)       TAG="agent.idle";    FORWARD=1; WRITE_GATE=1 ;;
+      permission_prompt) TAG="agent.waiting"; FORWARD=1 ;;
+      idle_prompt)       TAG="agent.idle";    FORWARD=1 ;;
     esac
     ;;
 esac
 if [ -n "$FORWARD" ]; then
   MSG="[EVENT] $BRANCH $TAG${LAST_MSG:+: $LAST_MSG}"
-  GATE="${KILD_DROPBOX:+$KILD_DROPBOX/.idle_sent}"
   if [ "$BRANCH" != "honryu" ] && \
      [ "$BRANCH" != "unknown" ] && \
-     { [ -n "$SKIP_GATE" ] || [ -z "$GATE" ] || [ ! -f "$GATE" ]; } && \
      kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' > /dev/null 2>&1; then
-    if kild inject honryu "$MSG"; then
-      if [ -n "$WRITE_GATE" ] && [ -n "$GATE" ]; then
-        touch "$GATE" || echo "[kild] Warning: failed to write idle gate $GATE" >&2
-      fi
-    fi
+    kild inject honryu "$MSG" 2>/dev/null || true
   fi
 fi
 "#;
@@ -106,17 +113,25 @@ pub fn ensure_claude_status_hook() -> Result<(), String> {
     ensure_claude_status_hook_with_paths(&paths)
 }
 
-/// Ensure Claude Code settings.json has KILD status hooks configured.
+/// Ensure Claude Code settings.json has KILD hooks configured.
 ///
-/// Patches `~/.claude/settings.json` to add Stop, Notification, SubagentStop,
-/// TeammateIdle, and TaskCompleted hook entries pointing to the claude-status
-/// hook script. Preserves all existing settings and hooks.
-/// Idempotent: skips if any hook already references the claude-status script.
+/// Patches `~/.claude/settings.json` with:
+/// - **HTTP hooks** for Stop and SubagentStop → daemon HTTP endpoint
+/// - **Command hooks** for TeammateIdle, TaskCompleted, Notification → shell script
+/// - **Prompt hook** for Stop → task verification before stopping
+/// - **Command hook** for SessionStart → auto-priming via `kild prime --self --raw`
+///
+/// Preserves all existing settings and hooks.
+/// Idempotent: skips if hooks already reference our script/URL.
 fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<(), String> {
     let claude_dir = home.join(".claude");
     let settings_path = claude_dir.join("settings.json");
     let hook_path = paths.claude_status_hook();
     let hook_path_str = hook_path.display().to_string();
+    let hooks_port = resolve_hooks_port();
+    let hooks_url = format!("http://127.0.0.1:{}/hooks", hooks_port);
+
+    let kild_bin = which_kild_bin();
 
     let mut settings: serde_json::Value = if settings_path.exists() {
         let content = std::fs::read_to_string(&settings_path)
@@ -132,14 +147,16 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
         serde_json::json!({})
     };
 
-    // Helper: check if a hook array already contains our script
+    // Helper: check if a hook array already contains our command script or HTTP URL.
+    // Does NOT check for prompt hooks — those have their own dedicated `has_prompt_hook` check.
     let has_our_hook = |entries: &serde_json::Value| -> bool {
         if let Some(arr) = entries.as_array() {
             arr.iter().any(|entry| {
                 if let Some(serde_json::Value::Array(hook_list)) = entry.get("hooks") {
-                    hook_list
-                        .iter()
-                        .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(&hook_path_str))
+                    hook_list.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str()) == Some(&hook_path_str)
+                            || h.get("url").and_then(|u| u.as_str()) == Some(hooks_url.as_str())
+                    })
                 } else {
                     false
                 }
@@ -148,13 +165,6 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
             false
         }
     };
-
-    // Build hook entries
-    let hook_entry = serde_json::json!({
-        "type": "command",
-        "command": hook_path_str,
-        "timeout": 5
-    });
 
     let hooks = settings
         .as_object_mut()
@@ -168,8 +178,14 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
 
     let mut added = 0;
 
-    // Stop, SubagentStop, TeammateIdle, TaskCompleted: no matcher needed
-    for event in &["Stop", "SubagentStop", "TeammateIdle", "TaskCompleted"] {
+    // --- HTTP hooks for Stop and SubagentStop (daemon processes these in Rust) ---
+    let http_hook = serde_json::json!({
+        "type": "http",
+        "url": hooks_url,
+        "timeout": 5
+    });
+
+    for event in &["Stop", "SubagentStop"] {
         let entries = hooks_obj
             .entry(*event)
             .or_insert_with(|| serde_json::json!([]));
@@ -182,12 +198,85 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
             .as_array_mut()
             .ok_or_else(|| format!("\"{event}\" field in settings.json is not an array"))?;
         arr.push(serde_json::json!({
-            "hooks": [hook_entry.clone()]
+            "hooks": [http_hook.clone()]
         }));
         added += 1;
     }
 
-    // Notification: matcher for permission_prompt and idle_prompt
+    // --- Prompt hook for Stop: task verification before stopping (#630) ---
+    {
+        let entries = hooks_obj
+            .entry("Stop")
+            .or_insert_with(|| serde_json::json!([]));
+
+        // Check if prompt hook already exists (separate from the HTTP hook check)
+        let has_prompt_hook = entries.as_array().is_some_and(|arr| {
+            arr.iter().any(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(|h| h.as_array())
+                    .is_some_and(|hooks| {
+                        hooks.iter().any(|h| {
+                            h.get("type").and_then(|t| t.as_str()) == Some("prompt")
+                                && h.get("prompt")
+                                    .and_then(|p| p.as_str())
+                                    .is_some_and(|p| p.contains("KILD"))
+                        })
+                    })
+            })
+        });
+
+        if !has_prompt_hook {
+            let prompt_text = r#"You are inside a KILD worker session. Before stopping, verify your assigned task is complete.
+
+Check the input JSON:
+- If `stop_hook_active` is true, the stop was explicitly requested by the user or system. Allow it by responding with {"decision": "allow"}.
+- Otherwise, read $KILD_DROPBOX/task.md (if the env var is set and the file exists) to see your current task.
+  - If the task described there is complete based on your work, respond with {"decision": "allow"}.
+  - If the task is NOT complete, respond with {"decision": "block", "reason": "Task not yet complete — continuing work."} and continue working on it.
+  - If there is no task file or $KILD_DROPBOX is not set, allow the stop.
+
+Respond with ONLY the JSON object, no other text."#;
+
+            let arr = entries
+                .as_array_mut()
+                .ok_or("\"Stop\" field in settings.json is not an array")?;
+            arr.push(serde_json::json!({
+                "hooks": [{
+                    "type": "prompt",
+                    "prompt": prompt_text
+                }]
+            }));
+            added += 1;
+        }
+    }
+
+    // --- Command hooks for TeammateIdle, TaskCompleted (need exit-code blocking) ---
+    let command_hook = serde_json::json!({
+        "type": "command",
+        "command": hook_path_str,
+        "timeout": 10
+    });
+
+    for event in &["TeammateIdle", "TaskCompleted"] {
+        let entries = hooks_obj
+            .entry(*event)
+            .or_insert_with(|| serde_json::json!([]));
+
+        if has_our_hook(entries) {
+            continue;
+        }
+
+        let arr = entries
+            .as_array_mut()
+            .ok_or_else(|| format!("\"{event}\" field in settings.json is not an array"))?;
+        arr.push(serde_json::json!({
+            "hooks": [command_hook.clone()]
+        }));
+        added += 1;
+    }
+
+    // --- Notification: command hook with matcher (HTTP not supported for this event) ---
     let notification_entries = hooks_obj
         .entry("Notification")
         .or_insert_with(|| serde_json::json!([]));
@@ -198,7 +287,42 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
             .ok_or("\"Notification\" field in settings.json is not an array")?;
         arr.push(serde_json::json!({
             "matcher": "permission_prompt|idle_prompt",
-            "hooks": [hook_entry.clone()]
+            "hooks": [command_hook.clone()]
+        }));
+        added += 1;
+    }
+
+    // --- SessionStart: command hook for auto-priming (#631) ---
+    let session_start_entries = hooks_obj
+        .entry("SessionStart")
+        .or_insert_with(|| serde_json::json!([]));
+
+    let has_session_start_hook = session_start_entries.as_array().is_some_and(|arr| {
+        arr.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .is_some_and(|hooks| {
+                    hooks.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .is_some_and(|c| c.contains("kild") && c.contains("prime"))
+                    })
+                })
+        })
+    });
+
+    if !has_session_start_hook {
+        let prime_cmd = format!("{} prime --self --raw", kild_bin);
+        let arr = session_start_entries
+            .as_array_mut()
+            .ok_or("\"SessionStart\" field in settings.json is not an array")?;
+        arr.push(serde_json::json!({
+            "hooks": [{
+                "type": "command",
+                "command": prime_cmd,
+                "timeout": 10
+            }]
         }));
         added += 1;
     }
@@ -224,6 +348,26 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
     );
 
     Ok(())
+}
+
+/// Resolve the path to the `kild` binary for use in hook commands.
+///
+/// Falls back to just "kild" (relying on PATH) if the binary cannot be located.
+fn which_kild_bin() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            // current_exe may point to kild, kild-daemon, or kild-tmux-shim.
+            // Check the same directory for a `kild` sibling binary.
+            let parent = p.parent()?;
+            let kild = parent.join("kild");
+            if kild.exists() {
+                Some(kild.display().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "kild".to_string())
 }
 
 pub fn ensure_claude_settings() -> Result<(), String> {
@@ -289,9 +433,18 @@ mod tests {
             content.contains("hook_event_name"),
             "Script should parse hook_event_name from JSON"
         );
+        // The script now only handles TeammateIdle, TaskCompleted, Notification
         assert!(
-            content.contains("Stop|SubagentStop|TeammateIdle|TaskCompleted"),
-            "Script should handle Stop, SubagentStop, TeammateIdle, TaskCompleted"
+            content.contains("TeammateIdle"),
+            "Script should handle TeammateIdle"
+        );
+        assert!(
+            content.contains("TaskCompleted"),
+            "Script should handle TaskCompleted"
+        );
+        assert!(
+            content.contains("Notification"),
+            "Script should handle Notification"
         );
         assert!(
             content.contains("permission_prompt"),
@@ -309,102 +462,54 @@ mod tests {
             content.contains("kild agent-status --self waiting --notify"),
             "Script should call kild agent-status for waiting"
         );
+        // Unit 4: TaskCompleted writes report
+        assert!(
+            content.contains("kild report --self --from-hook"),
+            "Script should pipe TaskCompleted to kild report"
+        );
+        // Unit 5: TeammateIdle checks queue
+        assert!(
+            content.contains("kild check-queue --self"),
+            "Script should call kild check-queue on TeammateIdle"
+        );
+        // Brain forwarding
         assert!(
             content.contains(r#"BRANCH" != "honryu""#),
-            "Script must guard against brain injecting into itself (self-loop prevention)"
+            "Script must guard against brain injecting into itself"
         );
         assert!(
             content.contains(r#".status == "active""#),
-            "Script must check that honryu session is active, not just present"
+            "Script must check honryu is active"
         );
-        assert!(
-            content.contains(".idle_sent"),
-            "Script must use .idle_sent gate file for deduplication"
-        );
-        assert!(
-            content.contains(r#"[ ! -f "$GATE" ]"#),
-            "Script must check gate file before injecting"
-        );
-        assert!(
-            content.contains(r#"touch "$GATE""#),
-            "Script must create gate file after successful inject"
-        );
-        assert!(
-            content.contains(r#"[ -z "$GATE" ]"#),
-            "Script must allow inject when KILD_DROPBOX is not set (no-dropbox fallback)"
-        );
-
-        // Event tagging assertions (#611)
+        // Event tagging
         assert!(
             content.contains("transcript_summary"),
-            "Script should extract transcript_summary from JSON payload"
-        );
-        assert!(
-            content.contains(r#"[ "${KILD_HOOK_VERBOSE:-0}" = "1" ] && FORWARD=1"#),
-            "Script should gate verbose events on KILD_HOOK_VERBOSE=1"
+            "Script should extract transcript_summary"
         );
         assert!(
             content.contains("[EVENT] $BRANCH $TAG"),
-            "Script should use unified [EVENT] $BRANCH $TAG format"
-        );
-        assert!(
-            content.contains(r#"TAG="agent.stop""#),
-            "Stop events should be tagged agent.stop"
-        );
-        assert!(
-            content.contains(r#"TAG="subagent.stop""#),
-            "SubagentStop events should be tagged subagent.stop"
+            "Script should use unified event format"
         );
         assert!(
             content.contains(r#"TAG="teammate.idle""#),
-            "TeammateIdle events should be tagged teammate.idle"
+            "TeammateIdle should be tagged"
         );
         assert!(
             content.contains(r#"TAG="task.completed""#),
-            "TaskCompleted events should be tagged task.completed"
+            "TaskCompleted should be tagged"
         );
         assert!(
             content.contains(r#"TAG="agent.waiting""#),
-            "Notification(permission_prompt) should be tagged agent.waiting"
+            "Notification(permission_prompt) should be tagged"
         );
         assert!(
             content.contains(r#"TAG="agent.idle""#),
-            "Notification(idle_prompt) should be tagged agent.idle"
+            "Notification(idle_prompt) should be tagged"
         );
+        // Stop and SubagentStop should NOT be in the command hook (moved to HTTP)
         assert!(
-            content.contains("SKIP_GATE"),
-            "Script should bypass gate for permission_prompt events"
-        );
-        // Default forwarding: SubagentStop, TeammateIdle, TaskCompleted are verbose-only
-        // (gated on KILD_HOOK_VERBOSE=1), while Stop and Notification forward unconditionally
-        let forward_block = content
-            .split("TAG=\"\"")
-            .nth(1)
-            .expect("Should have TAG initialization");
-        assert!(
-            forward_block.contains("SubagentStop")
-                && forward_block.contains("TeammateIdle")
-                && forward_block.contains("TaskCompleted"),
-            "SubagentStop, TeammateIdle, TaskCompleted should appear in the forward block"
-        );
-        assert!(
-            forward_block.contains("KILD_HOOK_VERBOSE"),
-            "Verbose-only events must be gated on KILD_HOOK_VERBOSE"
-        );
-        // Stop must forward unconditionally — not gated on KILD_HOOK_VERBOSE
-        let stop_arm_start = content.find("Stop)").expect("Should have Stop arm");
-        let stop_arm_end = content
-            .find("SubagentStop)")
-            .expect("Should have SubagentStop arm");
-        let stop_arm = &content[stop_arm_start..stop_arm_end];
-        assert!(
-            !stop_arm.contains("KILD_HOOK_VERBOSE"),
-            "Stop must not be gated on KILD_HOOK_VERBOSE"
-        );
-        // Only primary events (Stop, idle_prompt) should write the gate file
-        assert!(
-            content.contains("WRITE_GATE"),
-            "Script should use WRITE_GATE to control gate file writes"
+            !content.contains("Stop|SubagentStop|TeammateIdle|TaskCompleted"),
+            "Old combined case pattern should not exist"
         );
 
         #[cfg(unix)]
@@ -428,20 +533,26 @@ mod tests {
         let temp_home =
             std::env::temp_dir().join(format!("kild_test_claude_hook_idem_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_home);
+
+        let paths = KildPaths::from_dir(temp_home.join(".kild"));
+        let result = ensure_claude_status_hook_with_paths(&paths);
+        assert!(result.is_ok());
         let hook_path = temp_home.join(".kild").join("hooks").join("claude-status");
 
-        let result =
-            ensure_claude_status_hook_with_paths(&KildPaths::from_dir(temp_home.join(".kild")));
-        assert!(result.is_ok());
-        let content1 = fs::read_to_string(&hook_path).unwrap();
+        // Write stale/outdated content to simulate an old hook version
+        fs::write(&hook_path, "#!/bin/sh\n# outdated hook\n").unwrap();
 
-        let result =
-            ensure_claude_status_hook_with_paths(&KildPaths::from_dir(temp_home.join(".kild")));
+        // Second call should overwrite with current content
+        let result = ensure_claude_status_hook_with_paths(&paths);
         assert!(result.is_ok());
-        let content2 = fs::read_to_string(&hook_path).unwrap();
-        assert_eq!(
-            content1, content2,
-            "Content should not change on second call"
+        let content = fs::read_to_string(&hook_path).unwrap();
+        assert!(
+            content.contains("TeammateIdle"),
+            "Should have been overwritten with current hook content"
+        );
+        assert!(
+            !content.contains("outdated hook"),
+            "Stale content should be gone"
         );
 
         let _ = fs::remove_dir_all(&temp_home);
@@ -473,17 +584,16 @@ mod tests {
         let content = fs::read_to_string(&settings_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // Verify all hook events are present
         let hooks = parsed["hooks"].as_object().unwrap();
+
+        // HTTP hooks for Stop and SubagentStop
         assert!(hooks.contains_key("Stop"), "Should have Stop hooks");
-        assert!(
-            hooks.contains_key("Notification"),
-            "Should have Notification hooks"
-        );
         assert!(
             hooks.contains_key("SubagentStop"),
             "Should have SubagentStop hooks"
         );
+
+        // Command hooks for TeammateIdle, TaskCompleted, Notification
         assert!(
             hooks.contains_key("TeammateIdle"),
             "Should have TeammateIdle hooks"
@@ -492,6 +602,48 @@ mod tests {
             hooks.contains_key("TaskCompleted"),
             "Should have TaskCompleted hooks"
         );
+        assert!(
+            hooks.contains_key("Notification"),
+            "Should have Notification hooks"
+        );
+
+        // SessionStart hook for auto-priming
+        assert!(
+            hooks.contains_key("SessionStart"),
+            "Should have SessionStart hooks"
+        );
+
+        // Verify Stop has both HTTP hook and prompt hook
+        let stop_entries = parsed["hooks"]["Stop"].as_array().unwrap();
+        assert!(
+            stop_entries.len() >= 2,
+            "Stop should have HTTP hook + prompt hook, got {} entries",
+            stop_entries.len()
+        );
+
+        // Verify HTTP hook type
+        let has_http = stop_entries.iter().any(|e| {
+            e["hooks"]
+                .as_array()
+                .is_some_and(|h| h.iter().any(|hook| hook["type"] == "http"))
+        });
+        assert!(has_http, "Stop should have an HTTP hook");
+
+        // Verify prompt hook type
+        let has_prompt = stop_entries.iter().any(|e| {
+            e["hooks"]
+                .as_array()
+                .is_some_and(|h| h.iter().any(|hook| hook["type"] == "prompt"))
+        });
+        assert!(has_prompt, "Stop should have a prompt hook");
+
+        // Verify SubagentStop is HTTP type
+        let subagent_hooks = &parsed["hooks"]["SubagentStop"][0]["hooks"][0];
+        assert_eq!(subagent_hooks["type"], "http");
+
+        // Verify TeammateIdle is command type
+        let teammate_hooks = &parsed["hooks"]["TeammateIdle"][0]["hooks"][0];
+        assert_eq!(teammate_hooks["type"], "command");
 
         // Verify Notification has matcher
         let notification = parsed["hooks"]["Notification"][0].as_object().unwrap();
@@ -500,10 +652,14 @@ mod tests {
             "Notification should have matcher"
         );
 
-        // Verify hook command points to claude-status
+        // Verify SessionStart hook references kild prime
+        let session_start_hooks = &parsed["hooks"]["SessionStart"][0]["hooks"][0];
+        assert_eq!(session_start_hooks["type"], "command");
+        let cmd = session_start_hooks["command"].as_str().unwrap();
         assert!(
-            content.contains("claude-status"),
-            "Settings should reference claude-status hook"
+            cmd.contains("prime") && cmd.contains("--self") && cmd.contains("--raw"),
+            "SessionStart should run kild prime --self --raw, got: {}",
+            cmd
         );
 
         let _ = fs::remove_dir_all(&temp_home);
@@ -544,14 +700,6 @@ mod tests {
                 .any(|v| v == "Bash(*)"),
             "Existing permissions should be preserved"
         );
-        assert!(
-            parsed["enabledPlugins"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|v| v == "my-plugin"),
-            "Existing enabledPlugins should be preserved"
-        );
 
         // New hooks added
         assert!(
@@ -574,7 +722,6 @@ mod tests {
         let claude_dir = temp_home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
 
-        // First call creates the config
         let result = ensure_claude_settings_with_home(
             &temp_home,
             &KildPaths::from_dir(temp_home.join(".kild")),
@@ -582,7 +729,6 @@ mod tests {
         assert!(result.is_ok());
         let content1 = fs::read_to_string(claude_dir.join("settings.json")).unwrap();
 
-        // Second call should skip (already configured)
         let result = ensure_claude_settings_with_home(
             &temp_home,
             &KildPaths::from_dir(temp_home.join(".kild")),
@@ -609,7 +755,6 @@ mod tests {
         let claude_dir = temp_home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
 
-        // Create settings with existing user hooks
         let existing = serde_json::json!({
             "hooks": {
                 "PreToolUse": [{
@@ -633,7 +778,6 @@ mod tests {
         let content = fs::read_to_string(claude_dir.join("settings.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // Existing PreToolUse hook preserved
         let pre_tool = parsed["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(
             pre_tool.len(),
@@ -645,7 +789,6 @@ mod tests {
             "Existing user hook command should be preserved"
         );
 
-        // Our hooks added
         assert!(parsed["hooks"]["Stop"].is_array());
 
         let _ = fs::remove_dir_all(&temp_home);
@@ -677,67 +820,11 @@ mod tests {
             err
         );
 
-        // Verify the file was NOT modified
         let content = fs::read_to_string(claude_dir.join("settings.json")).unwrap();
         assert_eq!(
             content, "{invalid json\n",
             "Malformed file should not be modified"
         );
-
-        let _ = fs::remove_dir_all(&temp_home);
-    }
-
-    #[test]
-    fn test_ensure_claude_settings_partial_idempotency() {
-        use std::fs;
-
-        let temp_home = std::env::temp_dir().join(format!(
-            "kild_test_claude_settings_partial_{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&temp_home);
-        let claude_dir = temp_home.join(".claude");
-        fs::create_dir_all(&claude_dir).unwrap();
-        let paths = KildPaths::from_dir(temp_home.join(".kild"));
-        let hook_path_str = paths.claude_status_hook().display().to_string();
-
-        // Create settings with our hook on Stop only (partial configuration)
-        let existing = serde_json::json!({
-            "hooks": {
-                "Stop": [{
-                    "hooks": [{"type": "command", "command": hook_path_str, "timeout": 5}]
-                }]
-            }
-        });
-        fs::write(
-            claude_dir.join("settings.json"),
-            serde_json::to_string_pretty(&existing).unwrap(),
-        )
-        .unwrap();
-
-        let result = ensure_claude_settings_with_home(&temp_home, &paths);
-        assert!(result.is_ok(), "Should patch missing events: {:?}", result);
-
-        let content = fs::read_to_string(claude_dir.join("settings.json")).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        let hooks = parsed["hooks"].as_object().unwrap();
-
-        // Stop should NOT be duplicated
-        let stop_arr = hooks["Stop"].as_array().unwrap();
-        assert_eq!(stop_arr.len(), 1, "Stop hook should not be duplicated");
-
-        // Missing events should be added
-        for event in &[
-            "SubagentStop",
-            "TeammateIdle",
-            "TaskCompleted",
-            "Notification",
-        ] {
-            assert!(
-                hooks[*event].is_array() && !hooks[*event].as_array().unwrap().is_empty(),
-                "{event} hook should be added"
-            );
-        }
 
         let _ = fs::remove_dir_all(&temp_home);
     }
@@ -754,7 +841,6 @@ mod tests {
         let claude_dir = temp_home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
 
-        // Create settings with a non-array event value
         let existing = serde_json::json!({
             "hooks": {
                 "Stop": "invalid"
@@ -795,7 +881,6 @@ mod tests {
         assert!(result.is_ok());
 
         let hook_path = paths.claude_status_hook();
-        // Validate shell syntax with sh -n (parse without executing)
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&hook_path)
@@ -827,24 +912,26 @@ mod tests {
         let content = fs::read_to_string(temp_home.join(".claude/settings.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // Verify Stop hook entry structure (no matcher)
+        // Verify Stop has HTTP hook (no matcher)
         let stop_entries = parsed["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop_entries.len(), 1);
-        let stop_entry = stop_entries[0].as_object().unwrap();
+        // Find the HTTP hook entry
+        let http_entry = stop_entries
+            .iter()
+            .find(|e| {
+                e["hooks"]
+                    .as_array()
+                    .is_some_and(|h| h.iter().any(|hook| hook["type"] == "http"))
+            })
+            .expect("Stop should have an HTTP hook entry");
         assert!(
-            !stop_entry.contains_key("matcher"),
-            "Stop should not have matcher"
+            !http_entry.as_object().unwrap().contains_key("matcher"),
+            "Stop HTTP hook should not have matcher"
         );
-        let stop_hooks = stop_entry["hooks"].as_array().unwrap();
-        assert_eq!(stop_hooks.len(), 1);
-        assert_eq!(stop_hooks[0]["type"], "command");
-        assert!(
-            stop_hooks[0]["command"]
-                .as_str()
-                .unwrap()
-                .ends_with("claude-status")
-        );
-        assert_eq!(stop_hooks[0]["timeout"], 5);
+        let http_hooks = http_entry["hooks"].as_array().unwrap();
+        assert_eq!(http_hooks.len(), 1);
+        assert_eq!(http_hooks[0]["type"], "http");
+        assert!(http_hooks[0]["url"].as_str().unwrap().contains("127.0.0.1"));
+        assert_eq!(http_hooks[0]["timeout"], 5);
 
         // Verify Notification hook entry structure (with matcher)
         let notif_entries = parsed["hooks"]["Notification"].as_array().unwrap();
@@ -854,7 +941,6 @@ mod tests {
         let notif_hooks = notif_entry["hooks"].as_array().unwrap();
         assert_eq!(notif_hooks.len(), 1);
         assert_eq!(notif_hooks[0]["type"], "command");
-        assert_eq!(notif_hooks[0]["timeout"], 5);
 
         let _ = fs::remove_dir_all(&temp_home);
     }

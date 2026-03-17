@@ -127,7 +127,7 @@ pub fn prime_command() -> Command {
             Arg::new("branch")
                 .help("Branch name of the kild to prime")
                 .index(1)
-                .required_unless_present("all"),
+                .required_unless_present_any(["all", "self"]),
         )
         .arg(
             Arg::new("json")
@@ -140,7 +140,7 @@ pub fn prime_command() -> Command {
                 .long("all")
                 .help("Generate fleet context for all fleet kilds")
                 .action(ArgAction::SetTrue)
-                .conflicts_with("branch"),
+                .conflicts_with_all(["branch", "self"]),
         )
         .arg(
             Arg::new("status")
@@ -148,6 +148,56 @@ pub fn prime_command() -> Command {
                 .help("Output fleet status table only (compact)")
                 .action(ArgAction::SetTrue)
                 .conflicts_with("json"),
+        )
+        .arg(
+            Arg::new("self")
+                .long("self")
+                .help("Resolve branch from KILD_SESSION_BRANCH env var")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["branch", "all"]),
+        )
+        .arg(
+            Arg::new("raw")
+                .long("raw")
+                .help("Accepted for compatibility (output is always plain markdown)")
+                .action(ArgAction::SetTrue)
+                .hide(true),
+        )
+}
+
+pub fn report_command() -> Command {
+    Command::new("report")
+        .about("Write task completion report to dropbox")
+        .arg(
+            Arg::new("self")
+                .long("self")
+                .help("Resolve session from KILD_SESSION_BRANCH env var")
+                .action(ArgAction::SetTrue)
+                .required(true),
+        )
+        .arg(
+            Arg::new("from-hook")
+                .long("from-hook")
+                .help("Read TaskCompleted JSON from stdin and extract report data")
+                .action(ArgAction::SetTrue)
+                .required(true),
+        )
+}
+
+pub fn check_queue_command() -> Command {
+    Command::new("check-queue")
+        .about("Check for queued work and deliver if available")
+        .long_about(
+            "Check if there are queued tasks for this session. If a task is available, \
+             deliver it to the dropbox and exit 2 (blocks TeammateIdle hook). If no tasks \
+             are queued, exit 0 (teammate goes idle normally).",
+        )
+        .arg(
+            Arg::new("self")
+                .long("self")
+                .help("Resolve session from KILD_SESSION_BRANCH env var")
+                .action(ArgAction::SetTrue)
+                .required(true),
         )
 }
 

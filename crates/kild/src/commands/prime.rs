@@ -42,13 +42,20 @@ pub(crate) fn handle_prime_command(matches: &ArgMatches) -> Result<(), Box<dyn s
         return handle_all_prime(matches.get_flag("json"), matches.get_flag("status"));
     }
 
-    let branch = matches
-        .get_one::<String>("branch")
-        .ok_or("Branch argument is required (or use --all)")?;
+    let branch = if matches.get_flag("self") {
+        std::env::var("KILD_SESSION_BRANCH").map_err(
+            |_| "KILD_SESSION_BRANCH not set — --self requires running inside a kild session",
+        )?
+    } else {
+        matches
+            .get_one::<String>("branch")
+            .ok_or("Branch argument is required (or use --all / --self)")?
+            .clone()
+    };
     let json_output = matches.get_flag("json");
     let status_only = matches.get_flag("status");
 
-    handle_single_prime(branch, json_output, status_only)
+    handle_single_prime(&branch, json_output, status_only)
 }
 
 fn handle_single_prime(

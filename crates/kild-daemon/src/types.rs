@@ -38,6 +38,11 @@ pub struct DaemonConfig {
     #[serde(default = "default_shutdown_timeout_secs")]
     pub shutdown_timeout_secs: u64,
 
+    /// HTTP hook endpoint port for Claude Code `type: "http"` hooks.
+    /// Default: 19222. Set to 0 to disable.
+    #[serde(default = "default_hooks_port")]
+    pub hooks_port: u16,
+
     /// TCP listener address. None = Unix socket only.
     /// Example: "0.0.0.0:7432"
     #[serde(default)]
@@ -106,6 +111,7 @@ impl Default for DaemonConfig {
             pty_output_batch_ms: default_pty_output_batch_ms(),
             client_buffer_size: default_client_buffer_size(),
             shutdown_timeout_secs: default_shutdown_timeout_secs(),
+            hooks_port: default_hooks_port(),
             bind_tcp: None,
             tls_cert_path: None,
             tls_key_path: None,
@@ -153,6 +159,10 @@ fn default_client_buffer_size() -> usize {
 
 fn default_shutdown_timeout_secs() -> u64 {
     5
+}
+
+fn default_hooks_port() -> u16 {
+    kild_protocol::DEFAULT_HOOKS_PORT
 }
 
 /// Wrapper for deserializing the `[daemon]` section from a KILD config file.

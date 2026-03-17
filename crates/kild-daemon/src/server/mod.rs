@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::errors::DaemonError;
+use crate::hooks;
 use crate::pid;
 use crate::session::manager::SessionManager;
 use crate::tls;
@@ -133,6 +134,26 @@ pub async fn run_server(config: DaemonConfig) -> Result<(), DaemonError> {
             mgr_clone,
             shutdown_clone,
         ));
+    }
+
+    // Optionally start HTTP hook endpoint for Claude Code `type: "http"` hooks.
+    if config.hooks_port > 0 {
+        let hook_state = Arc::new(hooks::HookState::new());
+        let hooks_shutdown = shutdown.clone();
+        let hooks_port = config.hooks_port;
+        tokio::spawn(async move {
+            if let Err(e) = hooks::serve_hooks(hooks_port, hook_state, hooks_shutdown).await {
+                error!(
+                    event = "daemon.hooks.http_listener_failed",
+                    port = hooks_port,
+                    error = %e,
+                    "HTTP hook endpoint failed to start on port {}. Claude Code Stop/SubagentStop \
+                     hooks will not be processed. Check if port {} is already in use or set \
+                     [daemon] hooks_port to a different value in ~/.kild/config.toml.",
+                    hooks_port, hooks_port,
+                );
+            }
+        });
     }
 
     // Accept loop (Unix socket)

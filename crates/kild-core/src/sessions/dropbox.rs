@@ -414,14 +414,6 @@ pub fn write_task(
         return Err(SessionError::IoError { source: e });
     }
 
-    // Clear the idle gate file immediately after task.md succeeds, since task delivery
-    // is now confirmed. The claude-status hook creates .idle_sent on the first idle event;
-    // we clear it here to reset the dedup gate for the next task cycle.
-    // Must happen before history.jsonl (which can fail and return early).
-    // Best-effort: if removal fails, the stale gate will suppress the next idle inject.
-    // Logged at warn level — the task was delivered, so write_task returns Ok regardless.
-    remove_idle_gate_file(&dropbox_dir.join(".idle_sent"), branch);
-
     // Append history.jsonl — task delivery already succeeded via task.md;
     // log loudly on failure but do not roll back the task files.
     let history_path = dropbox_dir.join("history.jsonl");
@@ -461,59 +453,6 @@ pub fn write_task(
     );
 
     Ok(Some(new_id))
-}
-
-/// Remove the `.idle_sent` gate file at the given path (best-effort).
-///
-/// No-op if the file does not exist. Warns on removal failure.
-/// Shared by `write_task` (inline gate clear) and `clear_idle_gate` (open-session path).
-fn remove_idle_gate_file(gate_path: &std::path::Path, branch: &str) {
-    if gate_path.exists() {
-        if let Err(e) = std::fs::remove_file(gate_path) {
-            warn!(
-                event = "core.session.dropbox.idle_gate_clear_failed",
-                branch = branch,
-                path = %gate_path.display(),
-                error = %e,
-            );
-        } else {
-            info!(
-                event = "core.session.dropbox.idle_gate_cleared",
-                branch = branch,
-            );
-        }
-    }
-}
-
-/// Clear the `.idle_sent` gate file in a session's dropbox directory.
-///
-/// The gate file is created by the `claude-status` hook after the first idle event.
-/// It must be cleared when new work is delivered (task injection or initial prompt)
-/// so the next idle event triggers a brain notification.
-///
-/// No-op if fleet mode is not active, the dropbox does not exist, or the gate file
-/// is already absent. Best-effort: warns on removal failure.
-pub(super) fn clear_idle_gate(project_id: &str, branch: &str) {
-    if !fleet::fleet_mode_active(branch) {
-        return;
-    }
-
-    let paths = match KildPaths::resolve() {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(
-                event = "core.session.dropbox.idle_gate_path_resolve_failed",
-                branch = branch,
-                error = %e,
-            );
-            return;
-        }
-    };
-
-    let gate_path = paths
-        .fleet_dropbox_dir(project_id, branch)
-        .join(".idle_sent");
-    remove_idle_gate_file(&gate_path, branch);
 }
 
 /// Inject `KILD_DROPBOX` (and `KILD_FLEET_DIR` for brain) into daemon env vars.
@@ -580,6 +519,190 @@ pub(super) fn inject_dropbox_env_vars(
         branch = branch,
         dropbox = %dropbox.display(),
     );
+}
+
+/// Write a report to the dropbox `report.md` file.
+///
+/// Called when a task is completed (e.g. from the TaskCompleted hook).
+/// Overwrites any existing report for the current task cycle.
+/// No-op if fleet mode is not active.
+pub fn write_report(project_id: &str, branch: &str, content: &str) -> Result<(), SessionError> {
+    if !fleet::fleet_mode_active(branch) {
+        return Ok(());
+    }
+
+    let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
+        source: std::io::Error::other(e),
+    })?;
+
+    let dropbox_dir = paths.fleet_dropbox_dir(project_id, branch);
+    if !dropbox_dir.exists() {
+        return Ok(());
+    }
+
+    let report_path = dropbox_dir.join("report.md");
+    std::fs::write(&report_path, content).map_err(|e| {
+        error!(
+            event = "core.session.dropbox.write_report_failed",
+            branch = branch,
+            error = %e,
+        );
+        SessionError::IoError { source: e }
+    })?;
+
+    info!(
+        event = "core.session.dropbox.write_report_completed",
+        branch = branch,
+    );
+
+    Ok(())
+}
+
+/// Enqueue a task into the dropbox queue directory.
+///
+/// Creates `queue/` subdirectory if needed. Tasks are numbered with a
+/// monotonically increasing sequence number. Returns the task's sequence number.
+/// No-op (returns `Ok(None)`) if fleet mode is not active.
+pub fn enqueue_task(
+    project_id: &str,
+    branch: &str,
+    text: &str,
+) -> Result<Option<u64>, SessionError> {
+    if !fleet::fleet_mode_active(branch) {
+        return Ok(None);
+    }
+
+    let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
+        source: std::io::Error::other(e),
+    })?;
+
+    let dropbox_dir = paths.fleet_dropbox_dir(project_id, branch);
+    if !dropbox_dir.exists() {
+        return Ok(None);
+    }
+
+    let queue_dir = dropbox_dir.join("queue");
+    std::fs::create_dir_all(&queue_dir).map_err(|e| SessionError::IoError { source: e })?;
+
+    // Find next queue number by scanning existing files.
+    let next_num = next_queue_number(&queue_dir)?;
+
+    let task_path = queue_dir.join(format!("{}.md", next_num));
+    std::fs::write(&task_path, text).map_err(|e| SessionError::IoError { source: e })?;
+
+    info!(
+        event = "core.session.dropbox.enqueue_task_completed",
+        branch = branch,
+        queue_num = next_num,
+    );
+
+    Ok(Some(next_num))
+}
+
+/// Dequeue the next task from the queue directory (FIFO).
+///
+/// Removes and returns the lowest-numbered task file content.
+/// Returns `Ok(None)` if the queue is empty or fleet mode is not active.
+pub fn dequeue_task(project_id: &str, branch: &str) -> Result<Option<String>, SessionError> {
+    if !fleet::fleet_mode_active(branch) {
+        return Ok(None);
+    }
+
+    let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
+        source: std::io::Error::other(e),
+    })?;
+
+    let queue_dir = paths.fleet_dropbox_dir(project_id, branch).join("queue");
+    if !queue_dir.exists() {
+        return Ok(None);
+    }
+
+    let lowest = lowest_queue_file(&queue_dir)?;
+    let Some(path) = lowest else {
+        return Ok(None);
+    };
+
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| SessionError::IoError { source: e })?;
+    std::fs::remove_file(&path).map_err(|e| SessionError::IoError { source: e })?;
+
+    info!(
+        event = "core.session.dropbox.dequeue_task_completed",
+        branch = branch,
+    );
+
+    Ok(Some(content))
+}
+
+/// Peek at the next queued task without removing it.
+///
+/// Returns `Ok(None)` if the queue is empty or fleet mode is not active.
+pub fn peek_queue(project_id: &str, branch: &str) -> Result<Option<String>, SessionError> {
+    if !fleet::fleet_mode_active(branch) {
+        return Ok(None);
+    }
+
+    let paths = KildPaths::resolve().map_err(|e| SessionError::IoError {
+        source: std::io::Error::other(e),
+    })?;
+
+    let queue_dir = paths.fleet_dropbox_dir(project_id, branch).join("queue");
+    if !queue_dir.exists() {
+        return Ok(None);
+    }
+
+    let lowest = lowest_queue_file(&queue_dir)?;
+    match lowest {
+        Some(path) => {
+            let content =
+                std::fs::read_to_string(&path).map_err(|e| SessionError::IoError { source: e })?;
+            Ok(Some(content))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Find the next available queue number (max existing + 1, starting at 1).
+fn next_queue_number(queue_dir: &std::path::Path) -> Result<u64, SessionError> {
+    let mut max = 0u64;
+    let entries = std::fs::read_dir(queue_dir).map_err(|e| SessionError::IoError { source: e })?;
+    for entry in entries {
+        let entry = entry.map_err(|e| SessionError::IoError { source: e })?;
+        if let Some(num) = entry
+            .path()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u64>().ok())
+            && num > max
+        {
+            max = num;
+        }
+    }
+    Ok(max + 1)
+}
+
+/// Find the lowest-numbered queue file path.
+fn lowest_queue_file(
+    queue_dir: &std::path::Path,
+) -> Result<Option<std::path::PathBuf>, SessionError> {
+    let entries = std::fs::read_dir(queue_dir).map_err(|e| SessionError::IoError { source: e })?;
+    let mut lowest: Option<(u64, std::path::PathBuf)> = None;
+    for entry in entries {
+        let entry = entry.map_err(|e| SessionError::IoError { source: e })?;
+        let path = entry.path();
+        if let Some(num) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            match &lowest {
+                Some((min, _)) if num < *min => lowest = Some((num, path)),
+                None => lowest = Some((num, path)),
+                _ => {}
+            }
+        }
+    }
+    Ok(lowest.map(|(_, p)| p))
 }
 
 /// Read the current dropbox protocol state for a session.
@@ -1472,62 +1595,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn write_task_clears_idle_gate_file() {
-        with_env("wt_gate_clear", true, |_| {
-            ensure_dropbox("proj123", "my-branch", "claude");
-
-            // Simulate the hook creating the gate file (as it would after first idle event).
-            let paths = KildPaths::resolve().unwrap();
-            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
-            let gate_path = dropbox_dir.join(".idle_sent");
-            std::fs::write(&gate_path, "").unwrap();
-            assert!(
-                gate_path.exists(),
-                "gate file should exist before write_task"
-            );
-
-            write_task(
-                "proj123",
-                "my-branch",
-                "new task",
-                &[DeliveryMethod::Dropbox],
-            )
-            .unwrap();
-
-            assert!(
-                !gate_path.exists(),
-                "write_task should clear .idle_sent gate file"
-            );
-        });
-    }
-
-    #[test]
-    fn write_task_succeeds_without_gate_file() {
-        with_env("wt_gate_absent", true, |_| {
-            ensure_dropbox("proj123", "my-branch", "claude");
-
-            let paths = KildPaths::resolve().unwrap();
-            let dropbox_dir = paths.fleet_dropbox_dir("proj123", "my-branch");
-            let gate_path = dropbox_dir.join(".idle_sent");
-            assert!(
-                !gate_path.exists(),
-                "gate file should not exist before write_task"
-            );
-
-            let result = write_task(
-                "proj123",
-                "my-branch",
-                "new task",
-                &[DeliveryMethod::Dropbox],
-            );
-            assert!(
-                result.is_ok(),
-                "write_task should succeed without gate file"
-            );
-        });
-    }
-
     // --- read_dropbox_state ---
 
     #[test]
@@ -1908,50 +1975,127 @@ mod tests {
         assert!(md.contains("No fleet sessions."));
     }
 
-    // --- clear_idle_gate ---
+    // --- enqueue_task / dequeue_task / peek_queue ---
 
     #[test]
-    fn clear_idle_gate_removes_existing_gate_file() {
-        with_env("cig_exists", true, |_| {
+    fn enqueue_dequeue_fifo_ordering() {
+        with_env("queue_fifo", true, |_| {
             ensure_dropbox("proj123", "my-branch", "claude");
 
-            let paths = KildPaths::resolve().unwrap();
-            let gate_path = paths
-                .fleet_dropbox_dir("proj123", "my-branch")
-                .join(".idle_sent");
-            std::fs::write(&gate_path, "").unwrap();
-            assert!(gate_path.exists(), "gate file should exist before clear");
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "first").unwrap(),
+                Some(1)
+            );
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "second").unwrap(),
+                Some(2)
+            );
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "third").unwrap(),
+                Some(3)
+            );
 
-            clear_idle_gate("proj123", "my-branch");
-
-            assert!(
-                !gate_path.exists(),
-                "clear_idle_gate should remove .idle_sent"
+            // FIFO: first in, first out
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("first")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("second")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap().as_deref(),
+                Some("third")
+            );
+            assert_eq!(
+                dequeue_task("proj123", "my-branch").unwrap(),
+                None,
+                "queue should be empty"
             );
         });
     }
 
     #[test]
-    fn clear_idle_gate_noop_when_no_gate_file() {
-        with_env("cig_absent", true, |_| {
+    fn peek_queue_does_not_consume() {
+        with_env("queue_peek", true, |_| {
             ensure_dropbox("proj123", "my-branch", "claude");
+            enqueue_task("proj123", "my-branch", "task text").unwrap();
 
-            // No gate file created — clear_idle_gate should not panic or error.
-            clear_idle_gate("proj123", "my-branch");
+            let peek1 = peek_queue("proj123", "my-branch").unwrap();
+            let peek2 = peek_queue("proj123", "my-branch").unwrap();
+            assert_eq!(peek1, peek2, "peek must be idempotent");
+            assert!(peek1.is_some());
 
-            let paths = KildPaths::resolve().unwrap();
-            let gate_path = paths
-                .fleet_dropbox_dir("proj123", "my-branch")
-                .join(".idle_sent");
-            assert!(!gate_path.exists());
+            // Item should still be dequeueable
+            assert!(dequeue_task("proj123", "my-branch").unwrap().is_some());
         });
     }
 
     #[test]
-    fn clear_idle_gate_noop_when_fleet_not_active() {
-        with_env("cig_no_fleet", false, |_| {
-            // Fleet not active — should not panic or error.
-            clear_idle_gate("proj123", "my-branch");
+    fn dequeue_empty_queue_returns_none() {
+        with_env("queue_empty", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+            assert_eq!(dequeue_task("proj123", "my-branch").unwrap(), None);
+        });
+    }
+
+    #[test]
+    fn enqueue_noop_when_fleet_not_active() {
+        with_env("queue_no_fleet", false, |_| {
+            assert_eq!(
+                enqueue_task("proj123", "my-branch", "should not enqueue").unwrap(),
+                None
+            );
+        });
+    }
+
+    #[test]
+    fn write_report_overwrites_existing() {
+        with_env("report_overwrite", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            write_report("proj123", "my-branch", "first report").unwrap();
+            write_report("proj123", "my-branch", "second report").unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let content = std::fs::read_to_string(
+                paths
+                    .fleet_dropbox_dir("proj123", "my-branch")
+                    .join("report.md"),
+            )
+            .unwrap();
+            assert_eq!(content, "second report");
+        });
+    }
+
+    #[test]
+    fn write_report_noop_when_fleet_not_active() {
+        with_env("report_no_fleet", false, |_| {
+            // Should not error, just no-op
+            write_report("proj123", "my-branch", "should not write").unwrap();
+
+            let paths = KildPaths::resolve().unwrap();
+            let report_path = paths
+                .fleet_dropbox_dir("proj123", "my-branch")
+                .join("report.md");
+            assert!(!report_path.exists());
+        });
+    }
+
+    // --- enqueue_task sequence number comment ---
+
+    #[test]
+    fn enqueue_task_sequence_numbers_are_monotonic() {
+        with_env("queue_seq", true, |_| {
+            ensure_dropbox("proj123", "my-branch", "claude");
+
+            assert_eq!(enqueue_task("proj123", "my-branch", "a").unwrap(), Some(1));
+            assert_eq!(enqueue_task("proj123", "my-branch", "b").unwrap(), Some(2));
+
+            // Dequeue first, then enqueue — next should be 3, not 1
+            dequeue_task("proj123", "my-branch").unwrap();
+            assert_eq!(enqueue_task("proj123", "my-branch", "c").unwrap(), Some(3));
         });
     }
 }

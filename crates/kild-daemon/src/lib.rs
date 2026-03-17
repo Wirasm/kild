@@ -1,5 +1,6 @@
 pub mod client;
 pub mod errors;
+pub mod hooks;
 pub mod pid;
 pub mod protocol;
 pub mod pty;

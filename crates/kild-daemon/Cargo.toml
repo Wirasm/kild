@@ -39,6 +39,11 @@ base64.workspace = true
 # Zero-copy byte buffer for broadcast channel
 bytes.workspace = true
 
+# HTTP hook endpoint
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+
 # TOML config parsing
 toml.workspace = true
 
