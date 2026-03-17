@@ -18,7 +18,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "kild list --json > ~/.kild/brain/state.json 2>/dev/null || true"
+          command: "mkdir -p ~/.kild/brain && kild list --json > ~/.kild/brain/state.json 2>> ~/.kild/brain/stop-hook.log || echo \"$(date): kild list failed on Stop hook\" >> ~/.kild/brain/stop-hook.log"
           timeout: 10
 ---
 

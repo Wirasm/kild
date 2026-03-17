@@ -44,15 +44,25 @@ case "$STATUS" in
     ;;
   stopped)
     kild open honryu --resume
+    echo "Waiting for Honryū to initialize..."
     sleep 5
-    kild inject honryu "You've been restarted by the Tōryō. Orient yourself: check kild list --json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
-    echo "Honryū restarted."
+    if kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' >/dev/null 2>&1; then
+      kild inject honryu "You've been restarted by the Tōryō. Orient yourself: check kild list --json, today's session log, and .kild/wave-plan.json (if it exists, mention it). Then greet the Tōryō and summarize the fleet state."
+      echo "Honryū restarted."
+    else
+      echo "Warning: honryu session not active after 5s. Run: kild inject honryu \"...\" once it starts." >&2
+    fi
     ;;
   *)
     kild create honryu --daemon --main --agent claude --yolo --note "Honryū fleet supervisor"
+    echo "Waiting for Honryū to initialize..."
     sleep 5
-    kild inject honryu "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, check today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state."
-    echo "Honryū initialized."
+    if kild list --json 2>/dev/null | jq -e '.sessions[] | select(.branch == "honryu" and .status == "active")' >/dev/null 2>&1; then
+      kild inject honryu "You are Honryū, the KILD fleet supervisor. You have just been initialized by the Tōryō. Orient yourself: run kild list --json, check today's session log, and .kild/wave-plan.json if they exist. If a wave plan exists, mention it. Then greet the Tōryō and report fleet state."
+      echo "Honryū initialized."
+    else
+      echo "Warning: honryu session not active after 5s. Run: kild inject honryu \"...\" once it starts." >&2
+    fi
     ;;
 esac
 ```
