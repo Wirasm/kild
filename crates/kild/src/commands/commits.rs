@@ -38,7 +38,7 @@ pub(crate) fn handle_commits_command(
     if let Err(e) = std::io::stdout().write_all(commits.as_bytes())
         && e.kind() != std::io::ErrorKind::BrokenPipe
     {
-        eprintln!("Write failed: {}", e);
+        eprintln!("{} {}", crate::color::error("Write failed:"), e);
         error!(
             event = "cli.commits_write_failed",
             branch = branch,

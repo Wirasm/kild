@@ -41,7 +41,7 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "pr": null,
-                    "branch": format!("kild/{}", branch),
+                    "branch": kild_core::git::kild_branch_name(branch),
                     "reason": "no_remote_configured"
                 }))?
             );
@@ -114,12 +114,12 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
                         "pr": null,
-                        "branch": format!("kild/{}", branch),
+                        "branch": kild_branch,
                         "reason": "no_pr_found"
                     }))?
                 );
             } else {
-                println!("No PR found for branch 'kild/{}'", branch);
+                println!("No PR found for branch '{}'", kild_branch);
             }
             info!(
                 event = "cli.pr_completed",

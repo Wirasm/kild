@@ -9,6 +9,23 @@ use kild_core::{events, session_ops};
 use super::json_types::JsonError;
 use crate::color;
 
+/// Display a CLI operation error consistently.
+///
+/// Format: `"Could not {operation} '{target}': {error}"` with colored "Could not {operation}" prefix.
+/// All single-resource CLI errors should use this for consistent user-facing output.
+pub(crate) fn display_operation_error(
+    operation: &str,
+    target: &str,
+    error: impl std::fmt::Display,
+) {
+    eprintln!(
+        "{} '{}': {}",
+        color::error(&format!("Could not {operation}")),
+        target,
+        error
+    );
+}
+
 /// Resolve the branch name of the calling session, if running inside one.
 ///
 /// Tries `$KILD_SESSION_BRANCH` first (reliable for claude/codex agents),

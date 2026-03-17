@@ -10,6 +10,57 @@ use super::daemon_helpers::{
     spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
 
+/// Resolve the final agent command and session ID for resume or fresh open.
+///
+/// - `resume = true`, non-bare-shell: appends resume args using `session.agent_session_id`.
+///   Returns `Err(ResumeUnsupported)` if the agent does not support resume.
+///   Returns `Err(ResumeNoSessionId)` if no stored session ID is available.
+/// - `resume = false`, non-bare-shell, resume-capable agent: generates a fresh session ID
+///   for future resume capability.
+/// - `is_bare_shell = true`, or non-resume-capable agent: returns the command unchanged
+///   with `None` as the session ID.
+fn resolve_resume_args(
+    resume: bool,
+    is_bare_shell: bool,
+    agent: &str,
+    agent_command: String,
+    session: &Session,
+) -> Result<(String, Option<String>), SessionError> {
+    if resume && !is_bare_shell {
+        if let Some(ref sid) = session.agent_session_id {
+            if agents::resume::supports_resume(agent) {
+                let extra = agents::resume::resume_session_args(agent, sid);
+                let cmd = format!("{} {}", agent_command, extra.join(" "));
+                info!(event = "core.session.resume_started", session_id = %sid, agent = %agent);
+                Ok((cmd, Some(sid.clone())))
+            } else {
+                error!(event = "core.session.resume_unsupported", agent = %agent);
+                Err(SessionError::ResumeUnsupported {
+                    agent: agent.to_string(),
+                })
+            }
+        } else {
+            error!(event = "core.session.resume_no_session_id", branch = %session.branch);
+            Err(SessionError::ResumeNoSessionId {
+                branch: session.branch.to_string(),
+            })
+        }
+    } else if !is_bare_shell && agents::resume::supports_resume(agent) {
+        // Fresh open: generate new session ID for future resume capability
+        let sid = agents::resume::generate_session_id();
+        let extra = agents::resume::create_session_args(agent, &sid);
+        let cmd = if extra.is_empty() {
+            agent_command
+        } else {
+            info!(event = "core.session.agent_session_id_set", session_id = %sid);
+            format!("{} {}", agent_command, extra.join(" "))
+        };
+        Ok((cmd, Some(sid)))
+    } else {
+        Ok((agent_command, None))
+    }
+}
+
 /// Resolve the effective runtime mode for `open_session`.
 ///
 /// Priority: explicit CLI flag > session's stored mode > config > Terminal default.
@@ -255,39 +306,8 @@ pub fn open_session(request: &super::types::OpenSessionRequest) -> Result<Sessio
     };
 
     // 4. Apply resume / session-id logic to agent command
-    let (agent_command, new_agent_session_id) = if resume && !is_bare_shell {
-        if let Some(ref sid) = session.agent_session_id {
-            if agents::resume::supports_resume(&agent) {
-                let extra = agents::resume::resume_session_args(&agent, sid);
-                let cmd = format!("{} {}", agent_command, extra.join(" "));
-                info!(event = "core.session.resume_started", session_id = %sid, agent = %agent);
-                (cmd, Some(sid.clone()))
-            } else {
-                error!(event = "core.session.resume_unsupported", agent = %agent);
-                return Err(SessionError::ResumeUnsupported {
-                    agent: agent.clone(),
-                });
-            }
-        } else {
-            error!(event = "core.session.resume_no_session_id", branch = name);
-            return Err(SessionError::ResumeNoSessionId {
-                branch: name.to_string(),
-            });
-        }
-    } else if !is_bare_shell && agents::resume::supports_resume(&agent) {
-        // Fresh open: generate new session ID for future resume capability
-        let sid = agents::resume::generate_session_id();
-        let extra = agents::resume::create_session_args(&agent, &sid);
-        let cmd = if extra.is_empty() {
-            agent_command
-        } else {
-            info!(event = "core.session.agent_session_id_set", session_id = %sid);
-            format!("{} {}", agent_command, extra.join(" "))
-        };
-        (cmd, Some(sid))
-    } else {
-        (agent_command, None)
-    };
+    let (agent_command, new_agent_session_id) =
+        resolve_resume_args(resume, is_bare_shell, &agent, agent_command, &session)?;
 
     // 4b. Determine task list ID for agents that support it
     let new_task_list_id = if resume && !is_bare_shell {

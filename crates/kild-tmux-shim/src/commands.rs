@@ -282,10 +282,13 @@ fn create_pty_pane(
     Ok(pane_id)
 }
 
+/// The tmux version string reported by the shim.
+const SHIM_VERSION: &str = "tmux 3.4";
+
 // -- Command handlers --
 
 fn handle_version() -> Result<i32, ShimError> {
-    println!("tmux 3.4");
+    println!("{}", SHIM_VERSION);
     Ok(0)
 }
 
