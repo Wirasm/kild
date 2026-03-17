@@ -36,6 +36,76 @@ macro_rules! define_agent_backend_tests {
 }
 
 macro_rules! define_agent_backend {
+    // Arm with yolo_flags + acp_command (agents that support both)
+    (
+        $struct_name:ident,
+        test_prefix: $prefix:ident,
+        name: $name:expr,
+        display_name: $display:expr,
+        binary: $binary:expr,
+        command: $cmd:expr,
+        process_patterns: [$($pat:expr),+ $(,)?],
+        yolo_flags: $yolo:expr,
+        acp_command: ($acp_binary:expr, $acp_args:expr)
+    ) => {
+        pub struct $struct_name;
+
+        impl crate::agents::traits::AgentBackend for $struct_name {
+            fn name(&self) -> &'static str {
+                $name
+            }
+
+            fn display_name(&self) -> &'static str {
+                $display
+            }
+
+            fn is_available(&self) -> bool {
+                which::which($binary).is_ok()
+            }
+
+            fn default_command(&self) -> &'static str {
+                $cmd
+            }
+
+            fn process_patterns(&self) -> Vec<String> {
+                vec![$($pat.to_string()),+]
+            }
+
+            fn yolo_flags(&self) -> Option<&'static str> {
+                Some($yolo)
+            }
+
+            fn acp_command(&self) -> Option<crate::agents::traits::AcpCommandInfo> {
+                Some(crate::agents::traits::AcpCommandInfo {
+                    binary: $acp_binary,
+                    args: $acp_args,
+                })
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use crate::agents::traits::AgentBackend;
+
+            define_agent_backend_tests!($struct_name, $prefix, $name, $display, $cmd, [$($pat),+]);
+
+            paste::paste! {
+                #[test]
+                fn [<$prefix _backend_returns_correct_yolo_flags>]() {
+                    assert_eq!($struct_name.yolo_flags(), Some($yolo));
+                }
+
+                #[test]
+                fn [<$prefix _backend_returns_acp_command>]() {
+                    let acp = $struct_name.acp_command();
+                    assert!(acp.is_some(), "Agent should support ACP");
+                    let info = acp.unwrap();
+                    assert_eq!(info.binary, $acp_binary);
+                }
+            }
+        }
+    };
     // Arm with yolo_flags (agents that support autonomous mode)
     (
         $struct_name:ident,
@@ -90,7 +160,72 @@ macro_rules! define_agent_backend {
             }
         }
     };
-    // Arm without yolo_flags (agents that don't support autonomous mode)
+    // Arm without yolo_flags but with acp_command
+    (
+        $struct_name:ident,
+        test_prefix: $prefix:ident,
+        name: $name:expr,
+        display_name: $display:expr,
+        binary: $binary:expr,
+        command: $cmd:expr,
+        process_patterns: [$($pat:expr),+ $(,)?],
+        acp_command: ($acp_binary:expr, $acp_args:expr)
+    ) => {
+        pub struct $struct_name;
+
+        impl crate::agents::traits::AgentBackend for $struct_name {
+            fn name(&self) -> &'static str {
+                $name
+            }
+
+            fn display_name(&self) -> &'static str {
+                $display
+            }
+
+            fn is_available(&self) -> bool {
+                which::which($binary).is_ok()
+            }
+
+            fn default_command(&self) -> &'static str {
+                $cmd
+            }
+
+            fn process_patterns(&self) -> Vec<String> {
+                vec![$($pat.to_string()),+]
+            }
+
+            fn acp_command(&self) -> Option<crate::agents::traits::AcpCommandInfo> {
+                Some(crate::agents::traits::AcpCommandInfo {
+                    binary: $acp_binary,
+                    args: $acp_args,
+                })
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use crate::agents::traits::AgentBackend;
+
+            define_agent_backend_tests!($struct_name, $prefix, $name, $display, $cmd, [$($pat),+]);
+
+            paste::paste! {
+                #[test]
+                fn [<$prefix _backend_returns_no_yolo_flags>]() {
+                    assert_eq!($struct_name.yolo_flags(), None);
+                }
+
+                #[test]
+                fn [<$prefix _backend_returns_acp_command>]() {
+                    let acp = $struct_name.acp_command();
+                    assert!(acp.is_some(), "Agent should support ACP");
+                    let info = acp.unwrap();
+                    assert_eq!(info.binary, $acp_binary);
+                }
+            }
+        }
+    };
+    // Arm without yolo_flags and without acp_command
     (
         $struct_name:ident,
         test_prefix: $prefix:ident,
@@ -161,7 +296,8 @@ mod claude {
         binary: "claude",
         command: "claude",
         process_patterns: ["claude", "claude-code"],
-        yolo_flags: "--dangerously-skip-permissions"
+        yolo_flags: "--dangerously-skip-permissions",
+        acp_command: ("claude-code-acp", &[])
     );
 }
 
@@ -185,7 +321,8 @@ mod gemini {
         binary: "gemini",
         command: "gemini",
         process_patterns: ["gemini", "gemini-cli"],
-        yolo_flags: "--yolo --approval-mode yolo"
+        yolo_flags: "--yolo --approval-mode yolo",
+        acp_command: ("gemini", &["--experimental-acp"])
     );
 }
 
@@ -208,7 +345,8 @@ mod opencode {
         display_name: "OpenCode",
         binary: "opencode",
         command: "opencode",
-        process_patterns: ["opencode"]
+        process_patterns: ["opencode"],
+        acp_command: ("opencode", &["acp"])
     );
 }
 

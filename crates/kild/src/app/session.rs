@@ -80,14 +80,25 @@ pub fn create_command() -> Command {
                 .long("daemon")
                 .help("Launch agent in daemon-owned PTY (overrides config)")
                 .action(ArgAction::SetTrue)
-                .conflicts_with("no-daemon"),
+                .conflicts_with("no-daemon")
+                .conflicts_with("acp"),
         )
         .arg(
             Arg::new("no-daemon")
                 .long("no-daemon")
                 .help("Launch agent in external terminal window (overrides config)")
                 .action(ArgAction::SetTrue)
-                .conflicts_with("daemon"),
+                .conflicts_with("daemon")
+                .conflicts_with("acp"),
+        )
+        .arg(
+            Arg::new("acp")
+                .long("acp")
+                .help("Launch agent via ACP (Agent Client Protocol) instead of PTY")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("daemon")
+                .conflicts_with("no-daemon")
+                .conflicts_with("no-agent"),
         )
         .arg(
             Arg::new("main")
@@ -167,14 +178,25 @@ pub fn open_command() -> Command {
                 .long("daemon")
                 .help("Launch agent in daemon-owned PTY (overrides config)")
                 .action(ArgAction::SetTrue)
-                .conflicts_with("no-daemon"),
+                .conflicts_with("no-daemon")
+                .conflicts_with("acp"),
         )
         .arg(
             Arg::new("no-daemon")
                 .long("no-daemon")
                 .help("Launch agent in external terminal window (overrides config)")
                 .action(ArgAction::SetTrue)
-                .conflicts_with("daemon"),
+                .conflicts_with("daemon")
+                .conflicts_with("acp"),
+        )
+        .arg(
+            Arg::new("acp")
+                .long("acp")
+                .help("Launch agent via ACP (Agent Client Protocol) instead of PTY")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("daemon")
+                .conflicts_with("no-daemon")
+                .conflicts_with("no-agent"),
         )
         .arg(
             Arg::new("no-attach")

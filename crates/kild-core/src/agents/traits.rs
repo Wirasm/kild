@@ -29,6 +29,26 @@ pub trait AgentBackend: Send + Sync {
     fn yolo_flags(&self) -> Option<&'static str> {
         None
     }
+
+    /// Returns the ACP (Agent Client Protocol) command info for this agent.
+    ///
+    /// When `Some`, the agent supports structured JSON-RPC communication via
+    /// ACP instead of raw PTY terminal I/O. The returned info specifies the
+    /// binary and arguments to launch the ACP server mode.
+    ///
+    /// Returns `None` (default) for agents that don't support ACP.
+    fn acp_command(&self) -> Option<AcpCommandInfo> {
+        None
+    }
+}
+
+/// ACP command info for agents that support the Agent Client Protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcpCommandInfo {
+    /// Binary name to execute (e.g., "claude-code-acp", "opencode").
+    pub binary: &'static str,
+    /// Additional arguments for ACP mode (e.g., &["acp"]).
+    pub args: &'static [&'static str],
 }
 
 #[cfg(test)]

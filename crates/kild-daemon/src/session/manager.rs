@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::errors::DaemonError;
@@ -14,6 +14,7 @@ use crate::types::{DaemonConfig, DaemonSessionStatus};
 ///
 /// Manages the map of `DaemonSession` instances, delegates to `PtyManager`
 /// for PTY allocation, and handles client attach/detach tracking.
+/// Supports both PTY sessions (terminal I/O) and ACP sessions (stdio relay).
 ///
 /// Lock discipline: methods taking `&self` are safe to call under a read lock
 /// on the outer `RwLock<SessionManager>`; methods taking `&mut self` require a
@@ -21,20 +22,20 @@ use crate::types::{DaemonConfig, DaemonSessionStatus};
 pub struct SessionManager {
     sessions: HashMap<String, DaemonSession>,
     pty_manager: PtyManager,
+    /// Stdin channels for ACP sessions (no PTY — bytes go to subprocess stdin).
+    acp_stdin_senders: HashMap<String, mpsc::Sender<Vec<u8>>>,
     config: DaemonConfig,
     next_client_id: ClientId,
-    /// Sender for PTY exit notifications. Passed to each PTY reader task.
-    pty_exit_tx: tokio::sync::mpsc::UnboundedSender<PtyExitEvent>,
+    /// Sender for PTY/ACP exit notifications. Passed to each reader task.
+    pty_exit_tx: mpsc::UnboundedSender<PtyExitEvent>,
 }
 
 impl SessionManager {
-    pub fn new(
-        config: DaemonConfig,
-        pty_exit_tx: tokio::sync::mpsc::UnboundedSender<PtyExitEvent>,
-    ) -> Self {
+    pub fn new(config: DaemonConfig, pty_exit_tx: mpsc::UnboundedSender<PtyExitEvent>) -> Self {
         Self {
             sessions: HashMap::new(),
             pty_manager: PtyManager::new(),
+            acp_stdin_senders: HashMap::new(),
             config,
             next_client_id: 1,
             pty_exit_tx,
@@ -280,6 +281,90 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Create a new ACP session (no PTY — stdio relay).
+    ///
+    /// Spawns the ACP agent as a subprocess with piped stdin/stdout, sets up
+    /// broadcast channels and scrollback, and transitions the session to Running.
+    pub fn create_acp_session(
+        &mut self,
+        session_id: &str,
+        working_directory: &str,
+        command: &str,
+        args: &[String],
+        env_vars: &[(String, String)],
+    ) -> Result<SessionInfo, DaemonError> {
+        if self.sessions.contains_key(session_id) {
+            return Err(DaemonError::SessionAlreadyExists(session_id.to_string()));
+        }
+
+        info!(
+            event = "daemon.acp.create_started",
+            session_id = session_id,
+            command = command,
+        );
+
+        let created_at = chrono::Utc::now().to_rfc3339();
+
+        let mut session = DaemonSession::new(
+            session_id.to_string(),
+            working_directory.to_string(),
+            command.to_string(),
+            created_at,
+            self.config.scrollback_buffer_size,
+        );
+
+        let shared_scrollback = session.shared_scrollback();
+
+        let broadcast_capacity = std::cmp::max(self.config.client_buffer_size / 4096, 16);
+        let working_dir = std::path::Path::new(working_directory);
+
+        let spawn_result = crate::acp::relay::spawn_acp_process(
+            session_id,
+            command,
+            args,
+            working_dir,
+            env_vars,
+            broadcast_capacity,
+            shared_scrollback,
+            self.pty_exit_tx.clone(),
+        )?;
+
+        // Transition session to Running using the broadcast sender from ACP spawn
+        session.set_running(spawn_result.output_tx, spawn_result.pid)?;
+
+        // Store stdin channel for relay writes
+        self.acp_stdin_senders
+            .insert(session_id.to_string(), spawn_result.stdin_tx);
+
+        let info = session.to_session_info();
+        self.sessions.insert(session_id.to_string(), session);
+
+        info!(
+            event = "daemon.acp.create_completed",
+            session_id = session_id,
+            pid = ?spawn_result.pid,
+        );
+
+        Ok(info)
+    }
+
+    /// Write bytes to an ACP session's stdin.
+    ///
+    /// Returns an error if the session is not found or is not an ACP session.
+    pub fn write_acp_stdin(&self, session_id: &str, data: Vec<u8>) -> Result<(), DaemonError> {
+        let tx = self
+            .acp_stdin_senders
+            .get(session_id)
+            .ok_or_else(|| DaemonError::SessionNotFound(session_id.to_string()))?;
+
+        tx.try_send(data).map_err(|e| {
+            DaemonError::PtyError(format!(
+                "Failed to write to ACP session '{}' stdin: {}",
+                session_id, e
+            ))
+        })
+    }
+
     /// Destroy a session entirely.
     ///
     /// The session state is always removed, regardless of the force flag.
@@ -311,6 +396,9 @@ impl SessionManager {
                 message = "PTY kill failed during destroy — child process may still be running",
             );
         }
+
+        // Clean up ACP stdin channel if this was an ACP session
+        self.acp_stdin_senders.remove(session_id);
 
         // Always remove the session state during destroy
         self.sessions.remove(session_id);
@@ -367,11 +455,11 @@ impl SessionManager {
         }
     }
 
-    /// Handle a PTY exit event: transition the session to Stopped and clean up PTY.
-    /// Returns the session_id and output_tx if the session had attached clients
+    /// Handle a PTY/ACP exit event: transition the session to Stopped and clean up.
+    /// Returns the output_tx if the session had attached clients
     /// (so the caller can broadcast a session_event notification).
     pub fn handle_pty_exit(&mut self, session_id: &str) -> Option<broadcast::Sender<Bytes>> {
-        // Clean up PTY resources and capture exit code
+        // Clean up PTY resources and capture exit code (PTY sessions)
         let exit_code = match self.pty_manager.remove(session_id) {
             Some(mut pty) => {
                 // Child has already exited (reader got EOF), so wait() returns immediately
@@ -393,14 +481,20 @@ impl SessionManager {
                 code
             }
             None => {
-                warn!(
-                    event = "daemon.session.pty_already_removed",
+                // ACP sessions have no PTY — this is expected, not a warning.
+                // The exit code is captured by the ACP exit monitor task
+                // but not surfaced here (session.set_exit_code is set below).
+                debug!(
+                    event = "daemon.session.no_pty_to_remove",
                     session_id = session_id,
-                    "PTY already removed (race with stop or natural exit)",
+                    "No PTY for session (ACP or already cleaned up)",
                 );
                 None
             }
         };
+
+        // Clean up ACP stdin channel if present
+        self.acp_stdin_senders.remove(session_id);
 
         info!(
             event = "daemon.session.pty_exited",
