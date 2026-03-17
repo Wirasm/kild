@@ -10,12 +10,15 @@ use super::daemon_helpers::{
     spawn_and_save_attach_window, spawn_daemon_agent, spawn_terminal_agent,
 };
 
-/// Resolve the agent command and session ID for resume or fresh open.
+/// Resolve the final agent command and session ID for resume or fresh open.
 ///
-/// When `resume` is true, appends resume args using the session's stored agent_session_id.
-/// When `resume` is false, generates a fresh session ID for resume-capable agents.
-///
-/// Returns `(final_agent_command, new_agent_session_id)`.
+/// - `resume = true`, non-bare-shell: appends resume args using `session.agent_session_id`.
+///   Returns `Err(ResumeUnsupported)` if the agent does not support resume.
+///   Returns `Err(ResumeNoSessionId)` if no stored session ID is available.
+/// - `resume = false`, non-bare-shell, resume-capable agent: generates a fresh session ID
+///   for future resume capability.
+/// - `is_bare_shell = true`, or non-resume-capable agent: returns the command unchanged
+///   with `None` as the session ID.
 fn resolve_resume_args(
     resume: bool,
     is_bare_shell: bool,

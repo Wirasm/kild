@@ -16,11 +16,11 @@ use crate::color;
 pub(crate) fn display_operation_error(
     operation: &str,
     target: &str,
-    error: &dyn std::fmt::Display,
+    error: impl std::fmt::Display,
 ) {
     eprintln!(
         "{} '{}': {}",
-        color::error(&format!("Could not {}", operation)),
+        color::error(&format!("Could not {operation}")),
         target,
         error
     );

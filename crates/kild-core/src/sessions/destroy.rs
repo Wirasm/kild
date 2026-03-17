@@ -40,8 +40,10 @@ pub fn cleanup_task_list(session_id: &str, task_list_id: &str, home_dir: &std::p
 
 /// Kill all tracked agents for a session, closing their terminal windows or daemon PTYs.
 ///
-/// Returns `Ok(())` if all agents were killed (or if `force` is true).
-/// Returns `Err(ProcessKillFailed)` if any agent could not be killed and `force` is false.
+/// - Daemon-managed agents: cleanup failures are always non-fatal (session file is being
+///   removed regardless), so daemon errors never block destruction.
+/// - Terminal-managed agents: kill failures are accumulated and returned as
+///   `Err(ProcessKillFailed)` unless `force` is true.
 fn kill_tracked_agents(session: &Session, force: bool) -> Result<(), SessionError> {
     if !session.has_agents() {
         warn!(
@@ -143,7 +145,7 @@ fn kill_tracked_agents(session: &Session, force: bool) -> Result<(), SessionErro
             );
         }
 
-        let &(first_pid, ref first_msg) = kill_errors.first().unwrap();
+        let &(first_pid, ref first_msg) = &kill_errors[0];
         let error_count = kill_errors.len();
 
         let message = if error_count == 1 {

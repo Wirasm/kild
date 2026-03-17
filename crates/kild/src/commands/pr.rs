@@ -114,15 +114,12 @@ pub(crate) fn handle_pr_command(matches: &ArgMatches) -> Result<(), Box<dyn std:
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
                         "pr": null,
-                        "branch": kild_core::git::kild_branch_name(branch),
+                        "branch": kild_branch,
                         "reason": "no_pr_found"
                     }))?
                 );
             } else {
-                println!(
-                    "No PR found for branch '{}'",
-                    kild_core::git::kild_branch_name(branch)
-                );
+                println!("No PR found for branch '{}'", kild_branch);
             }
             info!(
                 event = "cli.pr_completed",
