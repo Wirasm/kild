@@ -16,9 +16,10 @@ use kild_config::{Config, KildConfig};
 
 use super::daemon_request::build_daemon_create_request;
 use super::integrations::{
-    setup_claude_integration, setup_codex_integration, setup_opencode_integration,
+    setup_claude_integration, setup_codex_integration, setup_fleet_instructions,
+    setup_opencode_integration,
 };
-use super::{dropbox, fleet};
+use super::{fleet, inbox};
 
 /// Everything needed to spawn an agent in either a daemon PTY or an external terminal.
 pub(super) struct AgentSpawnParams<'a> {
@@ -35,6 +36,8 @@ pub(super) struct AgentSpawnParams<'a> {
     pub rows: Option<u16>,
     /// CLI override for initial PTY columns (daemon sessions only).
     pub cols: Option<u16>,
+    /// True when the session uses `--main` (project root as worktree).
+    pub use_main_worktree: bool,
 }
 
 /// Spawn an agent in a daemon-managed PTY.
@@ -55,14 +58,24 @@ pub(super) fn spawn_daemon_agent(
     // 1. Auto-start daemon if not running
     crate::daemon::ensure_daemon_running(params.kild_config)?;
 
-    // 2. Agent integration setup (hooks, config patching)
+    // 2. Agent integration setup (hooks, config patching, fleet instructions)
     setup_codex_integration(params.agent);
     setup_opencode_integration(params.agent, params.worktree_path);
     setup_claude_integration(params.agent);
+    setup_fleet_instructions(params.agent, params.worktree_path, params.use_main_worktree);
 
-    // 3. Fleet member + dropbox setup
+    // 3. Fleet member + inbox setup
     fleet::ensure_fleet_member(params.branch, params.worktree_path, params.agent);
-    dropbox::ensure_dropbox(params.project_id, params.branch, params.agent);
+    let paths = kild_paths::KildPaths::resolve().map_err(|e| SessionError::DaemonError {
+        message: format!("{} — cannot create inbox", e),
+    })?;
+    inbox::ensure_inbox(
+        &paths,
+        params.project_id,
+        params.branch,
+        params.agent,
+        params.branch == fleet::BRAIN_BRANCH,
+    );
 
     // 4. Fleet agent flags → augmented command
     let fleet_command = match fleet::fleet_agent_flags(params.branch, params.agent) {
@@ -79,12 +92,14 @@ pub(super) fn spawn_daemon_agent(
         params.branch,
     )?;
 
-    // 6. Inject dropbox env vars
-    dropbox::inject_dropbox_env_vars(
+    // 6. Inject inbox env vars
+    inbox::inject_inbox_env_vars(
         &mut req_params.env_vars,
         params.project_id,
         params.branch,
         params.agent,
+        params.branch == fleet::BRAIN_BRANCH,
+        &paths,
     );
 
     // 7. Create PTY session via daemon IPC

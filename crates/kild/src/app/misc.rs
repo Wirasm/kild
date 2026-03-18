@@ -77,7 +77,7 @@ pub fn stats_command() -> Command {
 
 pub fn inbox_command() -> Command {
     Command::new("inbox")
-        .about("Inspect fleet dropbox protocol state for a kild")
+        .about("Inspect fleet inbox state for a kild")
         .arg(
             Arg::new("branch")
                 .help("Branch name of the kild")
@@ -96,27 +96,6 @@ pub fn inbox_command() -> Command {
                 .help("Show inbox state for all fleet kilds")
                 .action(ArgAction::SetTrue)
                 .conflicts_with("branch"),
-        )
-        .arg(
-            Arg::new("task")
-                .long("task")
-                .help("Show only the current task content")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["report", "status", "all", "json"]),
-        )
-        .arg(
-            Arg::new("report")
-                .long("report")
-                .help("Show only the latest report")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["task", "status", "all", "json"]),
-        )
-        .arg(
-            Arg::new("status")
-                .long("status")
-                .help("Show only task-id vs ack status")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["task", "report", "all", "json"]),
         )
 }
 
@@ -162,42 +141,6 @@ pub fn prime_command() -> Command {
                 .help("Accepted for compatibility (output is always plain markdown)")
                 .action(ArgAction::SetTrue)
                 .hide(true),
-        )
-}
-
-pub fn report_command() -> Command {
-    Command::new("report")
-        .about("Write task completion report to dropbox")
-        .arg(
-            Arg::new("self")
-                .long("self")
-                .help("Resolve session from KILD_SESSION_BRANCH env var")
-                .action(ArgAction::SetTrue)
-                .required(true),
-        )
-        .arg(
-            Arg::new("from-hook")
-                .long("from-hook")
-                .help("Read TaskCompleted JSON from stdin and extract report data")
-                .action(ArgAction::SetTrue)
-                .required(true),
-        )
-}
-
-pub fn check_queue_command() -> Command {
-    Command::new("check-queue")
-        .about("Check for queued work and deliver if available")
-        .long_about(
-            "Check if there are queued tasks for this session. If a task is available, \
-             deliver it to the dropbox and exit 2 (blocks TeammateIdle hook). If no tasks \
-             are queued, exit 0 (teammate goes idle normally).",
-        )
-        .arg(
-            Arg::new("self")
-                .long("self")
-                .help("Resolve session from KILD_SESSION_BRANCH env var")
-                .action(ArgAction::SetTrue)
-                .required(true),
         )
 }
 

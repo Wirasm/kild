@@ -239,6 +239,7 @@ pub fn create_session(
         kild_config,
         rows: request.rows,
         cols: request.cols,
+        use_main_worktree: request.use_main_worktree,
     };
 
     let initial_agent = match request.runtime_mode {
@@ -315,8 +316,8 @@ pub fn create_session(
     // 7. Save session BEFORE spawning attach window so `kild attach` can find it
     persistence::save_session_to_file(&session, &config.sessions_dir())?;
 
-    // 7a+7b. Write initial prompt to dropbox and deliver to agent (best-effort, may block up to 20s).
-    // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
+    // 7a+7b. Write initial prompt to inbox and deliver to agent (best-effort, may block up to 20s).
+    // Fleet claude sessions skip PTY delivery — inbox task.md + Claude inbox is more reliable.
     if let Some(ref prompt) = request.initial_prompt {
         deliver_initial_prompt_for_session(
             &session.project_id,

@@ -1,13 +1,8 @@
 /// Fleet mode — Honryū team setup for daemon sessions.
 ///
-/// Two separate gates control fleet functionality:
-///
-/// - **Dropbox** (`is_dropbox_capable_agent`): file-based protocol (task.md, ack,
-///   report.md) available to ALL real AI agents (claude, codex, gemini, kiro, amp,
-///   opencode). Bare shell sessions are excluded.
-///
-/// - **Claude inbox/team** (`is_claude_fleet_agent`): Claude Code inbox JSON injection
-///   and `--agent-id`/`--team-name` CLI flags. Claude-only.
+/// Claude Code's native team protocol (config.json, inboxes/*.json, --agent-id flags)
+/// is the fast delivery path for Claude sessions. The file-based inbox protocol in
+/// `inbox.rs` is the universal protocol for all agents.
 ///
 /// Fleet mode is opt-in: it activates when the honryu team directory exists
 /// (~/.claude/teams/honryu/) or when the brain session itself is being created.
@@ -57,14 +52,6 @@ fn claude_config_dir() -> Option<PathBuf> {
 
 fn team_dir() -> Option<PathBuf> {
     claude_config_dir().map(|d| d.join("teams").join(TEAM_NAME))
-}
-
-/// Returns true if the agent supports the file-based dropbox protocol.
-///
-/// All real AI agents can read/write dropbox files (task.md, ack, report.md).
-/// Only bare shell sessions are excluded — they have no agent to consume tasks.
-pub(super) fn is_dropbox_capable_agent(agent: &str) -> bool {
-    AgentType::parse(agent).is_some()
 }
 
 /// Returns true if the agent supports the Claude Code inbox/team protocol.
@@ -531,9 +518,6 @@ fn remove_from_team_config(branch: &str, dir: &Path) {
 }
 
 /// Serialize all tests that mutate CLAUDE_CONFIG_DIR — env vars are process-global.
-///
-/// Shared across `fleet::tests` and `dropbox::tests` so neither module can
-/// overwrite `CLAUDE_CONFIG_DIR` while the other is mid-test.
 #[cfg(test)]
 pub(super) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -600,25 +584,6 @@ mod tests {
     #[test]
     fn fleet_safe_name_brain_unchanged() {
         assert_eq!(fleet_safe_name(BRAIN_BRANCH), BRAIN_BRANCH);
-    }
-
-    // --- is_dropbox_capable_agent ---
-
-    #[test]
-    fn is_dropbox_capable_agent_true_for_all_real_agents() {
-        assert!(is_dropbox_capable_agent("claude"));
-        assert!(is_dropbox_capable_agent("codex"));
-        assert!(is_dropbox_capable_agent("gemini"));
-        assert!(is_dropbox_capable_agent("kiro"));
-        assert!(is_dropbox_capable_agent("amp"));
-        assert!(is_dropbox_capable_agent("opencode"));
-    }
-
-    #[test]
-    fn is_dropbox_capable_agent_false_for_shell() {
-        assert!(!is_dropbox_capable_agent("shell"));
-        assert!(!is_dropbox_capable_agent(""));
-        assert!(!is_dropbox_capable_agent("unknown-thing"));
     }
 
     // --- is_claude_fleet_agent ---

@@ -42,7 +42,5 @@ pub fn build_cli() -> Command {
         .subcommand(daemon::inject_command())
         .subcommand(misc::completions_command())
         .subcommand(misc::init_hooks_command())
-        .subcommand(misc::report_command())
-        .subcommand(misc::check_queue_command())
         .subcommand(project::project_command())
 }

@@ -354,13 +354,14 @@ pub fn open_session(request: &super::types::OpenSessionRequest) -> Result<Sessio
         kild_config: &kild_config,
         rows,
         cols,
+        use_main_worktree: session.use_main_worktree,
     };
 
     let new_agent = if use_daemon {
         let agent_process = spawn_daemon_agent(&spawn_params)?;
 
         // Open-only: deliver initial prompt after spawn.
-        // Fleet claude sessions skip PTY delivery — dropbox task.md + Claude inbox is more reliable.
+        // Fleet claude sessions skip PTY delivery — inbox task.md + Claude inbox is more reliable.
         if let Some(prompt) = initial_prompt {
             deliver_initial_prompt_for_session(
                 &session.project_id,

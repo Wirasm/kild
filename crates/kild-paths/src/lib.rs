@@ -64,19 +64,19 @@ impl KildPaths {
         self.kild_dir.join("health_history")
     }
 
-    // --- Fleet paths ---
+    // --- Inbox paths ---
 
-    pub fn fleet_dir(&self) -> PathBuf {
-        self.kild_dir.join("fleet")
+    pub fn inbox_base_dir(&self) -> PathBuf {
+        self.kild_dir.join("inbox")
     }
 
-    pub fn fleet_project_dir(&self, project_id: &str) -> PathBuf {
-        self.fleet_dir().join(project_id)
+    pub fn inbox_project_dir(&self, project_id: &str) -> PathBuf {
+        self.inbox_base_dir().join(project_id)
     }
 
-    pub fn fleet_dropbox_dir(&self, project_id: &str, branch: &str) -> PathBuf {
+    pub fn inbox_dir(&self, project_id: &str, branch: &str) -> PathBuf {
         let safe_branch = branch.replace('/', "_");
-        self.fleet_project_dir(project_id).join(safe_branch)
+        self.inbox_project_dir(project_id).join(safe_branch)
     }
 
     // --- Top-level files ---
@@ -514,42 +514,42 @@ mod tests {
     }
 
     #[test]
-    fn test_fleet_dir() {
+    fn test_inbox_base_dir() {
         assert_eq!(
-            test_paths().fleet_dir(),
-            PathBuf::from("/home/user/.kild/fleet")
+            test_paths().inbox_base_dir(),
+            PathBuf::from("/home/user/.kild/inbox")
         );
     }
 
     #[test]
-    fn test_fleet_project_dir() {
+    fn test_inbox_project_dir() {
         assert_eq!(
-            test_paths().fleet_project_dir("abc123"),
-            PathBuf::from("/home/user/.kild/fleet/abc123")
+            test_paths().inbox_project_dir("abc123"),
+            PathBuf::from("/home/user/.kild/inbox/abc123")
         );
     }
 
     #[test]
-    fn test_fleet_dropbox_dir() {
+    fn test_inbox_dir() {
         assert_eq!(
-            test_paths().fleet_dropbox_dir("abc123", "my-branch"),
-            PathBuf::from("/home/user/.kild/fleet/abc123/my-branch")
+            test_paths().inbox_dir("abc123", "my-branch"),
+            PathBuf::from("/home/user/.kild/inbox/abc123/my-branch")
         );
     }
 
     #[test]
-    fn test_fleet_dropbox_dir_sanitizes_slashes() {
+    fn test_inbox_dir_sanitizes_slashes() {
         assert_eq!(
-            test_paths().fleet_dropbox_dir("abc123", "feature/auth"),
-            PathBuf::from("/home/user/.kild/fleet/abc123/feature_auth")
+            test_paths().inbox_dir("abc123", "feature/auth"),
+            PathBuf::from("/home/user/.kild/inbox/abc123/feature_auth")
         );
     }
 
     #[test]
-    fn test_fleet_dropbox_dir_multiple_slashes() {
+    fn test_inbox_dir_multiple_slashes() {
         assert_eq!(
-            test_paths().fleet_dropbox_dir("abc123", "a/b/c"),
-            PathBuf::from("/home/user/.kild/fleet/abc123/a_b_c")
+            test_paths().inbox_dir("abc123", "a/b/c"),
+            PathBuf::from("/home/user/.kild/inbox/abc123/a_b_c")
         );
     }
 }

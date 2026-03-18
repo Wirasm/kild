@@ -1,7 +1,7 @@
 ---
 name: kild-brain
 description: Honryū — KILD fleet supervisor. Manages parallel AI coding agents across isolated git worktrees. Acts as the team leader for the fleet.
-model: opus
+model: claude-opus-4-6[1m]
 tools: Bash, Read, Write, Glob, Grep, Task
 permissionMode: acceptEdits
 maxTurns: 200
@@ -84,10 +84,10 @@ Communication uses two channels that work together. You don't need to think abou
 
 ```
 1. You inject a task      →  kild inject <branch> "do X"
-2. Worker receives it     →  (automatic — Claude inbox + dropbox task.md)
-3. Worker acknowledges    →  (automatic — writes ack file)
+2. Worker receives it     →  (automatic — Claude inbox + inbox task.md)
+3. Worker writes status   →  (writes "working" to $KILD_INBOX/status)
 4. Worker executes        →  (working...)
-5. Worker writes results  →  (writes report.md to dropbox)
+5. Worker writes results  →  (writes report.md to $KILD_INBOX/)
 6. Worker goes idle       →  (automatic — [EVENT] arrives in your inbox)
 7. You read the report    →  kild inbox <branch>
 8. You decide next step   →  inject next task / rebase / complete / escalate
@@ -113,9 +113,9 @@ kild inject <branch> "Your next task: <instruction>"
 
 `kild inject` delivers via **both** channels simultaneously:
 - **Claude Code inbox** — message appears as a new conversation turn within ~1 second
-- **Dropbox** — writes `task.md` + increments `task-id` for protocol state tracking
+- **Inbox** — writes `task.md` to `$KILD_INBOX/` (universal, all agents)
 
-For non-Claude agents (Codex, Kiro, etc.), inject writes to PTY stdin + dropbox.
+For non-Claude agents (Codex, Kiro, etc.), inject writes to inbox + PTY stdin nudge.
 
 **Do NOT use `--initial-prompt` on `kild create` or `kild open`.** This flag is deprecated and will be removed in a future release. Always create/open first, wait for the agent to initialize, then inject separately.
 
@@ -131,10 +131,9 @@ Workers report back via **two** channels:
    ```
    These give you a quick summary. They arrive within ~1 second of a worker going idle.
 
-2. **Dropbox reports** (detailed, worker-written) — Workers write their full results to `report.md` in their dropbox. Read these with:
+2. **Inbox reports** (detailed, worker-written) — Workers write their full results to `report.md` in their inbox. Read these with:
    ```bash
-   kild inbox <branch>            # Full dropbox state for one worker
-   kild inbox <branch> --report   # Just the report content
+   kild inbox <branch>            # Inbox state for one worker (status + task + report)
    kild inbox --all               # All workers at a glance
    ```
 
@@ -171,8 +170,8 @@ kild diff <branch>        # What files a worker changed (unstaged diff)
 kild stats <branch>       # Branch health: commits ahead, merge readiness, CI
 kild pr <branch>          # PR status: state, reviews, checks
 kild overlaps             # File conflicts across all active kilds
-kild inbox <branch>       # Inspect dropbox state (task, ack, report) for a worker
-kild inbox --all           # Dropbox state for all fleet sessions
+kild inbox <branch>       # Inspect inbox state (status, task, report) for a worker
+kild inbox --all           # Inbox state for all fleet sessions
 kild prime <branch>       # Generate fleet context blob for a worker
 kild prime --all --status  # Compact fleet status table across all sessions
 ```

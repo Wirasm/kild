@@ -1963,9 +1963,6 @@ fn test_cli_inbox_command() {
     assert_eq!(sub.get_one::<String>("branch").unwrap(), "test-branch");
     assert!(!sub.get_flag("json"));
     assert!(!sub.get_flag("all"));
-    assert!(!sub.get_flag("task"));
-    assert!(!sub.get_flag("report"));
-    assert!(!sub.get_flag("status"));
 }
 
 #[test]
@@ -2002,77 +1999,5 @@ fn test_cli_inbox_all_conflicts_with_branch() {
 fn test_cli_inbox_requires_branch_or_all() {
     let app = build_cli();
     let matches = app.try_get_matches_from(vec!["kild", "inbox"]);
-    assert!(matches.is_err());
-}
-
-#[test]
-fn test_cli_inbox_task_flag() {
-    let app = build_cli();
-    let matches = app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--task"]);
-    assert!(matches.is_ok());
-
-    let matches = matches.unwrap();
-    let sub = matches.subcommand_matches("inbox").unwrap();
-    assert!(sub.get_flag("task"));
-}
-
-#[test]
-fn test_cli_inbox_report_flag() {
-    let app = build_cli();
-    let matches = app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--report"]);
-    assert!(matches.is_ok());
-
-    let matches = matches.unwrap();
-    let sub = matches.subcommand_matches("inbox").unwrap();
-    assert!(sub.get_flag("report"));
-}
-
-#[test]
-fn test_cli_inbox_status_flag() {
-    let app = build_cli();
-    let matches = app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--status"]);
-    assert!(matches.is_ok());
-
-    let matches = matches.unwrap();
-    let sub = matches.subcommand_matches("inbox").unwrap();
-    assert!(sub.get_flag("status"));
-}
-
-#[test]
-fn test_cli_inbox_task_conflicts_with_all() {
-    let app = build_cli();
-    let matches = app.try_get_matches_from(vec!["kild", "inbox", "--all", "--task"]);
-    assert!(matches.is_err());
-}
-
-#[test]
-fn test_cli_inbox_task_conflicts_with_report() {
-    let app = build_cli();
-    let matches =
-        app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--task", "--report"]);
-    assert!(matches.is_err());
-}
-
-#[test]
-fn test_cli_inbox_task_conflicts_with_json() {
-    let app = build_cli();
-    let matches =
-        app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--task", "--json"]);
-    assert!(matches.is_err());
-}
-
-#[test]
-fn test_cli_inbox_report_conflicts_with_json() {
-    let app = build_cli();
-    let matches =
-        app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--report", "--json"]);
-    assert!(matches.is_err());
-}
-
-#[test]
-fn test_cli_inbox_status_conflicts_with_json() {
-    let app = build_cli();
-    let matches =
-        app.try_get_matches_from(vec!["kild", "inbox", "test-branch", "--status", "--json"]);
     assert!(matches.is_err());
 }
