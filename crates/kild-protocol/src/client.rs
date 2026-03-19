@@ -241,6 +241,15 @@ impl IpcConnection {
         }
     }
 
+    /// Read the current read timeout from the underlying socket.
+    pub fn get_read_timeout(&self) -> Result<Option<Duration>, IpcError> {
+        match &self.stream {
+            IpcStream::Unix(s) => Ok(s.read_timeout()?),
+            #[cfg(feature = "tcp")]
+            IpcStream::Tls(s) => Ok(s.get_ref().read_timeout()?),
+        }
+    }
+
     /// Check if the connection is still usable (peer hasn't closed).
     ///
     /// For Unix streams: temporarily sets a 1ms read timeout (restored via RAII
@@ -492,6 +501,30 @@ mod tests {
             !conn.is_alive(),
             "Socket with closed peer should not be alive"
         );
+    }
+
+    #[test]
+    fn test_get_read_timeout_returns_current_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let _listener = UnixListener::bind(&sock_path).unwrap();
+
+        let conn = IpcConnection::connect(&sock_path).unwrap();
+
+        // Default timeout from connect() is 30s
+        let timeout = conn.get_read_timeout().unwrap();
+        assert_eq!(timeout, Some(Duration::from_secs(30)));
+
+        // Change to 2s and verify get returns the new value
+        conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let timeout = conn.get_read_timeout().unwrap();
+        assert_eq!(timeout, Some(Duration::from_secs(2)));
+
+        // Restore to 30s and verify
+        conn.set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let timeout = conn.get_read_timeout().unwrap();
+        assert_eq!(timeout, Some(Duration::from_secs(30)));
     }
 
     #[test]
