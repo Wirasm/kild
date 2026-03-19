@@ -124,6 +124,18 @@ pub enum DaemonClientError {
     Io(#[from] std::io::Error),
 }
 
+impl DaemonClientError {
+    /// Whether this error indicates the daemon is unreachable (not running,
+    /// connection refused, IO failure, protocol corruption).
+    ///
+    /// Only `DaemonError` (a structured error response) proves the daemon is
+    /// alive and processed the request — all other variants mean the PTY is
+    /// effectively already dead.
+    pub fn is_unreachable(&self) -> bool {
+        !matches!(self, DaemonClientError::DaemonError { .. })
+    }
+}
+
 impl KildError for DaemonClientError {
     fn error_code(&self) -> &'static str {
         match self {
@@ -805,5 +817,53 @@ mod tests {
         let ipc_err = IpcError::Io(io_err);
         let daemon_err: DaemonClientError = ipc_err.into();
         assert!(matches!(daemon_err, DaemonClientError::Io(_)));
+    }
+
+    #[test]
+    fn test_is_unreachable_not_running() {
+        let err = DaemonClientError::NotRunning {
+            path: "/tmp/test.sock".to_string(),
+        };
+        assert!(err.is_unreachable(), "NotRunning should be unreachable");
+    }
+
+    #[test]
+    fn test_is_unreachable_connection_failed() {
+        let err = DaemonClientError::ConnectionFailed {
+            message: "connection reset".to_string(),
+        };
+        assert!(
+            err.is_unreachable(),
+            "ConnectionFailed should be unreachable"
+        );
+    }
+
+    #[test]
+    fn test_is_unreachable_protocol_error() {
+        let err = DaemonClientError::ProtocolError {
+            message: "empty response".to_string(),
+        };
+        assert!(err.is_unreachable(), "ProtocolError should be unreachable");
+    }
+
+    #[test]
+    fn test_is_unreachable_io_error() {
+        let err = DaemonClientError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken",
+        ));
+        assert!(err.is_unreachable(), "Io should be unreachable");
+    }
+
+    #[test]
+    fn test_is_unreachable_daemon_error_is_reachable() {
+        let err = DaemonClientError::DaemonError {
+            code: ErrorCode::SessionNotFound,
+            message: "not found".to_string(),
+        };
+        assert!(
+            !err.is_unreachable(),
+            "DaemonError means daemon is alive — should NOT be unreachable"
+        );
     }
 }

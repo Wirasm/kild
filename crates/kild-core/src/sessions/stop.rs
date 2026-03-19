@@ -56,12 +56,22 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                     agent = agent_proc.agent()
                 );
                 if let Err(e) = crate::daemon::client::destroy_daemon_session(daemon_sid, false) {
-                    error!(
-                        event = "core.session.destroy_daemon_failed",
-                        daemon_session_id = daemon_sid,
-                        error = %e
-                    );
-                    daemon_errors.push(e.to_string());
+                    if e.is_unreachable() {
+                        // Daemon unreachable — PTY is effectively already dead.
+                        warn!(
+                            event = "core.session.destroy_daemon_unreachable",
+                            daemon_session_id = daemon_sid,
+                            error = %e,
+                            "Daemon unreachable during stop — treating as PTY already dead"
+                        );
+                    } else {
+                        error!(
+                            event = "core.session.destroy_daemon_failed",
+                            daemon_session_id = daemon_sid,
+                            error = %e
+                        );
+                        daemon_errors.push(e.to_string());
+                    }
                 }
 
                 // Close the attach terminal window so it doesn't linger showing
@@ -272,11 +282,20 @@ pub fn stop_teammate(branch: &str, pane_id: &str) -> Result<(), SessionError> {
         .ok_or_else(pane_not_found)?
         .to_string();
 
-    crate::daemon::client::destroy_daemon_session(&daemon_session_id, false).map_err(|e| {
-        SessionError::DaemonError {
-            message: e.to_string(),
+    if let Err(e) = crate::daemon::client::destroy_daemon_session(&daemon_session_id, false) {
+        if e.is_unreachable() {
+            warn!(
+                event = "core.session.stop_teammate_daemon_unreachable",
+                daemon_session_id = %daemon_session_id,
+                error = %e,
+                "Daemon unreachable during teammate stop — treating as PTY already dead"
+            );
+        } else {
+            return Err(SessionError::DaemonError {
+                message: e.to_string(),
+            });
         }
-    })?;
+    }
 
     info!(
         event = "core.session.stop_teammate_completed",

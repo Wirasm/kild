@@ -1,6 +1,5 @@
 use tracing::{error, info, warn};
 
-use crate::daemon::client::DaemonClientError;
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use kild_config::Config;
 
@@ -69,7 +68,7 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
     let status = match crate::daemon::client::get_session_status(&daemon_sid) {
         Ok(s) => s,
         Err(e) => {
-            if !is_daemon_unreachable(&e) {
+            if !e.is_unreachable() {
                 // Daemon sent a structured error (DaemonError) — it's alive but
                 // returned something unexpected. Don't sync to avoid false positives.
                 warn!(
@@ -139,18 +138,6 @@ pub fn sync_daemon_session_status(session: &mut Session) -> bool {
     }
 
     true
-}
-
-/// Check if a daemon client error indicates the daemon is unreachable.
-///
-/// Connection failures, IO errors, and protocol errors (e.g., empty response from
-/// a dying daemon) all indicate the daemon process is not functional. Only
-/// `DaemonError` (a structured error response) proves the daemon is alive.
-///
-/// Note: `get_session_status()` converts `NotRunning` into `Ok(None)` before
-/// returning, so `NotRunning` cannot reach this helper in practice.
-fn is_daemon_unreachable(e: &DaemonClientError) -> bool {
-    !matches!(e, DaemonClientError::DaemonError { .. })
 }
 
 #[cfg(test)]
@@ -271,64 +258,7 @@ mod tests {
         assert_eq!(session.status, SessionStatus::Active);
     }
 
-    #[test]
-    fn test_is_daemon_unreachable_connection_failed() {
-        let err = DaemonClientError::ConnectionFailed {
-            message: "connection reset".to_string(),
-        };
-        assert!(
-            is_daemon_unreachable(&err),
-            "ConnectionFailed should be treated as unreachable"
-        );
-    }
-
-    #[test]
-    fn test_is_daemon_unreachable_io_error() {
-        let err = DaemonClientError::Io(std::io::Error::new(
-            std::io::ErrorKind::BrokenPipe,
-            "broken",
-        ));
-        assert!(
-            is_daemon_unreachable(&err),
-            "IO errors should be treated as unreachable"
-        );
-    }
-
-    #[test]
-    fn test_is_daemon_unreachable_protocol_error() {
-        let err = DaemonClientError::ProtocolError {
-            message: "Empty response from daemon".to_string(),
-        };
-        assert!(
-            is_daemon_unreachable(&err),
-            "ProtocolError (empty response from dying daemon) should be treated as unreachable"
-        );
-    }
-
-    #[test]
-    fn test_is_daemon_unreachable_not_running() {
-        // NotRunning cannot reach is_daemon_unreachable in practice (absorbed by
-        // get_session_status into Ok(None)), but the helper classifies it correctly.
-        let err = DaemonClientError::NotRunning {
-            path: "/tmp/test.sock".to_string(),
-        };
-        assert!(
-            is_daemon_unreachable(&err),
-            "NotRunning should be treated as unreachable"
-        );
-    }
-
-    #[test]
-    fn test_is_daemon_unreachable_daemon_error_is_reachable() {
-        let err = DaemonClientError::DaemonError {
-            code: kild_protocol::ErrorCode::SessionNotFound,
-            message: "not found".to_string(),
-        };
-        assert!(
-            !is_daemon_unreachable(&err),
-            "DaemonError means daemon is alive — should NOT be treated as unreachable"
-        );
-    }
+    // is_unreachable classification tests live on DaemonClientError in daemon/client.rs
 
     #[test]
     fn test_sync_daemon_marks_stopped_when_daemon_not_running() {
