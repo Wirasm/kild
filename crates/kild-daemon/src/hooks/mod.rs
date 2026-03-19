@@ -300,18 +300,18 @@ fn forward_to_brain(branch: &str, message: &str) {
     // This runs on the tokio blocking thread pool since kild-core is sync.
     let msg = message.to_string();
     let branch = branch.to_string();
-    tokio::task::spawn_blocking(move || {
+    let handle = tokio::task::spawn_blocking(move || {
         match kild_core::session_ops::list_sessions() {
             Ok(sessions) => {
-                let honryu_active = sessions.iter().any(|s| {
+                let honryu = sessions.iter().find(|s| {
                     s.branch.as_ref() == "honryu" && s.status == kild_core::SessionStatus::Active
                 });
 
-                if !honryu_active {
+                let Some(_honryu_session) = honryu else {
                     return;
-                }
+                };
 
-                // Write to Claude Code inbox for the brain
+                // Write to Claude Code inbox for fast delivery.
                 let safe_name = kild_core::sessions::fleet::fleet_safe_name(&branch);
                 if let Err(e) = kild_core::sessions::fleet::write_to_inbox(
                     kild_core::sessions::fleet::BRAIN_BRANCH,
@@ -336,6 +336,15 @@ fn forward_to_brain(branch: &str, message: &str) {
                     error = %e,
                 );
             }
+        }
+    });
+    // Await the blocking task in a separate spawn to catch panics.
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            error!(
+                event = "daemon.hooks.brain_forward_task_panicked",
+                error = %e,
+            );
         }
     });
 }

@@ -9,6 +9,7 @@ description: |
   - Status: "kild status", "check kild", "kild health", "how are my kilds"
   - Navigation: "cd to kild", "go to kild", "path to kild", "open in editor", "edit kild", "code kild"
   - Lifecycle: "stop kild", "open kild", "destroy kild", "complete kild", "clean up kilds"
+  - Fleet: "inject", "inbox", "prime", "fleet status", "send task to kild"
   - Output: "list as json", "json output", "verbose mode"
 
   KILD creates isolated Git worktrees where AI agents work independently without
@@ -609,6 +610,104 @@ Initializes agent integration hooks in the current project.
 ```bash
 kild init-hooks opencode
 kild init-hooks opencode --no-install
+```
+
+## Fleet Mode (Inject, Inbox, Prime)
+
+Fleet mode enables a brain agent to coordinate multiple worker kilds. Each fleet session gets an inbox directory at `~/.kild/inbox/<project_id>/<branch>/` with three files:
+
+- `task.md` - Current task (written by brain via `kild inject`)
+- `status` - Worker status (e.g., `idle`, `working`)
+- `report.md` - Task result (written by worker on completion)
+
+Fleet mode activates automatically when the `honryu` team directory exists or when creating the brain session. The `$KILD_INBOX` environment variable is injected into fleet daemon sessions, pointing to the session's inbox directory.
+
+Fleet instruction files are also placed in each worker's worktree for easy agent access.
+
+### Inject a Message
+```bash
+kild inject <branch> "<text>"
+```
+
+Sends text to a running kild worker. For Claude sessions, writes to the Claude Code inbox for near-instant delivery (~1s polling). For all other agents, writes to PTY stdin. The task is also written to the session's inbox directory (`task.md`).
+
+**Flags:**
+- `--inbox` - Force Claude Code inbox protocol (default for claude agents, PTY stdin for others)
+
+**Examples:**
+```bash
+# Send task to a worker
+kild inject feature-auth "Implement the login endpoint"
+
+# Force inbox protocol for non-claude agent
+kild inject feature-auth "Start the task" --inbox
+```
+
+### Inspect Inbox State
+```bash
+kild inbox <branch> [--json]
+kild inbox --all [--json]
+```
+
+Shows the current inbox state (status, task, report) for a fleet session.
+
+**Flags:**
+- `--json` - Output in JSON format
+- `--all` - Show inbox state for all fleet kilds
+
+**Examples:**
+```bash
+# Single session
+kild inbox feature-auth
+
+# All fleet sessions
+kild inbox --all
+
+# JSON for scripting
+kild inbox --all --json
+```
+
+### Generate Fleet Context (Prime)
+```bash
+kild prime <branch> [--json] [--status]
+kild prime --self [--json] [--status]
+kild prime --all [--json] [--status]
+```
+
+Generates a fleet context blob for agent bootstrapping. Outputs protocol instructions, current task, and fleet status as composable markdown. Useful for priming agents with fleet awareness.
+
+**Flags:**
+- `--json` - Output in JSON format
+- `--status` - Output fleet status table only (compact)
+- `--self` - Resolve branch from `$KILD_SESSION_BRANCH` env var (for use inside a kild session)
+- `--all` - Generate context for all fleet sessions
+
+**Examples:**
+```bash
+# Prime a single worker
+kild prime feature-auth
+
+# Inject prime context into a worker
+kild inject feature-auth "$(kild prime feature-auth)"
+
+# Fleet status table only
+kild prime --all --status
+
+# JSON output
+kild prime feature-auth --json
+
+# Self-prime (from inside a kild session)
+kild prime --self
+```
+
+### Typical Brain Setup
+```bash
+kild create honryu --daemon --main   # Brain: runs from project root, no worktree
+sleep 5                               # Wait for agent init
+kild inject honryu "Orient yourself"  # Deliver initial task via inject
+kild create worker-auth --daemon      # Worker: auto-joins fleet with team flags
+sleep 5
+kild inject worker-auth "Implement JWT auth"  # Brain -> worker message
 ```
 
 ## Global Flags

@@ -49,14 +49,9 @@ NTYPE=$(echo "$INPUT" | grep -o '"notification_type":"[^"]*"' | head -1 | sed 's
 case "$EVENT" in
   TeammateIdle)
     kild agent-status --self idle --notify
-    # Check for queued work — exit 2 blocks idle if tasks are available.
-    kild check-queue --self 2>/dev/null
-    exit $?
     ;;
   TaskCompleted)
     kild agent-status --self idle --notify
-    # Write structured task data to dropbox report.
-    echo "$INPUT" | kild report --self --from-hook 2>/dev/null
     ;;
   Notification)
     case "$NTYPE" in
@@ -118,8 +113,6 @@ pub fn ensure_claude_status_hook() -> Result<(), String> {
 /// Patches `~/.claude/settings.json` with:
 /// - **HTTP hooks** for Stop and SubagentStop → daemon HTTP endpoint
 /// - **Command hooks** for TeammateIdle, TaskCompleted, Notification → shell script
-/// - **Prompt hook** for Stop → task verification before stopping
-/// - **Command hook** for SessionStart → auto-priming via `kild prime --self --raw`
 ///
 /// Preserves all existing settings and hooks.
 /// Idempotent: skips if hooks already reference our script/URL.
@@ -130,8 +123,6 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
     let hook_path_str = hook_path.display().to_string();
     let hooks_port = resolve_hooks_port();
     let hooks_url = format!("http://127.0.0.1:{}/hooks", hooks_port);
-
-    let kild_bin = which_kild_bin();
 
     let mut settings: serde_json::Value = if settings_path.exists() {
         let content = std::fs::read_to_string(&settings_path)
@@ -148,7 +139,6 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
     };
 
     // Helper: check if a hook array already contains our command script or HTTP URL.
-    // Does NOT check for prompt hooks — those have their own dedicated `has_prompt_hook` check.
     let has_our_hook = |entries: &serde_json::Value| -> bool {
         if let Some(arr) = entries.as_array() {
             arr.iter().any(|entry| {
@@ -203,54 +193,6 @@ fn ensure_claude_settings_with_home(home: &Path, paths: &KildPaths) -> Result<()
         added += 1;
     }
 
-    // --- Prompt hook for Stop: task verification before stopping (#630) ---
-    {
-        let entries = hooks_obj
-            .entry("Stop")
-            .or_insert_with(|| serde_json::json!([]));
-
-        // Check if prompt hook already exists (separate from the HTTP hook check)
-        let has_prompt_hook = entries.as_array().is_some_and(|arr| {
-            arr.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .is_some_and(|hooks| {
-                        hooks.iter().any(|h| {
-                            h.get("type").and_then(|t| t.as_str()) == Some("prompt")
-                                && h.get("prompt")
-                                    .and_then(|p| p.as_str())
-                                    .is_some_and(|p| p.contains("KILD"))
-                        })
-                    })
-            })
-        });
-
-        if !has_prompt_hook {
-            let prompt_text = r#"You are inside a KILD worker session. Before stopping, verify your assigned task is complete.
-
-Check the input JSON:
-- If `stop_hook_active` is true, the stop was explicitly requested by the user or system. Allow it by responding with {"decision": "allow"}.
-- Otherwise, read $KILD_DROPBOX/task.md (if the env var is set and the file exists) to see your current task.
-  - If the task described there is complete based on your work, respond with {"decision": "allow"}.
-  - If the task is NOT complete, respond with {"decision": "block", "reason": "Task not yet complete — continuing work."} and continue working on it.
-  - If there is no task file or $KILD_DROPBOX is not set, allow the stop.
-
-Respond with ONLY the JSON object, no other text."#;
-
-            let arr = entries
-                .as_array_mut()
-                .ok_or("\"Stop\" field in settings.json is not an array")?;
-            arr.push(serde_json::json!({
-                "hooks": [{
-                    "type": "prompt",
-                    "prompt": prompt_text
-                }]
-            }));
-            added += 1;
-        }
-    }
-
     // --- Command hooks for TeammateIdle, TaskCompleted (need exit-code blocking) ---
     let command_hook = serde_json::json!({
         "type": "command",
@@ -292,41 +234,6 @@ Respond with ONLY the JSON object, no other text."#;
         added += 1;
     }
 
-    // --- SessionStart: command hook for auto-priming (#631) ---
-    let session_start_entries = hooks_obj
-        .entry("SessionStart")
-        .or_insert_with(|| serde_json::json!([]));
-
-    let has_session_start_hook = session_start_entries.as_array().is_some_and(|arr| {
-        arr.iter().any(|entry| {
-            entry
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .is_some_and(|hooks| {
-                    hooks.iter().any(|h| {
-                        h.get("command")
-                            .and_then(|c| c.as_str())
-                            .is_some_and(|c| c.contains("kild") && c.contains("prime"))
-                    })
-                })
-        })
-    });
-
-    if !has_session_start_hook {
-        let prime_cmd = format!("{} prime --self --raw", kild_bin);
-        let arr = session_start_entries
-            .as_array_mut()
-            .ok_or("\"SessionStart\" field in settings.json is not an array")?;
-        arr.push(serde_json::json!({
-            "hooks": [{
-                "type": "command",
-                "command": prime_cmd,
-                "timeout": 10
-            }]
-        }));
-        added += 1;
-    }
-
     if added == 0 {
         info!(event = "core.session.claude_settings_already_configured");
         return Ok(());
@@ -348,26 +255,6 @@ Respond with ONLY the JSON object, no other text."#;
     );
 
     Ok(())
-}
-
-/// Resolve the path to the `kild` binary for use in hook commands.
-///
-/// Falls back to just "kild" (relying on PATH) if the binary cannot be located.
-fn which_kild_bin() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            // current_exe may point to kild, kild-daemon, or kild-tmux-shim.
-            // Check the same directory for a `kild` sibling binary.
-            let parent = p.parent()?;
-            let kild = parent.join("kild");
-            if kild.exists() {
-                Some(kild.display().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "kild".to_string())
 }
 
 pub fn ensure_claude_settings() -> Result<(), String> {
@@ -461,16 +348,6 @@ mod tests {
         assert!(
             content.contains("kild agent-status --self waiting --notify"),
             "Script should call kild agent-status for waiting"
-        );
-        // Unit 4: TaskCompleted writes report
-        assert!(
-            content.contains("kild report --self --from-hook"),
-            "Script should pipe TaskCompleted to kild report"
-        );
-        // Unit 5: TeammateIdle checks queue
-        assert!(
-            content.contains("kild check-queue --self"),
-            "Script should call kild check-queue on TeammateIdle"
         );
         // Brain forwarding
         assert!(
@@ -607,18 +484,11 @@ mod tests {
             "Should have Notification hooks"
         );
 
-        // SessionStart hook for auto-priming
-        assert!(
-            hooks.contains_key("SessionStart"),
-            "Should have SessionStart hooks"
-        );
-
-        // Verify Stop has both HTTP hook and prompt hook
+        // Verify Stop has HTTP hook
         let stop_entries = parsed["hooks"]["Stop"].as_array().unwrap();
         assert!(
-            stop_entries.len() >= 2,
-            "Stop should have HTTP hook + prompt hook, got {} entries",
-            stop_entries.len()
+            !stop_entries.is_empty(),
+            "Stop should have at least one hook entry"
         );
 
         // Verify HTTP hook type
@@ -628,14 +498,6 @@ mod tests {
                 .is_some_and(|h| h.iter().any(|hook| hook["type"] == "http"))
         });
         assert!(has_http, "Stop should have an HTTP hook");
-
-        // Verify prompt hook type
-        let has_prompt = stop_entries.iter().any(|e| {
-            e["hooks"]
-                .as_array()
-                .is_some_and(|h| h.iter().any(|hook| hook["type"] == "prompt"))
-        });
-        assert!(has_prompt, "Stop should have a prompt hook");
 
         // Verify SubagentStop is HTTP type
         let subagent_hooks = &parsed["hooks"]["SubagentStop"][0]["hooks"][0];
@@ -650,16 +512,6 @@ mod tests {
         assert_eq!(
             notification["matcher"], "permission_prompt|idle_prompt",
             "Notification should have matcher"
-        );
-
-        // Verify SessionStart hook references kild prime
-        let session_start_hooks = &parsed["hooks"]["SessionStart"][0]["hooks"][0];
-        assert_eq!(session_start_hooks["type"], "command");
-        let cmd = session_start_hooks["command"].as_str().unwrap();
-        assert!(
-            cmd.contains("prime") && cmd.contains("--self") && cmd.contains("--raw"),
-            "SessionStart should run kild prime --self --raw, got: {}",
-            cmd
         );
 
         let _ = fs::remove_dir_all(&temp_home);

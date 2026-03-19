@@ -9,7 +9,6 @@ mod json_types;
 mod agent_status;
 mod attach;
 mod cd;
-mod check_queue;
 mod cleanup;
 mod code;
 mod commits;
@@ -32,7 +31,6 @@ mod pr;
 mod prime;
 mod project;
 mod rebase;
-mod report;
 mod stats;
 mod status;
 mod stop;
@@ -74,8 +72,6 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("inject", sub_matches)) => inject::handle_inject_command(sub_matches),
         Some(("teammates", sub_matches)) => teammates::handle_teammates_command(sub_matches),
         Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches),
-        Some(("report", sub_matches)) => report::handle_report_command(sub_matches),
-        Some(("check-queue", sub_matches)) => check_queue::handle_check_queue_command(sub_matches),
         Some(("project", sub_matches)) => project::handle_project_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");

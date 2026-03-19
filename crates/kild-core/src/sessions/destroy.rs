@@ -308,8 +308,8 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
         }
     }
 
-    // 3d. Clean up fleet dropbox directory
-    super::dropbox::cleanup_dropbox(&session.project_id, &session.branch);
+    // 3d. Clean up fleet inbox directory
+    super::inbox::cleanup_inbox(&session.project_id, &session.branch);
 
     // 3e. Clean up fleet inbox file and team config entry
     super::fleet::remove_fleet_member(&session.branch);

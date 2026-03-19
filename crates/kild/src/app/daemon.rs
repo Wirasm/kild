@@ -54,13 +54,6 @@ pub fn inject_command() -> Command {
                 .help("Force Claude Code inbox protocol (default for claude, PTY stdin for others)")
                 .action(ArgAction::SetTrue),
         )
-        .arg(
-            Arg::new("queue")
-                .long("queue")
-                .help("Queue task for later delivery instead of immediate injection")
-                .action(ArgAction::SetTrue)
-                .conflicts_with("inbox"),
-        )
 }
 
 pub fn attach_command() -> Command {

@@ -7,7 +7,7 @@ use super::backends::{
     AmpBackend, ClaudeBackend, CodexBackend, GeminiBackend, KiroBackend, OpenCodeBackend,
 };
 use super::traits::AgentBackend;
-use super::types::{AgentType, InjectMethod};
+use super::types::AgentType;
 
 /// Global registry of all supported agent backends.
 static REGISTRY: LazyLock<AgentRegistry> = LazyLock::new(AgentRegistry::new);
@@ -95,15 +95,12 @@ pub fn get_yolo_flags(name: &str) -> Option<&'static str> {
     get_agent(name).and_then(|backend| backend.yolo_flags())
 }
 
-/// Get the inject method for an agent by name (case-insensitive).
+/// Check if the agent is Claude Code (case-insensitive).
 ///
-/// Returns `InjectMethod::ClaudeInbox` for Claude Code (inbox polling protocol).
-/// Returns `InjectMethod::Pty` for all other agents (universal PTY stdin path).
-pub fn get_inject_method(name: &str) -> InjectMethod {
-    match name.to_lowercase().as_str() {
-        "claude" => InjectMethod::ClaudeInbox,
-        _ => InjectMethod::Pty,
-    }
+/// Used to determine whether the Claude Code inbox fast-path should be used
+/// alongside the universal file inbox.
+pub fn is_claude_agent(name: &str) -> bool {
+    name.eq_ignore_ascii_case("claude")
 }
 
 /// Get a comma-separated string of all supported agent names.
@@ -365,17 +362,17 @@ mod tests {
     }
 
     #[test]
-    fn test_get_inject_method() {
-        assert_eq!(get_inject_method("claude"), InjectMethod::ClaudeInbox);
-        assert_eq!(get_inject_method("Claude"), InjectMethod::ClaudeInbox);
-        assert_eq!(get_inject_method("CLAUDE"), InjectMethod::ClaudeInbox);
+    fn test_is_claude_agent() {
+        assert!(is_claude_agent("claude"));
+        assert!(is_claude_agent("Claude"));
+        assert!(is_claude_agent("CLAUDE"));
 
-        assert_eq!(get_inject_method("codex"), InjectMethod::Pty);
-        assert_eq!(get_inject_method("gemini"), InjectMethod::Pty);
-        assert_eq!(get_inject_method("amp"), InjectMethod::Pty);
-        assert_eq!(get_inject_method("kiro"), InjectMethod::Pty);
-        assert_eq!(get_inject_method("opencode"), InjectMethod::Pty);
-        assert_eq!(get_inject_method("unknown"), InjectMethod::Pty);
+        assert!(!is_claude_agent("codex"));
+        assert!(!is_claude_agent("gemini"));
+        assert!(!is_claude_agent("amp"));
+        assert!(!is_claude_agent("kiro"));
+        assert!(!is_claude_agent("opencode"));
+        assert!(!is_claude_agent("unknown"));
     }
 
     #[test]
