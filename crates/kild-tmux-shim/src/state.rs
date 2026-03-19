@@ -178,6 +178,9 @@ pub fn load_shared(session_id: &str) -> Result<PaneRegistry, ShimError> {
 }
 
 /// Load the registry with an exclusive (write) lock.
+/// Production callers should use `load_and_lock()` instead for atomic
+/// load-modify-save. This remains available for tests.
+#[cfg(test)]
 pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
     let data_path = panes_path(session_id)?;
     let _lock = acquire_lock(session_id, LockMode::Exclusive)?;
@@ -196,6 +199,8 @@ pub fn load(session_id: &str) -> Result<PaneRegistry, ShimError> {
     Ok(registry)
 }
 
+/// Standalone save with its own lock. For load-modify-save workflows,
+/// prefer `LockedRegistry::save()` which holds the lock atomically.
 pub fn save(session_id: &str, registry: &PaneRegistry) -> Result<(), ShimError> {
     let data_path = panes_path(session_id)?;
     let _lock = acquire_lock(session_id, LockMode::Exclusive)?;
