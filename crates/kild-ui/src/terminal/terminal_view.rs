@@ -4,12 +4,14 @@ use gpui::{
 };
 
 use super::blink::BlinkManager;
+use super::state::ReconnectState;
 use super::terminal_element::scroll_delta_lines;
 
 use super::input;
 use super::state::Terminal;
 use super::terminal_element::{MouseState, TerminalElement};
 use super::types::TerminalContent;
+use crate::daemon_client;
 use crate::theme;
 use crate::views::main_view::keybindings::UiKeybindings;
 
@@ -34,6 +36,8 @@ pub struct TerminalView {
     mouse_state: MouseState,
     /// Parsed keybindings for routing keys between PTY and MainView.
     keybindings: UiKeybindings,
+    /// In-flight reconnection task. Stored to prevent cancellation.
+    _reconnect_task: Option<Task<()>>,
 }
 
 impl TerminalView {
@@ -88,6 +92,7 @@ impl TerminalView {
                 cmd_held: false,
             },
             keybindings,
+            _reconnect_task: None,
         }
     }
 
@@ -138,6 +143,7 @@ impl TerminalView {
                 cmd_held: false,
             },
             keybindings,
+            _reconnect_task: None,
         }
     }
 
@@ -199,11 +205,143 @@ impl TerminalView {
         }
     }
 
+    /// Attempt to reconnect a disconnected daemon terminal.
+    ///
+    /// Spawns an async task that re-attaches to the daemon session, builds a
+    /// fresh `Terminal::from_daemon()`, and swaps it in along with a new batch
+    /// loop task. No-op for local terminals or if a reconnect is already in
+    /// progress.
+    fn try_reconnect(&mut self, cx: &mut Context<Self>) {
+        let session_id = match self.terminal.daemon_session_id() {
+            Some(id) => id.to_string(),
+            None => return,
+        };
+
+        if self.terminal.reconnect_state() == ReconnectState::Connecting {
+            return;
+        }
+
+        tracing::info!(
+            event = "ui.terminal.reconnect_started",
+            session_id = session_id
+        );
+        self.terminal.set_reconnect_state(ReconnectState::Connecting);
+        cx.notify();
+
+        let task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
+            let sid = session_id.clone();
+            let conn_result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon_client::connect_for_attach(&sid, 24, 80).await
+                })
+                .await;
+
+            match conn_result {
+                Err(e) => {
+                    tracing::error!(
+                        event = "ui.terminal.reconnect_failed",
+                        session_id = session_id,
+                        error = %e,
+                    );
+                    let msg = e.to_string();
+                    let _ = this.update(cx, |view, cx| {
+                        view.terminal.set_reconnect_state(ReconnectState::Failed(msg));
+                        view._reconnect_task = None;
+                        cx.notify();
+                    });
+                }
+                Ok(conn) => {
+                    let _ = this.update(cx, |view, cx| {
+                        match Terminal::from_daemon(session_id.clone(), conn, cx) {
+                            Ok(mut new_terminal) => {
+                                let (byte_rx, event_rx) = match new_terminal.take_channels() {
+                                    Ok(ch) => ch,
+                                    Err(e) => {
+                                        tracing::error!(
+                                            event = "ui.terminal.reconnect_channels_failed",
+                                            error = %e,
+                                        );
+                                        view.terminal.set_reconnect_state(
+                                            ReconnectState::Failed(e.to_string()),
+                                        );
+                                        view._reconnect_task = None;
+                                        cx.notify();
+                                        return;
+                                    }
+                                };
+
+                                let term = new_terminal.term().clone();
+                                let pty_writer = new_terminal.pty_writer().clone();
+                                let error_state = new_terminal.error_state().clone();
+                                let exited = new_terminal.exited_flag().clone();
+                                let executor = cx.background_executor().clone();
+
+                                let event_task = cx.spawn(
+                                    async move |this2, cx2: &mut gpui::AsyncApp| {
+                                        Terminal::run_batch_loop(
+                                            term,
+                                            pty_writer,
+                                            error_state,
+                                            exited,
+                                            byte_rx,
+                                            event_rx,
+                                            executor,
+                                            || {
+                                                let _ =
+                                                    this2.update(cx2, |_, cx| cx.notify());
+                                            },
+                                        )
+                                        .await;
+                                    },
+                                );
+
+                                view.terminal = new_terminal;
+                                view._event_task = event_task;
+                                view._reconnect_task = None;
+                                tracing::info!(
+                                    event = "ui.terminal.reconnect_completed",
+                                    session_id = session_id,
+                                );
+                                cx.notify();
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "ui.terminal.reconnect_terminal_failed",
+                                    session_id = session_id,
+                                    error = %e,
+                                );
+                                view.terminal.set_reconnect_state(ReconnectState::Failed(
+                                    e.to_string(),
+                                ));
+                                view._reconnect_task = None;
+                                cx.notify();
+                            }
+                        }
+                    });
+                }
+            }
+        });
+
+        self._reconnect_task = Some(task);
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.blink.reset(cx);
 
         let key = event.keystroke.key.as_str();
         let cmd = event.keystroke.modifiers.platform;
+
+        // Intercept R key on dead daemon terminals to trigger reconnect.
+        if key == "r"
+            && !event.keystroke.modifiers.control
+            && !cmd
+            && self.terminal.has_exited()
+            && self.terminal.daemon_session_id().is_some()
+        {
+            self.try_reconnect(cx);
+            return;
+        }
 
         if event.keystroke.modifiers.control && key == "tab" {
             cx.propagate();
@@ -314,18 +452,49 @@ impl Render for TerminalView {
             .bg(theme::terminal_background());
 
         if let Some(msg) = error {
+            let is_daemon = self.terminal.daemon_session_id().is_some();
+            let reconnect = self.terminal.reconnect_state();
+
+            let (banner_bg, banner_text) = if is_daemon {
+                match &reconnect {
+                    ReconnectState::Connecting => (
+                        theme::surface_1(),
+                        "Reconnecting to daemon session...".to_string(),
+                    ),
+                    ReconnectState::Failed(err) => (
+                        theme::ember(),
+                        format!(
+                            "Reconnect failed: {err}. Press R to retry or {} to return.",
+                            self.keybindings.terminal.focus_escape.hint_str()
+                        ),
+                    ),
+                    ReconnectState::Idle => (
+                        theme::ember(),
+                        format!(
+                            "Terminal error: {msg}. Press R to reconnect or {} to return.",
+                            self.keybindings.terminal.focus_escape.hint_str()
+                        ),
+                    ),
+                }
+            } else {
+                (
+                    theme::ember(),
+                    format!(
+                        "Terminal error: {msg}. {} to return.",
+                        self.keybindings.terminal.focus_escape.hint_str()
+                    ),
+                )
+            };
+
             container = container.child(
                 div()
                     .w_full()
                     .px(px(theme::SPACE_3))
                     .py(px(theme::SPACE_2))
-                    .bg(theme::ember())
+                    .bg(banner_bg)
                     .text_color(theme::text_white())
                     .text_size(px(theme::TEXT_SM))
-                    .child(format!(
-                        "Terminal error: {msg}. {} to return.",
-                        self.keybindings.terminal.focus_escape.hint_str()
-                    )),
+                    .child(banner_text),
             );
         }
 

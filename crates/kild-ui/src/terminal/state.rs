@@ -18,6 +18,17 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use super::errors::TerminalError;
 use crate::daemon_client::{self, DaemonConnection};
 
+/// State of a reconnection attempt in a daemon terminal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReconnectState {
+    /// No reconnection in progress — error banner may be shown.
+    Idle,
+    /// Reconnect attempt underway.
+    Connecting,
+    /// Reconnect failed with this message.
+    Failed(String),
+}
+
 /// Resolve the working directory for a new terminal.
 ///
 /// - `Some(path)` that exists and is a directory → returns `Some(path)`
@@ -221,6 +232,10 @@ pub struct Terminal {
     /// Last-known terminal mode flags. Updated by sync() in render().
     /// Used by on_key_down to read APP_CURSOR without re-acquiring the lock.
     last_mode: TermMode,
+    /// Daemon session ID for reconnection. `None` for local terminals.
+    daemon_session_id: Option<String>,
+    /// Reconnection state for daemon terminals. Shared with the view layer.
+    reconnect_state: Arc<Mutex<ReconnectState>>,
 }
 
 impl Terminal {
@@ -376,6 +391,8 @@ impl Terminal {
             exited: Arc::new(AtomicBool::new(false)),
             current_size,
             last_mode: initial_mode,
+            daemon_session_id: None,
+            reconnect_state: Arc::new(Mutex::new(ReconnectState::Idle)),
         })
     }
 
@@ -604,6 +621,8 @@ impl Terminal {
             exited,
             current_size,
             last_mode: initial_mode,
+            daemon_session_id: Some(session_id),
+            reconnect_state: Arc::new(Mutex::new(ReconnectState::Idle)),
         })
     }
 
@@ -796,6 +815,26 @@ impl Terminal {
     /// APP_CURSOR without re-acquiring the lock on every keystroke.
     pub fn last_mode(&self) -> TermMode {
         self.last_mode
+    }
+
+    /// Daemon session ID, if this terminal is backed by a daemon session.
+    pub fn daemon_session_id(&self) -> Option<&str> {
+        self.daemon_session_id.as_deref()
+    }
+
+    /// Current reconnection state (cloned snapshot).
+    pub fn reconnect_state(&self) -> ReconnectState {
+        self.reconnect_state
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(ReconnectState::Idle)
+    }
+
+    /// Update the reconnection state.
+    pub fn set_reconnect_state(&self, state: ReconnectState) {
+        if let Ok(mut s) = self.reconnect_state.lock() {
+            *s = state;
+        }
     }
 }
 
