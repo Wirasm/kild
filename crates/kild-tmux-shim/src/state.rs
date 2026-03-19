@@ -4,8 +4,12 @@
 //!
 //! - **Reads**: Use `load_shared()` to acquire a shared (read-only) lock.
 //!   Multiple readers can hold shared locks concurrently.
-//! - **Writes**: Use `load()` to acquire an exclusive lock, mutate the registry,
-//!   then call `save()` (which re-acquires the exclusive lock).
+//! - **Read-modify-write**: Use `load_and_lock()` to acquire an exclusive lock
+//!   and return a `LockedRegistry` guard. The lock is held across the entire
+//!   load → mutate → save cycle, preventing pane ID races from concurrent
+//!   `split-window` calls. Call `locked.save()` to persist and release.
+//! - **Legacy writes**: `load()` + `save()` each acquire independent locks.
+//!   Only use for initialization paths where atomicity is not required.
 //!
 //! Locks are automatically released when the `Flock` handle is dropped (RAII).
 
@@ -207,6 +211,63 @@ pub fn save(session_id: &str, registry: &PaneRegistry) -> Result<(), ShimError> 
     file.flush()?;
 
     Ok(())
+}
+
+/// RAII guard holding both the exclusive flock and the deserialized registry.
+/// The lock is held for the entire duration the guard is alive.
+/// Drop releases the lock via `Flock`'s `Drop` impl.
+pub struct LockedRegistry {
+    registry: PaneRegistry,
+    session_id: String,
+    _lock: Flock<fs::File>,
+}
+
+impl LockedRegistry {
+    /// Access the registry for reading.
+    pub fn registry(&self) -> &PaneRegistry {
+        &self.registry
+    }
+
+    /// Access the registry for mutation.
+    pub fn registry_mut(&mut self) -> &mut PaneRegistry {
+        &mut self.registry
+    }
+
+    /// Write the (possibly mutated) registry to disk while still holding the lock.
+    /// Consumes self — lock is released when this returns.
+    pub fn save(self) -> Result<(), ShimError> {
+        let data_path = panes_path(&self.session_id)?;
+        let content =
+            serde_json::to_string_pretty(&self.registry).map_err(|e| ShimError::StateError {
+                message: format!("failed to serialize pane registry: {}", e),
+            })?;
+        let mut file = fs::File::create(&data_path).map_err(|e| ShimError::StateError {
+            message: format!("failed to write {}: {}", data_path.display(), e),
+        })?;
+        file.write_all(content.as_bytes())?;
+        file.flush()?;
+        Ok(())
+    }
+}
+
+/// Acquire an exclusive lock and read the registry atomically.
+/// Returns a guard that keeps the lock alive until dropped or saved.
+pub fn load_and_lock(session_id: &str) -> Result<LockedRegistry, ShimError> {
+    let data_path = panes_path(session_id)?;
+    let lock = acquire_lock(session_id, LockMode::Exclusive)?;
+    let content = fs::read_to_string(&data_path).map_err(|e| ShimError::StateError {
+        message: format!("failed to read {}: {}", data_path.display(), e),
+    })?;
+    let registry: PaneRegistry =
+        serde_json::from_str(&content).map_err(|e| ShimError::StateError {
+            message: format!("failed to parse pane registry: {}", e),
+        })?;
+    registry.validate()?;
+    Ok(LockedRegistry {
+        registry,
+        session_id: session_id.to_string(),
+        _lock: lock,
+    })
 }
 
 pub fn allocate_pane_id(registry: &mut PaneRegistry) -> String {
@@ -685,6 +746,75 @@ mod tests {
         assert_eq!(registry.next_pane_id, 1);
         assert_eq!(registry.panes.len(), 1);
         assert_eq!(registry.panes["%0"].daemon_session_id, "daemon-abc-123");
+
+        let dir = state_dir(&test_id).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_load_and_lock_basic_roundtrip() {
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        init_registry(&test_id, "daemon-abc-123").unwrap();
+
+        let mut locked = load_and_lock(&test_id).unwrap();
+        assert_eq!(locked.registry().next_pane_id, 1);
+
+        let pane_id = allocate_pane_id(locked.registry_mut());
+        assert_eq!(pane_id, "%1");
+
+        locked.save().unwrap();
+
+        let reloaded = load(&test_id).unwrap();
+        assert_eq!(reloaded.next_pane_id, 2);
+
+        let dir = state_dir(&test_id).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_load_and_lock_concurrent_allocations_unique() {
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use std::thread;
+
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        init_registry(&test_id, "daemon-abc-123").unwrap();
+
+        let num_threads = 8;
+        let test_id = Arc::new(test_id);
+        let mut handles = vec![];
+
+        for _ in 0..num_threads {
+            let id = Arc::clone(&test_id);
+            handles.push(thread::spawn(move || {
+                let mut locked = load_and_lock(&id).unwrap();
+                let pane_id = allocate_pane_id(locked.registry_mut());
+                locked.save().unwrap();
+                pane_id
+            }));
+        }
+
+        let pane_ids: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let unique: HashSet<&String> = pane_ids.iter().collect();
+
+        assert_eq!(
+            unique.len(),
+            num_threads,
+            "Expected {} unique pane IDs, got {}: {:?}",
+            num_threads,
+            unique.len(),
+            pane_ids
+        );
+
+        let final_registry = load(&test_id).unwrap();
+        // Initial next_pane_id was 1, plus 8 allocations = 9
+        assert_eq!(
+            final_registry.next_pane_id,
+            1 + num_threads as u32,
+            "next_pane_id should be {} after {} allocations from initial 1",
+            1 + num_threads as u32,
+            num_threads
+        );
 
         let dir = state_dir(&test_id).unwrap();
         fs::remove_dir_all(&dir).ok();

@@ -300,28 +300,37 @@ fn handle_split_window(args: SplitWindowArgs<'_>) -> Result<i32, ShimError> {
     );
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     // Determine which window the target pane belongs to
     let parent_pane_id = resolve_pane_id(args.target);
-    let window_id = registry
+    let window_id = locked
+        .registry()
         .panes
         .get(&parent_pane_id)
         .map(|p| p.window_id.clone())
         .unwrap_or_else(|| "0".to_string());
 
-    let pane_id = create_pty_pane(&mut registry, &window_id, &args.command)?;
-    state::save(&sid, &registry)?;
+    let pane_id = create_pty_pane(locked.registry_mut(), &window_id, &args.command)?;
 
-    if args.print_info {
-        let fmt = args.format.unwrap_or("#{pane_id}");
-        let session_name = &registry.session_name;
-        let window_name = registry
+    // Capture format values before save consumes the guard (only when needed)
+    let print_values = if args.print_info {
+        let session_name = locked.registry().session_name.clone();
+        let window_name = locked
+            .registry()
             .windows
             .get(&window_id)
-            .map(|w| w.name.as_str())
-            .unwrap_or("main");
-        let output = expand_format(fmt, &pane_id, session_name, &window_id, window_name, "");
+            .map(|w| w.name.clone())
+            .unwrap_or_else(|| "main".to_string());
+        Some((args.format.unwrap_or("#{pane_id}"), session_name, window_name))
+    } else {
+        None
+    };
+
+    locked.save()?;
+
+    if let Some((fmt, session_name, window_name)) = print_values {
+        let output = expand_format(fmt, &pane_id, &session_name, &window_id, &window_name, "");
         println!("{}", output);
     }
 
@@ -451,10 +460,11 @@ fn handle_kill_pane(args: KillPaneArgs<'_>) -> Result<i32, ShimError> {
     debug!(event = "shim.kill_pane_started", target = ?args.target);
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     let pane_id = resolve_pane_id(args.target);
-    let pane = registry
+    let pane = locked
+        .registry()
         .panes
         .get(&pane_id)
         .ok_or_else(|| ShimError::state(format!("pane {} not found in registry", pane_id)))?;
@@ -492,8 +502,8 @@ fn handle_kill_pane(args: KillPaneArgs<'_>) -> Result<i32, ShimError> {
         }
     }
 
-    registry.remove_pane(&pane_id);
-    state::save(&sid, &registry)?;
+    locked.registry_mut().remove_pane(&pane_id);
+    locked.save()?;
 
     debug!(event = "shim.kill_pane_completed", pane_id = pane_id);
     Ok(0)
@@ -574,17 +584,17 @@ fn handle_select_pane(args: SelectPaneArgs<'_>) -> Result<i32, ShimError> {
     // Only need state if we have style or title to store
     if args.style.is_some() || args.title.is_some() {
         let sid = session_id()?;
-        let mut registry = state::load(&sid)?;
+        let mut locked = state::load_and_lock(&sid)?;
         let pane_id = resolve_pane_id(args.target);
 
-        if let Some(pane) = registry.panes.get_mut(&pane_id) {
+        if let Some(pane) = locked.registry_mut().panes.get_mut(&pane_id) {
             if let Some(style) = args.style {
                 pane.border_style = style.to_string();
             }
             if let Some(title) = args.title {
                 pane.title = title.to_string();
             }
-            state::save(&sid, &registry)?;
+            locked.save()?;
         }
     }
 
@@ -604,15 +614,15 @@ fn handle_set_option(args: SetOptionArgs<'_>) -> Result<i32, ShimError> {
     // Store pane-scoped options in the pane entry
     if matches!(args.scope, OptionScope::Pane) {
         let sid = session_id()?;
-        let mut registry = state::load(&sid)?;
+        let mut locked = state::load_and_lock(&sid)?;
         let pane_id = resolve_pane_id(args.target);
 
-        if let Some(pane) = registry.panes.get_mut(&pane_id) {
+        if let Some(pane) = locked.registry_mut().panes.get_mut(&pane_id) {
             // Store known pane options
             if args.key == "pane-border-style" || args.key.ends_with("-style") {
                 pane.border_style = args.value;
             }
-            state::save(&sid, &registry)?;
+            locked.save()?;
         }
     }
 
@@ -655,12 +665,12 @@ fn handle_new_session(args: NewSessionArgs<'_>) -> Result<i32, ShimError> {
     debug!(event = "shim.new_session_started", name = ?args.session_name);
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     let session_name = args
         .session_name
         .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("kild_{}", registry.sessions.len()));
+        .unwrap_or_else(|| format!("kild_{}", locked.registry().sessions.len()));
 
     let window_name = args
         .window_name
@@ -668,8 +678,8 @@ fn handle_new_session(args: NewSessionArgs<'_>) -> Result<i32, ShimError> {
         .unwrap_or_else(|| "main".to_string());
 
     // Allocate a new window
-    let window_id = format!("{}", registry.windows.len());
-    registry.windows.insert(
+    let window_id = format!("{}", locked.registry().windows.len());
+    locked.registry_mut().windows.insert(
         window_id.clone(),
         WindowEntry {
             name: window_name,
@@ -678,10 +688,10 @@ fn handle_new_session(args: NewSessionArgs<'_>) -> Result<i32, ShimError> {
     );
 
     // Create initial pane in the new window
-    let pane_id = create_pty_pane(&mut registry, &window_id, &[])?;
+    let pane_id = create_pty_pane(locked.registry_mut(), &window_id, &[])?;
 
     // Register session
-    registry.sessions.insert(
+    locked.registry_mut().sessions.insert(
         session_name.clone(),
         SessionEntry {
             name: session_name.clone(),
@@ -689,7 +699,7 @@ fn handle_new_session(args: NewSessionArgs<'_>) -> Result<i32, ShimError> {
         },
     );
 
-    state::save(&sid, &registry)?;
+    locked.save()?;
 
     if args.print_info {
         let fmt = args.format.unwrap_or("#{pane_id}");
@@ -708,15 +718,15 @@ fn handle_new_window(args: NewWindowArgs<'_>) -> Result<i32, ShimError> {
     debug!(event = "shim.new_window_started", name = ?args.name);
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     let window_name = args
         .name
         .map(|s| s.to_string())
         .unwrap_or_else(|| "window".to_string());
-    let window_id = format!("{}", registry.windows.len());
+    let window_id = format!("{}", locked.registry().windows.len());
 
-    registry.windows.insert(
+    locked.registry_mut().windows.insert(
         window_id.clone(),
         WindowEntry {
             name: window_name.clone(),
@@ -724,20 +734,20 @@ fn handle_new_window(args: NewWindowArgs<'_>) -> Result<i32, ShimError> {
         },
     );
 
-    let pane_id = create_pty_pane(&mut registry, &window_id, &[])?;
+    let pane_id = create_pty_pane(locked.registry_mut(), &window_id, &[])?;
 
     // Add window to the target session (or default session)
     let session_key = args
         .target
         .and_then(|t| t.split(':').next())
-        .unwrap_or(&registry.session_name)
+        .unwrap_or(&locked.registry().session_name)
         .to_string();
 
-    if let Some(session) = registry.sessions.get_mut(&session_key) {
+    if let Some(session) = locked.registry_mut().sessions.get_mut(&session_key) {
         session.windows.push(window_id.clone());
     }
 
-    state::save(&sid, &registry)?;
+    locked.save()?;
 
     if args.print_info {
         let fmt = args.format.unwrap_or("#{pane_id}");
@@ -789,13 +799,13 @@ fn handle_break_pane(args: BreakPaneArgs<'_>) -> Result<i32, ShimError> {
     debug!(event = "shim.break_pane_started", source = ?args.source);
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     let pane_id = resolve_pane_id(args.source);
-    if let Some(pane) = registry.panes.get_mut(&pane_id) {
+    if let Some(pane) = locked.registry_mut().panes.get_mut(&pane_id) {
         pane.hidden = true;
     }
-    state::save(&sid, &registry)?;
+    locked.save()?;
 
     debug!(event = "shim.break_pane_completed", pane_id = pane_id);
     Ok(0)
@@ -805,13 +815,13 @@ fn handle_join_pane(args: JoinPaneArgs<'_>) -> Result<i32, ShimError> {
     debug!(event = "shim.join_pane_started", source = ?args.source);
 
     let sid = session_id()?;
-    let mut registry = state::load(&sid)?;
+    let mut locked = state::load_and_lock(&sid)?;
 
     let pane_id = resolve_pane_id(args.source);
-    if let Some(pane) = registry.panes.get_mut(&pane_id) {
+    if let Some(pane) = locked.registry_mut().panes.get_mut(&pane_id) {
         pane.hidden = false;
     }
-    state::save(&sid, &registry)?;
+    locked.save()?;
 
     debug!(event = "shim.join_pane_completed", pane_id = pane_id);
     Ok(0)
