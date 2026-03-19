@@ -83,7 +83,7 @@ core.editor    → crates/kild-core/src/editor/
 core.state     → crates/kild-core/src/state/
 core.notify    → crates/kild-core/src/notify/
 core.process   → crates/kild-core/src/process/
-core.fleet     → crates/kild-core/src/sessions/fleet.rs, crates/kild-core/src/sessions/dropbox.rs
+core.fleet     → crates/kild-core/src/sessions/fleet.rs, crates/kild-core/src/sessions/inbox.rs
 ui             → crates/kild-ui/
 ui.terminal    → crates/kild-ui/src/terminal/
 ui.views       → crates/kild-ui/src/views/

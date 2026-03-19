@@ -49,10 +49,10 @@ pub(crate) fn handle_inject_command(
 
     // 1. Write task to file inbox (universal, all agents).
     match kild_core::sessions::inbox::write_task(&session.project_id, &session.branch, text) {
-        Ok(Some(())) => {
+        Ok(true) => {
             info!(event = "cli.inject.inbox_written", branch = branch);
         }
-        Ok(None) => {
+        Ok(false) => {
             // No inbox dir — fleet mode not active. Just proceed with delivery.
         }
         Err(e) => {

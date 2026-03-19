@@ -69,13 +69,7 @@ pub(super) fn spawn_daemon_agent(
     let paths = kild_paths::KildPaths::resolve().map_err(|e| SessionError::DaemonError {
         message: format!("{} — cannot create inbox", e),
     })?;
-    inbox::ensure_inbox(
-        &paths,
-        params.project_id,
-        params.branch,
-        params.agent,
-        params.branch == fleet::BRAIN_BRANCH,
-    );
+    inbox::ensure_inbox(&paths, params.project_id, params.branch, params.agent);
 
     // 4. Fleet agent flags → augmented command
     let fleet_command = match fleet::fleet_agent_flags(params.branch, params.agent) {

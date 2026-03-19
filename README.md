@@ -293,24 +293,22 @@ kild inject <branch> "implement the auth module" --inbox
 
 **Note**: For Claude daemon sessions, inject uses the inbox polling protocol by default (message delivered as a new user turn within ~1s). For all other agents, it writes to PTY stdin. The worker should be idle before injecting.
 
-### Inspect fleet dropbox state
+### Inspect fleet inbox state
 ```bash
-# Show dropbox protocol state for a worker session
+# Show inbox state for a worker session
 kild inbox <branch>
 
 # Show all fleet sessions in a table
 kild inbox --all
 
-# Filter output
-kild inbox <branch> --task    # task content only
-kild inbox <branch> --report  # report content only
-kild inbox <branch> --status  # ack status line only
-kild inbox <branch> --json    # machine-readable JSON
+# Machine-readable JSON output
+kild inbox <branch> --json
+kild inbox --all --json
 ```
 
 ### Generate fleet context for agent bootstrapping
 ```bash
-# Output protocol + current task + fleet status as a markdown blob
+# Output current task + fleet status as a markdown blob
 kild prime <branch>
 
 # Fleet status table only (compact)

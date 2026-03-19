@@ -55,12 +55,11 @@ fn handle_single_prime(
         .filter(|s| s.project_id == session.project_id)
         .collect();
 
-    let context =
-        inbox::generate_prime_context_resolved(&session.project_id, &session.branch, &sessions)
-            .map_err(|e| {
-                error!(event = "cli.prime_failed", branch = branch, error = %e);
-                Box::<dyn std::error::Error>::from(e)
-            })?;
+    let context = inbox::generate_prime_context(&session.project_id, &session.branch, &sessions)
+        .map_err(|e| {
+            error!(event = "cli.prime_failed", branch = branch, error = %e);
+            Box::<dyn std::error::Error>::from(e)
+        })?;
 
     let context = match context {
         Some(ctx) => ctx,
@@ -76,14 +75,20 @@ fn handle_single_prime(
     };
 
     if json_output {
-        let inbox_state =
-            inbox::read_inbox_state_resolved(&session.project_id, &session.branch).unwrap_or(None);
+        let inbox_state = inbox::read_inbox_state(&session.project_id, &session.branch)
+            .map_err(|e| {
+                warn!(event = "cli.prime_inbox_read_failed", branch = branch, error = %e);
+                e
+            })
+            .ok()
+            .flatten();
+        let fleet = inbox::build_fleet_entries_for_json(&session.project_id, &sessions);
         let output = PrimeOutput {
             branch: branch.to_string(),
             status: inbox_state.as_ref().map(|s| s.status.clone()),
             task: inbox_state.as_ref().and_then(|s| s.task.clone()),
             report: inbox_state.as_ref().and_then(|s| s.report.clone()),
-            fleet: vec![], // Fleet entries are embedded in the context markdown
+            fleet,
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if status_only {
@@ -120,21 +125,23 @@ fn handle_all_prime(
         return Ok(());
     }
 
+    // Build project sessions once (single-project tool).
+    let project_id = sessions
+        .first()
+        .map(|s| s.project_id.to_string())
+        .unwrap_or_default();
+    let project_sessions: Vec<_> = sessions
+        .iter()
+        .filter(|s| s.project_id.as_ref() == project_id)
+        .cloned()
+        .collect();
+
     let mut contexts: Vec<(String, String)> = Vec::new(); // (branch, markdown)
     let mut errors: Vec<(String, String)> = Vec::new();
 
-    for session in &sessions {
-        let project_sessions: Vec<_> = sessions
-            .iter()
-            .filter(|s| s.project_id == session.project_id)
-            .cloned()
-            .collect();
-
-        match inbox::generate_prime_context_resolved(
-            &session.project_id,
-            &session.branch,
-            &project_sessions,
-        ) {
+    for session in &project_sessions {
+        match inbox::generate_prime_context(&session.project_id, &session.branch, &project_sessions)
+        {
             Ok(Some(ctx)) => contexts.push((session.branch.to_string(), ctx)),
             Ok(None) => {} // non-fleet session, skip
             Err(e) => {
@@ -171,18 +178,8 @@ fn handle_all_prime(
             .collect();
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if status_only {
-        // Print a single fleet status table (from first session's project)
-        if let Some(session) = sessions.first() {
-            let project_sessions: Vec<_> = sessions
-                .iter()
-                .filter(|s| s.project_id == session.project_id)
-                .cloned()
-                .collect();
-            if let Some(table) =
-                inbox::generate_status_table(&session.project_id, &project_sessions)
-            {
-                print!("# Fleet Status\n\n{}", table);
-            }
+        if let Some(table) = inbox::generate_status_table(&project_id, &project_sessions) {
+            print!("# Fleet Status\n\n{}", table);
         }
     } else {
         for (i, (_branch, ctx)) in contexts.iter().enumerate() {
@@ -198,6 +195,25 @@ fn handle_all_prime(
         count = contexts.len(),
         failed = errors.len(),
     );
+
+    if !errors.is_empty() {
+        eprintln!();
+        for (branch, msg) in &errors {
+            eprintln!(
+                "{} '{}': {}",
+                crate::color::error("Prime context failed for"),
+                branch,
+                msg,
+            );
+        }
+        let total = contexts.len() + errors.len();
+        return Err(helpers::format_partial_failure_error(
+            "generate prime context",
+            errors.len(),
+            total,
+        )
+        .into());
+    }
 
     Ok(())
 }

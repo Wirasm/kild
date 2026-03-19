@@ -135,8 +135,7 @@ pub(super) fn deliver_initial_prompt_for_session(
     prompt: &str,
 ) {
     let inbox_wrote = match super::inbox::write_task(project_id, branch, prompt) {
-        Ok(Some(())) => true,
-        Ok(None) => false,
+        Ok(wrote) => wrote,
         Err(e) => {
             warn!(
                 event = "core.session.inbox.initial_task_write_failed",

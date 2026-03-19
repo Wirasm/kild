@@ -58,9 +58,11 @@ pub(crate) fn setup_fleet_instructions(agent: &str, worktree_path: &Path, is_mai
     }
 
     let result = match agent.to_lowercase().as_str() {
-        "claude" => write_claude_fleet_instructions(worktree_path),
-        "codex" | "amp" | "opencode" => write_agents_md_fleet_instructions(worktree_path),
-        "gemini" => write_gemini_fleet_instructions(worktree_path),
+        "claude" => write_fleet_instructions_to(worktree_path, ".claude/CLAUDE.md", "claude"),
+        "codex" | "amp" | "opencode" => {
+            write_fleet_instructions_to(worktree_path, "AGENTS.md", "agents_md")
+        }
+        "gemini" => write_fleet_instructions_to(worktree_path, "GEMINI.md", "gemini"),
         "kiro" => write_kiro_fleet_instructions(worktree_path),
         _ => {
             debug!(
@@ -86,48 +88,25 @@ pub(crate) fn setup_fleet_instructions(agent: &str, worktree_path: &Path, is_mai
     }
 }
 
-/// Write fleet instructions to `<worktree>/.claude/CLAUDE.md`.
-fn write_claude_fleet_instructions(worktree_path: &Path) -> Result<(), String> {
-    let claude_dir = worktree_path.join(".claude");
-    let file_path = claude_dir.join("CLAUDE.md");
+/// Write fleet instructions to a file using marker-based upsert.
+///
+/// Creates parent directories as needed. Used for Claude, Codex/Amp/OpenCode, and Gemini.
+fn write_fleet_instructions_to(
+    worktree_path: &Path,
+    relative_path: &str,
+    agent_label: &str,
+) -> Result<(), String> {
+    let file_path = worktree_path.join(relative_path);
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create {}: {}", parent.display(), e))?;
+    }
 
-    std::fs::create_dir_all(&claude_dir)
-        .map_err(|e| format!("failed to create {}: {}", claude_dir.display(), e))?;
-
-    let content = fleet_protocol_text();
-    upsert_fleet_section(&file_path, content)?;
-
-    info!(
-        event = "core.fleet.instructions_written",
-        agent = "claude",
-        path = %file_path.display(),
-    );
-    Ok(())
-}
-
-/// Write fleet instructions to `<worktree>/AGENTS.md` (Codex, Amp, OpenCode).
-fn write_agents_md_fleet_instructions(worktree_path: &Path) -> Result<(), String> {
-    let file_path = worktree_path.join("AGENTS.md");
-    let content = fleet_protocol_text();
-    upsert_fleet_section(&file_path, content)?;
+    upsert_fleet_section(&file_path, fleet_protocol_text())?;
 
     info!(
         event = "core.fleet.instructions_written",
-        agent = "agents_md",
-        path = %file_path.display(),
-    );
-    Ok(())
-}
-
-/// Write fleet instructions to `<worktree>/GEMINI.md`.
-fn write_gemini_fleet_instructions(worktree_path: &Path) -> Result<(), String> {
-    let file_path = worktree_path.join("GEMINI.md");
-    let content = fleet_protocol_text();
-    upsert_fleet_section(&file_path, content)?;
-
-    info!(
-        event = "core.fleet.instructions_written",
-        agent = "gemini",
+        agent = agent_label,
         path = %file_path.display(),
     );
     Ok(())
@@ -187,7 +166,16 @@ fn upsert_fleet_section(file_path: &Path, content: &str) -> Result<(), String> {
                 &existing[end..]
             )
         } else {
-            // Begin marker found but no end marker — append fresh section.
+            // Begin marker found but no end marker — corrupted section.
+            warn!(
+                event = "core.fleet.instructions_corrupt_markers",
+                path = %file_path.display(),
+                reason = "begin_without_end",
+            );
+            eprintln!(
+                "Warning: Fleet instruction markers corrupt in '{}' (begin without end). Appending fresh section.",
+                file_path.display()
+            );
             format!("{}{}", existing, section)
         }
     } else {
@@ -224,7 +212,7 @@ mod tests {
     #[test]
     fn write_claude_instructions_creates_file() {
         let dir = temp_dir("claude_create");
-        write_claude_fleet_instructions(&dir).unwrap();
+        write_fleet_instructions_to(&dir, ".claude/CLAUDE.md", "claude").unwrap();
 
         let path = dir.join(".claude/CLAUDE.md");
         assert!(path.exists());
@@ -239,10 +227,10 @@ mod tests {
     #[test]
     fn write_claude_instructions_idempotent() {
         let dir = temp_dir("claude_idempotent");
-        write_claude_fleet_instructions(&dir).unwrap();
+        write_fleet_instructions_to(&dir, ".claude/CLAUDE.md", "claude").unwrap();
         let content1 = fs::read_to_string(dir.join(".claude/CLAUDE.md")).unwrap();
 
-        write_claude_fleet_instructions(&dir).unwrap();
+        write_fleet_instructions_to(&dir, ".claude/CLAUDE.md", "claude").unwrap();
         let content2 = fs::read_to_string(dir.join(".claude/CLAUDE.md")).unwrap();
 
         assert_eq!(content1, content2, "second call should not change content");
@@ -255,7 +243,7 @@ mod tests {
         let dir = temp_dir("agents_append");
         fs::write(dir.join("AGENTS.md"), "# My Agents\n\nExisting content.\n").unwrap();
 
-        write_agents_md_fleet_instructions(&dir).unwrap();
+        write_fleet_instructions_to(&dir, "AGENTS.md", "agents_md").unwrap();
 
         let content = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
         assert!(
@@ -318,7 +306,7 @@ mod tests {
     #[test]
     fn write_gemini_fleet_instructions_creates_file() {
         let dir = temp_dir("gemini_create");
-        write_gemini_fleet_instructions(&dir).unwrap();
+        write_fleet_instructions_to(&dir, "GEMINI.md", "gemini").unwrap();
 
         let path = dir.join("GEMINI.md");
         assert!(path.exists());

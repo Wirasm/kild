@@ -34,11 +34,10 @@ fn handle_single_inbox(branch: &str, json_output: bool) -> Result<(), Box<dyn st
     info!(event = "cli.inbox_started", branch = branch);
 
     let session = helpers::require_session_json(branch, "cli.inbox_failed", json_output)?;
-    let state =
-        inbox::read_inbox_state_resolved(&session.project_id, &session.branch).map_err(|e| {
-            error!(event = "cli.inbox_failed", branch = branch, error = %e);
-            Box::<dyn std::error::Error>::from(e)
-        })?;
+    let state = inbox::read_inbox_state(&session.project_id, &session.branch).map_err(|e| {
+        error!(event = "cli.inbox_failed", branch = branch, error = %e);
+        Box::<dyn std::error::Error>::from(e)
+    })?;
 
     let state = match state {
         Some(s) => s,
@@ -85,7 +84,7 @@ fn handle_all_inbox(json_output: bool) -> Result<(), Box<dyn std::error::Error>>
     let mut errors: Vec<(String, String)> = Vec::new();
 
     for session in &sessions {
-        match inbox::read_inbox_state_resolved(&session.project_id, &session.branch) {
+        match inbox::read_inbox_state(&session.project_id, &session.branch) {
             Ok(Some(state)) => states.push(state),
             Ok(None) => {} // non-fleet session, skip
             Err(e) => {
