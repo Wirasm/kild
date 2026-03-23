@@ -216,11 +216,11 @@ fn sweep_ui_daemon_sessions(session_id: &str) {
                 }
             }
         }
-        Err(crate::daemon::client::DaemonClientError::NotRunning { .. }) => {
+        Err(e) if e.is_unreachable() => {
             debug!(
                 event = "core.session.destroy_ui_sessions_sweep_skipped",
                 session_id = session_id,
-                reason = "daemon_not_running"
+                reason = "daemon_unreachable"
             );
         }
         Err(e) => {
