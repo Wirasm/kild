@@ -225,16 +225,16 @@ impl TerminalView {
             event = "ui.terminal.reconnect_started",
             session_id = session_id
         );
-        self.terminal.set_reconnect_state(ReconnectState::Connecting);
+        self.terminal
+            .set_reconnect_state(ReconnectState::Connecting);
+        let (rows, cols) = self.terminal.current_size();
         cx.notify();
 
         let task = cx.spawn(async move |this, cx: &mut gpui::AsyncApp| {
             let sid = session_id.clone();
             let conn_result = cx
                 .background_executor()
-                .spawn(async move {
-                    daemon_client::connect_for_attach(&sid, 24, 80).await
-                })
+                .spawn(async move { daemon_client::connect_for_attach(&sid, rows, cols).await })
                 .await;
 
             match conn_result {
@@ -246,7 +246,8 @@ impl TerminalView {
                     );
                     let msg = e.to_string();
                     let _ = this.update(cx, |view, cx| {
-                        view.terminal.set_reconnect_state(ReconnectState::Failed(msg));
+                        view.terminal
+                            .set_reconnect_state(ReconnectState::Failed(msg));
                         view._reconnect_task = None;
                         cx.notify();
                     });
@@ -262,9 +263,9 @@ impl TerminalView {
                                             event = "ui.terminal.reconnect_channels_failed",
                                             error = %e,
                                         );
-                                        view.terminal.set_reconnect_state(
-                                            ReconnectState::Failed(e.to_string()),
-                                        );
+                                        view.terminal.set_reconnect_state(ReconnectState::Failed(
+                                            e.to_string(),
+                                        ));
                                         view._reconnect_task = None;
                                         cx.notify();
                                         return;
@@ -277,8 +278,8 @@ impl TerminalView {
                                 let exited = new_terminal.exited_flag().clone();
                                 let executor = cx.background_executor().clone();
 
-                                let event_task = cx.spawn(
-                                    async move |this2, cx2: &mut gpui::AsyncApp| {
+                                let event_task =
+                                    cx.spawn(async move |this2, cx2: &mut gpui::AsyncApp| {
                                         Terminal::run_batch_loop(
                                             term,
                                             pty_writer,
@@ -288,13 +289,11 @@ impl TerminalView {
                                             event_rx,
                                             executor,
                                             || {
-                                                let _ =
-                                                    this2.update(cx2, |_, cx| cx.notify());
+                                                let _ = this2.update(cx2, |_, cx| cx.notify());
                                             },
                                         )
                                         .await;
-                                    },
-                                );
+                                    });
 
                                 view.terminal = new_terminal;
                                 view._event_task = event_task;
@@ -311,9 +310,8 @@ impl TerminalView {
                                     session_id = session_id,
                                     error = %e,
                                 );
-                                view.terminal.set_reconnect_state(ReconnectState::Failed(
-                                    e.to_string(),
-                                ));
+                                view.terminal
+                                    .set_reconnect_state(ReconnectState::Failed(e.to_string()));
                                 view._reconnect_task = None;
                                 cx.notify();
                             }
@@ -333,7 +331,7 @@ impl TerminalView {
         let cmd = event.keystroke.modifiers.platform;
 
         // Intercept R key on dead daemon terminals to trigger reconnect.
-        if key == "r"
+        if key.eq_ignore_ascii_case("r")
             && !event.keystroke.modifiers.control
             && !cmd
             && self.terminal.has_exited()
@@ -458,7 +456,7 @@ impl Render for TerminalView {
             let (banner_bg, banner_text) = if is_daemon {
                 match &reconnect {
                     ReconnectState::Connecting => (
-                        theme::surface_1(),
+                        theme::surface(),
                         "Reconnecting to daemon session...".to_string(),
                     ),
                     ReconnectState::Failed(err) => (

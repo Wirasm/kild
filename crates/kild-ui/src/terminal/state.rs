@@ -830,10 +830,22 @@ impl Terminal {
             .unwrap_or(ReconnectState::Idle)
     }
 
+    /// Current PTY dimensions (rows, cols).
+    pub fn current_size(&self) -> (u16, u16) {
+        self.current_size.lock().map(|s| *s).unwrap_or((24, 80))
+    }
+
     /// Update the reconnection state.
     pub fn set_reconnect_state(&self, state: ReconnectState) {
-        if let Ok(mut s) = self.reconnect_state.lock() {
-            *s = state;
+        match self.reconnect_state.lock() {
+            Ok(mut s) => *s = state,
+            Err(e) => {
+                tracing::error!(
+                    event = "ui.terminal.reconnect_state_lock_poisoned",
+                    error = %e,
+                    "Could not update reconnect state — lock poisoned"
+                );
+            }
         }
     }
 }
