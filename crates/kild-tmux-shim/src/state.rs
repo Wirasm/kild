@@ -8,8 +8,10 @@
 //!   and return a `LockedRegistry` guard. The lock is held across the entire
 //!   load → mutate → save cycle, preventing pane ID races from concurrent
 //!   `split-window` calls. Call `locked.save()` to persist and release.
-//! - **Legacy writes**: `load()` + `save()` each acquire independent locks.
-//!   Only use for initialization paths where atomicity is not required.
+//! - **Init only**: `save()` acquires its own exclusive lock. Only used by
+//!   `init_registry()` where atomic load-modify-save is not needed.
+//! - **Test only**: `load()` acquires an exclusive lock for a single read.
+//!   Gated behind `#[cfg(test)]`.
 //!
 //! Locks are automatically released when the `Flock` handle is dropped (RAII).
 

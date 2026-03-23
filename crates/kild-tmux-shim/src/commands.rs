@@ -322,7 +322,11 @@ fn handle_split_window(args: SplitWindowArgs<'_>) -> Result<i32, ShimError> {
             .get(&window_id)
             .map(|w| w.name.clone())
             .unwrap_or_else(|| "main".to_string());
-        Some((args.format.unwrap_or("#{pane_id}"), session_name, window_name))
+        Some((
+            args.format.unwrap_or("#{pane_id}"),
+            session_name,
+            window_name,
+        ))
     } else {
         None
     };
@@ -667,18 +671,18 @@ fn handle_new_session(args: NewSessionArgs<'_>) -> Result<i32, ShimError> {
     let sid = session_id()?;
     let mut locked = state::load_and_lock(&sid)?;
 
+    // Read phase: derive names and IDs from current state
     let session_name = args
         .session_name
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("kild_{}", locked.registry().sessions.len()));
-
     let window_name = args
         .window_name
         .map(|s| s.to_string())
         .unwrap_or_else(|| "main".to_string());
-
-    // Allocate a new window
     let window_id = format!("{}", locked.registry().windows.len());
+
+    // Write phase: mutate registry
     locked.registry_mut().windows.insert(
         window_id.clone(),
         WindowEntry {
@@ -724,8 +728,16 @@ fn handle_new_window(args: NewWindowArgs<'_>) -> Result<i32, ShimError> {
         .name
         .map(|s| s.to_string())
         .unwrap_or_else(|| "window".to_string());
-    let window_id = format!("{}", locked.registry().windows.len());
 
+    // Read phase: derive IDs from current state
+    let window_id = format!("{}", locked.registry().windows.len());
+    let session_key = args
+        .target
+        .and_then(|t| t.split(':').next())
+        .unwrap_or(&locked.registry().session_name)
+        .to_string();
+
+    // Write phase: mutate registry
     locked.registry_mut().windows.insert(
         window_id.clone(),
         WindowEntry {
@@ -735,13 +747,6 @@ fn handle_new_window(args: NewWindowArgs<'_>) -> Result<i32, ShimError> {
     );
 
     let pane_id = create_pty_pane(locked.registry_mut(), &window_id, &[])?;
-
-    // Add window to the target session (or default session)
-    let session_key = args
-        .target
-        .and_then(|t| t.split(':').next())
-        .unwrap_or(&locked.registry().session_name)
-        .to_string();
 
     if let Some(session) = locked.registry_mut().sessions.get_mut(&session_key) {
         session.windows.push(window_id.clone());
