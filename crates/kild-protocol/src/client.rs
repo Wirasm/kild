@@ -250,6 +250,35 @@ impl IpcConnection {
         }
     }
 
+    /// Temporarily override the read timeout, run `f`, then restore the
+    /// original timeout.
+    ///
+    /// Returns `(T, bool)` where the bool indicates whether the original
+    /// timeout was successfully restored. When `false` the connection is in
+    /// an unknown timeout state and should **not** be returned to the pool.
+    ///
+    /// ```ignore
+    /// let (result, restored) = conn.with_read_timeout(
+    ///     Duration::from_secs(2),
+    ///     |c| c.send(&msg),
+    /// )?;
+    /// if restored { return_connection(conn); }
+    /// ```
+    pub fn with_read_timeout<F, T>(
+        &mut self,
+        timeout: Duration,
+        f: F,
+    ) -> Result<(T, bool), IpcError>
+    where
+        F: FnOnce(&mut Self) -> T,
+    {
+        let orig = self.get_read_timeout()?;
+        self.set_read_timeout(Some(timeout))?;
+        let result = f(self);
+        let restored = self.set_read_timeout(orig).is_ok();
+        Ok((result, restored))
+    }
+
     /// Check if the connection is still usable (peer hasn't closed).
     ///
     /// For Unix streams: temporarily sets a 1ms read timeout (restored via RAII
@@ -525,6 +554,48 @@ mod tests {
             .unwrap();
         let timeout = conn.get_read_timeout().unwrap();
         assert_eq!(timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn test_with_read_timeout_restores_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(&stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let response = r#"{"type":"ack","id":"1"}"#;
+            writeln!(stream, "{}", response).unwrap();
+            stream.flush().unwrap();
+            // Keep stream alive so peer doesn't see EOF before restore
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+
+        let mut conn = IpcConnection::connect(&sock_path).unwrap();
+        assert_eq!(
+            conn.get_read_timeout().unwrap(),
+            Some(Duration::from_secs(30))
+        );
+
+        let request = ClientMessage::Ping {
+            id: "1".to_string(),
+        };
+        let (result, restored) = conn
+            .with_read_timeout(Duration::from_secs(2), |c| c.send(&request))
+            .unwrap();
+
+        assert!(result.is_ok(), "send should succeed");
+        assert!(restored, "timeout should be restored");
+        assert_eq!(
+            conn.get_read_timeout().unwrap(),
+            Some(Duration::from_secs(30)),
+            "original timeout should be restored after with_read_timeout"
+        );
+
+        handle.join().unwrap();
     }
 
     #[test]

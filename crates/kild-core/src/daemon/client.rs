@@ -341,12 +341,12 @@ pub fn ping_daemon() -> Result<bool, DaemonClientError> {
         Err(e) => return Err(e),
     };
 
-    let orig_timeout = conn.get_read_timeout()?;
-    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let (result, restored) =
+        conn.with_read_timeout(Duration::from_secs(2), |c| c.send(&request))?;
 
-    match conn.send(&request) {
+    match result {
         Ok(_) => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             debug!(event = "core.daemon.ping_completed", alive = true);
@@ -394,12 +394,12 @@ pub fn get_session_status(
         }
     };
 
-    let orig_timeout = conn.get_read_timeout()?;
-    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let (result, restored) =
+        conn.with_read_timeout(Duration::from_secs(2), |c| c.send(&request))?;
 
-    match conn.send(&request) {
+    match result {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             debug!(
@@ -421,7 +421,7 @@ pub fn get_session_status(
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             debug!(
@@ -461,12 +461,12 @@ pub fn get_session_info(
         Err(e) => return Err(e),
     };
 
-    let orig_timeout = conn.get_read_timeout()?;
-    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let (result, restored) =
+        conn.with_read_timeout(Duration::from_secs(2), |c| c.send(&request))?;
 
-    match conn.send(&request) {
+    match result {
         Ok(DaemonMessage::SessionInfo { session, .. }) => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             Ok(Some((session.status, session.exit_code)))
@@ -483,7 +483,7 @@ pub fn get_session_info(
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             Ok(None)
@@ -571,12 +571,12 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
         Err(e) => return Err(e),
     };
 
-    let orig_timeout = conn.get_read_timeout()?;
-    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let (result, restored) =
+        conn.with_read_timeout(Duration::from_secs(2), |c| c.send(&request))?;
 
-    match conn.send(&request) {
+    match result {
         Ok(DaemonMessage::ScrollbackContents { data, .. }) => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             use base64::Engine;
@@ -599,7 +599,7 @@ pub fn read_scrollback(daemon_session_id: &str) -> Result<Option<Vec<u8>>, Daemo
             })
         }
         Err(IpcError::DaemonError { ref code, .. }) if *code == ErrorCode::SessionNotFound => {
-            if conn.set_read_timeout(orig_timeout).is_ok() {
+            if restored {
                 return_connection(conn);
             }
             Ok(None)
