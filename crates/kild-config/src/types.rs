@@ -108,6 +108,10 @@ pub struct KildConfig {
     /// UI configuration (keybindings, navigation).
     #[serde(default)]
     pub ui: UiConfig,
+
+    /// Fleet configuration (channels, communication).
+    #[serde(default)]
+    pub fleet: FleetConfig,
 }
 
 impl Default for KildConfig {
@@ -122,6 +126,7 @@ impl Default for KildConfig {
             editor: <EditorConfig as Default>::default(),
             daemon: DaemonRuntimeConfig::default(),
             ui: UiConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 }
@@ -138,6 +143,29 @@ impl UiConfig {
     /// Merge two UI configs. Override takes precedence for set fields.
     pub fn merge(_base: &Self, _override_config: &Self) -> Self {
         Self {}
+    }
+}
+
+/// Fleet configuration for inter-agent communication.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FleetConfig {
+    /// Enable MCP channel server for near-real-time fleet communication.
+    /// Requires Bun runtime. Default: false (research preview).
+    pub channels: Option<bool>,
+}
+
+impl FleetConfig {
+    /// Whether fleet channels are enabled (default: false).
+    pub fn channels(&self) -> bool {
+        self.channels.unwrap_or(false)
+    }
+
+    /// Merge two fleet configs. Override takes precedence for set fields.
+    pub fn merge(base: &Self, override_config: &Self) -> Self {
+        Self {
+            channels: override_config.channels.or(base.channels),
+        }
     }
 }
 

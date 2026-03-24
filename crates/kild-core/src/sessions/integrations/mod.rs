@@ -1,9 +1,11 @@
+pub mod channel;
 pub mod claude;
 pub mod codex;
 mod fleet_instructions;
 pub mod opencode;
 
 // Re-export setup orchestrators used by create.rs and open.rs
+pub(crate) use channel::setup_channel_integration;
 pub(crate) use claude::setup_claude_integration;
 pub(crate) use codex::setup_codex_integration;
 pub(crate) use fleet_instructions::setup_fleet_instructions;
