@@ -222,6 +222,16 @@ pub fn init_hooks_command() -> Command {
         )
 }
 
+pub fn init_channels_command() -> Command {
+    Command::new("init-channels")
+        .about("Install the fleet MCP channel server for real-time agent communication")
+        .long_about(
+            "Installs the kild-fleet MCP channel server at ~/.kild/channels/fleet/ and runs \
+             bun install. Requires Bun (https://bun.sh). Enable with [fleet] channels = true \
+             in ~/.kild/config.toml.",
+        )
+}
+
 pub fn code_command() -> Command {
     Command::new("code")
         .about("Open kild's worktree in your code editor")

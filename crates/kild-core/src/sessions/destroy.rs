@@ -314,6 +314,11 @@ pub fn destroy_session(name: &str, force: bool) -> Result<(), SessionError> {
     // 3e. Clean up fleet inbox file and team config entry
     super::fleet::remove_fleet_member(&session.branch);
 
+    // 3f. Clean up .mcp.json for --main sessions (worktree deletion handles non-main)
+    if session.use_main_worktree {
+        super::integrations::channel::cleanup_mcp_json(&session.worktree_path);
+    }
+
     // 4. Resolve main repo path before worktree removal (needed for branch cleanup)
     let main_repo_path = git::removal::find_main_repo_root(&session.worktree_path);
 

@@ -16,8 +16,8 @@ use kild_config::{Config, KildConfig};
 
 use super::daemon_request::build_daemon_create_request;
 use super::integrations::{
-    setup_claude_integration, setup_codex_integration, setup_fleet_instructions,
-    setup_opencode_integration,
+    setup_channel_integration, setup_claude_integration, setup_codex_integration,
+    setup_fleet_instructions, setup_opencode_integration,
 };
 use super::{fleet, inbox};
 
@@ -63,6 +63,13 @@ pub(super) fn spawn_daemon_agent(
     setup_opencode_integration(params.agent, params.worktree_path);
     setup_claude_integration(params.agent);
     setup_fleet_instructions(params.agent, params.worktree_path, params.use_main_worktree);
+    setup_channel_integration(
+        params.agent,
+        params.worktree_path,
+        params.branch,
+        params.use_main_worktree,
+        params.kild_config,
+    );
 
     // 3. Fleet member + inbox setup
     fleet::ensure_fleet_member(params.branch, params.worktree_path, params.agent);
@@ -72,10 +79,12 @@ pub(super) fn spawn_daemon_agent(
     inbox::ensure_inbox(&paths, params.project_id, params.branch, params.agent);
 
     // 4. Fleet agent flags → augmented command
-    let fleet_command = match fleet::fleet_agent_flags(params.branch, params.agent) {
-        Some(flags) => format!("{} {}", params.agent_command, flags),
-        None => params.agent_command.to_string(),
-    };
+    let channels_enabled = params.kild_config.fleet.channels();
+    let fleet_command =
+        match fleet::fleet_agent_flags(params.branch, params.agent, channels_enabled) {
+            Some(flags) => format!("{} {}", params.agent_command, flags),
+            None => params.agent_command.to_string(),
+        };
 
     // 5. Build daemon create request
     let mut req_params = build_daemon_create_request(

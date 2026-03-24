@@ -21,8 +21,8 @@ pub use include_config::{CopyOptions, IncludeConfig, PatternRule, default_includ
 pub use keybindings::{Keybindings, NavigationKeybindings, TerminalKeybindings};
 pub use loading::{get_agent_command, load_hierarchy, merge_configs};
 pub use types::{
-    AgentConfig, AgentSettings, Config, DaemonRuntimeConfig, EditorConfig, GitConfig, HealthConfig,
-    KildConfig, TerminalConfig, UiConfig,
+    AgentConfig, AgentSettings, Config, DaemonRuntimeConfig, EditorConfig, FleetConfig, GitConfig,
+    HealthConfig, KildConfig, TerminalConfig, UiConfig,
 };
 pub use validation::{VALID_TERMINALS, validate_config};
 
