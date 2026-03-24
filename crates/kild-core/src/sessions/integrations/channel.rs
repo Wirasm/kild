@@ -181,6 +181,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Connect ---
 await server.connect(new StdioServerTransport())
 
+// Signal successful connection by writing a breadcrumb to the inbox dir.
+// `kild inbox` or diagnostics can check for this file to confirm the channel loaded.
+if (INBOX && existsSync(INBOX)) {
+  writeFileSync(join(INBOX, '.channel'), `connected ${new Date().toISOString()} pid=${process.pid}`)
+}
+
 // --- File watching ---
 
 let debounce = new Map<string, ReturnType<typeof setTimeout>>()

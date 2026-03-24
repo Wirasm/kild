@@ -37,18 +37,22 @@ pub(crate) fn handle_init_channels_command(
         }
     }
 
-    // 3. Install dependencies
-    println!("Installing dependencies...");
-    let install = std::process::Command::new("bun")
-        .args(["install", "--no-summary"])
-        .current_dir(&fleet_dir)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .map_err(|e| format!("Failed to run bun install: {}", e))?;
+    // 3. Install dependencies (skip if node_modules already exists)
+    if fleet_dir.join("node_modules").exists() {
+        println!("Dependencies already installed.");
+    } else {
+        println!("Installing dependencies...");
+        let install = std::process::Command::new("bun")
+            .args(["install", "--no-summary"])
+            .current_dir(&fleet_dir)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| format!("Failed to run bun install: {}", e))?;
 
-    if !install.success() {
-        return Err("bun install failed".into());
+        if !install.success() {
+            return Err("bun install failed".into());
+        }
     }
 
     println!("\nFleet channel server ready.");
