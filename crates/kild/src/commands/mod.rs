@@ -22,6 +22,7 @@ mod focus;
 mod health;
 mod hide;
 mod inbox;
+mod init_channels;
 mod init_hooks;
 mod inject;
 mod list;
@@ -72,6 +73,9 @@ pub fn run_command(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
         Some(("inject", sub_matches)) => inject::handle_inject_command(sub_matches),
         Some(("teammates", sub_matches)) => teammates::handle_teammates_command(sub_matches),
         Some(("init-hooks", sub_matches)) => init_hooks::handle_init_hooks_command(sub_matches),
+        Some(("init-channels", sub_matches)) => {
+            init_channels::handle_init_channels_command(sub_matches)
+        }
         Some(("project", sub_matches)) => project::handle_project_command(sub_matches),
         _ => {
             error!(event = "cli.command_unknown");

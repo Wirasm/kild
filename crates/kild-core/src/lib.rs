@@ -47,8 +47,8 @@ pub use git::types::{
 };
 pub use kild_config::ConfigError;
 pub use kild_config::{
-    AgentConfig, AgentSettings, Config, DaemonRuntimeConfig, EditorConfig, GitConfig, HealthConfig,
-    Keybindings, KildConfig, TerminalConfig, UiConfig, VALID_TERMINALS,
+    AgentConfig, AgentSettings, Config, DaemonRuntimeConfig, EditorConfig, FleetConfig, GitConfig,
+    HealthConfig, Keybindings, KildConfig, TerminalConfig, UiConfig, VALID_TERMINALS,
 };
 pub use kild_config::{CopyOptions, IncludeConfig, PatternRule};
 pub use projects::{Project, ProjectError, ProjectRegistry, ProjectsData};

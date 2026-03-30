@@ -150,7 +150,16 @@ fn inbox_output_from_state(state: &InboxState) -> InboxOutput {
 }
 
 fn print_single_inbox(state: &InboxState) {
-    println!("Status:  {}", color::aurora(&state.status));
+    let channel_indicator = if state.channel_connected {
+        format!(" {}", color::aurora("[channel]"))
+    } else {
+        String::new()
+    };
+    println!(
+        "Status:  {}{}",
+        color::aurora(&state.status),
+        channel_indicator
+    );
 
     let task_str = state
         .task

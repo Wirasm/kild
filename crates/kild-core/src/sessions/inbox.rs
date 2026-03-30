@@ -24,6 +24,9 @@ pub struct InboxState {
     pub status: String,
     pub task: Option<String>,
     pub report: Option<String>,
+    /// Whether the MCP channel server is connected (`.channel` breadcrumb exists).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub channel_connected: bool,
 }
 
 /// A single session's fleet status for the prime context.
@@ -79,6 +82,12 @@ pub fn ensure_inbox(paths: &KildPaths, project_id: &str, branch: &str, agent: &s
             "Warning: Failed to initialize inbox status for '{}': {}",
             branch, e
         );
+    }
+
+    // Remove stale channel breadcrumb from previous session.
+    let channel_file = inbox_dir.join(".channel");
+    if channel_file.exists() {
+        let _ = std::fs::remove_file(&channel_file);
     }
 
     info!(
@@ -141,12 +150,14 @@ pub fn read_inbox_state(project_id: &str, branch: &str) -> Result<Option<InboxSt
 
     let task = std::fs::read_to_string(inbox_dir.join("task.md")).ok();
     let report = std::fs::read_to_string(inbox_dir.join("report.md")).ok();
+    let channel_connected = inbox_dir.join(".channel").exists();
 
     Ok(Some(InboxState {
         branch: branch.to_string(),
         status,
         task,
         report,
+        channel_connected,
     }))
 }
 

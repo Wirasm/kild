@@ -89,13 +89,13 @@ pub fn fleet_mode_active(branch: &str) -> bool {
 ///
 /// Returns None if fleet mode does not apply (wrong agent, not active, etc.).
 /// The returned string is appended to the existing agent command.
-pub fn fleet_agent_flags(branch: &str, agent: &str) -> Option<String> {
+pub fn fleet_agent_flags(branch: &str, agent: &str, channels_enabled: bool) -> Option<String> {
     if !is_claude_fleet_agent(agent) || !fleet_mode_active(branch) {
         return None;
     }
 
     let safe_name = fleet_safe_name(branch);
-    let flags = if branch == BRAIN_BRANCH {
+    let mut flags = if branch == BRAIN_BRANCH {
         // Brain loads the kild-brain agent definition and joins as team lead.
         format!(
             "--agent kild-brain --agent-id {safe_name}@{TEAM_NAME} \
@@ -106,6 +106,10 @@ pub fn fleet_agent_flags(branch: &str, agent: &str) -> Option<String> {
             "--agent-id {safe_name}@{TEAM_NAME} --agent-name {safe_name} --team-name {TEAM_NAME}"
         )
     };
+
+    if channels_enabled {
+        flags.push_str(" --dangerously-load-development-channels server:kild-fleet");
+    }
 
     Some(flags)
 }
@@ -604,7 +608,7 @@ mod tests {
     #[test]
     fn fleet_agent_flags_brain_gets_kild_brain_flag() {
         with_team_dir("brain_flag", |_| {
-            let flags = fleet_agent_flags(BRAIN_BRANCH, "claude").unwrap();
+            let flags = fleet_agent_flags(BRAIN_BRANCH, "claude", false).unwrap();
             assert!(
                 flags.contains("--agent kild-brain"),
                 "brain should get --agent kild-brain, got: {}",
@@ -621,7 +625,7 @@ mod tests {
     #[test]
     fn fleet_agent_flags_worker_does_not_get_brain_flag() {
         with_team_dir("worker_no_brain_flag", |_| {
-            let flags = fleet_agent_flags("my-feature", "claude").unwrap();
+            let flags = fleet_agent_flags("my-feature", "claude", false).unwrap();
             assert!(
                 !flags.contains("--agent kild-brain"),
                 "worker should not get --agent kild-brain, got: {}",
@@ -638,7 +642,7 @@ mod tests {
     #[test]
     fn fleet_agent_flags_slashed_branch_sanitized_in_agent_name() {
         with_team_dir("slashed_branch_flags", |_| {
-            let flags = fleet_agent_flags("refactor/consolidate-ipc", "claude").unwrap();
+            let flags = fleet_agent_flags("refactor/consolidate-ipc", "claude", false).unwrap();
             assert!(
                 flags.contains("--agent-id refactor-consolidate-ipc@honryu"),
                 "slashed branch should be sanitized in agent-id, got: {}",
@@ -660,10 +664,10 @@ mod tests {
     #[test]
     fn fleet_agent_flags_non_claude_returns_none() {
         with_team_dir("non_claude_none", |_| {
-            assert!(fleet_agent_flags("my-feature", "amp").is_none());
-            assert!(fleet_agent_flags("my-feature", "codex").is_none());
-            assert!(fleet_agent_flags("my-feature", "kiro").is_none());
-            assert!(fleet_agent_flags("my-feature", "gemini").is_none());
+            assert!(fleet_agent_flags("my-feature", "amp", false).is_none());
+            assert!(fleet_agent_flags("my-feature", "codex", false).is_none());
+            assert!(fleet_agent_flags("my-feature", "kiro", false).is_none());
+            assert!(fleet_agent_flags("my-feature", "gemini", false).is_none());
         });
     }
 
@@ -671,7 +675,7 @@ mod tests {
     fn fleet_agent_flags_returns_none_when_no_team_dir_and_not_brain() {
         without_team_dir("no_dir_worker", |_| {
             assert!(
-                fleet_agent_flags("my-feature", "claude").is_none(),
+                fleet_agent_flags("my-feature", "claude", false).is_none(),
                 "should be None when team dir absent and branch is not brain"
             );
         });
@@ -681,7 +685,7 @@ mod tests {
     fn fleet_agent_flags_brain_returns_flags_even_without_team_dir() {
         without_team_dir("no_dir_brain", |_| {
             // Brain creates the team — fleet activates unconditionally for the brain branch.
-            let flags = fleet_agent_flags(BRAIN_BRANCH, "claude");
+            let flags = fleet_agent_flags(BRAIN_BRANCH, "claude", false);
             assert!(
                 flags.is_some(),
                 "brain should get flags even when team dir absent"

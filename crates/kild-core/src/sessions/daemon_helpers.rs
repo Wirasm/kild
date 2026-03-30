@@ -22,7 +22,8 @@ pub use super::attach::spawn_and_save_attach_window;
 // Shim setup
 pub(crate) use super::shim_setup::ensure_shim_binary;
 
-// Agent integrations — public ensure functions (used by CLI init-hooks)
+// Agent integrations — public ensure functions (used by CLI init-hooks/init-channels)
+pub use super::integrations::channel::ensure_channel_server_installed;
 pub use super::integrations::{
     ensure_claude_settings, ensure_claude_status_hook, ensure_opencode_config,
     ensure_opencode_package_json, ensure_opencode_plugin_in_worktree,

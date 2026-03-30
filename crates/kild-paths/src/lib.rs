@@ -64,6 +64,16 @@ impl KildPaths {
         self.kild_dir.join("health_history")
     }
 
+    // --- Channel paths ---
+
+    pub fn channels_dir(&self) -> PathBuf {
+        self.kild_dir.join("channels")
+    }
+
+    pub fn fleet_channel_dir(&self) -> PathBuf {
+        self.channels_dir().join("fleet")
+    }
+
     // --- Inbox paths ---
 
     pub fn inbox_base_dir(&self) -> PathBuf {
@@ -510,6 +520,22 @@ mod tests {
         assert_eq!(
             KildPaths::project_keybindings(Path::new("/my/project")),
             PathBuf::from("/my/project/.kild/keybindings.toml")
+        );
+    }
+
+    #[test]
+    fn test_channels_dir() {
+        assert_eq!(
+            test_paths().channels_dir(),
+            PathBuf::from("/home/user/.kild/channels")
+        );
+    }
+
+    #[test]
+    fn test_fleet_channel_dir() {
+        assert_eq!(
+            test_paths().fleet_channel_dir(),
+            PathBuf::from("/home/user/.kild/channels/fleet")
         );
     }
 

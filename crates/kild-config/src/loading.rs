@@ -14,7 +14,8 @@
 use crate::agent_data;
 use crate::include_config::IncludeConfig;
 use crate::types::{
-    AgentConfig, DaemonRuntimeConfig, GitConfig, HealthConfig, KildConfig, TerminalConfig, UiConfig,
+    AgentConfig, DaemonRuntimeConfig, FleetConfig, GitConfig, HealthConfig, KildConfig,
+    TerminalConfig, UiConfig,
 };
 use crate::validation::validate_config;
 use std::fs;
@@ -174,6 +175,7 @@ pub fn merge_configs(base: KildConfig, override_config: KildConfig) -> KildConfi
         editor: base.editor.merge(override_config.editor),
         daemon: DaemonRuntimeConfig::merge(&base.daemon, &override_config.daemon),
         ui: UiConfig::merge(&base.ui, &override_config.ui),
+        fleet: FleetConfig::merge(&base.fleet, &override_config.fleet),
     }
 }
 
