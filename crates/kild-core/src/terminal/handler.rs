@@ -2,7 +2,7 @@ use std::path::Path;
 use tracing::{debug, info, warn};
 
 use crate::process::{
-    ensure_pid_dir, get_pid_file_path, get_process_info, is_process_running,
+    ProcessSnapshot, ensure_pid_dir, get_pid_file_path, get_process_info, is_process_running,
     read_pid_file_with_retry, wrap_command_with_pid_capture,
 };
 use crate::terminal::{errors::TerminalError, operations, types::*};
@@ -182,6 +182,7 @@ fn read_pid_from_file_with_validation(pid_file: &Path) -> ProcessSearchResult {
                     // Get full process info
                     match get_process_info(pid) {
                         Ok(info) => {
+                            let info = settle_exec_wrapper_process_info(pid, info);
                             info!(
                                 event = "core.terminal.pid_file_process_found",
                                 pid,
@@ -236,6 +237,26 @@ fn read_pid_from_file_with_validation(pid_file: &Path) -> ProcessSearchResult {
             );
             Ok((None, None, None))
         }
+    }
+}
+
+fn is_exec_wrapper_name(name: &str) -> bool {
+    matches!(
+        name.rsplit(['/', '\\']).next().unwrap_or(name),
+        "env" | "sh" | "bash" | "zsh"
+    )
+}
+
+fn settle_exec_wrapper_process_info(pid: u32, initial: ProcessSnapshot) -> ProcessSnapshot {
+    if !is_exec_wrapper_name(&initial.name) {
+        return initial;
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    match get_process_info(pid) {
+        Ok(refreshed) if refreshed.start_time == initial.start_time => refreshed,
+        _ => initial,
     }
 }
 

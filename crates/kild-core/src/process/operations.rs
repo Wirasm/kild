@@ -69,6 +69,10 @@ fn process_name_matches(actual_name: &str, expected_name: &str) -> bool {
     false
 }
 
+fn is_exec_wrapper_name(name: &str) -> bool {
+    matches!(extract_base_name(name), "env" | "sh" | "bash" | "zsh")
+}
+
 /// Kill a process with the given PID, validating it matches expected metadata
 pub fn kill_process(
     pid: u32,
@@ -81,10 +85,17 @@ pub fn kill_process(
 
     match system.process(pid_obj) {
         Some(process) => {
+            let actual_start_time = process.start_time();
+
             // Validate process identity to prevent PID reuse attacks
             if let Some(name) = expected_name {
                 let actual_name = process.name().to_string_lossy().to_string();
-                if !process_name_matches(&actual_name, name) {
+                let same_start_time =
+                    expected_start_time.is_some_and(|start_time| start_time == actual_start_time);
+
+                if !process_name_matches(&actual_name, name)
+                    && !(is_exec_wrapper_name(name) && same_start_time)
+                {
                     return Err(ProcessError::PidReused {
                         pid,
                         expected: name.to_string(),
@@ -94,12 +105,12 @@ pub fn kill_process(
             }
 
             if let Some(start_time) = expected_start_time
-                && process.start_time() != start_time
+                && actual_start_time != start_time
             {
                 return Err(ProcessError::PidReused {
                     pid,
                     expected: format!("start_time={}", start_time),
-                    actual: format!("start_time={}", process.start_time()),
+                    actual: format!("start_time={}", actual_start_time),
                 });
             }
 
@@ -526,6 +537,51 @@ mod tests {
 
         // Arbitrary substring matching is NOT supported
         assert!(!process_name_matches("my-kiro-daemon", "kiro"));
+    }
+
+    #[test]
+    fn test_kill_process_allows_exec_wrapper_name_change_with_same_start_time() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        let pid = child.id();
+        let info = get_process_info(pid).expect("sleep process should exist");
+
+        let result = kill_process(pid, Some("env"), Some(info.start_time));
+        assert!(
+            result.is_ok(),
+            "wrapper name mismatch with the same start time should be treated as the same exec'd process: {:?}",
+            result
+        );
+
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn test_kill_process_rejects_exec_wrapper_name_change_with_different_start_time() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        let pid = child.id();
+        let info = get_process_info(pid).expect("sleep process should exist");
+        let wrong_start_time = info.start_time.saturating_sub(1);
+
+        let result = kill_process(pid, Some("env"), Some(wrong_start_time));
+        assert!(
+            matches!(result, Err(ProcessError::PidReused { .. })),
+            "wrapper name mismatch with a different start time must still be rejected"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]

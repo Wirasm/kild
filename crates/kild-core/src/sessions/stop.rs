@@ -3,6 +3,7 @@ use tracing::{error, info, warn};
 use kild_paths::KildPaths;
 use kild_protocol::RuntimeMode;
 
+use crate::ProcessStatus;
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
 use kild_config::Config;
@@ -137,6 +138,19 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
         }
 
         if !kill_errors.is_empty() {
+            if daemon_errors.is_empty() && wait_for_terminal_processes_stopped(&session) {
+                warn!(
+                    event = "core.session.stop_reconciled_stale_process_metadata",
+                    session_id = %session.id,
+                    branch = %session.branch,
+                    kill_errors = kill_errors.len(),
+                    "Process kill failed, but all tracked terminal processes are now stopped; persisting stopped session"
+                );
+                kill_errors.clear();
+            }
+        }
+
+        if !kill_errors.is_empty() {
             for (pid, err) in &kill_errors {
                 error!(
                     event = "core.session.stop_kill_failed_summary",
@@ -221,6 +235,23 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     );
 
     Ok(())
+}
+
+fn wait_for_terminal_processes_stopped(session: &Session) -> bool {
+    const ATTEMPTS: usize = 5;
+    const DELAY_MS: u64 = 100;
+
+    for attempt in 0..ATTEMPTS {
+        if crate::sessions::info::determine_process_status(session) == ProcessStatus::Stopped {
+            return true;
+        }
+
+        if attempt + 1 < ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(DELAY_MS));
+        }
+    }
+
+    false
 }
 
 /// Stop a specific teammate PTY by pane ID within a session.
@@ -669,6 +700,65 @@ mod tests {
         assert!(worktree_dir.exists(), "Worktree should be preserved");
 
         // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_wait_for_terminal_processes_stopped_with_dead_pid() {
+        use crate::terminal::types::TerminalType;
+        use std::fs;
+
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir = std::env::temp_dir().join(format!("kild_test_stop_stale_pid_{}", unique_id));
+        let worktree_dir = temp_dir.join("worktree");
+        fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+        let agent = AgentProcess::new(
+            "claude".to_string(),
+            "test-project_stale-pid_0".to_string(),
+            Some(99999),
+            Some("env".to_string()),
+            Some(1234567890),
+            Some(TerminalType::Ghostty),
+            Some("test-window".to_string()),
+            "env -u CLAUDECODE KILD_SESSION_BRANCH=stale-pid claude".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            None,
+        )
+        .unwrap();
+
+        let session = Session::new(
+            "test-project_stale-pid".into(),
+            "test-project".into(),
+            "stale-pid".into(),
+            worktree_dir,
+            "claude".to_string(),
+            SessionStatus::Active,
+            chrono::Utc::now().to_rfc3339(),
+            3000,
+            3009,
+            10,
+            None,
+            None,
+            None,
+            vec![agent],
+            None,
+            None,
+            Some(RuntimeMode::Terminal),
+        );
+
+        assert!(
+            wait_for_terminal_processes_stopped(&session),
+            "dead tracked PID should be reconciled as stopped"
+        );
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
