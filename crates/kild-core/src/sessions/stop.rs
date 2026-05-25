@@ -3,10 +3,15 @@ use tracing::{error, info, warn};
 use kild_paths::KildPaths;
 use kild_protocol::RuntimeMode;
 
-use crate::ProcessStatus;
+use crate::process::ProcessError;
 use crate::sessions::{errors::SessionError, persistence, types::*};
 use crate::terminal;
 use kild_config::Config;
+
+struct KillError {
+    pid: u32,
+    error: ProcessError,
+}
 
 /// Stops the agent process in a kild without destroying the kild.
 ///
@@ -43,7 +48,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
 
         // Iterate all tracked agents — branch on daemon vs terminal
         let mut daemon_errors: Vec<String> = Vec::new();
-        let mut kill_errors: Vec<(u32, String)> = Vec::new();
+        let mut kill_errors: Vec<KillError> = Vec::new();
         for agent_proc in session.agents() {
             if let Some(daemon_sid) = agent_proc.daemon_session_id() {
                 // Daemon-managed: destroy daemon session state via IPC.
@@ -125,7 +130,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
                     }
                     Err(e) => {
                         error!(event = "core.session.stop_kill_failed", pid = pid, error = %e);
-                        kill_errors.push((pid, e.to_string()));
+                        kill_errors.push(KillError { pid, error: e });
                     }
                 }
             }
@@ -137,32 +142,33 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             return Err(SessionError::DaemonError { message });
         }
 
-        if !kill_errors.is_empty() {
-            if daemon_errors.is_empty() && wait_for_terminal_processes_stopped(&session) {
-                warn!(
-                    event = "core.session.stop_reconciled_stale_process_metadata",
-                    session_id = %session.id,
-                    branch = %session.branch,
-                    kill_errors = kill_errors.len(),
-                    "Process kill failed, but all tracked terminal processes are now stopped; persisting stopped session"
-                );
-                kill_errors.clear();
-            }
+        let reconciled_stale_process_metadata = !kill_errors.is_empty()
+            && daemon_errors.is_empty()
+            && wait_for_failed_terminal_processes_stopped(&kill_errors);
+
+        if reconciled_stale_process_metadata {
+            warn!(
+                event = "core.session.stop_reconciled_stale_process_metadata",
+                session_id = %session.id,
+                branch = %session.branch,
+                kill_errors = kill_errors.len(),
+                "Process kill failed, but each failed tracked PID is no longer running; persisting stopped session"
+            );
         }
 
-        if !kill_errors.is_empty() {
-            for (pid, err) in &kill_errors {
+        if !kill_errors.is_empty() && !reconciled_stale_process_metadata {
+            for kill_error in &kill_errors {
                 error!(
                     event = "core.session.stop_kill_failed_summary",
-                    pid = pid,
-                    error = %err
+                    pid = kill_error.pid,
+                    error = %kill_error.error
                 );
             }
 
             let error_count = kill_errors.len() + daemon_errors.len();
             let (first_pid, first_msg) = {
-                let (p, m) = kill_errors.first().unwrap();
-                (*p, m.clone())
+                let first = kill_errors.first().unwrap();
+                (first.pid, first.error.to_string())
             };
 
             let message = if error_count == 1 {
@@ -170,7 +176,7 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
             } else {
                 let pids: String = kill_errors
                     .iter()
-                    .map(|(p, _)| p.to_string())
+                    .map(|err| err.pid.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 let mut msg = format!(
@@ -237,12 +243,44 @@ pub fn stop_session(name: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
-fn wait_for_terminal_processes_stopped(session: &Session) -> bool {
+fn failed_terminal_processes_are_stopped(kill_errors: &[KillError]) -> bool {
+    kill_errors.iter().all(
+        |kill_error| match crate::process::is_process_running(kill_error.pid) {
+            Ok(false) => {
+                info!(
+                    event = "core.session.stop_reconcile_pid_stopped",
+                    pid = kill_error.pid,
+                    original_error = %kill_error.error
+                );
+                true
+            }
+            Ok(true) => {
+                warn!(
+                    event = "core.session.stop_reconcile_pid_still_running",
+                    pid = kill_error.pid,
+                    original_error = %kill_error.error
+                );
+                false
+            }
+            Err(e) => {
+                warn!(
+                    event = "core.session.stop_reconcile_pid_check_failed",
+                    pid = kill_error.pid,
+                    original_error = %kill_error.error,
+                    check_error = %e
+                );
+                false
+            }
+        },
+    )
+}
+
+fn wait_for_failed_terminal_processes_stopped(kill_errors: &[KillError]) -> bool {
     const ATTEMPTS: usize = 5;
     const DELAY_MS: u64 = 100;
 
     for attempt in 0..ATTEMPTS {
-        if crate::sessions::info::determine_process_status(session) == ProcessStatus::Stopped {
+        if failed_terminal_processes_are_stopped(&kill_errors) {
             return true;
         }
 
@@ -252,6 +290,22 @@ fn wait_for_terminal_processes_stopped(session: &Session) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+fn wait_for_terminal_processes_stopped(session: &Session) -> bool {
+    let kill_errors: Vec<KillError> = session
+        .agents()
+        .iter()
+        .filter_map(|agent| {
+            agent.process_id().map(|pid| KillError {
+                pid,
+                error: ProcessError::NotFound { pid },
+            })
+        })
+        .collect();
+
+    wait_for_failed_terminal_processes_stopped(&kill_errors)
 }
 
 /// Stop a specific teammate PTY by pane ID within a session.
@@ -341,6 +395,8 @@ pub fn stop_teammate(branch: &str, pane_id: &str) -> Result<(), SessionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_stop_session_not_found() {
@@ -760,6 +816,185 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_stop_session_reconciles_stale_terminal_metadata_and_persists_stopped_session() {
+        use std::fs;
+        use std::process::{Command, Stdio};
+        use temp_env::with_vars;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_home =
+            std::env::temp_dir().join(format!("kild_test_stop_reconcile_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_home);
+
+        let mut child = Command::new("sleep")
+            .arg("0.2")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        with_vars([("HOME", Some(temp_home.to_str().unwrap()))], || {
+            let config = Config::new();
+            let sessions_dir = config.sessions_dir();
+            let worktree_dir = temp_home.join("worktree");
+            fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+            fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+            let pid = child.id();
+            let info = crate::process::get_process_info(pid).expect("sleep process should exist");
+            let agent = AgentProcess::new(
+                "claude".to_string(),
+                "test-project_stale-stop_0".to_string(),
+                Some(pid),
+                Some("env".to_string()),
+                Some(info.start_time),
+                None,
+                None,
+                "env -u CLAUDECODE KILD_SESSION_BRANCH=stale-stop claude".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+                None,
+            )
+            .unwrap();
+
+            let session = Session::new(
+                "test-project_stale-stop".into(),
+                "test-project".into(),
+                "stale-stop".into(),
+                worktree_dir.clone(),
+                "claude".to_string(),
+                SessionStatus::Active,
+                chrono::Utc::now().to_rfc3339(),
+                3000,
+                3009,
+                10,
+                None,
+                None,
+                None,
+                vec![agent],
+                None,
+                None,
+                Some(RuntimeMode::Terminal),
+            );
+            persistence::save_session_to_file(&session, &sessions_dir)
+                .expect("Failed to save session");
+
+            stop_session("stale-stop").expect("stale metadata should reconcile once PID exits");
+
+            let after = persistence::find_session_by_name(&sessions_dir, "stale-stop")
+                .expect("Failed to find session")
+                .expect("Session should exist");
+            assert_eq!(after.status, SessionStatus::Stopped);
+            assert!(!after.has_agents(), "agents should be cleared");
+            assert!(
+                after.last_activity.is_some(),
+                "last activity should be updated"
+            );
+            assert!(worktree_dir.exists(), "worktree should be preserved");
+        });
+
+        let _ = child.wait();
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    #[test]
+    fn test_stop_session_keeps_identity_mismatch_visible_while_pid_running() {
+        use std::fs;
+        use std::process::{Command, Stdio};
+        use temp_env::with_vars;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let unique_id = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_home =
+            std::env::temp_dir().join(format!("kild_test_stop_identity_visible_{}", unique_id));
+        let _ = fs::remove_dir_all(&temp_home);
+
+        let mut child = Command::new("sleep")
+            .arg("2")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        with_vars([("HOME", Some(temp_home.to_str().unwrap()))], || {
+            let config = Config::new();
+            let sessions_dir = config.sessions_dir();
+            let worktree_dir = temp_home.join("worktree");
+            fs::create_dir_all(&sessions_dir).expect("Failed to create sessions dir");
+            fs::create_dir_all(&worktree_dir).expect("Failed to create worktree dir");
+
+            let pid = child.id();
+            let info = crate::process::get_process_info(pid).expect("sleep process should exist");
+            let agent = AgentProcess::new(
+                "claude".to_string(),
+                "test-project_live-mismatch_0".to_string(),
+                Some(pid),
+                Some("env".to_string()),
+                Some(info.start_time),
+                None,
+                None,
+                "env -u CLAUDECODE KILD_SESSION_BRANCH=live-mismatch claude".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+                None,
+            )
+            .unwrap();
+
+            let session = Session::new(
+                "test-project_live-mismatch".into(),
+                "test-project".into(),
+                "live-mismatch".into(),
+                worktree_dir,
+                "claude".to_string(),
+                SessionStatus::Active,
+                chrono::Utc::now().to_rfc3339(),
+                3000,
+                3009,
+                10,
+                None,
+                None,
+                None,
+                vec![agent],
+                None,
+                None,
+                Some(RuntimeMode::Terminal),
+            );
+            persistence::save_session_to_file(&session, &sessions_dir)
+                .expect("Failed to save session");
+
+            let result = stop_session("live-mismatch");
+            assert!(
+                matches!(result, Err(SessionError::ProcessKillFailed { .. })),
+                "live identity mismatch must remain user-visible: {:?}",
+                result
+            );
+
+            let after = persistence::find_session_by_name(&sessions_dir, "live-mismatch")
+                .expect("Failed to find session")
+                .expect("Session should exist");
+            assert_eq!(after.status, SessionStatus::Active);
+            assert!(after.has_agents(), "agents should remain for failed stop");
+        });
+
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_dir_all(&temp_home);
     }
 
     #[test]

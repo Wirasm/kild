@@ -69,10 +69,6 @@ fn process_name_matches(actual_name: &str, expected_name: &str) -> bool {
     false
 }
 
-fn is_exec_wrapper_name(name: &str) -> bool {
-    matches!(extract_base_name(name), "env" | "sh" | "bash" | "zsh")
-}
-
 /// Kill a process with the given PID, validating it matches expected metadata
 pub fn kill_process(
     pid: u32,
@@ -90,12 +86,7 @@ pub fn kill_process(
             // Validate process identity to prevent PID reuse attacks
             if let Some(name) = expected_name {
                 let actual_name = process.name().to_string_lossy().to_string();
-                let same_start_time =
-                    expected_start_time.is_some_and(|start_time| start_time == actual_start_time);
-
-                if !process_name_matches(&actual_name, name)
-                    && !(is_exec_wrapper_name(name) && same_start_time)
-                {
+                if !process_name_matches(&actual_name, name) {
                     return Err(ProcessError::PidReused {
                         pid,
                         expected: name.to_string(),
@@ -540,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kill_process_allows_exec_wrapper_name_change_with_same_start_time() {
+    fn test_kill_process_rejects_exec_wrapper_name_change_with_same_start_time() {
         let mut child = Command::new("sleep")
             .arg("30")
             .stdout(Stdio::null())
@@ -553,11 +544,12 @@ mod tests {
 
         let result = kill_process(pid, Some("env"), Some(info.start_time));
         assert!(
-            result.is_ok(),
-            "wrapper name mismatch with the same start time should be treated as the same exec'd process: {:?}",
+            matches!(result, Err(ProcessError::PidReused { .. })),
+            "wrapper name mismatch must not bypass process-name validation on start time alone: {:?}",
             result
         );
 
+        let _ = child.kill();
         let _ = child.wait();
     }
 
