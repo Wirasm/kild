@@ -3,6 +3,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+  type Project = { name: string; path: string };
+
   type Item =
     | { type: "user"; text: string }
     | { type: "assistant"; text: string }
@@ -21,6 +23,13 @@
   // Curated list for now; a `list_models` command (pi --list-models) comes later.
   const MODELS = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8", "gpt-5.5", "MiniMax-M3"];
 
+  let projects = $state<Project[]>([]);
+  let active = $state<Project | null>(null);
+  let adding = $state(false);
+  let newName = $state("");
+  let newPath = $state("");
+  let addError = $state<string | null>(null);
+
   let model = $state(MODELS[0]);
   let items = $state<Item[]>([]);
   let input = $state("");
@@ -36,11 +45,8 @@
 
   function appendText(delta: string) {
     const last = items[items.length - 1];
-    if (last && last.type === "assistant") {
-      last.text += delta;
-    } else {
-      items.push({ type: "assistant", text: delta });
-    }
+    if (last && last.type === "assistant") last.text += delta;
+    else items.push({ type: "assistant", text: delta });
     scrollDown();
   }
 
@@ -77,17 +83,41 @@
     }
   }
 
+  async function loadProjects() {
+    projects = await invoke<Project[]>("list_projects");
+  }
+
   async function newSession() {
+    if (!active) return;
     items = [];
     stats = null;
     modelLabel = null;
     running = false;
-    await invoke("spawn_session", { model });
+    await invoke("spawn_session", { model, cwd: active.path });
+  }
+
+  async function selectProject(p: Project) {
+    active = p;
+    await newSession();
+  }
+
+  async function addProject() {
+    addError = null;
+    try {
+      const p = await invoke<Project>("add_project", { name: newName.trim(), path: newPath.trim() });
+      await loadProjects();
+      adding = false;
+      newName = "";
+      newPath = "";
+      await selectProject(p);
+    } catch (e) {
+      addError = String(e);
+    }
   }
 
   async function send() {
     const text = input.trim();
-    if (!text || running) return;
+    if (!text || running || !active) return;
     items.push({ type: "user", text });
     input = "";
     running = true;
@@ -103,14 +133,16 @@
   }
 
   onMount(() => {
-    let active = true;
+    let alive = true;
     listen<UiEvent>("pi-event", (e) => handle(e.payload)).then((fn) => {
-      if (active) unlisten = fn;
+      if (alive) unlisten = fn;
       else fn();
     });
-    newSession();
+    loadProjects().then(() => {
+      if (alive && projects.length > 0) selectProject(projects[0]);
+    });
     return () => {
-      active = false;
+      alive = false;
       unlisten?.();
     };
   });
@@ -119,59 +151,93 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand">kild</div>
-    <button class="session active">session</button>
-    <button class="new" onclick={newSession}>+ new session</button>
+
+    <div class="section-label">Projects</div>
+    {#each projects as p}
+      <button class="project" class:active={active?.name === p.name} onclick={() => selectProject(p)}>
+        <span class="p-name">{p.name}</span>
+        <span class="p-path">{p.path}</span>
+      </button>
+    {/each}
+
+    {#if adding}
+      <div class="add-form">
+        <input bind:value={newName} placeholder="name" />
+        <input bind:value={newPath} placeholder="~/projects/my-app" />
+        {#if addError}<div class="add-error">{addError}</div>{/if}
+        <div class="add-actions">
+          <button class="primary" onclick={addProject}>Add</button>
+          <button onclick={() => (adding = false)}>Cancel</button>
+        </div>
+      </div>
+    {:else}
+      <button class="new" onclick={() => (adding = true)}>+ add project</button>
+    {/if}
+
+    {#if active}
+      <div class="section-label">Session</div>
+      <button class="session active" onclick={newSession}>new session ↻</button>
+    {/if}
   </aside>
 
   <main class="main">
-    <header class="topbar">
-      <select bind:value={model} onchange={newSession}>
-        {#each MODELS as m}<option value={m}>{m}</option>{/each}
-      </select>
-      <span class="model">{modelLabel ?? "…"}</span>
-      <span class="spacer"></span>
-      {#if stats}
-        <span class="gauge"
-          >ctx {stats.context_pct ?? "–"}% · {stats.tokens} tok · ${stats.cost.toFixed(4)}</span
-        >
-      {/if}
-    </header>
-
-    <section class="transcript" bind:this={transcriptEl}>
-      {#each items as item}
-        {#if item.type === "user"}
-          <div class="msg user">{item.text}</div>
-        {:else if item.type === "assistant"}
-          <div class="msg assistant">{item.text}</div>
-        {:else}
-          <div class="tool {item.status}">
-            <span class="tool-name">🔧 {item.name}</span>
-            <span class="tool-args">{item.args}</span>
-            <span class="tool-mark"
-              >{item.status === "running" ? "…" : item.status === "ok" ? "✓" : "✗"}</span
-            >
-          </div>
+    {#if !active}
+      <div class="empty">
+        <h2>No project yet</h2>
+        <p>Add a project directory to start chatting with an agent in it.</p>
+        <button class="primary" onclick={() => (adding = true)}>+ add project</button>
+      </div>
+    {:else}
+      <header class="topbar">
+        <span class="project-chip">{active.name}</span>
+        <select bind:value={model} onchange={newSession}>
+          {#each MODELS as m}<option value={m}>{m}</option>{/each}
+        </select>
+        <span class="model">{modelLabel ?? "…"}</span>
+        <span class="spacer"></span>
+        {#if stats}
+          <span class="gauge"
+            >ctx {stats.context_pct ?? "–"}% · {stats.tokens} tok · ${stats.cost.toFixed(4)}</span
+          >
         {/if}
-      {/each}
-      {#if running}<div class="thinking">▍</div>{/if}
-    </section>
+      </header>
 
-    <footer class="composer">
-      <textarea
-        bind:value={input}
-        onkeydown={onKeydown}
-        placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-        rows="2"
-      ></textarea>
-      <button onclick={send} disabled={running}>Send</button>
-    </footer>
+      <section class="transcript" bind:this={transcriptEl}>
+        {#each items as item}
+          {#if item.type === "user"}
+            <div class="msg user">{item.text}</div>
+          {:else if item.type === "assistant"}
+            <div class="msg assistant">{item.text}</div>
+          {:else}
+            <div class="tool {item.status}">
+              <span class="tool-name">🔧 {item.name}</span>
+              <span class="tool-args">{item.args}</span>
+              <span class="tool-mark"
+                >{item.status === "running" ? "…" : item.status === "ok" ? "✓" : "✗"}</span
+              >
+            </div>
+          {/if}
+        {/each}
+        {#if running}<div class="thinking">▍</div>{/if}
+      </section>
+
+      <footer class="composer">
+        <textarea
+          bind:value={input}
+          onkeydown={onKeydown}
+          placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+          rows="2"
+        ></textarea>
+        <button onclick={send} disabled={running}>Send</button>
+      </footer>
+    {/if}
   </main>
 </div>
 
 <style>
   .app {
     display: grid;
-    grid-template-columns: 190px 1fr;
+    grid-template-columns: 230px 1fr;
     height: 100vh;
   }
   .sidebar {
@@ -180,13 +246,21 @@
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
+    overflow-y: auto;
   }
   .brand {
     font-weight: 600;
     color: var(--ice);
     letter-spacing: 0.5px;
-    padding: 6px 8px 12px;
+    padding: 6px 8px 10px;
+  }
+  .section-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 10px 8px 4px;
   }
   .sidebar button {
     text-align: left;
@@ -198,19 +272,87 @@
     cursor: pointer;
     font: inherit;
   }
-  .sidebar .session.active {
+  .project {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .project.active {
+    background: var(--surface);
+  }
+  .project .p-name {
+    color: var(--text-bright);
+  }
+  .project .p-path {
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session.active {
     background: var(--surface);
     color: var(--text-bright);
   }
-  .sidebar .new {
+  .new {
     color: var(--text-muted);
-    margin-top: auto;
-    border: 1px dashed var(--border);
+    border: 1px dashed var(--border) !important;
+  }
+  .add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--surface);
+    border-radius: 8px;
+  }
+  .add-form input {
+    background: var(--void);
+    color: var(--text-bright);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 12px;
+  }
+  .add-error {
+    color: var(--ember);
+    font-size: 11px;
+  }
+  .add-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .primary {
+    background: var(--ice) !important;
+    color: var(--void) !important;
+    font-weight: 600;
+    border: none !important;
   }
   .main {
     display: grid;
     grid-template-rows: auto 1fr auto;
     min-width: 0;
+  }
+  .empty {
+    grid-row: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-subtle);
+  }
+  .empty h2 {
+    color: var(--text-bright);
+    margin: 0;
+  }
+  .empty .primary {
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
   }
   .topbar {
     display: flex;
@@ -219,6 +361,10 @@
     padding: 10px 16px;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--obsidian);
+  }
+  .project-chip {
+    color: var(--ice);
+    font-weight: 600;
   }
   .topbar select {
     background: var(--surface);

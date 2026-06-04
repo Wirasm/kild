@@ -7,6 +7,8 @@
 //! stays swappable.
 //!
 //! Slices:
+//! - [`project`] — a project is a directory an agent works in (a session's cwd).
 //! - [`rpc`] — the sole boundary to `pi`; drives `pi --mode rpc` over JSONL.
 
+pub mod project;
 pub mod rpc;

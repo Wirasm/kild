@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kild_core::project::Project;
 use kild_core::rpc::{PiOutput, PiRpcSession, PiRpcWriter, RpcCommand, SpawnOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -36,11 +37,13 @@ async fn spawn_session(
     app: AppHandle,
     state: State<'_, AppState>,
     model: Option<String>,
+    cwd: Option<String>,
 ) -> Result<(), String> {
     let writer_arc = state.writer.clone();
 
     let session = PiRpcSession::spawn(SpawnOptions {
         model,
+        cwd: cwd.map(std::path::PathBuf::from),
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
@@ -83,6 +86,18 @@ async fn send_prompt(state: State<'_, AppState>, text: String) -> Result<(), Str
         .send(&RpcCommand::Prompt { message: text })
         .await
         .map_err(|e| e.to_string())
+}
+
+/// List registered projects.
+#[tauri::command]
+fn list_projects() -> Result<Vec<Project>, String> {
+    kild_core::project::load_projects().map_err(|e| e.to_string())
+}
+
+/// Register a project (an existing directory). Names are unique.
+#[tauri::command]
+fn add_project(name: String, path: String) -> Result<Project, String> {
+    kild_core::project::add_project(name, path).map_err(|e| e.to_string())
 }
 
 fn translate(ev: &PiOutput) -> Option<UiEvent> {
@@ -135,7 +150,12 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![spawn_session, send_prompt])
+        .invoke_handler(tauri::generate_handler![
+            spawn_session,
+            send_prompt,
+            list_projects,
+            add_project
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
