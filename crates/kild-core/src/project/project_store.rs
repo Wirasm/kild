@@ -42,6 +42,9 @@ fn save_projects(projects: &[Project]) -> Result<(), ProjectError> {
 /// Register a project. The path must be an existing directory; names are unique.
 /// A leading `~/` is expanded to `$HOME`.
 pub fn add_project(name: String, path: String) -> Result<Project, ProjectError> {
+    if name.trim().is_empty() {
+        return Err(ProjectError::EmptyName);
+    }
     let path = expand_tilde(&path);
     if !path.is_dir() {
         return Err(ProjectError::NotADirectory(path.display().to_string()));

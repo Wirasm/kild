@@ -15,7 +15,7 @@ pub enum RpcError {
     #[error("failed to encode rpc command: {0}")]
     Encode(#[from] serde_json::Error),
 
-    /// The child's stdin pipe was not available.
-    #[error("pi stdin is closed")]
-    StdinClosed,
+    /// One of the child's stdio pipes (stdin/stdout/stderr) was not available.
+    #[error("pi {0} pipe is unavailable")]
+    PipeUnavailable(&'static str),
 }

@@ -101,21 +101,28 @@ kild/
 ├── .claude/
 │   ├── MANIFEST.md                # what to mirror from ../kild-old (audited reuse plan)
 │   └── PRPs/branding/             # brand + vision + design system (Tallinn Night)
+├── app/                           # Tauri 2 + SvelteKit conversation UI (its own workspace)
+│   ├── src/routes/+page.svelte    #   conversation view (transcript, model picker, projects)
+│   └── src-tauri/src/lib.rs       #   commands (spawn_session/send_prompt/projects) + event pump
 └── crates/
     ├── kild-core/                 # orchestration library — vertical slices
     │   └── src/
     │       ├── lib.rs
-    │       └── rpc/               # slice 1: the ONLY pi boundary
-    │           ├── rpc_types.rs   #   RpcCommand (in) + PiOutput events (out)
-    │           ├── rpc_client.rs  #   PiRpcSession: spawn `pi --mode rpc`, JSONL transport
-    │           └── rpc_errors.rs  #   RpcError
-    └── kild/                      # CLI binary (currently: the spike)
+    │       ├── rpc/               # the ONLY pi boundary — drives `pi --mode rpc`
+    │       │   ├── rpc_types.rs   #   RpcCommand (in) + PiOutput/DeltaKind events (out)
+    │       │   ├── rpc_client.rs  #   PiRpcSession + PiRpcWriter (split for concurrent drive)
+    │       │   └── rpc_errors.rs
+    │       └── project/           # a project is a directory an agent works in (session cwd)
+    │           ├── project_types.rs   #   Project { name, path }
+    │           ├── project_store.rs    #   persisted to ~/.kild/projects.json
+    │           └── project_errors.rs
+    └── kild/                      # CLI binary (currently: the rpc spike)
         └── src/main.rs
 ```
 
-Planned slices (see `.claude/MANIFEST.md`): `supervisor` (one pi child per worktree
-+ aggregated fleet state), `worktree`, `project`, `git`, `paths`, `config`, `forge`,
-plus the `kild-daemon` binary and the Tauri `app/`.
+Planned slices (see `.claude/MANIFEST.md`): `supervisor` (many pi sessions +
+aggregated fleet state), `worktree`, `git`, `config`, `forge`, plus the
+`kild-daemon` binary. (`project` and the Tauri `app/` now exist.)
 
 ### Naming conventions
 

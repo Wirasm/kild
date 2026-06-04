@@ -8,13 +8,13 @@
   type Item =
     | { type: "user"; text: string }
     | { type: "assistant"; text: string }
-    | { type: "tool"; name: string; args: string; status: "running" | "ok" | "error" };
+    | { type: "tool"; id: string; name: string; args: string; status: "running" | "ok" | "error" };
 
   type UiEvent =
     | { kind: "model"; provider: string; id: string }
     | { kind: "text"; delta: string }
-    | { kind: "tool_start"; name: string; args: string }
-    | { kind: "tool_end"; name: string; ok: boolean }
+    | { kind: "tool_start"; id: string; name: string; args: string }
+    | { kind: "tool_end"; id: string; name: string; ok: boolean }
     | { kind: "retry"; attempt: number; max: number }
     | { kind: "agent_end" }
     | { kind: "stats"; tokens: number; cost: number; context_pct: number | null }
@@ -36,6 +36,7 @@
   let running = $state(false);
   let modelLabel = $state<string | null>(null);
   let stats = $state<{ tokens: number; cost: number; context_pct: number | null } | null>(null);
+  let error = $state<string | null>(null);
   let transcriptEl: HTMLElement | undefined = $state();
   let unlisten: UnlistenFn | null = null;
 
@@ -59,13 +60,14 @@
         appendText(ev.delta);
         break;
       case "tool_start":
-        items.push({ type: "tool", name: ev.name, args: ev.args, status: "running" });
+        items.push({ type: "tool", id: ev.id, name: ev.name, args: ev.args, status: "running" });
         scrollDown();
         break;
       case "tool_end":
+        // Match by call-id, not name — pi can run two same-named tools in parallel.
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.type === "tool" && it.name === ev.name && it.status === "running") {
+          if (it.type === "tool" && it.id === ev.id && it.status === "running") {
             it.status = ev.ok ? "ok" : "error";
             break;
           }
@@ -75,7 +77,11 @@
         stats = { tokens: ev.tokens, cost: ev.cost, context_pct: ev.context_pct };
         break;
       case "agent_end":
+        running = false;
+        break;
       case "session_end":
+        // Session ended (possibly a pi crash) — don't leave tool cards spinning.
+        for (const it of items) if (it.type === "tool" && it.status === "running") it.status = "error";
         running = false;
         break;
       case "retry":
@@ -93,7 +99,12 @@
     stats = null;
     modelLabel = null;
     running = false;
-    await invoke("spawn_session", { model, cwd: active.path });
+    error = null;
+    try {
+      await invoke("spawn_session", { model, cwd: active.path });
+    } catch (e) {
+      error = `Could not start a session: ${e}`;
+    }
   }
 
   async function selectProject(p: Project) {
@@ -121,8 +132,14 @@
     items.push({ type: "user", text });
     input = "";
     running = true;
+    error = null;
     scrollDown();
-    await invoke("send_prompt", { text });
+    try {
+      await invoke("send_prompt", { text });
+    } catch (e) {
+      running = false;
+      error = `Send failed: ${e}`;
+    }
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -138,9 +155,13 @@
       if (alive) unlisten = fn;
       else fn();
     });
-    loadProjects().then(() => {
-      if (alive && projects.length > 0) selectProject(projects[0]);
-    });
+    loadProjects()
+      .then(() => {
+        if (alive && projects.length > 0) selectProject(projects[0]);
+      })
+      .catch((e) => {
+        error = `Could not load projects: ${e}`;
+      });
     return () => {
       alive = false;
       unlisten?.();
@@ -201,6 +222,13 @@
           >
         {/if}
       </header>
+
+      {#if error}
+        <div class="banner">
+          <span>{error}</span>
+          <button onclick={() => (error = null)}>✕</button>
+        </div>
+      {/if}
 
       <section class="transcript" bind:this={transcriptEl}>
         {#each items as item}
@@ -331,12 +359,12 @@
     border: none !important;
   }
   .main {
-    display: grid;
-    grid-template-rows: auto 1fr auto;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
   }
   .empty {
-    grid-row: 1 / -1;
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -387,7 +415,27 @@
     font-family: var(--mono);
     font-size: 12px;
   }
+  .banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 16px;
+    background: #2a1719;
+    color: var(--text-bright);
+    border-bottom: 1px solid var(--ember);
+    font-size: 13px;
+  }
+  .banner button {
+    background: transparent;
+    border: none;
+    color: var(--text-subtle);
+    cursor: pointer;
+    font: inherit;
+  }
   .transcript {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 20px;
     display: flex;

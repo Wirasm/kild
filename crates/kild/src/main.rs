@@ -11,7 +11,7 @@
 use std::io::Write;
 
 use anyhow::Result;
-use kild_core::rpc::{PiOutput, PiRpcSession, RpcCommand, SpawnOptions};
+use kild_core::rpc::{DeltaKind, PiOutput, PiRpcSession, RpcCommand, SpawnOptions};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
             PiOutput::MessageUpdate {
                 assistant_message_event,
             } => {
-                if assistant_message_event.kind == "text_delta" {
+                if assistant_message_event.kind == DeltaKind::TextDelta {
                     if let Some(delta) = assistant_message_event.delta {
                         print!("{delta}");
                         let _ = std::io::stdout().flush();
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            PiOutput::ToolExecutionStart { tool_name, args } => {
+            PiOutput::ToolExecutionStart { tool_name, args, .. } => {
                 println!(
                     "\n\x1b[36m🔧 {tool_name}\x1b[0m \x1b[2m{}\x1b[0m",
                     compact_args(&args)
@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
             PiOutput::ToolExecutionEnd {
                 tool_name,
                 is_error,
+                ..
             } => {
                 let mark = if is_error {
                     "\x1b[31m✗\x1b[0m"

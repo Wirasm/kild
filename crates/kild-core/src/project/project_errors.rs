@@ -17,4 +17,7 @@ pub enum ProjectError {
 
     #[error("a project named '{0}' already exists")]
     DuplicateName(String),
+
+    #[error("project name must not be empty")]
+    EmptyName,
 }

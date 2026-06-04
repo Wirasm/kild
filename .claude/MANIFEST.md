@@ -46,13 +46,17 @@ guards) is exactly what to copy rather than re-derive.
 
 - **`rpc` slice** (`kild-core::rpc`) — drives `pi --mode rpc`. New code, not
   mirrored: it is the spine the old PTY supervisor becomes.
+- **`project` slice** (`kild-core::project`) — `Project { name, path }`, the
+  session's cwd; persisted to `~/.kild/projects.json`. New code.
+- **Tauri `app/`** — conversation UI (project picker + streamed transcript).
 - **`.claude/PRPs/branding/`** — carried over verbatim.
 
-## Build order (next slices)
+## Build order
 
-1. `rpc` ✅ — spike: drive one pi child, render events.
-2. `supervisor` — many pi sessions (each runs in a worktree; a worktree may host
-   several); keyed by session id, not worktree. Aggregate fleet state.
-3. `git` + `worktree` + `project` — mirror the gems above.
-4. `kild-daemon` — wrap the supervisor behind the JSONL/TLS server skeleton.
-5. `app/` (Tauri) — render the aggregated stream + artifact browser.
+1. `rpc` ✅ — drive a pi session, render events.
+2. `project` ✅ — a project is a directory; sessions bind to it as cwd.
+3. `app/` (Tauri) ✅ — conversation UI (slice 1) + project picker (slice 2).
+4. `supervisor` — many pi sessions at once, keyed by session id; aggregate fleet
+   state (multi-session sidebar). *next*
+5. `git` + `worktree` — mirror the gems; per-repo worktrees within a project.
+6. `kild-daemon` — wrap the supervisor behind the JSONL/TLS server skeleton.

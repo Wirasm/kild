@@ -11,7 +11,8 @@ use super::rpc_types::{PiOutput, RpcCommand};
 /// How to launch the `pi --mode rpc` subprocess.
 #[derive(Debug, Clone, Default)]
 pub struct SpawnOptions {
-    /// Working directory (the agent's worktree). `None` inherits the current dir.
+    /// Working directory — the project the agent works in. `None` inherits the
+    /// current dir.
     pub cwd: Option<PathBuf>,
     /// `--model <pattern>`. `None` uses pi's configured default.
     pub model: Option<String>,
@@ -54,9 +55,9 @@ impl PiRpcSession {
             .stderr(Stdio::piped());
 
         let mut child = cmd.spawn().map_err(RpcError::Spawn)?;
-        let stdin = child.stdin.take().ok_or(RpcError::StdinClosed)?;
-        let stdout = child.stdout.take().ok_or(RpcError::StdinClosed)?;
-        let stderr = child.stderr.take().ok_or(RpcError::StdinClosed)?;
+        let stdin = child.stdin.take().ok_or(RpcError::PipeUnavailable("stdin"))?;
+        let stdout = child.stdout.take().ok_or(RpcError::PipeUnavailable("stdout"))?;
+        let stderr = child.stderr.take().ok_or(RpcError::PipeUnavailable("stderr"))?;
 
         // Reader task: JSONL stdout -> parsed events. pi's RPC mode is strict LF
         // framing; tokio's `lines()` splits only on `\n` and strips a trailing
@@ -100,11 +101,7 @@ impl PiRpcSession {
 
     /// Send a command to pi (one JSON line on stdin).
     pub async fn send(&mut self, command: &RpcCommand) -> Result<(), RpcError> {
-        let mut line = serde_json::to_vec(command)?;
-        line.push(b'\n');
-        self.stdin.write_all(&line).await?;
-        self.stdin.flush().await?;
-        Ok(())
+        write_command(&mut self.stdin, command).await
     }
 
     /// Await the next event from pi, or `None` once the stream ends.
@@ -153,11 +150,7 @@ pub struct PiRpcWriter {
 impl PiRpcWriter {
     /// Send a command to pi (one JSON line on stdin).
     pub async fn send(&mut self, command: &RpcCommand) -> Result<(), RpcError> {
-        let mut line = serde_json::to_vec(command)?;
-        line.push(b'\n');
-        self.stdin.write_all(&line).await?;
-        self.stdin.flush().await?;
-        Ok(())
+        write_command(&mut self.stdin, command).await
     }
 
     /// Close stdin and wait for pi to exit. The paired event receiver ends
@@ -168,4 +161,14 @@ impl PiRpcWriter {
         child.wait().await?;
         Ok(())
     }
+}
+
+/// Write one JSONL command to a child's stdin. Shared by [`PiRpcSession`] and its
+/// split [`PiRpcWriter`] half.
+async fn write_command(stdin: &mut ChildStdin, command: &RpcCommand) -> Result<(), RpcError> {
+    let mut line = serde_json::to_vec(command)?;
+    line.push(b'\n');
+    stdin.write_all(&line).await?;
+    stdin.flush().await?;
+    Ok(())
 }

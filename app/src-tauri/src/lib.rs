@@ -1,7 +1,8 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use kild_core::project::Project;
-use kild_core::rpc::{PiOutput, PiRpcSession, PiRpcWriter, RpcCommand, SpawnOptions};
+use kild_core::rpc::{DeltaKind, PiOutput, PiRpcSession, PiRpcWriter, RpcCommand, SpawnOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
@@ -10,6 +11,9 @@ use tokio::sync::Mutex;
 #[derive(Default)]
 struct AppState {
     writer: Arc<Mutex<Option<PiRpcWriter>>>,
+    /// Bumped on every spawn; a superseded session's pump sees the mismatch and
+    /// stops emitting / stops writing into the new session.
+    generation: Arc<AtomicU64>,
 }
 
 /// Frontend-facing event — a translated, serializable view of `PiOutput`.
@@ -19,8 +23,8 @@ struct AppState {
 enum UiEvent {
     Model { provider: String, id: String },
     Text { delta: String },
-    ToolStart { name: String, args: String },
-    ToolEnd { name: String, ok: bool },
+    ToolStart { id: String, name: String, args: String },
+    ToolEnd { id: String, name: String, ok: bool },
     Retry { attempt: u32, max: u32 },
     AgentEnd,
     Stats {
@@ -40,6 +44,9 @@ async fn spawn_session(
     cwd: Option<String>,
 ) -> Result<(), String> {
     let writer_arc = state.writer.clone();
+    let generation = state.generation.clone();
+    // Claim a new generation; any prior session's pump is now stale.
+    let gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     let session = PiRpcSession::spawn(SpawnOptions {
         model,
@@ -61,16 +68,26 @@ async fn spawn_session(
     let pump_writer = writer_arc.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(ev) = events.recv().await {
+            // A newer session superseded us — stop emitting and stop writing into
+            // what is now someone else's session.
+            if generation.load(Ordering::SeqCst) != gen {
+                return;
+            }
             if let Some(ui) = translate(&ev) {
                 let _ = app.emit("pi-event", ui);
             }
             if matches!(ev, PiOutput::AgentEnd) {
-                if let Some(w) = pump_writer.lock().await.as_mut() {
-                    let _ = w.send(&RpcCommand::GetSessionStats).await;
+                let mut guard = pump_writer.lock().await;
+                if generation.load(Ordering::SeqCst) == gen {
+                    if let Some(w) = guard.as_mut() {
+                        let _ = w.send(&RpcCommand::GetSessionStats).await;
+                    }
                 }
             }
         }
-        let _ = app.emit("pi-event", UiEvent::SessionEnd);
+        if generation.load(Ordering::SeqCst) == gen {
+            let _ = app.emit("pi-event", UiEvent::SessionEnd);
+        }
     });
 
     Ok(())
@@ -104,18 +121,25 @@ fn translate(ev: &PiOutput) -> Option<UiEvent> {
     match ev {
         PiOutput::MessageUpdate {
             assistant_message_event,
-        } if assistant_message_event.kind == "text_delta" => assistant_message_event
+        } if assistant_message_event.kind == DeltaKind::TextDelta => assistant_message_event
             .delta
             .clone()
             .map(|delta| UiEvent::Text { delta }),
-        PiOutput::ToolExecutionStart { tool_name, args } => Some(UiEvent::ToolStart {
+        PiOutput::ToolExecutionStart {
+            tool_call_id,
+            tool_name,
+            args,
+        } => Some(UiEvent::ToolStart {
+            id: tool_call_id.clone(),
             name: tool_name.clone(),
             args: args.to_string(),
         }),
         PiOutput::ToolExecutionEnd {
+            tool_call_id,
             tool_name,
             is_error,
         } => Some(UiEvent::ToolEnd {
+            id: tool_call_id.clone(),
             name: tool_name.clone(),
             ok: !is_error,
         }),
