@@ -18,6 +18,9 @@ pub struct SpawnOptions {
     pub model: Option<String>,
     /// `--provider <name>`. `None` uses pi's configured default.
     pub provider: Option<String>,
+    /// `--append-system-prompt <file>` — an agent's role prompt, layered on pi's
+    /// default. `None` runs the default agent (pi's own prompt).
+    pub append_system_prompt: Option<PathBuf>,
 }
 
 /// A live `pi --mode rpc` session: write commands, read structured events.
@@ -46,6 +49,9 @@ impl PiRpcSession {
         }
         if let Some(provider) = &opts.provider {
             cmd.arg("--provider").arg(provider);
+        }
+        if let Some(prompt) = &opts.append_system_prompt {
+            cmd.arg("--append-system-prompt").arg(prompt);
         }
         if let Some(cwd) = &opts.cwd {
             cmd.current_dir(cwd);

@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use kild_core::agent::Agent;
 use kild_core::project::Project;
 use kild_core::rpc::{DeltaKind, PiOutput, PiRpcSession, PiRpcWriter, RpcCommand, SpawnOptions};
 use serde::Serialize;
@@ -42,6 +43,7 @@ async fn spawn_session(
     state: State<'_, AppState>,
     model: Option<String>,
     cwd: Option<String>,
+    agent: Option<String>,
 ) -> Result<(), String> {
     let writer_arc = state.writer.clone();
     let generation = state.generation.clone();
@@ -51,6 +53,9 @@ async fn spawn_session(
     let session = PiRpcSession::spawn(SpawnOptions {
         model,
         cwd: cwd.map(std::path::PathBuf::from),
+        // A non-default agent's prompt is layered on pi's default; `default`
+        // (or unknown) resolves to None -> pi's own prompt.
+        append_system_prompt: agent.as_deref().and_then(kild_core::agent::prompt_file),
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
@@ -117,6 +122,18 @@ fn add_project(name: String, path: String) -> Result<Project, String> {
     kild_core::project::add_project(name, path).map_err(|e| e.to_string())
 }
 
+/// List agents (built-in `default` + authored prompt files).
+#[tauri::command]
+fn list_agents() -> Result<Vec<Agent>, String> {
+    kild_core::agent::list_agents().map_err(|e| e.to_string())
+}
+
+/// Author a new agent (name + system prompt).
+#[tauri::command]
+fn add_agent(name: String, system_prompt: String) -> Result<Agent, String> {
+    kild_core::agent::add_agent(name, system_prompt).map_err(|e| e.to_string())
+}
+
 fn translate(ev: &PiOutput) -> Option<UiEvent> {
     match ev {
         PiOutput::MessageUpdate {
@@ -178,7 +195,9 @@ pub fn run() {
             spawn_session,
             send_prompt,
             list_projects,
-            add_project
+            add_project,
+            list_agents,
+            add_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

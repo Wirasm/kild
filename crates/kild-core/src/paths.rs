@@ -21,3 +21,8 @@ pub fn kild_home() -> Option<PathBuf> {
 pub fn projects_file() -> Option<PathBuf> {
     Some(kild_home()?.join("projects.json"))
 }
+
+/// Directory of agent prompt files (`<kild_home>/agents/`).
+pub fn agents_dir() -> Option<PathBuf> {
+    Some(kild_home()?.join("agents"))
+}
