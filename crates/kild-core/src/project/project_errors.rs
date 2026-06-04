@@ -9,7 +9,7 @@ pub enum ProjectError {
     #[error("project store is corrupt: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("could not resolve home directory ($HOME unset)")]
+    #[error("could not resolve kild home ($KILD_HOME and $HOME both unset)")]
     NoHome,
 
     #[error("path is not an existing directory: {0}")]

@@ -14,8 +14,7 @@ struct ProjectsFile {
 }
 
 fn projects_path() -> Result<PathBuf, ProjectError> {
-    let home = std::env::var_os("HOME").ok_or(ProjectError::NoHome)?;
-    Ok(PathBuf::from(home).join(".kild").join("projects.json"))
+    crate::paths::projects_file().ok_or(ProjectError::NoHome)
 }
 
 /// Load all projects (empty if the store doesn't exist yet).

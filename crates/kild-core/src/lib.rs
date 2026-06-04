@@ -7,8 +7,10 @@
 //! stays swappable.
 //!
 //! Slices:
+//! - [`paths`] — centralized filesystem paths for kild's own state (`~/.config/kild`).
 //! - [`project`] — a project is a directory an agent works in (a session's cwd).
 //! - [`rpc`] — the sole boundary to `pi`; drives `pi --mode rpc` over JSONL.
 
+pub mod paths;
 pub mod project;
 pub mod rpc;
