@@ -50,12 +50,17 @@ async fn spawn_session(
     // Claim a new generation; any prior session's pump is now stale.
     let gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
+    // A non-default agent's prompt is resolved within the project and layered on
+    // pi's default; `default`/unknown -> None -> pi's own prompt.
+    let append_system_prompt = agent.as_deref().and_then(|name| {
+        kild_core::agent::resolve_prompt(name, cwd.as_deref().map(std::path::Path::new))
+            .ok()
+            .flatten()
+    });
     let session = PiRpcSession::spawn(SpawnOptions {
         model,
         cwd: cwd.map(std::path::PathBuf::from),
-        // A non-default agent's prompt is layered on pi's default; `default`
-        // (or unknown) resolves to None -> pi's own prompt.
-        append_system_prompt: agent.as_deref().and_then(kild_core::agent::prompt_file),
+        append_system_prompt,
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
@@ -122,16 +127,12 @@ fn add_project(name: String, path: String) -> Result<Project, String> {
     kild_core::project::add_project(name, path).map_err(|e| e.to_string())
 }
 
-/// List agents (built-in `default` + authored prompt files).
+/// List agents available to a project: built-in `default` + agents read from the
+/// project's `.kild/agents` / `.claude/agents` / `.pi/agents` and the global dirs.
 #[tauri::command]
-fn list_agents() -> Result<Vec<Agent>, String> {
-    kild_core::agent::list_agents().map_err(|e| e.to_string())
-}
-
-/// Author a new agent (name + system prompt).
-#[tauri::command]
-fn add_agent(name: String, system_prompt: String) -> Result<Agent, String> {
-    kild_core::agent::add_agent(name, system_prompt).map_err(|e| e.to_string())
+fn list_agents(project: Option<String>) -> Result<Vec<Agent>, String> {
+    let root = project.map(std::path::PathBuf::from);
+    kild_core::agent::list_agents(root.as_deref()).map_err(|e| e.to_string())
 }
 
 fn translate(ev: &PiOutput) -> Option<UiEvent> {
@@ -196,8 +197,7 @@ pub fn run() {
             send_prompt,
             list_projects,
             add_project,
-            list_agents,
-            add_agent
+            list_agents
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -22,7 +22,12 @@ pub fn projects_file() -> Option<PathBuf> {
     Some(kild_home()?.join("projects.json"))
 }
 
-/// Directory of agent prompt files (`<kild_home>/agents/`).
+/// Global kild agent definitions (`<kild_home>/agents/`).
 pub fn agents_dir() -> Option<PathBuf> {
     Some(kild_home()?.join("agents"))
+}
+
+/// Resolved/normalized prompt files passed to pi (`<kild_home>/prompts/`).
+pub fn prompts_dir() -> Option<PathBuf> {
+    Some(kild_home()?.join("prompts"))
 }

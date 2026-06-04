@@ -34,10 +34,6 @@
   let model = $state(MODELS[0]);
   let agents = $state<Agent[]>([]);
   let agentName = $state("default");
-  let addingAgent = $state(false);
-  let newAgentName = $state("");
-  let newAgentPrompt = $state("");
-  let agentError = $state<string | null>(null);
   let items = $state<Item[]>([]);
   let input = $state("");
   let running = $state(false);
@@ -100,26 +96,9 @@
     projects = await invoke<Project[]>("list_projects");
   }
 
-  async function loadAgents() {
-    agents = await invoke<Agent[]>("list_agents");
-  }
-
-  async function addAgent() {
-    agentError = null;
-    try {
-      const a = await invoke<Agent>("add_agent", {
-        name: newAgentName.trim(),
-        systemPrompt: newAgentPrompt,
-      });
-      await loadAgents();
-      addingAgent = false;
-      newAgentName = "";
-      newAgentPrompt = "";
-      agentName = a.name;
-      await newSession();
-    } catch (e) {
-      agentError = String(e);
-    }
+  async function loadAgents(projectPath: string) {
+    agents = await invoke<Agent[]>("list_agents", { project: projectPath });
+    if (!agents.some((a) => a.name === agentName)) agentName = "default";
   }
 
   async function newSession() {
@@ -138,6 +117,7 @@
 
   async function selectProject(p: Project) {
     active = p;
+    await loadAgents(p.path);
     await newSession();
   }
 
@@ -184,7 +164,6 @@
       if (alive) unlisten = fn;
       else fn();
     });
-    loadAgents().catch((e) => (error = `Could not load agents: ${e}`));
     loadProjects()
       .then(() => {
         if (alive && projects.length > 0) selectProject(projects[0]);
@@ -244,7 +223,6 @@
         <select bind:value={agentName} onchange={newSession} title="Agent (system prompt)">
           {#each agents as a}<option value={a.name}>{a.name}</option>{/each}
         </select>
-        <button class="add-agent-btn" title="New agent" onclick={() => (addingAgent = true)}>＋</button>
         <select bind:value={model} onchange={newSession} title="Model">
           {#each MODELS as m}<option value={m}>{m}</option>{/each}
         </select>
@@ -256,22 +234,6 @@
           >
         {/if}
       </header>
-
-      {#if addingAgent}
-        <div class="agent-form">
-          <input bind:value={newAgentName} placeholder="agent name (e.g. planner)" />
-          <textarea
-            bind:value={newAgentPrompt}
-            placeholder="System prompt — the agent's role and instructions. Layered on top of pi's default + the project's context."
-            rows="6"
-          ></textarea>
-          {#if agentError}<div class="add-error">{agentError}</div>{/if}
-          <div class="add-actions">
-            <button class="primary" onclick={addAgent}>Create agent</button>
-            <button onclick={() => (addingAgent = false)}>Cancel</button>
-          </div>
-        </div>
-      {/if}
 
       {#if error}
         <div class="banner">
@@ -464,39 +426,6 @@
     color: var(--text-subtle);
     font-family: var(--mono);
     font-size: 12px;
-  }
-  .topbar .add-agent-btn {
-    background: var(--surface);
-    color: var(--ice);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 9px;
-    cursor: pointer;
-    font: inherit;
-    line-height: 1;
-  }
-  .agent-form {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--obsidian);
-  }
-  .agent-form input,
-  .agent-form textarea {
-    background: var(--surface);
-    color: var(--text-bright);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 10px;
-    font: inherit;
-  }
-  .agent-form textarea {
-    resize: vertical;
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.5;
   }
   .banner {
     display: flex;
