@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KILD — Multiplexer v2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --void: #08090A;
+            --obsidian: #0E1012;
+            --surface: #151719;
+            --elevated: #1C1F22;
+
+            --border-subtle: #1F2328;
+            --border: #2D3139;
+            --border-strong: #3D434D;
+
+            --text-muted: #5C6370;
+            --text-subtle: #848D9C;
+            --text: #B8C0CC;
+            --text-bright: #E8ECF0;
+            --text-white: #F8FAFC;
+
+            --ice: #7CB4C8;
+            --ice-dim: #5E9AB2;
+            --ice-bright: #98CCE0;
+            --ice-glow: rgba(124, 180, 200, 0.12);
+
+            --blade: #64748B;
+
+            --aurora: #6B8F5E;
+            --aurora-glow: rgba(107, 143, 94, 0.10);
+
+            --copper: #C49A5C;
+            --copper-glow: rgba(196, 154, 92, 0.10);
+
+            --ember: #B87060;
+            --ember-glow: rgba(184, 112, 96, 0.10);
+
+            --kiri: #A088B0;
+            --kiri-glow: rgba(160, 136, 176, 0.10);
+
+            --term-bg: #0E1012;
+            --term-red: #e06c75;
+            --term-green: #98c379;
+            --term-yellow: #e5c07b;
+            --term-blue: #61afef;
+            --term-magenta: #c678dd;
+            --term-cyan: #56b6c2;
+            --term-white: #abb2bf;
+            --term-bright-black: #5c6370;
+
+            --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+            --text-xs: 11px;
+            --text-sm: 12px;
+            --text-base: 13px;
+            --text-md: 14px;
+
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-ui);
+            font-size: var(--text-base);
+            background: var(--void);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ============================================
+           LAYOUT: Rail | Sidebar | Main
+           ============================================ */
+
+        .app {
+            display: grid;
+            grid-template-columns: 48px 220px 1fr;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+        }
+
+        /* ============================================
+           PROJECT RAIL (48px)
+           ============================================ */
+
+        .rail {
+            grid-row: 1 / -1;
+            background: var(--obsidian);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: var(--space-3) 0;
+            gap: var(--space-2);
+        }
+
+        .rail-top {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-2);
+            flex: 1;
+        }
+
+        .rail-traffic {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: var(--space-3);
+            padding-bottom: var(--space-3);
+            border-bottom: 1px solid var(--border-subtle);
+            width: 100%;
+        }
+
+        .traffic-lights { display: flex; gap: 6px; }
+        .traffic-light { width: 10px; height: 10px; border-radius: 50%; }
+        .traffic-light.close { background: #ff5f56; }
+        .traffic-light.minimize { background: #ffbd2e; }
+        .traffic-light.maximize { background: #27c93f; }
+
+        .project-icon {
+            width: 32px; height: 32px; border-radius: var(--radius-md);
+            display: flex; align-items: center; justify-content: center;
+            font-size: var(--text-sm); font-weight: 600;
+            cursor: pointer; transition: all 100ms; position: relative;
+            color: var(--text-subtle); background: var(--surface);
+            border: 1px solid transparent;
+        }
+        .project-icon:hover { background: var(--elevated); color: var(--text); }
+        .project-icon.selected { background: var(--surface); color: var(--text-bright); border-color: var(--border); }
+        .project-icon.selected::before {
+            content: ''; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+            width: 3px; height: 20px; background: var(--ice); border-radius: 0 2px 2px 0;
+        }
+
+        .project-badge {
+            position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px;
+            border-radius: 7px; background: var(--text-muted); color: var(--void);
+            font-size: 9px; font-weight: 600;
+            display: flex; align-items: center; justify-content: center; padding: 0 3px;
+        }
+
+        .project-add {
+            width: 32px; height: 32px; border-radius: var(--radius-md);
+            display: flex; align-items: center; justify-content: center;
+            font-size: var(--text-md); color: var(--text-muted); cursor: pointer;
+            transition: all 100ms; border: 1px dashed var(--border);
+        }
+        .project-add:hover { color: var(--text-subtle); border-color: var(--border-strong); background: var(--surface); }
+
+        .rail-bottom {
+            display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+            padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); width: 100%;
+        }
+
+        .rail-settings {
+            width: 32px; height: 32px; border-radius: var(--radius-md);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-muted); cursor: pointer; transition: all 100ms;
+        }
+        .rail-settings:hover { color: var(--text-subtle); background: var(--surface); }
+
+        /* ============================================
+           SIDEBAR (220px) — Navigation only
+           ============================================ */
+
+        .sidebar {
+            grid-row: 1 / 2;
+            background: var(--obsidian);
+            border-right: 1px solid var(--border-subtle);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .sidebar-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: var(--space-2) var(--space-3);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .sidebar-project-name { font-size: var(--text-sm); font-weight: 600; color: var(--text-bright); }
+        .sidebar-project-count { font-size: var(--text-xs); color: var(--text-muted); }
+
+        .sidebar-content { flex: 1; overflow-y: auto; padding: var(--space-1) 0; }
+
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: var(--space-1) var(--space-3); margin-top: var(--space-2);
+            font-size: 10px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.06em;
+        }
+        .section-header:first-child { margin-top: 0; }
+        .section-count { font-family: var(--font-mono); font-size: 10px; }
+
+        /* Kild item */
+        .kild-item {
+            padding: 2px var(--space-3); cursor: pointer;
+            transition: background 80ms; border-left: 2px solid transparent;
+        }
+        .kild-item:hover { background: rgba(255, 255, 255, 0.02); }
+        .kild-item.selected { background: rgba(255, 255, 255, 0.03); border-left-color: var(--ice); }
+
+        .kild-row {
+            display: flex; align-items: center; gap: var(--space-2);
+            padding: 3px 0; position: relative;
+        }
+
+        .kild-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .kild-dot.active { background: var(--aurora); }
+        .kild-dot.stopped { background: var(--copper); opacity: 0.6; }
+
+        .kild-name {
+            font-size: var(--text-sm); font-weight: 500; color: var(--text);
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .kild-item.selected .kild-name { color: var(--text-bright); }
+        .kild-meta { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+
+        /* Hover actions on kild row */
+        .kild-actions {
+            display: none; gap: 2px; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+            background: var(--obsidian); padding-left: var(--space-1);
+        }
+        .kild-row:hover .kild-actions { display: flex; }
+        .kild-row:hover .kild-meta { display: none; }
+
+        .kild-action-btn {
+            padding: 2px 4px; font-size: 9px; font-family: var(--font-ui);
+            color: var(--text-muted); background: transparent;
+            border: 1px solid var(--border); border-radius: 3px;
+            cursor: pointer; transition: all 80ms;
+        }
+        .kild-action-btn:hover { color: var(--text-subtle); border-color: var(--border-strong); background: var(--elevated); }
+        .kild-action-btn.danger:hover { color: var(--ember); border-color: rgba(184,112,96,0.3); background: rgba(184,112,96,0.06); }
+
+        /* Terminal items nested under kild */
+        .terminal-list { padding-left: 16px; margin-top: 1px; margin-bottom: 2px; }
+
+        .terminal-item {
+            display: flex; align-items: center; gap: 6px;
+            padding: 2px var(--space-2); cursor: pointer;
+            border-radius: var(--radius-sm); transition: background 80ms;
+            font-size: var(--text-xs); color: var(--text-muted);
+        }
+        .terminal-item:hover { background: rgba(255, 255, 255, 0.04); color: var(--text-subtle); }
+        .terminal-item.active-tab { background: rgba(124, 180, 200, 0.06); color: var(--text); }
+
+        .terminal-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+        .terminal-dot.running { background: var(--aurora); }
+        .terminal-dot.idle { background: var(--text-muted); }
+
+        .terminal-name { font-family: var(--font-mono); font-size: 10px; flex: 1; }
+        .terminal-mode { font-size: 9px; color: var(--text-muted); opacity: 0.5; }
+
+        .terminal-add {
+            display: flex; align-items: center; gap: 6px;
+            padding: 2px var(--space-2); cursor: pointer;
+            border-radius: var(--radius-sm); transition: all 80ms;
+            font-size: 10px; color: var(--text-muted); opacity: 0.4;
+        }
+        .terminal-add:hover { opacity: 1; background: rgba(255, 255, 255, 0.03); }
+
+        /* ============================================
+           MAIN AREA — 3 views, one active at a time
+           ============================================ */
+
+        .main {
+            grid-row: 1 / 2;
+            display: flex; flex-direction: column;
+            background: var(--void); overflow: hidden;
+        }
+
+        /* View tabs */
+        .view-tabs {
+            display: flex; align-items: center;
+            background: var(--obsidian);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 0 var(--space-3); flex-shrink: 0;
+        }
+
+        .view-tab {
+            padding: var(--space-2) var(--space-3);
+            font-size: var(--text-xs); font-weight: 500;
+            color: var(--text-muted); background: transparent;
+            border: none; border-bottom: 2px solid transparent;
+            cursor: pointer; transition: all 80ms; font-family: var(--font-ui);
+        }
+        .view-tab:hover { color: var(--text-subtle); }
+        .view-tab.active { color: var(--text); border-bottom-color: var(--ice); }
+
+        .view-tab-spacer { flex: 1; }
+
+        /* Generic ghost button for tab bar */
+        .ghost-btn {
+            padding: var(--space-1) var(--space-2);
+            font-size: var(--text-xs); font-weight: 500;
+            color: var(--text-muted); background: transparent;
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            cursor: pointer; transition: all 80ms; font-family: var(--font-ui);
+            margin: var(--space-1) 0;
+        }
+        .ghost-btn:hover { color: var(--text-subtle); border-color: var(--border-strong); background: var(--surface); }
+
+        /* View containers */
+        .view { display: none; flex: 1; overflow: hidden; }
+        .view.active { display: flex; flex-direction: column; }
+
+        /* ============================================
+           CONTROL VIEW — 2x2 pane grid
+           ============================================ */
+
+        .pane-grid {
+            flex: 1;
+            display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+            gap: 1px; background: var(--border-subtle); overflow: hidden;
+        }
+
+        .pane {
+            display: flex; flex-direction: column;
+            background: var(--void); overflow: hidden;
+        }
+        .pane.focused { box-shadow: inset 0 0 0 1px var(--ice-dim); }
+
+        .pane-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 2px var(--space-2); background: var(--surface);
+            border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
+        }
+        .pane-header-left { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+        .pane-kild-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+        .pane-kild-name { font-size: 10px; font-weight: 500; color: var(--text-subtle); white-space: nowrap; }
+        .pane-sep { color: var(--border); font-size: 10px; }
+        .pane-terminal-name { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); }
+        .pane-branch { font-size: 9px; font-family: var(--font-mono); color: var(--text-muted); opacity: 0.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pane-header-right { display: flex; gap: 2px; opacity: 0; transition: opacity 100ms; flex-shrink: 0; }
+        .pane:hover .pane-header-right { opacity: 1; }
+        .pane-btn {
+            padding: 1px 4px; color: var(--text-muted); background: transparent;
+            border: none; border-radius: 3px; cursor: pointer; font-size: 9px; font-family: var(--font-ui);
+        }
+        .pane-btn:hover { color: var(--text-subtle); background: var(--elevated); }
+
+        /* Terminal content */
+        .terminal {
+            flex: 1; background: var(--term-bg); font-family: var(--font-mono);
+            font-size: 12px; line-height: 1.55; padding: var(--space-2) var(--space-3);
+            overflow-y: auto; color: var(--term-white);
+        }
+        .term-line { white-space: pre-wrap; word-break: break-all; }
+        .term-prompt { color: var(--term-green); }
+        .term-dim { color: var(--term-bright-black); }
+        .term-info { color: var(--term-blue); }
+        .term-output { color: var(--term-white); opacity: 0.85; }
+        .term-error { color: var(--term-red); }
+        .term-green { color: var(--term-green); }
+        .term-cursor {
+            display: inline-block; width: 7px; height: 14px;
+            background: var(--term-white); animation: blink 1s step-end infinite;
+            vertical-align: text-bottom;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Empty pane */
+        .pane-empty {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            color: var(--text-muted); font-size: var(--text-xs); gap: var(--space-2);
+        }
+        .pane-empty-hint { font-size: 10px; opacity: 0.4; }
+
+        /* ============================================
+           DASHBOARD VIEW — Fleet cards
+           ============================================ */
+
+        .dashboard-scroll { flex: 1; overflow-y: auto; padding: var(--space-4); }
+
+        .fleet-summary {
+            display: flex; gap: var(--space-4); margin-bottom: var(--space-4);
+            padding: var(--space-3); background: var(--surface);
+            border-radius: var(--radius-md); border: 1px solid var(--border-subtle);
+        }
+        .fleet-stat { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+        .fleet-stat-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .fleet-stat-number { font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
+        .fleet-stat-label { color: var(--text-muted); }
+
+        .dashboard-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: var(--space-3);
+        }
+
+        .dashboard-card {
+            background: var(--surface); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); padding: var(--space-3);
+            cursor: pointer; transition: all 80ms;
+        }
+        .dashboard-card:hover { border-color: var(--border); background: var(--elevated); }
+        .dashboard-card.stopped { opacity: 0.65; }
+
+        .dc-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+        .dc-name { font-size: var(--text-sm); font-weight: 500; color: var(--text-bright); flex: 1; }
+        .dc-agent { font-size: 10px; font-family: var(--font-mono); color: var(--kiri); opacity: 0.8; }
+
+        .dc-note { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--space-2); line-height: 1.4; }
+
+        .dc-stats { display: flex; gap: var(--space-3); font-size: 10px; font-family: var(--font-mono); }
+        .git-add { color: var(--aurora); }
+        .git-del { color: var(--ember); }
+        .git-files { color: var(--text-muted); }
+        .dc-time { color: var(--text-muted); }
+        .dc-pr { color: var(--ice); }
+
+        .dc-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: var(--space-2); padding-top: var(--space-2);
+            border-top: 1px solid var(--border-subtle); font-size: 10px; color: var(--text-muted);
+        }
+
+        /* ============================================
+           KILD DETAIL VIEW — drill-down from dashboard
+           ============================================ */
+
+        .detail-scroll { flex: 1; overflow-y: auto; }
+
+        .detail-back {
+            display: flex; align-items: center; gap: var(--space-1);
+            padding: var(--space-2) var(--space-4);
+            font-size: var(--text-xs); color: var(--text-muted);
+            cursor: pointer; background: transparent; border: none;
+            font-family: var(--font-ui); transition: color 80ms;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .detail-back:hover { color: var(--text-subtle); }
+
+        .detail-hero {
+            padding: var(--space-5) var(--space-4) var(--space-4);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .detail-hero-name { font-size: var(--text-md); font-weight: 600; color: var(--text-white); margin-bottom: 4px; }
+        .detail-hero-status { display: flex; align-items: center; gap: var(--space-2); }
+        .detail-status-badge {
+            display: inline-flex; align-items: center; gap: var(--space-1);
+            font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 3px;
+        }
+        .detail-status-badge.active { background: var(--aurora-glow); color: var(--aurora); }
+        .detail-status-badge.stopped { background: var(--copper-glow); color: var(--copper); }
+        .detail-hero-duration { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+        .detail-body { padding: var(--space-4); }
+
+        .detail-section { margin-bottom: var(--space-5); }
+        .detail-section-label {
+            font-size: 9px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--space-2);
+        }
+        .detail-note {
+            font-size: var(--text-xs); color: var(--text); line-height: 1.5;
+            padding: var(--space-2); background: var(--surface); border-radius: var(--radius-sm);
+        }
+
+        .detail-kv { display: flex; justify-content: space-between; padding: 3px 0; }
+        .detail-kv-label { font-size: var(--text-xs); color: var(--text-muted); }
+        .detail-kv-value { font-size: var(--text-xs); font-family: var(--font-mono); color: var(--text); }
+
+        .detail-git-summary { display: flex; gap: var(--space-3); font-size: var(--text-xs); font-family: var(--font-mono); }
+
+        .detail-pr-row {
+            display: flex; align-items: center; gap: var(--space-2);
+            padding: var(--space-2); background: var(--surface);
+            border-radius: var(--radius-sm); font-size: var(--text-xs);
+        }
+        .detail-pr-number { color: var(--ice); font-family: var(--font-mono); font-weight: 500; }
+        .detail-pr-status { color: var(--text-muted); }
+        .detail-pr-checks { margin-left: auto; color: var(--aurora); font-family: var(--font-mono); }
+
+        .detail-path {
+            font-size: 10px; font-family: var(--font-mono); color: var(--text-muted);
+            padding: var(--space-2); background: var(--surface);
+            border-radius: var(--radius-sm); word-break: break-all; line-height: 1.4;
+        }
+
+        .detail-terminals { display: flex; flex-direction: column; gap: 2px; }
+        .detail-terminal-row {
+            display: flex; align-items: center; gap: var(--space-2);
+            padding: var(--space-2); background: var(--surface);
+            border-radius: var(--radius-sm); font-size: var(--text-xs);
+            cursor: pointer; transition: background 80ms;
+        }
+        .detail-terminal-row:hover { background: var(--elevated); }
+        .detail-terminal-name { font-family: var(--font-mono); font-size: 10px; color: var(--text); flex: 1; }
+        .detail-terminal-mode { font-size: 9px; color: var(--text-muted); }
+        .detail-terminal-link { font-size: 9px; color: var(--ice); opacity: 0; transition: opacity 80ms; }
+        .detail-terminal-row:hover .detail-terminal-link { opacity: 1; }
+
+        .detail-actions {
+            display: flex; gap: var(--space-2); margin-top: var(--space-4);
+            padding-top: var(--space-4); border-top: 1px solid var(--border-subtle);
+        }
+        .detail-action-btn {
+            padding: var(--space-2) var(--space-3);
+            font-size: var(--text-xs); font-family: var(--font-ui); font-weight: 500;
+            color: var(--text-muted); background: transparent;
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            cursor: pointer; transition: all 80ms;
+        }
+        .detail-action-btn:hover { color: var(--text-subtle); border-color: var(--border-strong); background: var(--elevated); }
+        .detail-action-btn.danger:hover { color: var(--ember); border-color: rgba(184,112,96,0.3); background: rgba(184,112,96,0.06); }
+
+        /* ============================================
+           STATUS BAR
+           ============================================ */
+
+        .status-bar {
+            grid-column: 2 / -1;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 3px var(--space-3); background: var(--obsidian);
+            border-top: 1px solid var(--border-subtle);
+            font-size: 10px; color: var(--text-muted);
+        }
+        .status-left { display: flex; align-items: center; gap: var(--space-4); }
+        .status-alert { display: flex; align-items: center; gap: var(--space-1); }
+        .status-alert-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--copper); }
+        .status-right { display: flex; gap: var(--space-3); }
+        .shortcut { display: flex; align-items: center; gap: 3px; }
+        .kbd {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 14px; padding: 0px 3px; font-family: var(--font-mono);
+            font-size: 9px; font-weight: 500; color: var(--text-muted);
+            background: var(--surface); border: 1px solid var(--border); border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- PROJECT RAIL -->
+        <nav class="rail">
+            <div class="rail-top">
+                <div class="rail-traffic">
+                    <div class="traffic-lights">
+                        <span class="traffic-light close"></span>
+                        <span class="traffic-light minimize"></span>
+                        <span class="traffic-light maximize"></span>
+                    </div>
+                </div>
+                <div class="project-icon selected" title="kild">K<span class="project-badge">5</span></div>
+                <div class="project-icon" title="shards-api">S<span class="project-badge">3</span></div>
+                <div class="project-icon" title="web-client">W</div>
+                <div class="project-add" title="Add project">+</div>
+            </div>
+            <div class="rail-bottom">
+                <div class="rail-settings" title="Settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                </div>
+            </div>
+        </nav>
+
+        <!-- SIDEBAR — navigation only -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-project-name">kild</span>
+                <span class="sidebar-project-count">5 kilds</span>
+            </div>
+            <div class="sidebar-content">
+                <div class="section-header">
+                    <span>Active</span>
+                    <span class="section-count" style="color: var(--aurora);">3</span>
+                </div>
+
+                <!-- feature-auth: selected, has 2 terminals -->
+                <div class="kild-item selected" data-kild="auth">
+                    <div class="kild-row">
+                        <span class="kild-dot active"></span>
+                        <span class="kild-name">feature-auth</span>
+                        <span class="kild-meta">23m</span>
+                        <div class="kild-actions">
+                            <button class="kild-action-btn">editor</button>
+                            <button class="kild-action-btn">stop</button>
+                        </div>
+                    </div>
+                    <div class="terminal-list">
+                        <div class="terminal-item active-tab" data-terminal="auth-claude">
+                            <span class="terminal-dot running"></span>
+                            <span class="terminal-name">claude</span>
+                            <span class="terminal-mode">daemon</span>
+                        </div>
+                        <div class="terminal-item" data-terminal="auth-shell">
+                            <span class="terminal-dot running"></span>
+                            <span class="terminal-name">shell</span>
+                            <span class="terminal-mode">local</span>
+                        </div>
+                        <div class="terminal-add">+ terminal</div>
+                    </div>
+                </div>
+
+                <!-- feature-api -->
+                <div class="kild-item" data-kild="api">
+                    <div class="kild-row">
+                        <span class="kild-dot active"></span>
+                        <span class="kild-name">feature-api</span>
+                        <span class="kild-meta">1h 12m</span>
+                        <div class="kild-actions">
+                            <button class="kild-action-btn">editor</button>
+                            <button class="kild-action-btn">stop</button>
+                        </div>
+                    </div>
+                    <div class="terminal-list">
+                        <div class="terminal-item" data-terminal="api-kiro">
+                            <span class="terminal-dot running"></span>
+                            <span class="terminal-name">kiro</span>
+                            <span class="terminal-mode">daemon</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- perf-queries -->
+                <div class="kild-item" data-kild="perf">
+                    <div class="kild-row">
+                        <span class="kild-dot active"></span>
+                        <span class="kild-name">perf-queries</span>
+                        <span class="kild-meta">45m</span>
+                        <div class="kild-actions">
+                            <button class="kild-action-btn">editor</button>
+                            <button class="kild-action-btn">stop</button>
+                        </div>
+                    </div>
+                    <div class="terminal-list">
+                        <div class="terminal-item" data-terminal="perf-claude">
+                            <span class="terminal-dot running"></span>
+                            <span class="terminal-name">claude</span>
+                            <span class="terminal-mode">daemon</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-header">
+                    <span>Stopped</span>
+                    <span class="section-count" style="color: var(--copper);">2</span>
+                </div>
+
+                <div class="kild-item" data-kild="login">
+                    <div class="kild-row">
+                        <span class="kild-dot stopped"></span>
+                        <span class="kild-name">fix-login-bug</span>
+                        <span class="kild-meta">4h ago</span>
+                        <div class="kild-actions">
+                            <button class="kild-action-btn">open</button>
+                            <button class="kild-action-btn">editor</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="kild-item" data-kild="dark">
+                    <div class="kild-row">
+                        <span class="kild-dot stopped"></span>
+                        <span class="kild-name">dark-mode</span>
+                        <span class="kild-meta">1d ago</span>
+                        <div class="kild-actions">
+                            <button class="kild-action-btn">open</button>
+                            <button class="kild-action-btn">editor</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN AREA -->
+        <main class="main">
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="control">Control</button>
+                <button class="view-tab" data-view="dashboard">Dashboard</button>
+                <span class="view-tab-spacer"></span>
+                <button class="ghost-btn">+ terminal</button>
+            </div>
+
+            <!-- VIEW 1: CONTROL — terminal panes -->
+            <div class="view active" id="view-control">
+                <div class="pane-grid">
+                    <div class="pane focused">
+                        <div class="pane-header">
+                            <div class="pane-header-left">
+                                <span class="pane-kild-dot" style="background: var(--aurora);"></span>
+                                <span class="pane-kild-name">feature-auth</span>
+                                <span class="pane-sep">/</span>
+                                <span class="pane-terminal-name">claude</span>
+                                <span class="pane-branch">kild/feature-auth</span>
+                            </div>
+                            <div class="pane-header-right">
+                                <button class="pane-btn">max</button>
+                                <button class="pane-btn">&times;</button>
+                            </div>
+                        </div>
+                        <div class="terminal">
+                            <div class="term-line"><span class="term-info">Claude:</span> I'll implement JWT authentication with access and refresh tokens.</div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-dim">Reading</span> src/auth/mod.rs</div>
+                            <div class="term-line"><span class="term-dim">Reading</span> src/config/mod.rs</div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-dim">Creating</span> <span class="term-green">src/auth/jwt.rs</span></div>
+                            <div class="term-line"><span class="term-dim">Creating</span> <span class="term-green">src/auth/middleware.rs</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-dim">Running</span> cargo check</div>
+                            <div class="term-line"><span class="term-green">&#10003;</span> <span class="term-output">Compiling auth v0.1.0</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-info">Claude:</span> Middleware compiles. Writing tests. <span class="term-cursor"></span></div>
+                        </div>
+                    </div>
+
+                    <div class="pane">
+                        <div class="pane-header">
+                            <div class="pane-header-left">
+                                <span class="pane-kild-dot" style="background: var(--aurora);"></span>
+                                <span class="pane-kild-name">feature-api</span>
+                                <span class="pane-sep">/</span>
+                                <span class="pane-terminal-name">kiro</span>
+                            </div>
+                            <div class="pane-header-right">
+                                <button class="pane-btn">max</button>
+                                <button class="pane-btn">&times;</button>
+                            </div>
+                        </div>
+                        <div class="terminal">
+                            <div class="term-line"><span class="term-dim">Editing</span> <span class="term-green">src/api/routes.rs</span></div>
+                            <div class="term-line"><span class="term-dim">Editing</span> <span class="term-green">src/api/handlers.rs</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-dim">Running</span> cargo test</div>
+                            <div class="term-line"><span class="term-green">&#10003;</span> <span class="term-output">test api::routes::test_list ... ok</span></div>
+                            <div class="term-line"><span class="term-green">&#10003;</span> <span class="term-output">test api::routes::test_create ... ok</span></div>
+                            <div class="term-line"><span class="term-error">&#10007;</span> <span class="term-error">test api::routes::test_delete ... FAILED</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-output">Fixing delete handler... <span class="term-cursor"></span></span></div>
+                        </div>
+                    </div>
+
+                    <div class="pane">
+                        <div class="pane-header">
+                            <div class="pane-header-left">
+                                <span class="pane-kild-dot" style="background: var(--aurora);"></span>
+                                <span class="pane-kild-name">perf-queries</span>
+                                <span class="pane-sep">/</span>
+                                <span class="pane-terminal-name">claude</span>
+                            </div>
+                            <div class="pane-header-right">
+                                <button class="pane-btn">max</button>
+                                <button class="pane-btn">&times;</button>
+                            </div>
+                        </div>
+                        <div class="terminal">
+                            <div class="term-line"><span class="term-info">Claude:</span> Found N+1 in user_sessions.</div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-dim">Running</span> EXPLAIN ANALYZE</div>
+                            <div class="term-line"><span class="term-output">Seq Scan on user_sessions  (cost=0.00..431.00)</span></div>
+                            <div class="term-line"><span class="term-output">  Rows Removed by Filter: 11800</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-info">Claude:</span> Adding index. <span class="term-cursor"></span></div>
+                        </div>
+                    </div>
+
+                    <div class="pane">
+                        <div class="pane-header">
+                            <div class="pane-header-left">
+                                <span class="pane-kild-dot" style="background: var(--aurora);"></span>
+                                <span class="pane-kild-name">feature-auth</span>
+                                <span class="pane-sep">/</span>
+                                <span class="pane-terminal-name">shell</span>
+                            </div>
+                            <div class="pane-header-right">
+                                <button class="pane-btn">max</button>
+                                <button class="pane-btn">&times;</button>
+                            </div>
+                        </div>
+                        <div class="terminal">
+                            <div class="term-line"><span class="term-prompt">~/...feature-auth $</span> <span class="term-output">git diff --stat</span></div>
+                            <div class="term-line"><span class="term-output"> src/auth/jwt.rs       | 89 +++++++++++</span></div>
+                            <div class="term-line"><span class="term-output"> src/auth/middleware.rs | 45 ++++++</span></div>
+                            <div class="term-line"><span class="term-output"> src/auth/claims.rs    | 23 +++</span></div>
+                            <div class="term-line"><span class="term-output"> 5 files changed, 153 insertions(+), 12 deletions(-)</span></div>
+                            <div class="term-line"></div>
+                            <div class="term-line"><span class="term-prompt">~/...feature-auth $</span> <span class="term-cursor"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: DASHBOARD — fleet cards -->
+            <div class="view" id="view-dashboard">
+                <div class="dashboard-scroll">
+                    <div class="fleet-summary">
+                        <div class="fleet-stat"><span class="fleet-stat-dot" style="background: var(--aurora);"></span><span class="fleet-stat-number">3</span><span class="fleet-stat-label">active</span></div>
+                        <div class="fleet-stat"><span class="fleet-stat-dot" style="background: var(--copper);"></span><span class="fleet-stat-number">2</span><span class="fleet-stat-label">stopped</span></div>
+                        <div class="fleet-stat"><span class="fleet-stat-dot" style="background: var(--text-muted);"></span><span class="fleet-stat-number">5</span><span class="fleet-stat-label">terminals</span></div>
+                    </div>
+                    <div class="dashboard-grid">
+                        <div class="dashboard-card" data-detail="auth">
+                            <div class="dc-header"><span class="kild-dot active"></span><span class="dc-name">feature-auth</span><span class="dc-agent">claude</span></div>
+                            <div class="dc-note">JWT authentication for API. Access tokens, refresh in Redis.</div>
+                            <div class="dc-stats"><span class="git-add">+42</span><span class="git-del">-12</span><span class="git-files">5 files</span><span class="dc-time">23m</span><span class="dc-pr">#234</span></div>
+                            <div class="dc-footer"><span>2 terminals</span></div>
+                        </div>
+                        <div class="dashboard-card" data-detail="api">
+                            <div class="dc-header"><span class="kild-dot active"></span><span class="dc-name">feature-api</span><span class="dc-agent">kiro</span></div>
+                            <div class="dc-note">Refactoring API endpoints for v2.</div>
+                            <div class="dc-stats"><span class="git-add">+156</span><span class="git-del">-34</span><span class="git-files">12 files</span><span class="dc-time">1h 12m</span></div>
+                            <div class="dc-footer"><span>1 terminal</span></div>
+                        </div>
+                        <div class="dashboard-card" data-detail="perf">
+                            <div class="dc-header"><span class="kild-dot active"></span><span class="dc-name">perf-queries</span><span class="dc-agent">claude</span></div>
+                            <div class="dc-note">Database query optimization. N+1 fixes.</div>
+                            <div class="dc-stats"><span class="git-add">+28</span><span class="git-del">-8</span><span class="git-files">3 files</span><span class="dc-time">45m</span></div>
+                            <div class="dc-footer"><span>1 terminal</span></div>
+                        </div>
+                        <div class="dashboard-card stopped" data-detail="login">
+                            <div class="dc-header"><span class="kild-dot stopped"></span><span class="dc-name">fix-login-bug</span><span class="dc-agent">claude</span></div>
+                            <div class="dc-note">Issue #234 - login redirect loop. Needs rebase.</div>
+                            <div class="dc-stats"><span class="git-add">+8</span><span class="git-del">-3</span><span class="git-files">2 files</span><span class="dc-time">4h ago</span></div>
+                            <div class="dc-footer"><span>0 terminals</span></div>
+                        </div>
+                        <div class="dashboard-card stopped" data-detail="dark">
+                            <div class="dc-header"><span class="kild-dot stopped"></span><span class="dc-name">dark-mode</span><span class="dc-agent">claude</span></div>
+                            <div class="dc-note">Theme system implementation.</div>
+                            <div class="dc-stats"><span class="git-add">+89</span><span class="git-del">-12</span><span class="git-files">7 files</span><span class="dc-time">1d ago</span></div>
+                            <div class="dc-footer"><span>0 terminals</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 3: KILD DETAIL — drill-down -->
+            <div class="view" id="view-detail">
+                <div class="detail-scroll">
+                    <button class="detail-back" id="detail-back-btn">&#8592; Dashboard</button>
+
+                    <div class="detail-hero">
+                        <div class="detail-hero-name">feature-auth</div>
+                        <div class="detail-hero-status">
+                            <span class="detail-status-badge active">active</span>
+                            <span class="detail-hero-duration">23m 45s</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-body">
+                        <div class="detail-section">
+                            <div class="detail-section-label">Note</div>
+                            <div class="detail-note">JWT authentication for API. Access tokens with 15-min expiry, refresh tokens with 7-day in Redis.</div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-section-label">Session</div>
+                            <div class="detail-kv"><span class="detail-kv-label">Agent</span><span class="detail-kv-value">claude</span></div>
+                            <div class="detail-kv"><span class="detail-kv-label">Created</span><span class="detail-kv-value">today 14:32</span></div>
+                            <div class="detail-kv"><span class="detail-kv-label">Branch</span><span class="detail-kv-value">kild/feature-auth</span></div>
+                            <div class="detail-kv"><span class="detail-kv-label">Runtime</span><span class="detail-kv-value">daemon</span></div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-section-label">Git</div>
+                            <div class="detail-git-summary">
+                                <span class="git-add">+42</span>
+                                <span class="git-del">-12</span>
+                                <span class="git-files">5 files</span>
+                            </div>
+                            <div class="detail-kv" style="margin-top: 4px;"><span class="detail-kv-label">Status</span><span class="detail-kv-value" style="color: var(--copper);">uncommitted</span></div>
+                            <div class="detail-kv"><span class="detail-kv-label">Commits</span><span class="detail-kv-value">3 ahead</span></div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-section-label">PR</div>
+                            <div class="detail-pr-row">
+                                <span class="detail-pr-number">#234</span>
+                                <span class="detail-pr-status">open &middot; 1 review</span>
+                                <span class="detail-pr-checks">2/3</span>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-section-label">Terminals</div>
+                            <div class="detail-terminals">
+                                <div class="detail-terminal-row">
+                                    <span class="terminal-dot running"></span>
+                                    <span class="detail-terminal-name">claude</span>
+                                    <span class="detail-terminal-mode">daemon</span>
+                                    <span class="detail-terminal-link">open &rarr;</span>
+                                </div>
+                                <div class="detail-terminal-row">
+                                    <span class="terminal-dot running"></span>
+                                    <span class="detail-terminal-name">shell</span>
+                                    <span class="detail-terminal-mode">local</span>
+                                    <span class="detail-terminal-link">open &rarr;</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-section-label">Path</div>
+                            <div class="detail-path">~/.kild/worktrees/kild/feature-auth</div>
+                        </div>
+
+                        <div class="detail-actions">
+                            <button class="detail-action-btn">Open in editor</button>
+                            <button class="detail-action-btn">Copy path</button>
+                            <button class="detail-action-btn">Stop</button>
+                            <button class="detail-action-btn danger">Destroy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- STATUS BAR -->
+        <footer class="status-bar">
+            <div class="status-left">
+                <span class="status-alert"><span class="status-alert-dot"></span>fix-login-bug needs rebase</span>
+            </div>
+            <div class="status-right">
+                <span class="shortcut"><span class="kbd">&#8984;J</span>/<span class="kbd">K</span> nav</span>
+                <span class="shortcut"><span class="kbd">&#8984;D</span> dashboard</span>
+                <span class="shortcut"><span class="kbd">Esc</span> back</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // View management
+        const views = {
+            control: document.getElementById('view-control'),
+            dashboard: document.getElementById('view-dashboard'),
+            detail: document.getElementById('view-detail'),
+        };
+        const tabs = document.querySelectorAll('.view-tab');
+
+        function showView(name) {
+            Object.values(views).forEach(v => v.classList.remove('active'));
+            views[name].classList.add('active');
+            tabs.forEach(t => {
+                t.classList.toggle('active', t.dataset.view === name);
+                // Detail view keeps dashboard tab active
+                if (name === 'detail') t.classList.toggle('active', t.dataset.view === 'dashboard');
+            });
+        }
+
+        // Tab clicks
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => showView(tab.dataset.view));
+        });
+
+        // Project switching
+        document.querySelectorAll('.project-icon').forEach(icon => {
+            icon.addEventListener('click', () => {
+                document.querySelectorAll('.project-icon').forEach(i => i.classList.remove('selected'));
+                icon.classList.add('selected');
+            });
+        });
+
+        // Kild selection → auto-focus terminal, switch to control view
+        document.querySelectorAll('.kild-item').forEach(item => {
+            item.querySelector('.kild-row').addEventListener('click', (e) => {
+                // Don't trigger if clicking action buttons
+                if (e.target.classList.contains('kild-action-btn')) return;
+                document.querySelectorAll('.kild-item').forEach(i => i.classList.remove('selected'));
+                item.classList.add('selected');
+                showView('control');
+            });
+        });
+
+        // Dashboard card → detail view
+        document.querySelectorAll('.dashboard-card').forEach(card => {
+            card.addEventListener('click', () => showView('detail'));
+        });
+
+        // Detail back button
+        document.getElementById('detail-back-btn').addEventListener('click', () => showView('dashboard'));
+
+        // Keyboard
+        document.addEventListener('keydown', (e) => {
+            if (e.metaKey && e.key === 'd') {
+                e.preventDefault();
+                const current = views.dashboard.classList.contains('active') || views.detail.classList.contains('active');
+                showView(current ? 'control' : 'dashboard');
+            }
+            if (e.key === 'Escape') {
+                if (views.detail.classList.contains('active')) showView('dashboard');
+            }
+        });
+    </script>
+</body>
+</html>
