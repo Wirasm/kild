@@ -12,6 +12,6 @@ mod rpc_client;
 mod rpc_errors;
 mod rpc_types;
 
-pub use rpc_client::{PiRpcSession, SpawnOptions};
+pub use rpc_client::{PiRpcSession, PiRpcWriter, SpawnOptions};
 pub use rpc_errors::RpcError;
 pub use rpc_types::{AssistantDelta, PiOutput, RpcCommand};

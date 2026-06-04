@@ -1,0 +1,38 @@
+/* Tallinn Night — ported from the old kild theme (see .claude/PRPs/branding) */
+:root {
+  --void: #08090a;
+  --obsidian: #0e1012;
+  --surface: #151719;
+  --elevated: #1c1f22;
+  --border-subtle: #1f2328;
+  --border: #2d3139;
+  --text-muted: #5c6370;
+  --text-subtle: #848d9c;
+  --text: #b8c0cc;
+  --text-bright: #e8ecf0;
+  --ice: #7cb4c8;
+  --ice-dim: #5e9ab2;
+  --aurora: #6b8f5e;
+  --copper: #c49a5c;
+  --ember: #b87060;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ui: Inter, -apple-system, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}

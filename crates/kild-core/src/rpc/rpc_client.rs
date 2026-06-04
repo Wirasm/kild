@@ -112,6 +112,19 @@ impl PiRpcSession {
         self.events.recv().await
     }
 
+    /// Split into a write handle and the event receiver, so the send side and
+    /// read side can be driven from separate tasks concurrently — e.g. a UI that
+    /// streams events while still sending `prompt`/`steer` commands.
+    pub fn split(self) -> (PiRpcWriter, mpsc::Receiver<PiOutput>) {
+        (
+            PiRpcWriter {
+                child: self.child,
+                stdin: self.stdin,
+            },
+            self.events,
+        )
+    }
+
     /// Close stdin and wait for pi to exit.
     pub async fn shutdown(self) -> Result<(), RpcError> {
         let PiRpcSession {
@@ -124,6 +137,34 @@ impl PiRpcSession {
         // writing to a half-closed pipe.
         drop(stdin);
         while events.recv().await.is_some() {}
+        child.wait().await?;
+        Ok(())
+    }
+}
+
+/// The write half of a [`PiRpcSession`] (see [`PiRpcSession::split`]) — owns the
+/// child process and its stdin so commands can be sent while a separate task
+/// drains events.
+pub struct PiRpcWriter {
+    child: Child,
+    stdin: ChildStdin,
+}
+
+impl PiRpcWriter {
+    /// Send a command to pi (one JSON line on stdin).
+    pub async fn send(&mut self, command: &RpcCommand) -> Result<(), RpcError> {
+        let mut line = serde_json::to_vec(command)?;
+        line.push(b'\n');
+        self.stdin.write_all(&line).await?;
+        self.stdin.flush().await?;
+        Ok(())
+    }
+
+    /// Close stdin and wait for pi to exit. The paired event receiver ends
+    /// (`recv()` returns `None`) once pi's stdout closes.
+    pub async fn shutdown(self) -> Result<(), RpcError> {
+        drop(self.stdin);
+        let mut child = self.child;
         child.wait().await?;
         Ok(())
     }
