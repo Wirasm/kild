@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -8,17 +9,24 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
-/// Active session's write handle. The event pump owns the read half.
+/// Live sessions, keyed by id. Each entry is a write handle; its read half is
+/// owned by a per-session event pump. This is the runtime registry — in-memory,
+/// many concurrent pi sessions.
 #[derive(Default)]
 struct AppState {
-    writer: Arc<Mutex<Option<PiRpcWriter>>>,
-    /// Bumped on every spawn; a superseded session's pump sees the mismatch and
-    /// stops emitting / stops writing into the new session.
-    generation: Arc<AtomicU64>,
+    sessions: Arc<Mutex<HashMap<u64, PiRpcWriter>>>,
+    next_id: Arc<AtomicU64>,
 }
 
-/// Frontend-facing event — a translated, serializable view of `PiOutput`.
+/// Frontend-facing event — a translated, serializable view of `PiOutput`, tagged
+/// with the session it belongs to so the UI routes it to the right transcript.
 /// pi's wire shapes never reach the UI (the boundary rule lives here).
+#[derive(Clone, Serialize)]
+struct SessionEvent {
+    session: u64,
+    event: UiEvent,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum UiEvent {
@@ -36,7 +44,8 @@ enum UiEvent {
     SessionEnd,
 }
 
-/// Spawn a fresh `pi --mode rpc` session and start pumping its events to the UI.
+/// Spawn a fresh `pi --mode rpc` session, register it, and pump its events to the
+/// UI tagged with the new session id (which is returned to the caller).
 #[tauri::command]
 async fn spawn_session(
     app: AppHandle,
@@ -44,11 +53,9 @@ async fn spawn_session(
     model: Option<String>,
     cwd: Option<String>,
     agent: Option<String>,
-) -> Result<(), String> {
-    let writer_arc = state.writer.clone();
-    let generation = state.generation.clone();
-    // Claim a new generation; any prior session's pump is now stale.
-    let gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
+) -> Result<u64, String> {
+    let sessions = state.sessions.clone();
+    let id = state.next_id.fetch_add(1, Ordering::SeqCst) + 1;
 
     // A non-default agent's prompt is resolved within the project and layered on
     // pi's default; `default`/unknown -> None -> pi's own prompt.
@@ -67,52 +74,56 @@ async fn spawn_session(
     let (writer, mut events) = session.split();
 
     {
-        // Replace any previous session (dropping its writer closes that pi).
-        let mut guard = writer_arc.lock().await;
-        *guard = Some(writer);
-        if let Some(w) = guard.as_mut() {
+        let mut map = sessions.lock().await;
+        map.insert(id, writer);
+        if let Some(w) = map.get_mut(&id) {
             let _ = w.send(&RpcCommand::GetState).await; // report resolved model
         }
     }
 
-    let pump_writer = writer_arc.clone();
+    let pump_sessions = sessions.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(ev) = events.recv().await {
-            // A newer session superseded us — stop emitting and stop writing into
-            // what is now someone else's session.
-            if generation.load(Ordering::SeqCst) != gen {
-                return;
-            }
             if let Some(ui) = translate(&ev) {
-                let _ = app.emit("pi-event", ui);
+                let _ = app.emit("pi-event", SessionEvent { session: id, event: ui });
             }
             if matches!(ev, PiOutput::AgentEnd) {
-                let mut guard = pump_writer.lock().await;
-                if generation.load(Ordering::SeqCst) == gen {
-                    if let Some(w) = guard.as_mut() {
-                        let _ = w.send(&RpcCommand::GetSessionStats).await;
-                    }
+                if let Some(w) = pump_sessions.lock().await.get_mut(&id) {
+                    let _ = w.send(&RpcCommand::GetSessionStats).await;
                 }
             }
         }
-        if generation.load(Ordering::SeqCst) == gen {
-            let _ = app.emit("pi-event", UiEvent::SessionEnd);
-        }
+        // pi exited (clean, crash, or stopped): drop the entry and notify the UI.
+        pump_sessions.lock().await.remove(&id);
+        let _ = app.emit(
+            "pi-event",
+            SessionEvent {
+                session: id,
+                event: UiEvent::SessionEnd,
+            },
+        );
     });
 
-    Ok(())
+    Ok(id)
 }
 
-/// Send a user prompt to the active session.
+/// Send a user prompt to a specific session.
 #[tauri::command]
-async fn send_prompt(state: State<'_, AppState>, text: String) -> Result<(), String> {
-    let writer_arc = state.writer.clone();
-    let mut guard = writer_arc.lock().await;
-    let writer = guard.as_mut().ok_or("no active session")?;
+async fn send_prompt(state: State<'_, AppState>, session: u64, text: String) -> Result<(), String> {
+    let mut map = state.sessions.lock().await;
+    let writer = map.get_mut(&session).ok_or("no such session")?;
     writer
         .send(&RpcCommand::Prompt { message: text })
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Stop a session: dropping its writer closes stdin, so pi exits and the pump
+/// emits `session_end`.
+#[tauri::command]
+async fn stop_session(state: State<'_, AppState>, session: u64) -> Result<(), String> {
+    state.sessions.lock().await.remove(&session);
+    Ok(())
 }
 
 /// List registered projects.
@@ -195,6 +206,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             spawn_session,
             send_prompt,
+            stop_session,
             list_projects,
             add_project,
             list_agents

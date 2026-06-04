@@ -21,55 +21,66 @@
     | { kind: "stats"; tokens: number; cost: number; context_pct: number | null }
     | { kind: "session_end" };
 
-  // Curated list for now; a `list_models` command (pi --list-models) comes later.
+  type Session = {
+    id: number;
+    projectName: string;
+    agent: string;
+    model: string;
+    items: Item[];
+    running: boolean;
+    status: "running" | "stopped";
+    modelLabel: string | null;
+    stats: { tokens: number; cost: number; context_pct: number | null } | null;
+  };
+
   const MODELS = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8", "gpt-5.5", "MiniMax-M3"];
 
+  // Projects + new-session config
   let projects = $state<Project[]>([]);
-  let active = $state<Project | null>(null);
+  let active = $state<Project | null>(null); // active project = context for new sessions
   let adding = $state(false);
   let newName = $state("");
   let newPath = $state("");
   let addError = $state<string | null>(null);
-
-  let model = $state(MODELS[0]);
   let agents = $state<Agent[]>([]);
   let agentName = $state("default");
-  let items = $state<Item[]>([]);
+  let model = $state(MODELS[0]);
+
+  // Sessions (runtime registry)
+  let sessions = $state<Session[]>([]);
+  let activeId = $state<number | null>(null);
   let input = $state("");
-  let running = $state(false);
-  let modelLabel = $state<string | null>(null);
-  let stats = $state<{ tokens: number; cost: number; context_pct: number | null } | null>(null);
   let error = $state<string | null>(null);
   let transcriptEl: HTMLElement | undefined = $state();
   let unlisten: UnlistenFn | null = null;
+
+  let activeSession = $derived(sessions.find((s) => s.id === activeId) ?? null);
 
   function scrollDown() {
     queueMicrotask(() => transcriptEl?.scrollTo({ top: transcriptEl.scrollHeight }));
   }
 
-  function appendText(delta: string) {
-    const last = items[items.length - 1];
-    if (last && last.type === "assistant") last.text += delta;
-    else items.push({ type: "assistant", text: delta });
-    scrollDown();
-  }
-
-  function handle(ev: UiEvent) {
+  function handle(sessionId: number, ev: UiEvent) {
+    const s = sessions.find((x) => x.id === sessionId);
+    if (!s) return;
     switch (ev.kind) {
       case "model":
-        modelLabel = `${ev.provider} / ${ev.id}`;
+        s.modelLabel = `${ev.provider} / ${ev.id}`;
         break;
-      case "text":
-        appendText(ev.delta);
+      case "text": {
+        const last = s.items[s.items.length - 1];
+        if (last && last.type === "assistant") last.text += ev.delta;
+        else s.items.push({ type: "assistant", text: ev.delta });
+        if (s.id === activeId) scrollDown();
         break;
+      }
       case "tool_start":
-        items.push({ type: "tool", id: ev.id, name: ev.name, args: ev.args, status: "running" });
-        scrollDown();
+        s.items.push({ type: "tool", id: ev.id, name: ev.name, args: ev.args, status: "running" });
+        if (s.id === activeId) scrollDown();
         break;
       case "tool_end":
-        // Match by call-id, not name — pi can run two same-named tools in parallel.
-        for (let i = items.length - 1; i >= 0; i--) {
-          const it = items[i];
+        for (let i = s.items.length - 1; i >= 0; i--) {
+          const it = s.items[i];
           if (it.type === "tool" && it.id === ev.id && it.status === "running") {
             it.status = ev.ok ? "ok" : "error";
             break;
@@ -77,15 +88,15 @@
         }
         break;
       case "stats":
-        stats = { tokens: ev.tokens, cost: ev.cost, context_pct: ev.context_pct };
+        s.stats = { tokens: ev.tokens, cost: ev.cost, context_pct: ev.context_pct };
         break;
       case "agent_end":
-        running = false;
+        s.running = false;
         break;
       case "session_end":
-        // Session ended (possibly a pi crash) — don't leave tool cards spinning.
-        for (const it of items) if (it.type === "tool" && it.status === "running") it.status = "error";
-        running = false;
+        for (const it of s.items) if (it.type === "tool" && it.status === "running") it.status = "error";
+        s.running = false;
+        s.status = "stopped";
         break;
       case "retry":
         break;
@@ -95,32 +106,14 @@
   async function loadProjects() {
     projects = await invoke<Project[]>("list_projects");
   }
-
   async function loadAgents(projectPath: string) {
     agents = await invoke<Agent[]>("list_agents", { project: projectPath });
     if (!agents.some((a) => a.name === agentName)) agentName = "default";
   }
-
-  async function newSession() {
-    if (!active) return;
-    items = [];
-    stats = null;
-    modelLabel = null;
-    running = false;
-    error = null;
-    try {
-      await invoke("spawn_session", { model, cwd: active.path, agent: agentName });
-    } catch (e) {
-      error = `Could not start a session: ${e}`;
-    }
-  }
-
   async function selectProject(p: Project) {
     active = p;
     await loadAgents(p.path);
-    await newSession();
   }
-
   async function addProject() {
     addError = null;
     try {
@@ -135,18 +128,59 @@
     }
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || running || !active) return;
-    items.push({ type: "user", text });
+  async function startSession() {
+    if (!active) return;
+    error = null;
+    try {
+      const id = await invoke<number>("spawn_session", { model, cwd: active.path, agent: agentName });
+      sessions.push({
+        id,
+        projectName: active.name,
+        agent: agentName,
+        model,
+        items: [],
+        running: false,
+        status: "running",
+        modelLabel: null,
+        stats: null,
+      });
+      activeId = id;
+      input = "";
+    } catch (e) {
+      error = `Could not start a session: ${e}`;
+    }
+  }
+
+  function selectSession(id: number) {
+    activeId = id;
     input = "";
-    running = true;
+    scrollDown();
+  }
+
+  async function closeSession(id: number) {
+    try {
+      await invoke("stop_session", { session: id });
+    } catch {
+      /* best-effort */
+    }
+    sessions = sessions.filter((s) => s.id !== id);
+    if (activeId === id) activeId = sessions[sessions.length - 1]?.id ?? null;
+  }
+
+  async function send() {
+    const s = activeSession;
+    if (!s || s.running || s.status === "stopped") return;
+    const text = input.trim();
+    if (!text) return;
+    s.items.push({ type: "user", text });
+    input = "";
+    s.running = true;
     error = null;
     scrollDown();
     try {
-      await invoke("send_prompt", { text });
+      await invoke("send_prompt", { session: s.id, text });
     } catch (e) {
-      running = false;
+      s.running = false;
       error = `Send failed: ${e}`;
     }
   }
@@ -160,7 +194,9 @@
 
   onMount(() => {
     let alive = true;
-    listen<UiEvent>("pi-event", (e) => handle(e.payload)).then((fn) => {
+    listen<{ session: number; event: UiEvent }>("pi-event", (e) =>
+      handle(e.payload.session, e.payload.event)
+    ).then((fn) => {
       if (alive) unlisten = fn;
       else fn();
     });
@@ -168,9 +204,7 @@
       .then(() => {
         if (alive && projects.length > 0) selectProject(projects[0]);
       })
-      .catch((e) => {
-        error = `Could not load projects: ${e}`;
-      });
+      .catch((e) => (error = `Could not load projects: ${e}`));
     return () => {
       alive = false;
       unlisten?.();
@@ -189,7 +223,6 @@
         <span class="p-path">{p.path}</span>
       </button>
     {/each}
-
     {#if adding}
       <div class="add-form">
         <input bind:value={newName} placeholder="name" />
@@ -205,45 +238,68 @@
     {/if}
 
     {#if active}
-      <div class="section-label">Session</div>
-      <button class="session active" onclick={newSession}>new session ↻</button>
+      <div class="section-label">New session · {active.name}</div>
+      <div class="new-session">
+        <select bind:value={agentName} title="Agent (system prompt)">
+          {#each agents as a}<option value={a.name}>{a.name}</option>{/each}
+        </select>
+        <select bind:value={model} title="Model">
+          {#each MODELS as m}<option value={m}>{m}</option>{/each}
+        </select>
+        <button class="primary start" onclick={startSession}>+ start session</button>
+      </div>
+    {/if}
+
+    {#if sessions.length > 0}
+      <div class="section-label">Sessions</div>
+      {#each sessions as s}
+        <div class="session-row" class:active={s.id === activeId}>
+          <button class="session-pick" onclick={() => selectSession(s.id)}>
+            <span class="dot {s.status}" class:busy={s.running}></span>
+            <span class="s-title">{s.agent} · {s.model}</span>
+            <span class="s-proj">{s.projectName}</span>
+          </button>
+          <button class="session-close" title="Close session" onclick={() => closeSession(s.id)}>✕</button>
+        </div>
+      {/each}
     {/if}
   </aside>
 
   <main class="main">
-    {#if !active}
+    {#if projects.length === 0}
       <div class="empty">
         <h2>No project yet</h2>
         <p>Add a project directory to start chatting with an agent in it.</p>
         <button class="primary" onclick={() => (adding = true)}>+ add project</button>
       </div>
+    {:else if !activeSession}
+      <div class="empty">
+        <h2>No session</h2>
+        <p>Pick a project, choose an agent + model in the sidebar, and start a session.</p>
+        {#if active}<button class="primary" onclick={startSession}>+ start session</button>{/if}
+      </div>
     {:else}
       <header class="topbar">
-        <span class="project-chip">{active.name}</span>
-        <select bind:value={agentName} onchange={newSession} title="Agent (system prompt)">
-          {#each agents as a}<option value={a.name}>{a.name}</option>{/each}
-        </select>
-        <select bind:value={model} onchange={newSession} title="Model">
-          {#each MODELS as m}<option value={m}>{m}</option>{/each}
-        </select>
-        <span class="model">{modelLabel ?? "…"}</span>
+        <span class="project-chip">{activeSession.projectName}</span>
+        <span class="summary">{activeSession.agent} · {activeSession.model}</span>
+        <span class="model">{activeSession.modelLabel ?? "…"}</span>
+        {#if activeSession.status === "stopped"}<span class="stopped-tag">stopped</span>{/if}
         <span class="spacer"></span>
-        {#if stats}
+        {#if activeSession.stats}
           <span class="gauge"
-            >ctx {stats.context_pct ?? "–"}% · {stats.tokens} tok · ${stats.cost.toFixed(4)}</span
+            >ctx {activeSession.stats.context_pct ?? "–"}% · {activeSession.stats.tokens} tok · ${activeSession.stats.cost.toFixed(
+              4
+            )}</span
           >
         {/if}
       </header>
 
       {#if error}
-        <div class="banner">
-          <span>{error}</span>
-          <button onclick={() => (error = null)}>✕</button>
-        </div>
+        <div class="banner"><span>{error}</span><button onclick={() => (error = null)}>✕</button></div>
       {/if}
 
       <section class="transcript" bind:this={transcriptEl}>
-        {#each items as item}
+        {#each activeSession.items as item}
           {#if item.type === "user"}
             <div class="msg user">{item.text}</div>
           {:else if item.type === "assistant"}
@@ -258,17 +314,22 @@
             </div>
           {/if}
         {/each}
-        {#if running}<div class="thinking">▍</div>{/if}
+        {#if activeSession.running}<div class="thinking">▍</div>{/if}
       </section>
 
       <footer class="composer">
         <textarea
           bind:value={input}
           onkeydown={onKeydown}
-          placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+          placeholder={activeSession.status === "stopped"
+            ? "Session stopped — start a new one to continue"
+            : "Message the agent…  (Enter to send, Shift+Enter for newline)"}
           rows="2"
+          disabled={activeSession.status === "stopped"}
         ></textarea>
-        <button onclick={send} disabled={running}>Send</button>
+        <button onclick={send} disabled={activeSession.running || activeSession.status === "stopped"}
+          >Send</button
+        >
       </footer>
     {/if}
   </main>
@@ -277,7 +338,7 @@
 <style>
   .app {
     display: grid;
-    grid-template-columns: 230px 1fr;
+    grid-template-columns: 240px 1fr;
     height: 100vh;
   }
   .sidebar {
@@ -300,7 +361,7 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.6px;
-    padding: 10px 8px 4px;
+    padding: 12px 8px 4px;
   }
   .sidebar button {
     text-align: left;
@@ -330,10 +391,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .session.active {
-    background: var(--surface);
-    color: var(--text-bright);
   }
   .new {
     color: var(--text-muted);
@@ -369,6 +426,79 @@
     color: var(--void) !important;
     font-weight: 600;
     border: none !important;
+  }
+  .new-session {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 4px 4px;
+  }
+  .new-session select {
+    background: var(--surface);
+    color: var(--text-bright);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+  }
+  .new-session .start {
+    text-align: center;
+    padding: 7px;
+  }
+  .session-row {
+    display: flex;
+    align-items: center;
+    border-radius: 6px;
+  }
+  .session-row.active {
+    background: var(--surface);
+  }
+  .session-pick {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .session-pick .s-title {
+    color: var(--text-bright);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-pick .s-proj {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: auto;
+    flex: none;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .dot.running {
+    background: var(--aurora);
+  }
+  .dot.stopped {
+    background: var(--text-muted);
+  }
+  .dot.busy {
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
+  .session-close {
+    color: var(--text-muted) !important;
+    padding: 4px 8px !important;
+    flex: none;
+  }
+  .session-close:hover {
+    color: var(--ember) !important;
   }
   .main {
     display: flex;
@@ -406,18 +536,21 @@
     color: var(--ice);
     font-weight: 600;
   }
-  .topbar select {
-    background: var(--surface);
-    color: var(--text-bright);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 8px;
-    font: inherit;
+  .topbar .summary {
+    color: var(--text-subtle);
+    font-size: 13px;
   }
   .topbar .model {
     color: var(--text-muted);
     font-family: var(--mono);
     font-size: 12px;
+  }
+  .topbar .stopped-tag {
+    color: var(--ember);
+    font-size: 11px;
+    border: 1px solid var(--ember);
+    border-radius: 4px;
+    padding: 1px 6px;
   }
   .topbar .spacer {
     flex: 1;
@@ -525,6 +658,9 @@
     border-radius: 8px;
     padding: 10px 12px;
     font: inherit;
+  }
+  .composer textarea:disabled {
+    opacity: 0.6;
   }
   .composer button {
     background: var(--ice);
