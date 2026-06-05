@@ -4,13 +4,28 @@ if (process.env.KILD_ROLE === 'worker') {
   await (await import('./worker.ts')).runWorker();
 }
 
+import { execFile as execFileCb } from 'node:child_process';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
 import { Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
-import { addProject, loadProjects } from './kild/projects.ts';
+import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import { type Outbound, sessionManager } from './kild/sessions.ts';
+import {
+  assertSafeBranch,
+  listWorktrees,
+  pruneMergedWorktrees,
+  removeWorktree,
+  worktreePath,
+  worktreesRoot,
+} from './kild/worktree.ts';
+
+const execFile = promisify(execFileCb);
+const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const PORT = Number(process.env.KILD_PORT ?? 4517);
 // Bind to loopback only: the engine holds the user's OAuth and runs bash in their
@@ -50,6 +65,81 @@ app.post('/api/projects', async (c) => {
 // ── Agents ────────────────────────────────────────────────────────────────────
 app.get('/api/agents', async (c) => c.json(await listAgents(c.req.query('project'))));
 
+// ── Worktrees ─────────────────────────────────────────────────────────────────
+// A project query may be a registered name or a raw path (the cockpit passes the
+// path; the CLI a name). Worktree names a live session is using are never pruned.
+async function resolveProjectPath(q: string | undefined): Promise<string | null> {
+  if (!q) return null;
+  return (await findProject(q))?.path ?? q;
+}
+const worktreesInUse = (): Set<string> =>
+  new Set(
+    sessionManager
+      .list()
+      .map((s) => s.worktree)
+      .filter((w): w is string => typeof w === 'string'),
+  );
+
+app.get('/api/worktrees', async (c) => {
+  const repo = await resolveProjectPath(c.req.query('project'));
+  if (!repo) return c.json({ error: 'project required' }, 400);
+  try {
+    await pruneMergedWorktrees(repo, worktreesInUse()); // prune-merged on every list
+    const trees = (await listWorktrees(repo)).filter((t) => t.branch.startsWith('kild/'));
+    return c.json(trees);
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
+app.delete('/api/worktrees', async (c) => {
+  const { project, name } = await c.req.json<{ project: string; name: string }>();
+  const repo = await resolveProjectPath(project);
+  if (!repo) return c.json({ error: 'project required' }, 400);
+  try {
+    assertSafeBranch(name); // allowlist before building a path under worktreesRoot()
+    if (worktreesInUse().has(name)) {
+      return c.json({ error: `worktree '${name}' is in use by a live session` }, 409);
+    }
+    await removeWorktree(repo, worktreePath(name));
+    return c.json({ ok: true, name });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
+app.post('/api/worktrees/prune', async (c) => {
+  const { project } = await c.req.json<{ project: string }>();
+  const repo = await resolveProjectPath(project);
+  if (!repo) return c.json({ error: 'project required' }, 400);
+  try {
+    const pruned = await pruneMergedWorktrees(repo, worktreesInUse());
+    return c.json({ pruned });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
+// ── Open in OS ────────────────────────────────────────────────────────────────
+// Reveal a worktree path in the OS file browser. Only paths under the worktree root
+// are allowed — the engine is loopback-only but must never shell `open` on an
+// arbitrary path. Keeps the cockpit pure-web (no Tauri opener API needed).
+app.post('/api/open', async (c) => {
+  const { path: target } = await c.req.json<{ path: string }>();
+  const root = worktreesRoot();
+  const resolved = path.resolve(target ?? '');
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    return c.json({ error: 'path is not under the worktree root' }, 403);
+  }
+  try {
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+    await execFile(opener, [resolved]);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
@@ -66,6 +156,7 @@ type ClientMessage =
       agent?: string;
       projectName?: string;
       origin?: 'ui' | 'cli';
+      worktree?: string;
     }
   | { type: 'prompt'; id: string; text: string }
   | { type: 'stop'; id: string };
@@ -80,7 +171,11 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
   if (typeof m.id !== 'string') return null;
-  if (m.type === 'spawn' || m.type === 'stop') return m as ClientMessage;
+  if (m.type === 'spawn') {
+    if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
+    return m as ClientMessage;
+  }
+  if (m.type === 'stop') return m as ClientMessage;
   if (m.type === 'prompt' && typeof m.text === 'string') return m as ClientMessage;
   return null;
 }
@@ -116,5 +211,21 @@ app.get(
 );
 
 console.log(`kild-engine listening on http://${HOST}:${PORT}`);
+
+// One-shot merge-prune on start: clean up worktrees whose kild/* branch already
+// landed in the default branch. Fire-and-forget per registered project; no timer.
+void loadProjects()
+  .then((projects) =>
+    Promise.all(
+      projects.map((p) =>
+        pruneMergedWorktrees(p.path, worktreesInUse()).catch((err) => {
+          // A non-git/unreadable project dir is expected (skip quietly-ish); anything
+          // else is logged rather than hidden.
+          console.warn(`kild: startup prune skipped ${p.name}: ${errText(err)}`);
+        }),
+      ),
+    ),
+  )
+  .catch((err) => console.warn(`kild: startup prune failed: ${errText(err)}`));
 
 export default { port: PORT, hostname: HOST, fetch: app.fetch, websocket };

@@ -41,6 +41,9 @@ driven from the cockpit UI over the engine's WebSocket, not the CLI.)
 | `kild project rm <name>` | Remove a project |
 | `kild agent ls [--project <dir>]` | List available agents (built-in `default` + convention dirs) |
 | `kild agent show <name> [--project <dir>]` | Print an agent's resolved system prompt |
+| `kild worktree ls --project <p>` | List the project's `kild/*` worktrees |
+| `kild worktree rm <name> --project <p>` | Remove a worktree (frees disk; the `kild/<name>` branch persists) |
+| `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only; dirty/in-use ones are kept) |
 
 Add `--json` to any command for machine-readable output on stdout.
 
@@ -55,7 +58,7 @@ Add `--json` to any command for machine-readable output on stdout.
 ## `kild run`
 
 ```
-kild run [--project <name>] [--agent <name>] [--model <pattern>] <prompt…>
+kild run [--project <name>] [--agent <name>] [--model <pattern>] [--worktree <name>] <prompt…>
 ```
 
 - **cwd** — defaults to the **current directory** (the agent works wherever you
@@ -65,6 +68,11 @@ kild run [--project <name>] [--agent <name>] [--model <pattern>] <prompt…>
   role). Omit for the plain `default` agent. List options with `kild agent ls`.
 - **`--model <pattern>`** — e.g. `claude-opus-4-8`, `claude-haiku-4-5`. Omit to use
   pi's configured default.
+- **`--worktree <name>`** — run the agent in an isolated `kild/<name>` **git
+  worktree** instead of the project dir, so concurrent agents on one repo don't
+  collide. Created if missing, **attached** if it already exists (two runs with the
+  same name share a tree). Omit to run in the main checkout. The worktree **persists**
+  after the run — review/merge `kild/<name>`, then `kild worktree rm <name>`.
 
 ### `--json` result shape (`RunOutcome`)
 
@@ -104,6 +112,17 @@ Run in a specific directory (e.g. a worktree) with a fast model:
 ```bash
 cd /path/to/worktree
 kild run --model claude-haiku-4-5 "Run the tests and report failures."
+```
+
+Run two agents on one repo in isolation, then review + clean up their branches:
+
+```bash
+kild run --project myapp --worktree fix-auth --json "Fix the auth bug." 2>/dev/null &
+kild run --project myapp --worktree add-logs --json "Add request logging." 2>/dev/null &
+wait
+kild worktree ls --project myapp --json   # each on its own kild/<name>
+# after reviewing/merging kild/fix-auth:
+kild worktree rm fix-auth --project myapp
 ```
 
 Register a project, then list agents available to it:

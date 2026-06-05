@@ -2,6 +2,8 @@
   import Dropdown from "./Dropdown.svelte";
   import type { Agent } from "../types";
 
+  type RunMode = "main" | "new" | "existing";
+
   interface Props {
     isOpen: boolean;
     agents: Agent[];
@@ -9,6 +11,10 @@
     model: string;
     models: string[];
     projectName: string;
+    worktrees: string[];
+    runMode: RunMode;
+    worktreeName: string;
+    existingWorktree: string;
     onStart: () => void;
     onClose: () => void;
   }
@@ -20,6 +26,10 @@
     model = $bindable(),
     models,
     projectName,
+    worktrees,
+    runMode = $bindable(),
+    worktreeName = $bindable(),
+    existingWorktree = $bindable(),
     onStart,
     onClose,
   }: Props = $props();
@@ -77,6 +87,42 @@
       <div class="form-group">
         <span class="field-label">Select Model</span>
         <Dropdown bind:value={model} options={models} label="Model" />
+      </div>
+
+      <div class="form-group">
+        <span class="field-label">Run in</span>
+        <div class="run-toggle">
+          <button type="button" class:selected={runMode === "main"} onclick={() => (runMode = "main")}>
+            main checkout
+          </button>
+          <button type="button" class:selected={runMode === "new"} onclick={() => (runMode = "new")}>
+            new worktree
+          </button>
+          <button
+            type="button"
+            class:selected={runMode === "existing"}
+            disabled={worktrees.length === 0}
+            title={worktrees.length === 0 ? "No existing worktrees" : ""}
+            onclick={() => (runMode = "existing")}
+          >
+            existing
+          </button>
+        </div>
+
+        {#if runMode === "new"}
+          <input
+            class="wt-input"
+            type="text"
+            placeholder="branch name, e.g. fix-auth"
+            bind:value={worktreeName}
+          />
+          <span class="hint">Isolated on <code>kild/{worktreeName || "<name>"}</code>.</span>
+        {:else if runMode === "existing"}
+          <Dropdown bind:value={existingWorktree} options={worktrees} label="Worktree" />
+          <span class="hint">Attach to the existing <code>kild/{existingWorktree}</code> tree (shared).</span>
+        {:else}
+          <span class="hint">Runs in the project's main checkout — no isolation.</span>
+        {/if}
       </div>
     </div>
 
@@ -208,6 +254,63 @@
     letter-spacing: 0.5px;
     color: var(--text-muted);
     font-weight: 600;
+  }
+
+  .run-toggle {
+    display: flex;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .run-toggle button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .run-toggle button:hover:not(.selected):not(:disabled) {
+    color: var(--text-bright);
+  }
+  .run-toggle button.selected {
+    background: var(--surface);
+    color: var(--ice);
+    box-shadow: var(--shadow-subtle);
+  }
+  .run-toggle button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .wt-input {
+    background: var(--surface);
+    color: var(--text-bright);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .wt-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: var(--glow-ice);
+  }
+
+  .hint {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .hint code {
+    font-family: var(--mono);
+    color: var(--ice);
   }
 
   .modal-footer {

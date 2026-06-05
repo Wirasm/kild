@@ -6,9 +6,18 @@
   import Composer from "$lib/components/Composer.svelte";
   import ProjectModal from "$lib/components/ProjectModal.svelte";
   import SessionModal from "$lib/components/SessionModal.svelte";
-  import { EngineSocket, addProject as apiAddProject, listAgents, listProjects } from "$lib/api";
+  import {
+    EngineSocket,
+    addProject as apiAddProject,
+    listAgents,
+    listProjects,
+    listWorktrees,
+    removeWorktree as apiRemoveWorktree,
+    pruneWorktrees as apiPruneWorktrees,
+    openWorktree as apiOpenWorktree,
+  } from "$lib/api";
 
-  import type { Project, Agent, UiEvent, Session, SessionInfo } from "$lib/types";
+  import type { Project, Agent, UiEvent, Session, SessionInfo, Worktree } from "$lib/types";
 
   const MODELS = [
     "anthropic/claude-haiku-4-5",
@@ -29,6 +38,15 @@
   let agents = $state<Agent[]>([]);
   let agentName = $state("default");
   let model = $state(MODELS[0]);
+
+  // Run-location for a new session: main checkout (default), a new worktree, or an
+  // existing one (attach). `worktrees` holds the active project's `kild/*` trees.
+  let runMode = $state<"main" | "new" | "existing">("main");
+  let worktreeName = $state("");
+  let existingWorktree = $state("");
+  let worktrees = $state<Worktree[]>([]);
+  // The engine carries each worktree's name (branch minus `kild/`); that's the id spawn expects.
+  let worktreeNames = $derived(worktrees.map((w) => w.name ?? w.branch));
 
   $effect(() => {
     if (typeof localStorage !== "undefined") {
@@ -115,6 +133,7 @@
     } catch (e) {
       error = `Could not load agents: ${e}`;
     }
+    refreshWorktrees();
   }
   async function addProject() {
     addError = null;
@@ -130,11 +149,36 @@
     }
   }
 
+  // Open the new-session modal: load the project's worktrees (so "existing" can
+  // attach) and seed a suggested name for "new" (editable).
+  async function openSessionModal() {
+    runMode = "main";
+    existingWorktree = "";
+    worktreeName = `${agentName}-${crypto.randomUUID().slice(0, 4)}`;
+    startingSession = true;
+    if (active) {
+      try {
+        worktrees = await listWorktrees(active.path);
+      } catch (e) {
+        worktrees = [];
+        error = `Could not load worktrees: ${e instanceof Error ? e.message : e}`;
+      }
+    }
+  }
+
+  // Resolve the selected run-location to a worktree name (undefined = main checkout).
+  function selectedWorktree(): string | undefined {
+    if (runMode === "new") return worktreeName.trim() || undefined;
+    if (runMode === "existing") return existingWorktree || undefined;
+    return undefined;
+  }
+
   function startSession() {
     if (!active || !socket) return;
     error = null;
+    const worktree = selectedWorktree();
     const id = crypto.randomUUID();
-    socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name });
+    socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name, worktree });
     ownedIds.add(id);
     sessions.push({
       id,
@@ -147,10 +191,49 @@
       modelLabel: null,
       stats: null,
       origin: "ui",
+      // Instant chip; the on-disk worktreePath arrives via the engine broadcast.
+      branch: worktree ? `kild/${worktree}` : undefined,
     });
     activeId = id;
     input = "";
     startingSession = false;
+  }
+
+  async function refreshWorktrees() {
+    if (!active) return;
+    try {
+      worktrees = await listWorktrees(active.path);
+    } catch (e) {
+      error = `Could not load worktrees: ${e instanceof Error ? e.message : e}`;
+    }
+  }
+
+  async function removeWorktree(name: string) {
+    if (!active) return;
+    try {
+      await apiRemoveWorktree(active.path, name);
+      await refreshWorktrees();
+    } catch (e) {
+      error = `Could not remove worktree: ${e instanceof Error ? e.message : e}`;
+    }
+  }
+
+  async function pruneWorktrees() {
+    if (!active) return;
+    try {
+      await apiPruneWorktrees(active.path);
+      await refreshWorktrees();
+    } catch (e) {
+      error = `Could not prune worktrees: ${e instanceof Error ? e.message : e}`;
+    }
+  }
+
+  async function onOpenWorktree(path: string) {
+    try {
+      await apiOpenWorktree(path);
+    } catch (e) {
+      error = `Could not open worktree: ${e instanceof Error ? e.message : e}`;
+    }
   }
 
   function selectSession(id: string) {
@@ -187,9 +270,15 @@
   function reconcileSessions(infos: SessionInfo[]) {
     const live = new Set(infos.map((i) => i.id));
     sessions = sessions.filter((s) => ownedIds.has(s.id) || live.has(s.id));
-    const known = new Set(sessions.map((s) => s.id));
     for (const info of infos) {
-      if (known.has(info.id)) continue;
+      const existing = sessions.find((s) => s.id === info.id);
+      if (existing) {
+        // Patch in branch/worktreePath now the engine has broadcast them (owned
+        // sessions get their on-disk path here; the chip was already set on spawn).
+        if (info.branch) existing.branch = info.branch;
+        if (info.worktreePath) existing.worktreePath = info.worktreePath;
+        continue;
+      }
       sessions.push({
         id: info.id,
         projectName: info.projectName ?? info.cwd ?? "—",
@@ -201,6 +290,8 @@
         modelLabel: null,
         stats: null,
         origin: info.origin,
+        branch: info.branch,
+        worktreePath: info.worktreePath,
       });
     }
     if (activeId && !sessions.some((s) => s.id === activeId)) {
@@ -253,11 +344,14 @@
     bind:addError={addError}
     bind:sessions={sessions}
     bind:activeId={activeId}
+    worktrees={worktrees}
     onSelectProject={selectProject}
     onAddProject={addProject}
-    onNewSession={() => (startingSession = true)}
+    onNewSession={openSessionModal}
     onSelectSession={selectSession}
     onCloseSession={closeSession}
+    onRemoveWorktree={removeWorktree}
+    onPruneWorktrees={pruneWorktrees}
   />
 
   <ProjectModal
@@ -276,6 +370,10 @@
     bind:model={model}
     models={MODELS}
     projectName={active?.name ?? ""}
+    worktrees={worktreeNames}
+    bind:runMode={runMode}
+    bind:worktreeName={worktreeName}
+    bind:existingWorktree={existingWorktree}
     onStart={startSession}
     onClose={() => (startingSession = false)}
   />
@@ -298,10 +396,10 @@
       <div class="empty">
         <h2>No session</h2>
         <p>Pick a project, choose an agent + model, and start a session.</p>
-        {#if active}<button class="primary" onclick={() => (startingSession = true)}>+ start session</button>{/if}
+        {#if active}<button class="primary" onclick={openSessionModal}>+ start session</button>{/if}
       </div>
     {:else}
-      <Topbar activeSession={activeSession} />
+      <Topbar activeSession={activeSession} onOpenWorktree={onOpenWorktree} />
 
       <Ledger items={activeSession.items} running={activeSession.running} />
 

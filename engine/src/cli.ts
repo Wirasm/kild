@@ -12,6 +12,14 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import {
+  ensureWorktree,
+  listWorktrees,
+  pruneMergedWorktrees,
+  removeWorktree,
+  type Worktree,
+  worktreePath,
+} from './kild/worktree.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -20,6 +28,7 @@ const { values, positionals } = parseArgs({
     project: { type: 'string' },
     agent: { type: 'string' },
     model: { type: 'string' },
+    worktree: { type: 'string' },
   },
 });
 
@@ -41,10 +50,12 @@ async function dispatch(): Promise<void> {
       return project(action, rest);
     case 'agent':
       return agent(action, rest);
+    case 'worktree':
+      return worktree(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|run> …');
+      console.error('usage: kild <project|agent|worktree|run> …');
       process.exit(2);
   }
 }
@@ -91,6 +102,69 @@ async function agent(action: string | undefined, args: string[]): Promise<void> 
   }
 }
 
+// REST helper for the worktree group when routing through a live engine. Surfaces
+// the engine's error body (e.g. a 409 when a worktree is in use by a live session).
+async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(`${ENGINE}${path}`, init);
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `${path} failed (${r.status})`);
+  }
+  return r.json() as Promise<T>;
+}
+
+async function worktree(action: string | undefined, args: string[]): Promise<void> {
+  const repo = values.project
+    ? ((await findProject(values.project))?.path ?? values.project)
+    : undefined;
+  if (!repo) throw new Error('--project <name|path> is required');
+  const q = `project=${encodeURIComponent(repo)}`;
+
+  // When the engine is up it owns the live sessions, so route mutations through it —
+  // its endpoints skip worktrees a running session is using. When it's down, no live
+  // session can exist, so operating directly is safe (and `ls` is read-only).
+  const engineUp = await fetch(`${ENGINE}/api/health`)
+    .then((r) => r.ok)
+    .catch(() => false);
+
+  if (action === 'ls') {
+    const trees = engineUp
+      ? await engineFetch<Worktree[]>(`/api/worktrees?${q}`)
+      : (await listWorktrees(repo)).filter((t) => t.branch.startsWith('kild/'));
+    if (json) return void console.log(JSON.stringify(trees, null, 2));
+    if (trees.length === 0) return void console.error('no kild worktrees');
+    for (const t of trees) console.log(`${t.branch}\t${t.path}`);
+  } else if (action === 'rm') {
+    const [name] = args;
+    if (!name) throw new Error('usage: kild worktree rm <name> --project <p>');
+    if (engineUp) {
+      await engineFetch(`/api/worktrees`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: repo, name }),
+      });
+    } else {
+      await removeWorktree(repo, worktreePath(name));
+    }
+    if (json) console.log(JSON.stringify({ ok: true, name }, null, 2));
+    else console.log(`removed worktree ${name}`);
+  } else if (action === 'prune') {
+    const pruned = engineUp
+      ? (
+          await engineFetch<{ pruned: string[] }>(`/api/worktrees/prune`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ project: repo }),
+          })
+        ).pruned
+      : await pruneMergedWorktrees(repo);
+    if (json) console.log(JSON.stringify({ pruned }, null, 2));
+    else console.log(pruned.length ? `pruned: ${pruned.join(', ')}` : 'nothing to prune');
+  } else {
+    throw new Error('usage: kild worktree <ls|rm|prune> --project <p>');
+  }
+}
+
 async function run(prompt: string): Promise<void> {
   if (!prompt) throw new Error('usage: kild run <prompt…>');
   // If the engine is up, run THROUGH it so the session shows up in the cockpit;
@@ -122,6 +196,7 @@ async function runViaEngine(prompt: string): Promise<void> {
           agent: values.agent,
           projectName: values.project,
           origin: 'cli',
+          worktree: values.worktree,
         }),
       );
       ws.send(JSON.stringify({ type: 'prompt', id, text: prompt }));
@@ -164,6 +239,10 @@ async function runViaEngine(prompt: string): Promise<void> {
 
 async function runInProcess(prompt: string): Promise<void> {
   const projectPath = values.project ? (await findProject(values.project))?.path : undefined;
+  let cwd = projectPath ?? process.cwd();
+  // Engine-down fallback: replicate the worker's create-or-attach so `--worktree`
+  // isolates standalone runs too.
+  if (values.worktree) cwd = (await ensureWorktree(cwd, values.worktree)).path;
 
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
@@ -173,7 +252,7 @@ async function runInProcess(prompt: string): Promise<void> {
     model,
     authStorage,
     modelRegistry: registry,
-    cwd: projectPath ?? process.cwd(),
+    cwd,
   });
 
   let text = '';

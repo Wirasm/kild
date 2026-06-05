@@ -118,19 +118,22 @@ kild/
 │   ├── package.json            #   bin: kild → src/cli.ts
 │   ├── biome.jsonc
 │   ├── src/
-│   │   ├── server.ts           #   Hono HTTP (projects/agents) + WS (sessions) — cockpit backend + daemon
-│   │   ├── cli.ts              #   the `kild` CLI (project/agent/run); thin, delegates to the lib
-│   │   └── kild/               #   shared library
-│   │       ├── config.ts       #     default model + state dir (~/.config/kild via $KILD_HOME)
-│   │       ├── projects.ts     #     project registry (a project = a directory an agent works in)
-│   │       ├── agents.ts       #     agents read from .kild/.claude/.pi convention dirs
-│   │       ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream
-│   │       ├── worktree.ts     #     git worktrees (+ a Flue local() sandbox over a worktree)
-│   │       ├── run.ts          #     [Flue layer] one-shot run via Flue
-│   │       ├── rooms.ts        #     [Flue layer] agent-to-agent rooms (peer comms)
-│   │       ├── brain.ts        #     [Flue layer] operator-mirror agent (kild capabilities as tools)
-│   │       ├── observability.ts#     [Flue layer] observe() → cockpit event log
-│   │       └── auth.ts         #     [Flue layer] bridge ~/.pi auth into the Flue runtime
+│   │   ├── server.ts           #   Hono HTTP (projects/agents/worktrees/open) + WS (sessions) — cockpit backend + daemon
+│   │   ├── cli.ts              #   the `kild` CLI (project/agent/worktree/run); thin, delegates to the lib
+│   │   ├── worker.ts           #   per-session subprocess; ensures the worktree, then createAgentSession({cwd})
+│   │   ├── kild/               #   shared library
+│   │   │   ├── config.ts       #     default model + state dir (~/.config/kild via $KILD_HOME)
+│   │   │   ├── projects.ts     #     project registry (a project = a directory an agent works in)
+│   │   │   ├── agents.ts       #     agents read from .kild/.claude/.pi convention dirs
+│   │   │   ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream
+│   │   │   ├── worktree.ts     #     [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (NO @flue)
+│   │   │   ├── run.ts          #     [Flue layer] one-shot run via Flue
+│   │   │   ├── rooms.ts        #     [Flue layer] agent-to-agent rooms (peer comms)
+│   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild capabilities as tools)
+│   │   │   ├── observability.ts#     [Flue layer] observe() → cockpit event log
+│   │   │   └── auth.ts         #     [Flue layer] bridge ~/.pi auth into the Flue runtime
+│   │   └── flue/               #   [Flue layer] Flue-promotable mechanisms
+│   │       └── worktree-sandbox.ts #  worktree() SandboxFactory (self-contained; upstream contribution)
 │   └── src/workflows/          #   [Flue layer] runnable Flue workflows (rooms/brain/merge/run demos)
 └── app/                        # the cockpit — Tauri 2 + SvelteKit
     ├── src/
@@ -153,6 +156,14 @@ kild/
   workflows (rooms, brain, merge team) — and is the upstream we contribute to.
 - **The cockpit is a web client.** The frontend reaches the engine over HTTP + WS
   only; the Tauri shell hosts the webview and nothing else.
+- **The worktree boundary.** kild owns worktree *policy* — the `kild/<name>` naming,
+  the `$KILD_HOME/worktrees/<name>` path, validation, create-or-attach, merge-prune,
+  the cockpit UI. That logic lives in `engine/src/kild/worktree.ts` and is on the
+  session hot path, so it has **no `@flue` import**. The general *mechanism* — a
+  `worktree()` SandboxFactory — lives in `engine/src/flue/worktree-sandbox.ts`,
+  self-contained (no `kild/*` imports) so it can be lifted into Flue verbatim.
+  Worktrees **persist**: a session closing never removes one; only an explicit
+  `kild worktree rm` / UI action or the automatic merge-prune does.
 
 ### Naming conventions
 
@@ -164,11 +175,16 @@ kild/
 
 ## The cockpit ↔ engine protocol
 
-- **REST:** `GET /api/projects`, `POST /api/projects`, `GET /api/agents?project=…`.
+- **REST:** `GET /api/projects`, `POST /api/projects`, `GET /api/agents?project=…`,
+  `GET /api/worktrees?project=…`, `DELETE /api/worktrees` (`{project,name}`),
+  `POST /api/worktrees/prune` (`{project}`), `POST /api/open` (`{path}`, scoped to the
+  worktree root).
 - **WebSocket** `/ws`: client → `{type:'spawn'|'prompt'|'stop', id, …}`; server →
   `{session, event}` where `event` is a `UiEvent`
   (`model | text | tool_start | tool_end | retry | agent_end | stats | session_end`).
-  Session ids are client-generated UUIDs.
+  Session ids are client-generated UUIDs. A `spawn` may carry `worktree` (a name) to
+  run the agent in an isolated `kild/<name>` worktree; `SessionInfo` then carries
+  `branch` + `worktreePath`.
 
 ## Brand / Design
 

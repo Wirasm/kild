@@ -1,12 +1,18 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 
 import type { UiEvent } from './events.ts';
+import { worktreePath, worktreeRef } from './worktree.ts';
 
 export interface SpawnRequest {
   model?: string;
   cwd?: string;
   agent?: string;
   projectName?: string;
+  /** Worktree *name* (not path). Absent → run in the project's main checkout.
+   *  Present → the worker ensures `kild/<name>` and runs the agent there. Two
+   *  sessions naming the same worktree share its tree (attach); different names
+   *  split. The worker creates-or-attaches from `cwd` (the repo). */
+  worktree?: string;
 }
 
 /** Metadata the cockpit shows for a session — including ones the CLI started. */
@@ -17,6 +23,12 @@ export interface SessionInfo {
   agent?: string;
   projectName?: string;
   origin: 'ui' | 'cli';
+  /** The selected worktree's name (echoed for the worktrees-in-use cross-check). */
+  worktree?: string;
+  /** `kild/<name>` ref, when the session runs in a worktree (else undefined). */
+  branch?: string;
+  /** Deterministic on-disk worktree path, when the session runs in a worktree. */
+  worktreePath?: string;
 }
 
 /** A message broadcast to every connected client. */
@@ -39,6 +51,8 @@ class PiSession {
         KILD_MODEL: req.model ?? '',
         KILD_CWD: req.cwd ?? process.cwd(),
         KILD_AGENT: req.agent ?? '',
+        // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
+        KILD_WORKTREE: req.worktree ?? '',
       },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -106,6 +120,23 @@ class SessionManager {
       projectName: req.projectName,
       origin,
     };
+    if (req.worktree) {
+      // Deterministic derivation (no await → spawn stays synchronous, no race).
+      // A bad name throws here; surface it as an error for this id rather than
+      // throwing out of spawn() and aborting the whole connection's frame.
+      try {
+        info.worktree = req.worktree;
+        info.branch = worktreeRef(req.worktree);
+        info.worktreePath = worktreePath(req.worktree);
+      } catch (err) {
+        this.broadcast({
+          session: id,
+          event: { kind: 'error', message: err instanceof Error ? err.message : String(err) },
+        });
+        this.broadcast({ session: id, event: { kind: 'session_end' } });
+        return;
+      }
+    }
     const session = new PiSession(req, (event) => {
       this.broadcast({ session: id, event });
       if (event.kind === 'session_end') {
@@ -124,6 +155,10 @@ class SessionManager {
   stop(id: string): void {
     const entry = this.sessions.get(id);
     if (!entry) return;
+    // Deliberately does NOT remove the session's worktree. Worktrees persist; a
+    // shared worktree (a reviewer attached to a coder's tree) must survive any one
+    // session closing. Removal is explicit (`kild worktree rm` / UI) or automatic
+    // only via merge-prune. See worktree.ts:pruneMergedWorktrees.
     entry.session.stop();
     this.sessions.delete(id);
     this.broadcast({ sessions: this.list() });

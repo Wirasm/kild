@@ -28,6 +28,10 @@ export type Session = {
   modelLabel: string | null;
   stats: { tokens: number; cost: number; context_pct: number | null } | null;
   origin: "ui" | "cli";
+  /** `kild/<name>` branch, when the session runs in an isolated worktree. */
+  branch?: string;
+  /** On-disk worktree path, when the session runs in an isolated worktree. */
+  worktreePath?: string;
 };
 
 /** Session metadata broadcast by the engine — including sessions other clients
@@ -39,4 +43,11 @@ export type SessionInfo = {
   agent?: string;
   projectName?: string;
   origin: "ui" | "cli";
+  worktree?: string;
+  branch?: string;
+  worktreePath?: string;
 };
+
+/** A kild worktree (`kild/<name>` branch) as listed by the engine. `name` is the
+ *  branch minus the `kild/` prefix — the selectable id the engine expects. */
+export type Worktree = { branch: string; path: string; name?: string };

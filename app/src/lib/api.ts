@@ -1,4 +1,4 @@
-import type { Agent, Project, SessionInfo, UiEvent } from "./types";
+import type { Agent, Project, SessionInfo, UiEvent, Worktree } from "./types";
 
 /** The kild engine's base URL. Override with VITE_KILD_ENGINE. */
 const BASE = import.meta.env.VITE_KILD_ENGINE ?? "http://localhost:4517";
@@ -29,7 +29,60 @@ export async function listAgents(project?: string): Promise<Agent[]> {
   return r.json();
 }
 
-export type SpawnOptions = { model?: string; cwd?: string; agent?: string; projectName?: string };
+/** List the project's `kild/*` worktrees (the engine merge-prunes first). `project`
+ *  may be a registered name or a path. */
+export async function listWorktrees(project: string): Promise<Worktree[]> {
+  const r = await fetch(`${BASE}/api/worktrees?project=${encodeURIComponent(project)}`);
+  if (!r.ok) throw new Error(`worktrees request failed (${r.status})`);
+  return r.json();
+}
+
+/** Remove a worktree by name (frees disk; the `kild/<name>` branch persists). */
+export async function removeWorktree(project: string, name: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/worktrees`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project, name }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `remove worktree failed (${r.status})`);
+  }
+}
+
+/** Run the merge-prune now; returns the names pruned. */
+export async function pruneWorktrees(project: string): Promise<string[]> {
+  const r = await fetch(`${BASE}/api/worktrees/prune`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project }),
+  });
+  if (!r.ok) throw new Error(`prune worktrees failed (${r.status})`);
+  return ((await r.json()) as { pruned: string[] }).pruned;
+}
+
+/** Reveal a worktree path in the OS file browser (engine validates it's under the
+ *  worktree root). Keeps the frontend pure-web — no Tauri API. */
+export async function openWorktree(path: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/open`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `open failed (${r.status})`);
+  }
+}
+
+export type SpawnOptions = {
+  model?: string;
+  cwd?: string;
+  agent?: string;
+  projectName?: string;
+  /** Selected worktree name; undefined = run in the project's main checkout. */
+  worktree?: string;
+};
 
 /**
  * WebSocket client to the kild engine — spawn/prompt/stop sessions and receive

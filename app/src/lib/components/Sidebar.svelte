@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Project, Session } from "../types";
+  import type { Project, Session, Worktree } from "../types";
 
   interface Props {
     projects: Project[];
@@ -10,11 +10,14 @@
     addError: string | null;
     sessions: Session[];
     activeId: string | null;
+    worktrees: Worktree[];
     onSelectProject: (p: Project) => void;
     onAddProject: () => void;
     onNewSession: () => void;
     onSelectSession: (id: string) => void;
     onCloseSession: (id: string) => void;
+    onRemoveWorktree: (name: string) => void;
+    onPruneWorktrees: () => void;
   }
 
   let {
@@ -26,11 +29,14 @@
     addError = $bindable(),
     sessions = $bindable(),
     activeId = $bindable(),
+    worktrees,
     onSelectProject,
     onAddProject,
     onNewSession,
     onSelectSession,
     onCloseSession,
+    onRemoveWorktree,
+    onPruneWorktrees,
   }: Props = $props();
 
   let filterMode = $state<"project" | "all">("project");
@@ -90,6 +96,27 @@
       <button class="session-close" title="Close session" onclick={() => onCloseSession(s.id)}>✕</button>
     </div>
   {/each}
+
+  {#if active && worktrees.length > 0}
+    <div class="sessions-header-row">
+      <div class="section-label">Worktrees</div>
+      <button class="prune-btn" title="Remove worktrees whose branch is merged" onclick={onPruneWorktrees}>
+        prune
+      </button>
+    </div>
+    {#each worktrees as w (w.branch)}
+      <div class="session-row">
+        <span class="wt-pick">
+          <span class="wt-branch">⎇ {w.name ?? w.branch}</span>
+        </span>
+        <button
+          class="session-close"
+          title="Remove worktree (branch persists)"
+          onclick={() => onRemoveWorktree(w.name ?? w.branch)}
+        >✕</button>
+      </div>
+    {/each}
+  {/if}
 </aside>
 
 <style>
@@ -264,6 +291,37 @@
   }
   .session-close:hover {
     color: var(--ember) !important;
+    background: transparent !important;
+  }
+  .wt-pick {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 7px 9px;
+  }
+  .wt-pick .wt-branch {
+    color: var(--aurora);
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prune-btn {
+    background: transparent !important;
+    border: none !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 8px !important;
+    margin-right: 8px;
+    cursor: pointer;
+  }
+  .prune-btn:hover {
+    color: var(--ice) !important;
     background: transparent !important;
   }
   .sessions-header-row {

@@ -3,6 +3,7 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { resolveModel, withRole } from './kild/models.ts';
+import { ensureWorktree } from './kild/worktree.ts';
 
 /**
  * One agent session, one process. The engine spawns this (the same binary with
@@ -12,11 +13,24 @@ import { resolveModel, withRole } from './kild/models.ts';
  * and stop commands are read from stdin as JSONL.
  */
 export async function runWorker(): Promise<never> {
-  const cwd = process.env.KILD_CWD || process.cwd();
+  let cwd = process.env.KILD_CWD || process.cwd();
+  const worktreeName = process.env.KILD_WORKTREE || undefined;
   const agentName = process.env.KILD_AGENT || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
+
+  // Optional isolation: run inside the named git worktree (create-or-attach) rather
+  // than the raw repo. Done here (not in the manager) so spawn stays synchronous;
+  // prompts sent before this resolves are OS-buffered on stdin, so none are lost.
+  if (worktreeName) {
+    try {
+      cwd = (await ensureWorktree(cwd, worktreeName)).path;
+    } catch (err) {
+      emit({ kind: 'error', message: `worktree: ${errText(err)}` });
+      process.exit(1);
+    }
+  }
 
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
@@ -57,7 +71,12 @@ export async function runWorker(): Promise<never> {
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
-      const msg = JSON.parse(line) as { type: string; text?: string };
+      let msg: { type: string; text?: string };
+      try {
+        msg = JSON.parse(line) as { type: string; text?: string };
+      } catch {
+        continue; // a malformed command line must not crash the worker; skip it
+      }
       if (msg.type === 'prompt' && msg.text) {
         const text = withRole(msg.text, preamble);
         preamble = null;
