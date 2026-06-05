@@ -13,6 +13,7 @@ import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
+import { channelManager } from './kild/channel/channel-manager.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import { type Outbound, sessionManager } from './kild/sessions.ts';
 import {
@@ -159,7 +160,17 @@ type ClientMessage =
       worktree?: string;
     }
   | { type: 'prompt'; id: string; text: string }
-  | { type: 'stop'; id: string };
+  | { type: 'stop'; id: string }
+  // Channel frames carry the channel id as `id` (same as sessions carry session id).
+  | {
+      type: 'channel_open';
+      id: string;
+      name: string;
+      cwd: string;
+      members: Array<{ name: string; agent: string; model?: string }>;
+    }
+  | { type: 'channel_post'; id: string; text: string }
+  | { type: 'channel_close'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
   let msg: unknown;
@@ -177,6 +188,14 @@ function parseClientMessage(data: string): ClientMessage | null {
   }
   if (m.type === 'stop') return m as ClientMessage;
   if (m.type === 'prompt' && typeof m.text === 'string') return m as ClientMessage;
+  if (m.type === 'channel_open') {
+    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.members)) {
+      return null;
+    }
+    return m as ClientMessage;
+  }
+  if (m.type === 'channel_post' && typeof m.text === 'string') return m as ClientMessage;
+  if (m.type === 'channel_close') return m as ClientMessage;
   return null;
 }
 
@@ -187,10 +206,15 @@ app.get(
     return next();
   },
   upgradeWebSocket(() => {
-    let unsubscribe: (() => void) | undefined;
+    // One connection subscribes to both buses: session events and channel messages.
+    let unsubscribeSessions: (() => void) | undefined;
+    let unsubscribeChannels: (() => void) | undefined;
     return {
       onOpen(_evt, ws) {
-        unsubscribe = sessionManager.subscribe((msg: Outbound) => ws.send(JSON.stringify(msg)));
+        unsubscribeSessions = sessionManager.subscribe((msg: Outbound) =>
+          ws.send(JSON.stringify(msg)),
+        );
+        unsubscribeChannels = channelManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
         const msg = parseClientMessage(String(evt.data));
@@ -201,10 +225,17 @@ app.get(
           sessionManager.prompt(msg.id, msg.text);
         } else if (msg.type === 'stop') {
           sessionManager.stop(msg.id);
+        } else if (msg.type === 'channel_open') {
+          channelManager.open(msg.id, { name: msg.name, cwd: msg.cwd, members: msg.members });
+        } else if (msg.type === 'channel_post') {
+          channelManager.postFromHuman(msg.id, msg.text);
+        } else if (msg.type === 'channel_close') {
+          channelManager.close(msg.id);
         }
       },
       onClose() {
-        unsubscribe?.();
+        unsubscribeSessions?.();
+        unsubscribeChannels?.();
       },
     };
   }),

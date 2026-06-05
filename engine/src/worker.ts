@@ -1,6 +1,7 @@
 import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
+import { createPostMessageTool } from './kild/channel/post-message-tool.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { ensureWorktree } from './kild/worktree.ts';
@@ -17,6 +18,7 @@ export async function runWorker(): Promise<never> {
   const worktreeName = process.env.KILD_WORKTREE || undefined;
   const agentName = process.env.KILD_AGENT || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
+  const channelId = process.env.KILD_CHANNEL || undefined;
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
 
@@ -40,7 +42,22 @@ export async function runWorker(): Promise<never> {
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   try {
     model = resolveModel(registry, modelPattern);
-    ({ session } = await createAgentSession({ model, authStorage, modelRegistry: registry, cwd }));
+    // A channel member gets a `post_message` tool; its calls become `message_out`
+    // control lines on stdout, which the engine routes into the channel.
+    const customTools = channelId
+      ? [
+          createPostMessageTool((text) =>
+            process.stdout.write(`${JSON.stringify({ kind: 'message_out', text })}\n`),
+          ),
+        ]
+      : undefined;
+    ({ session } = await createAgentSession({
+      model,
+      authStorage,
+      modelRegistry: registry,
+      cwd,
+      customTools,
+    }));
   } catch (err) {
     emit({ kind: 'error', message: errText(err) });
     process.exit(1);
@@ -63,8 +80,27 @@ export async function runWorker(): Promise<never> {
 
   let preamble = agentName ? await resolveAgentInstructions(agentName, cwd) : null;
 
+  // pi runs one turn at a time. A channel can deliver a message (prompt) to this
+  // member while it is still mid-turn, so we queue prompts and drain them strictly
+  // sequentially rather than awaiting inside the stdin handler.
+  const promptQueue: string[] = [];
+  let draining = false;
+  async function drainPrompts(): Promise<void> {
+    if (draining) return;
+    draining = true;
+    while (promptQueue.length > 0) {
+      const text = promptQueue.shift() as string;
+      try {
+        await session.prompt(text);
+      } catch (err) {
+        emit({ kind: 'error', message: errText(err) });
+      }
+    }
+    draining = false;
+  }
+
   let buf = '';
-  process.stdin.on('data', async (chunk: Buffer) => {
+  process.stdin.on('data', (chunk: Buffer) => {
     buf += chunk.toString();
     const lines = buf.split('\n');
     buf = lines.pop() ?? ''; // keep the incomplete trailing line
@@ -78,13 +114,9 @@ export async function runWorker(): Promise<never> {
         continue; // a malformed command line must not crash the worker; skip it
       }
       if (msg.type === 'prompt' && msg.text) {
-        const text = withRole(msg.text, preamble);
-        preamble = null;
-        try {
-          await session.prompt(text);
-        } catch (err) {
-          emit({ kind: 'error', message: errText(err) });
-        }
+        promptQueue.push(withRole(msg.text, preamble));
+        preamble = null; // the agent preamble rides only the first delivered turn
+        void drainPrompts();
       } else if (msg.type === 'stop') {
         session.dispose();
         process.exit(0);

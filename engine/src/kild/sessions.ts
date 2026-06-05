@@ -13,6 +13,10 @@ export interface SpawnRequest {
    *  sessions naming the same worktree share its tree (attach); different names
    *  split. The worker creates-or-attaches from `cwd` (the repo). */
   worktree?: string;
+  /** Extra environment for the worker — opaque to the manager. Channel members use
+   *  it to carry `KILD_CHANNEL` / `KILD_MEMBER`; it never overrides the `KILD_*`
+   *  vars the manager itself sets. */
+  env?: Record<string, string>;
 }
 
 /** Metadata the cockpit shows for a session — including ones the CLI started. */
@@ -43,10 +47,15 @@ class PiSession {
   private readonly child: ChildProcess;
   private buf = '';
 
-  constructor(req: SpawnRequest, onEvent: (event: UiEvent) => void) {
+  constructor(
+    req: SpawnRequest,
+    onEvent: (event: UiEvent) => void,
+    onMessage?: (text: string) => void,
+  ) {
     this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
       env: {
         ...process.env,
+        ...req.env, // extra worker env (e.g. channel membership); our KILD_* win below
         KILD_ROLE: 'worker',
         KILD_MODEL: req.model ?? '',
         KILD_CWD: req.cwd ?? process.cwd(),
@@ -64,12 +73,16 @@ class PiSession {
       for (const raw of lines) {
         const line = raw.trim();
         if (!line) continue;
+        let parsed: { kind?: string; text?: string };
         try {
-          const event = JSON.parse(line) as UiEvent;
-          if ('kind' in event) onEvent(event);
+          parsed = JSON.parse(line);
         } catch {
-          // non-JSON line from the worker (a stray log); ignore.
+          continue; // non-JSON line from the worker (a stray log); ignore.
         }
+        // A channel member's `post_message` arrives as a `message_out` control line:
+        // route it to the channel, not the transcript. Everything else is a UiEvent.
+        if (parsed.kind === 'message_out') onMessage?.(parsed.text ?? '');
+        else if (parsed.kind) onEvent(parsed as UiEvent);
       }
     });
     this.child.on('error', (err) =>
@@ -116,7 +129,12 @@ class SessionManager {
     return [...this.sessions.values()].map((s) => s.info);
   }
 
-  spawn(id: string, req: SpawnRequest, origin: 'ui' | 'cli' = 'ui'): void {
+  spawn(
+    id: string,
+    req: SpawnRequest,
+    origin: 'ui' | 'cli' = 'ui',
+    onMessage?: (text: string) => void,
+  ): void {
     if (this.sessions.has(id)) return;
     const info: SessionInfo = {
       id,
@@ -143,13 +161,17 @@ class SessionManager {
         return;
       }
     }
-    const session = new PiSession(req, (event) => {
-      this.broadcast({ session: id, event });
-      if (event.kind === 'session_end') {
-        this.sessions.delete(id);
-        this.broadcast({ sessions: this.list() });
-      }
-    });
+    const session = new PiSession(
+      req,
+      (event) => {
+        this.broadcast({ session: id, event });
+        if (event.kind === 'session_end') {
+          this.sessions.delete(id);
+          this.broadcast({ sessions: this.list() });
+        }
+      },
+      onMessage,
+    );
     this.sessions.set(id, { session, info });
     this.broadcast({ sessions: this.list() });
   }

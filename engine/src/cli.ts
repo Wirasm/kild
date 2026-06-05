@@ -54,8 +54,10 @@ async function dispatch(): Promise<void> {
       return worktree(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
+    case 'channel':
+      return channel([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run> …');
+      console.error('usage: kild <project|agent|worktree|run|channel> …');
       process.exit(2);
   }
 }
@@ -173,6 +175,91 @@ async function run(prompt: string): Promise<void> {
     .then((r) => r.ok)
     .catch(() => false);
   return engineUp ? runViaEngine(prompt) : runInProcess(prompt);
+}
+
+/**
+ * `kild channel <goal>` — the two-agent channel demo. Opens an `orchestrator` +
+ * `worker` channel through the engine, posts the goal to @orchestrator, and streams
+ * every message: the orchestrator delegates to @worker; the worker reports back to
+ * @orchestrator and @human. Ctrl-C is the kill switch — it closes the channel
+ * (stopping both members) and exits. Requires the engine (it is multi-session).
+ */
+async function channel(goal: string): Promise<void> {
+  if (!goal) throw new Error('usage: kild channel <goal…> [--project <p>] [--model <m>]');
+  const engineUp = await fetch(`${ENGINE}/api/health`)
+    .then((r) => r.ok)
+    .catch(() => false);
+  if (!engineUp) {
+    throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
+  }
+  const cwd = values.project
+    ? ((await findProject(values.project))?.path ?? values.project)
+    : process.cwd();
+  const name = values.project ?? 'channel';
+  const channelId = crypto.randomUUID();
+  const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+
+  await new Promise<void>((resolve, reject) => {
+    const closeChannel = () => {
+      try {
+        ws.send(JSON.stringify({ type: 'channel_close', id: channelId }));
+      } catch {
+        // socket already gone — nothing to close
+      }
+      setTimeout(() => {
+        ws.close();
+        resolve();
+      }, 200); // let the close frame flush before we exit
+    };
+    process.on('SIGINT', () => {
+      if (!json) console.error('\n\x1b[2m— closing channel —\x1b[0m');
+      closeChannel();
+    });
+
+    ws.addEventListener('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'channel_open',
+          id: channelId,
+          name,
+          cwd,
+          members: [
+            { name: 'orchestrator', agent: 'orchestrator', model: values.model },
+            { name: 'worker', agent: 'worker', model: values.model },
+          ],
+        }),
+      );
+      ws.send(
+        JSON.stringify({ type: 'channel_post', id: channelId, text: `@orchestrator ${goal}` }),
+      );
+      if (!json) {
+        console.error(`\x1b[2m# channel "${name}" — orchestrator + worker · Ctrl-C to stop\x1b[0m`);
+      }
+    });
+
+    ws.addEventListener('message', (e) => {
+      let parsed: {
+        channelMessage?: { channelId: string; from: string; mentions: string[]; text: string };
+      };
+      try {
+        parsed = JSON.parse(String((e as { data: unknown }).data));
+      } catch {
+        return;
+      }
+      const m = parsed.channelMessage;
+      if (!m || m.channelId !== channelId) return;
+      if (json) {
+        console.log(JSON.stringify(m));
+      } else {
+        const to = m.mentions.length
+          ? ` \x1b[2m→ ${m.mentions.map((x) => `@${x}`).join(' ')}\x1b[0m`
+          : '';
+        console.log(`\x1b[1m${m.from}\x1b[0m${to}: ${m.text}`);
+      }
+    });
+
+    ws.addEventListener('error', () => reject(new Error('engine socket error')));
+  });
 }
 
 async function runViaEngine(prompt: string): Promise<void> {
