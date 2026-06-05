@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:full": "bun run bundle:engine && concurrently -k -n engine,web \"cd ../engine && bun run dev\" \"vite dev\"",
     "build": "vite build",
+    "bundle:engine": "bash scripts/bundle-sidecar.sh",
+    "build:all": "bun run bundle:engine && vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -13,6 +16,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "concurrently": "^9.0.0",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

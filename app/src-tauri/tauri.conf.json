@@ -4,9 +4,9 @@
   "version": "0.0.1",
   "identifier": "com.rasmus.kild",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run dev:full",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build:all",
     "frontendDist": "../build"
   },
   "app": {
@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/kild-engine"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

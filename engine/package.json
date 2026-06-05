@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",
     "format": "biome format --write src",
+    "compile": "bun build --compile --minify --target=bun-darwin-arm64 src/server.ts --outfile dist/kild-engine",
     "flue": "flue"
   },
   "dependencies": {

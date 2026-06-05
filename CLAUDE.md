@@ -91,16 +91,18 @@ bun run typecheck      # tsc --noEmit
 bun run lint           # biome check src
 bun run format         # biome format --write src
 
-# Cockpit (cd app) — needs the engine running
-bun run dev            # vite dev server on :1420
-bun run tauri dev      # native window (runs `bun run dev` for the frontend)
+# Cockpit (cd app)
+bun run tauri dev      # ONE command: builds the engine sidecar, starts engine + frontend, opens the window
+bun run dev            # frontend-only vite dev server on :1420
 bun run check          # svelte-check
-bun run build          # static frontend build → app/build
+bun run tauri build    # release .app — bundles the engine as a sidecar the shell spawns
 ```
 
-Dev loop today: run the engine (`cd engine && bun run dev`) and the cockpit
-(`cd app && bun run tauri dev`) as two processes. (A bundled sidecar — engine as a
-`bun build --compile` binary the Tauri shell spawns — is the planned packaging.)
+Dev loop: `cd app && bun run tauri dev`. Its `beforeDevCommand` compiles the engine
+to a binary (Tauri's `externalBin` requires it present) and runs the live engine +
+frontend concurrently; the shell opens the window. In a **release** build the shell
+spawns the bundled engine sidecar (`#[cfg(not(debug_assertions))]` in `lib.rs`); in
+dev the engine is the live `bun run dev` process instead.
 
 `pi` must be on `PATH` and authenticated (`~/.pi/agent/auth.json`).
 
