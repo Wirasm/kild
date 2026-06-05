@@ -136,7 +136,7 @@ kild/
     ├── src/
     │   ├── lib/api.ts          #   engine client (REST + EngineSocket over WS)
     │   ├── lib/types.ts        #   shared FE types (Project, Agent, Session, UiEvent, Item)
-    │   ├── lib/components/      #   Sidebar, Topbar, Ledger, ToolCard, Composer
+    │   ├── lib/components/      #   Sidebar, Topbar, Ledger, ToolCard, Composer, ProjectModal, Dropdown
     │   ├── lib/theme/tokens.css #   Tallinn Night design tokens
     │   └── routes/+page.svelte #   sidebar (projects/sessions/new) + per-session transcript
     └── src-tauri/              #   thin Rust shell (webview host only; no logic)
