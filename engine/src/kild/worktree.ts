@@ -75,23 +75,33 @@ export async function createWorktree(repo: string, branch: string): Promise<Work
 export async function ensureWorktree(repo: string, name: string): Promise<Worktree> {
   const wtPath = worktreePath(name);
   const ref = worktreeRef(name);
+  const attached = { branch: ref, path: wtPath, name };
   if (existsSync(wtPath)) {
     // Attach only to a real linked worktree (the `.git` pointer file). A leftover or
     // corrupt dir must NOT silently become a non-isolated cwd — fail fast instead.
-    if (existsSync(path.join(wtPath, '.git'))) return { branch: ref, path: wtPath, name };
+    if (existsSync(path.join(wtPath, '.git'))) return attached;
     throw new Error(`worktree path exists but is not a git worktree: ${wtPath}`);
   }
-  // The branch may already exist (the worktree was removed but the branch kept).
-  // Check it out — never `-B` (which would reset and lose its commits).
-  const branchExists = await execFile('git', ['-C', repo, 'rev-parse', '--verify', ref])
-    .then(() => true)
-    .catch(() => false);
-  if (branchExists) {
-    await execFile('git', ['-C', repo, 'worktree', 'add', wtPath, ref]);
-  } else {
-    await execFile('git', ['-C', repo, 'worktree', 'add', '-b', ref, wtPath]);
+  try {
+    // The branch may already exist (the worktree was removed but the branch kept).
+    // Check it out — never `-B` (which would reset and lose its commits).
+    const branchExists = await execFile('git', ['-C', repo, 'rev-parse', '--verify', ref])
+      .then(() => true)
+      .catch(() => false);
+    if (branchExists) {
+      await execFile('git', ['-C', repo, 'worktree', 'add', wtPath, ref]);
+    } else {
+      await execFile('git', ['-C', repo, 'worktree', 'add', '-b', ref, wtPath]);
+    }
+  } catch (err) {
+    // Cold-start race: a concurrent session creating the *same* new worktree between
+    // our existsSync check and `worktree add` wins, and ours fails ("already exists").
+    // N agents sharing one fresh tree is valid, so attach to the real worktree it left
+    // behind; only re-throw if the path still isn't a git worktree.
+    if (existsSync(path.join(wtPath, '.git'))) return attached;
+    throw err;
   }
-  return { branch: ref, path: wtPath, name };
+  return attached;
 }
 
 export async function listWorktrees(repo: string): Promise<Worktree[]> {
