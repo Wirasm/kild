@@ -51,26 +51,21 @@ app.get(
         const msg = JSON.parse(String(evt.data)) as ClientMessage;
         if (msg.type === 'spawn') {
           live.add(msg.id);
-          manager
-            .spawn(msg.id, { model: msg.model, cwd: msg.cwd, agent: msg.agent }, (e) =>
-              send(msg.id, e),
-            )
-            .catch((err) => {
-              console.error('spawn failed:', err);
-              send(msg.id, { kind: 'session_end' });
-            });
+          manager.spawn(msg.id, { model: msg.model, cwd: msg.cwd, agent: msg.agent }, (e) =>
+            send(msg.id, e),
+          );
         } else if (msg.type === 'prompt') {
           manager.prompt(msg.id, msg.text).catch((err) => {
             console.error('prompt failed:', err);
             send(msg.id, { kind: 'agent_end' });
           });
         } else if (msg.type === 'stop') {
-          manager.stop(msg.id, (e) => send(msg.id, e));
+          void manager.stop(msg.id, (e) => send(msg.id, e));
           live.delete(msg.id);
         }
       },
       onClose() {
-        for (const id of live) manager.stop(id, () => {});
+        for (const id of live) void manager.stop(id, () => {});
         live.clear();
       },
     };

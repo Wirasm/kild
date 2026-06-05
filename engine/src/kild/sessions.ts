@@ -50,7 +50,11 @@ interface RawAgentEvent {
 export class SessionManager {
   private readonly authStorage = AuthStorage.create();
   private readonly registry = ModelRegistry.create(this.authStorage);
-  private readonly sessions = new Map<string, AgentSession>();
+  // Keyed by session id. The value is a *promise* of the session so the id is
+  // registered synchronously on spawn — a prompt arriving before the (async)
+  // session finishes constructing then waits for it instead of failing.
+  private readonly sessions = new Map<string, Promise<AgentSession>>();
+  private readonly preambles = new Map<string, string>();
 
   /** Resolve a `provider/id` or bare `id` pattern to a Model (undefined → pi default). */
   private resolveModel(pattern?: string) {
@@ -62,7 +66,23 @@ export class SessionManager {
     return this.registry.getAll().find((m) => m.id === pattern);
   }
 
-  async spawn(id: string, req: SpawnRequest, emit: (event: UiEvent) => void): Promise<void> {
+  /** Register the session synchronously (as a promise) and start building it. */
+  spawn(id: string, req: SpawnRequest, emit: (event: UiEvent) => void): void {
+    const promise = this.createSession(id, req, emit);
+    this.sessions.set(id, promise);
+    promise.catch((err) => {
+      console.error('spawn failed:', err);
+      this.sessions.delete(id);
+      this.preambles.delete(id);
+      emit({ kind: 'session_end' });
+    });
+  }
+
+  private async createSession(
+    id: string,
+    req: SpawnRequest,
+    emit: (event: UiEvent) => void,
+  ): Promise<AgentSession> {
     const model = this.resolveModel(req.model);
     const { session } = await createAgentSession({
       model,
@@ -70,7 +90,6 @@ export class SessionManager {
       modelRegistry: this.registry,
       cwd: req.cwd ?? process.cwd(),
     });
-    this.sessions.set(id, session);
 
     if (model) emit({ kind: 'model', provider: model.provider, id: model.id });
 
@@ -95,13 +114,14 @@ export class SessionManager {
       const instructions = await resolveAgentInstructions(req.agent, req.cwd);
       if (instructions) this.preambles.set(id, instructions);
     }
+
+    return session;
   }
 
-  private readonly preambles = new Map<string, string>();
-
   async prompt(id: string, text: string): Promise<void> {
-    const session = this.sessions.get(id);
-    if (!session) throw new Error(`no such session: ${id}`);
+    const pending = this.sessions.get(id);
+    if (!pending) throw new Error(`no such session: ${id}`);
+    const session = await pending; // wait until the session has finished constructing
     const preamble = this.preambles.get(id);
     if (preamble) {
       this.preambles.delete(id);
@@ -111,14 +131,17 @@ export class SessionManager {
     }
   }
 
-  stop(id: string, emit: (event: UiEvent) => void): void {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.dispose();
-      this.sessions.delete(id);
-      this.preambles.delete(id);
-      emit({ kind: 'session_end' });
+  async stop(id: string, emit: (event: UiEvent) => void): Promise<void> {
+    const pending = this.sessions.get(id);
+    if (!pending) return;
+    this.sessions.delete(id);
+    this.preambles.delete(id);
+    try {
+      (await pending).dispose();
+    } catch {
+      // spawn failed; nothing to dispose
     }
+    emit({ kind: 'session_end' });
   }
 }
 
