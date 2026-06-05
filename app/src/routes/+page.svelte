@@ -5,6 +5,7 @@
   import Ledger from "$lib/components/Ledger.svelte";
   import Composer from "$lib/components/Composer.svelte";
   import ProjectModal from "$lib/components/ProjectModal.svelte";
+  import SessionModal from "$lib/components/SessionModal.svelte";
   import { EngineSocket, addProject as apiAddProject, listAgents, listProjects } from "$lib/api";
 
   import type { Project, Agent, UiEvent, Session, SessionInfo } from "$lib/types";
@@ -21,6 +22,7 @@
   let projects = $state<Project[]>([]);
   let active = $state<Project | null>(null); // active project = context for new sessions
   let adding = $state(false);
+  let startingSession = $state(false);
   let newName = $state("");
   let newPath = $state("");
   let addError = $state<string | null>(null);
@@ -148,6 +150,7 @@
     });
     activeId = id;
     input = "";
+    startingSession = false;
   }
 
   function selectSession(id: string) {
@@ -248,15 +251,11 @@
     bind:newName={newName}
     bind:newPath={newPath}
     bind:addError={addError}
-    agents={agents}
-    bind:agentName={agentName}
-    bind:model={model}
-    models={MODELS}
     bind:sessions={sessions}
     bind:activeId={activeId}
     onSelectProject={selectProject}
     onAddProject={addProject}
-    onStartSession={startSession}
+    onNewSession={() => (startingSession = true)}
     onSelectSession={selectSession}
     onCloseSession={closeSession}
   />
@@ -268,6 +267,17 @@
     addError={addError}
     onAdd={addProject}
     onClose={() => (adding = false)}
+  />
+
+  <SessionModal
+    bind:isOpen={startingSession}
+    agents={agents}
+    bind:agentName={agentName}
+    bind:model={model}
+    models={MODELS}
+    projectName={active?.name ?? ""}
+    onStart={startSession}
+    onClose={() => (startingSession = false)}
   />
 
   <main class="main">
@@ -287,8 +297,8 @@
     {:else if !activeSession}
       <div class="empty">
         <h2>No session</h2>
-        <p>Pick a project, choose an agent + model in the sidebar, and start a session.</p>
-        {#if active}<button class="primary" onclick={startSession}>+ start session</button>{/if}
+        <p>Pick a project, choose an agent + model, and start a session.</p>
+        {#if active}<button class="primary" onclick={() => (startingSession = true)}>+ start session</button>{/if}
       </div>
     {:else}
       <Topbar activeSession={activeSession} />

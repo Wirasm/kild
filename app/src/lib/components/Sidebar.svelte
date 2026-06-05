@@ -1,6 +1,5 @@
 <script lang="ts">
-  import type { Project, Agent, Session } from "../types";
-  import Dropdown from "./Dropdown.svelte";
+  import type { Project, Session } from "../types";
 
   interface Props {
     projects: Project[];
@@ -9,15 +8,11 @@
     newName: string;
     newPath: string;
     addError: string | null;
-    agents: Agent[];
-    agentName: string;
-    model: string;
-    models: string[];
     sessions: Session[];
     activeId: string | null;
     onSelectProject: (p: Project) => void;
     onAddProject: () => void;
-    onStartSession: () => void;
+    onNewSession: () => void;
     onSelectSession: (id: string) => void;
     onCloseSession: (id: string) => void;
   }
@@ -29,20 +24,15 @@
     newName = $bindable(),
     newPath = $bindable(),
     addError = $bindable(),
-    agents,
-    agentName = $bindable(),
-    model = $bindable(),
-    models,
     sessions = $bindable(),
     activeId = $bindable(),
     onSelectProject,
     onAddProject,
-    onStartSession,
+    onNewSession,
     onSelectSession,
     onCloseSession,
   }: Props = $props();
 
-  let showCreator = $state(false);
   let filterMode = $state<"project" | "all">("project");
 
   // Reset filter mode to show current active project sessions by default
@@ -84,18 +74,10 @@
       </div>
     {/if}
   </div>
-  {#if active}
-    <button class="new" onclick={() => showCreator = !showCreator}>
-      {showCreator ? "✕ close creator" : "+ new session"}
+  {#if active && filterMode === "project"}
+    <button class="new" onclick={onNewSession}>
+      + new session
     </button>
-  {/if}
-
-  {#if showCreator && active}
-    <div class="new-session">
-      <Dropdown bind:value={agentName} options={agents.map((a) => a.name)} label="Select Agent" />
-      <Dropdown bind:value={model} options={models} label="Select Model" />
-      <button class="primary start" onclick={() => { onStartSession(); showCreator = false; }}>+ start session</button>
-    </div>
   {/if}
 
   {#each filteredSessions as s (s.id)}
@@ -197,16 +179,6 @@
   .primary:hover {
     background: var(--ice-dim) !important;
     box-shadow: var(--glow-ice);
-  }
-  .new-session {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 2px 4px 4px;
-  }
-  .new-session .start {
-    text-align: center;
-    padding: 7px;
   }
   .session-row {
     display: flex;
