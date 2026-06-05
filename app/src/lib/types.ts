@@ -14,6 +14,7 @@ export type UiEvent =
   | { kind: "retry"; attempt: number; max: number }
   | { kind: "agent_end" }
   | { kind: "stats"; tokens: number; cost: number; context_pct: number | null }
+  | { kind: "error"; message: string }
   | { kind: "session_end" };
 
 export type Session = {

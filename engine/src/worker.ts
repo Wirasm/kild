@@ -19,14 +19,22 @@ export async function runWorker(): Promise<never> {
 
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
-  const model = resolveModel(registry, modelPattern);
 
-  const { session } = await createAgentSession({
-    model,
-    authStorage,
-    modelRegistry: registry,
-    cwd,
-  });
+  // A given-but-unresolvable model is surfaced, not silently swapped for pi's
+  // default. No model = pi's configured default (intentional).
+  const model = modelPattern ? resolveModel(registry, modelPattern) : undefined;
+  if (modelPattern && !model) {
+    emit({ kind: 'error', message: `unknown model: ${modelPattern}` });
+    process.exit(1);
+  }
+
+  let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
+  try {
+    ({ session } = await createAgentSession({ model, authStorage, modelRegistry: registry, cwd }));
+  } catch (err) {
+    emit({ kind: 'error', message: `failed to start agent: ${errText(err)}` });
+    process.exit(1);
+  }
   if (model) emit({ kind: 'model', provider: model.provider, id: model.id });
 
   session.subscribe((e: RawAgentEvent) => {
@@ -63,8 +71,7 @@ export async function runWorker(): Promise<never> {
         try {
           await session.prompt(text);
         } catch (err) {
-          console.error('worker prompt error:', err);
-          emit({ kind: 'agent_end' });
+          emit({ kind: 'error', message: errText(err) });
         }
       } else if (msg.type === 'stop') {
         session.dispose();
@@ -81,9 +88,12 @@ export async function runWorker(): Promise<never> {
   return new Promise<never>(() => {});
 }
 
-function resolveModel(registry: ModelRegistry, pattern?: string) {
-  if (!pattern) return undefined;
+function resolveModel(registry: ModelRegistry, pattern: string) {
   const slash = pattern.indexOf('/');
   if (slash !== -1) return registry.find(pattern.slice(0, slash), pattern.slice(slash + 1));
   return registry.getAll().find((m) => m.id === pattern);
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

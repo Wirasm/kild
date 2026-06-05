@@ -68,6 +68,10 @@
       case "agent_end":
         s.running = false;
         break;
+      case "error":
+        s.items.push({ type: "assistant", text: `⚠️ ${ev.message}` });
+        s.running = false;
+        break;
       case "session_end":
         for (const it of s.items) if (it.type === "tool" && it.status === "running") it.status = "error";
         s.running = false;

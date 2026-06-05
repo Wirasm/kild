@@ -1,4 +1,4 @@
-import { exec as execCb } from 'node:child_process';
+import { execFile as execFileCb } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -7,7 +7,9 @@ import { local } from '@flue/runtime/node';
 
 import { kildHome } from './config.ts';
 
-const exec = promisify(execCb);
+// execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
+// feeds an LLM-generated branch name in here, so shell interpolation would be RCE.
+const execFile = promisify(execFileCb);
 
 /** A git worktree on disk — kild's local isolation strategy, the battery Flue
  *  lacks (its sandboxes are virtual / local-cwd / Daytona, never a worktree). */
@@ -20,17 +22,24 @@ function worktreesRoot(): string {
   return path.join(kildHome(), 'worktrees');
 }
 
+function assertSafeBranch(branch: string): void {
+  if (branch.startsWith('-') || !/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    throw new Error(`invalid branch name: ${branch}`);
+  }
+}
+
 /** Create an isolated git worktree on a fresh `kild/<branch>` branch. */
 export async function createWorktree(repo: string, branch: string): Promise<Worktree> {
+  assertSafeBranch(branch);
   const wtPath = path.join(worktreesRoot(), branch.replace(/\//g, '-'));
   const ref = `kild/${branch}`;
-  await exec(`git -C "${repo}" worktree remove --force "${wtPath}" 2>/dev/null || true`);
-  await exec(`git -C "${repo}" worktree add -B "${ref}" "${wtPath}"`);
+  await execFile('git', ['-C', repo, 'worktree', 'remove', '--force', wtPath]).catch(() => {});
+  await execFile('git', ['-C', repo, 'worktree', 'add', '-B', ref, wtPath]);
   return { branch: ref, path: wtPath };
 }
 
 export async function listWorktrees(repo: string): Promise<Worktree[]> {
-  const { stdout } = await exec(`git -C "${repo}" worktree list --porcelain`);
+  const { stdout } = await execFile('git', ['-C', repo, 'worktree', 'list', '--porcelain']);
   const trees: Worktree[] = [];
   let cur: Partial<Worktree> = {};
   for (const line of stdout.split('\n')) {
@@ -46,11 +55,10 @@ export async function listWorktrees(repo: string): Promise<Worktree[]> {
 }
 
 export async function removeWorktree(repo: string, wtPath: string): Promise<void> {
-  await exec(`git -C "${repo}" worktree remove --force "${wtPath}"`);
+  await execFile('git', ['-C', repo, 'worktree', 'remove', '--force', wtPath]);
 }
 
-/** A Flue sandbox that runs the agent's shell/fs directly inside the worktree.
- *  This is the load-bearing proof: worktree slots into Flue's Sandbox seam. */
+/** A Flue sandbox that runs the agent's shell/fs directly inside the worktree. */
 export function worktreeSandbox(wt: Worktree): SandboxFactory {
   return local({ cwd: wt.path });
 }

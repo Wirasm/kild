@@ -13,11 +13,26 @@ import { addProject, loadProjects } from './kild/projects.ts';
 import { type Outbound, sessionManager } from './kild/sessions.ts';
 
 const PORT = Number(process.env.KILD_PORT ?? 4517);
+// Bind to loopback only: the engine holds the user's OAuth and runs bash in their
+// repos, so it must never be reachable from the LAN.
+const HOST = process.env.KILD_HOST ?? '127.0.0.1';
+
+// Only the cockpit's own origins may drive the engine from a browser context.
+// A request with no Origin is a non-browser client (the CLI / curl); browsers
+// always send one, so an unexpected Origin is a hostile web page — rejected.
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:1420',
+  'http://127.0.0.1:1420',
+  'tauri://localhost',
+  'https://tauri.localhost',
+]);
+const originAllowed = (origin: string | undefined): boolean =>
+  origin == null || ALLOWED_ORIGINS.has(origin);
 
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 const app = new Hono();
-app.use('/*', cors());
+app.use('/*', cors({ origin: (origin) => (origin && ALLOWED_ORIGINS.has(origin) ? origin : '') }));
 
 app.get('/api/health', (c) => c.json({ ok: true, name: 'kild-engine' }));
 
@@ -38,24 +53,6 @@ app.get('/api/agents', async (c) => c.json(await listAgents(c.req.query('project
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
-/** Spawn a session over HTTP — used by the CLI so its session shows up in the UI. */
-app.post('/api/sessions', async (c) => {
-  const body = await c.req.json<{
-    id: string;
-    model?: string;
-    cwd?: string;
-    agent?: string;
-    projectName?: string;
-  }>();
-  sessionManager.spawn(body.id, body, 'cli');
-  return c.json({ id: body.id });
-});
-app.post('/api/sessions/:id/prompt', async (c) => {
-  const { text } = await c.req.json<{ text: string }>();
-  sessionManager.prompt(c.req.param('id'), text);
-  return c.json({ ok: true });
-});
-
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the same broadcast — so sessions started by any
 // client (UI or CLI) are visible to all. Sessions are engine-owned and survive a
@@ -73,8 +70,27 @@ type ClientMessage =
   | { type: 'prompt'; id: string; text: string }
   | { type: 'stop'; id: string };
 
+function parseClientMessage(data: string): ClientMessage | null {
+  let msg: unknown;
+  try {
+    msg = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (typeof m.id !== 'string') return null;
+  if (m.type === 'spawn' || m.type === 'stop') return m as ClientMessage;
+  if (m.type === 'prompt' && typeof m.text === 'string') return m as ClientMessage;
+  return null;
+}
+
 app.get(
   '/ws',
+  async (c, next) => {
+    if (!originAllowed(c.req.header('origin'))) return c.text('forbidden', 403);
+    return next();
+  },
   upgradeWebSocket(() => {
     let unsubscribe: (() => void) | undefined;
     return {
@@ -82,7 +98,8 @@ app.get(
         unsubscribe = sessionManager.subscribe((msg: Outbound) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
-        const msg = JSON.parse(String(evt.data)) as ClientMessage;
+        const msg = parseClientMessage(String(evt.data));
+        if (!msg) return; // ignore malformed / unknown frames
         if (msg.type === 'spawn') {
           sessionManager.spawn(msg.id, msg, msg.origin ?? 'ui');
         } else if (msg.type === 'prompt') {
@@ -98,6 +115,6 @@ app.get(
   }),
 );
 
-console.log(`kild-engine listening on http://localhost:${PORT}`);
+console.log(`kild-engine listening on http://${HOST}:${PORT}`);
 
-export default { port: PORT, fetch: app.fetch, websocket };
+export default { port: PORT, hostname: HOST, fetch: app.fetch, websocket };

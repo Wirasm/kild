@@ -142,6 +142,7 @@ async function runViaEngine(prompt: string): Promise<void> {
         cost = ev.cost as number;
       } else if (ev.kind === 'agent_end') {
         setTimeout(() => {
+          ws.send(JSON.stringify({ type: 'stop', id })); // one-shot: clean up the worker
           ws.close();
           resolve();
         }, 150); // catch the trailing stats event

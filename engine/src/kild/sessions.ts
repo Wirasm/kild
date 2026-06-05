@@ -58,6 +58,9 @@ class PiSession {
         }
       }
     });
+    this.child.on('error', (err) =>
+      onEvent({ kind: 'error', message: `worker failed: ${err.message}` }),
+    );
     this.child.on('exit', () => onEvent({ kind: 'session_end' }));
   }
 
