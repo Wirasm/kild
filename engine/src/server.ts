@@ -1,10 +1,16 @@
+// One binary, two roles: `KILD_ROLE=worker` runs a single agent session (one per
+// process — the coding-agent SDK requires it); otherwise this is the engine.
+if (process.env.KILD_ROLE === 'worker') {
+  await (await import('./worker.ts')).runWorker();
+}
+
 import { Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
 import { addProject, loadProjects } from './kild/projects.ts';
-import { SessionManager, type UiEvent } from './kild/sessions.ts';
+import { type Outbound, sessionManager } from './kild/sessions.ts';
 
 const PORT = Number(process.env.KILD_PORT ?? 4517);
 
@@ -27,46 +33,65 @@ app.post('/api/projects', async (c) => {
 });
 
 // ── Agents ────────────────────────────────────────────────────────────────────
-app.get('/api/agents', async (c) => {
-  const project = c.req.query('project');
-  return c.json(await listAgents(project));
+app.get('/api/agents', async (c) => c.json(await listAgents(c.req.query('project'))));
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+app.get('/api/sessions', (c) => c.json(sessionManager.list()));
+
+/** Spawn a session over HTTP — used by the CLI so its session shows up in the UI. */
+app.post('/api/sessions', async (c) => {
+  const body = await c.req.json<{
+    id: string;
+    model?: string;
+    cwd?: string;
+    agent?: string;
+    projectName?: string;
+  }>();
+  sessionManager.spawn(body.id, body, 'cli');
+  return c.json({ id: body.id });
+});
+app.post('/api/sessions/:id/prompt', async (c) => {
+  const { text } = await c.req.json<{ text: string }>();
+  sessionManager.prompt(c.req.param('id'), text);
+  return c.json({ ok: true });
 });
 
-// ── Sessions (WebSocket) ──────────────────────────────────────────────────────
-// One SessionManager per connection; messages mirror the old Tauri commands.
+// ── Live stream (WebSocket) ─────────────────────────────────────────────────
+// Every connection subscribes to the same broadcast — so sessions started by any
+// client (UI or CLI) are visible to all. Sessions are engine-owned and survive a
+// connection drop.
 type ClientMessage =
-  | { type: 'spawn'; id: string; model?: string; cwd?: string; agent?: string }
+  | {
+      type: 'spawn';
+      id: string;
+      model?: string;
+      cwd?: string;
+      agent?: string;
+      projectName?: string;
+    }
   | { type: 'prompt'; id: string; text: string }
   | { type: 'stop'; id: string };
 
 app.get(
   '/ws',
   upgradeWebSocket(() => {
-    const manager = new SessionManager();
-    const live = new Set<string>();
+    let unsubscribe: (() => void) | undefined;
     return {
-      onMessage(evt, ws) {
-        const send = (id: string, event: UiEvent) =>
-          ws.send(JSON.stringify({ session: id, event }));
+      onOpen(_evt, ws) {
+        unsubscribe = sessionManager.subscribe((msg: Outbound) => ws.send(JSON.stringify(msg)));
+      },
+      onMessage(evt) {
         const msg = JSON.parse(String(evt.data)) as ClientMessage;
         if (msg.type === 'spawn') {
-          live.add(msg.id);
-          manager.spawn(msg.id, { model: msg.model, cwd: msg.cwd, agent: msg.agent }, (e) =>
-            send(msg.id, e),
-          );
+          sessionManager.spawn(msg.id, msg, 'ui');
         } else if (msg.type === 'prompt') {
-          manager.prompt(msg.id, msg.text).catch((err) => {
-            console.error('prompt failed:', err);
-            send(msg.id, { kind: 'agent_end' });
-          });
+          sessionManager.prompt(msg.id, msg.text);
         } else if (msg.type === 'stop') {
-          void manager.stop(msg.id, (e) => send(msg.id, e));
-          live.delete(msg.id);
+          sessionManager.stop(msg.id);
         }
       },
       onClose() {
-        for (const id of live) void manager.stop(id, () => {});
-        live.clear();
+        unsubscribe?.();
       },
     };
   }),

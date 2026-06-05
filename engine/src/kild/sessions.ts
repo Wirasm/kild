@@ -1,176 +1,135 @@
-import {
-  type AgentSession,
-  AuthStorage,
-  createAgentSession,
-  ModelRegistry,
-} from '@earendil-works/pi-coding-agent';
+import { type ChildProcess, spawn } from 'node:child_process';
 
-import { resolveAgentInstructions } from './agents.ts';
-
-/**
- * Frontend-facing event — a translated, serializable view of a pi agent event,
- * identical in shape to what the old Rust `rpc` slice produced. The cockpit
- * routes each to the right transcript by session id. pi wire shapes never reach
- * the UI; translation happens here, at the boundary.
- */
-export type UiEvent =
-  | { kind: 'model'; provider: string; id: string }
-  | { kind: 'text'; delta: string }
-  | { kind: 'tool_start'; id: string; name: string; args: string }
-  | { kind: 'tool_end'; id: string; name: string; ok: boolean }
-  | { kind: 'retry'; attempt: number; max: number }
-  | { kind: 'agent_end' }
-  | { kind: 'stats'; tokens: number; cost: number; context_pct: number | null }
-  | { kind: 'session_end' };
+import type { UiEvent } from './events.ts';
 
 export interface SpawnRequest {
   model?: string;
   cwd?: string;
   agent?: string;
+  projectName?: string;
 }
 
-/** A pi agent event as delivered to `AgentSession.subscribe` (loosely typed at the boundary). */
-interface RawAgentEvent {
-  type: string;
-  assistantMessageEvent?: { type?: string; delta?: string };
-  toolCallId?: string;
-  toolName?: string;
-  isError?: boolean;
-  args?: unknown;
-  attempt?: number;
-  maxAttempts?: number;
+/** Metadata the cockpit shows for a session — including ones the CLI started. */
+export interface SessionInfo {
+  id: string;
+  model?: string;
+  cwd?: string;
+  agent?: string;
+  projectName?: string;
+  origin: 'ui' | 'cli';
+}
+
+/** A message broadcast to every connected client. */
+export type Outbound = { session: string; event: UiEvent } | { sessions: SessionInfo[] };
+
+/**
+ * One agent session = one worker subprocess (see `worker.ts`). The worker is the
+ * same binary re-invoked with `KILD_ROLE=worker`; we talk to it over its stdio:
+ * `UiEvent` JSONL out, prompt/stop JSONL in.
+ */
+class PiSession {
+  private readonly child: ChildProcess;
+  private buf = '';
+
+  constructor(req: SpawnRequest, onEvent: (event: UiEvent) => void) {
+    this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
+      env: {
+        ...process.env,
+        KILD_ROLE: 'worker',
+        KILD_MODEL: req.model ?? '',
+        KILD_CWD: req.cwd ?? process.cwd(),
+        KILD_AGENT: req.agent ?? '',
+      },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+
+    this.child.stdout?.on('data', (chunk: Buffer) => {
+      this.buf += chunk.toString();
+      let nl: number;
+      while ((nl = this.buf.indexOf('\n')) >= 0) {
+        const line = this.buf.slice(0, nl).trim();
+        this.buf = this.buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const event = JSON.parse(line) as UiEvent;
+          if ('kind' in event) onEvent(event);
+        } catch {
+          // non-JSON line from the worker (a stray log); ignore.
+        }
+      }
+    });
+    this.child.on('exit', () => onEvent({ kind: 'session_end' }));
+  }
+
+  prompt(text: string): void {
+    this.child.stdin?.write(`${JSON.stringify({ type: 'prompt', text })}\n`);
+  }
+
+  stop(): void {
+    this.child.stdin?.write(`${JSON.stringify({ type: 'stop' })}\n`);
+    this.child.kill();
+  }
 }
 
 /**
- * Owns the live pi agent sessions for the cockpit — the in-process replacement
- * for the old daemon's subprocess registry. Each session is a coding-agent SDK
- * `AgentSession` (native pi auth, no bridge); its event stream is translated to
- * [`UiEvent`] and pushed to the caller's `emit`.
+ * The engine's single owner of all live sessions. Each session is an isolated
+ * subprocess, so sessions run concurrently and a crash takes down only its own
+ * process. Every client (cockpit WS connections, and the CLI) subscribes to the
+ * same broadcast, so a session started anywhere is visible everywhere.
  */
-export class SessionManager {
-  private readonly authStorage = AuthStorage.create();
-  private readonly registry = ModelRegistry.create(this.authStorage);
-  // Keyed by session id. The value is a *promise* of the session so the id is
-  // registered synchronously on spawn — a prompt arriving before the (async)
-  // session finishes constructing then waits for it instead of failing.
-  private readonly sessions = new Map<string, Promise<AgentSession>>();
-  private readonly preambles = new Map<string, string>();
+class SessionManager {
+  private readonly sessions = new Map<string, { session: PiSession; info: SessionInfo }>();
+  private readonly subscribers = new Set<(msg: Outbound) => void>();
 
-  /** Resolve a `provider/id` or bare `id` pattern to a Model (undefined → pi default). */
-  private resolveModel(pattern?: string) {
-    if (!pattern) return undefined;
-    const slash = pattern.indexOf('/');
-    if (slash !== -1) {
-      return this.registry.find(pattern.slice(0, slash), pattern.slice(slash + 1));
-    }
-    return this.registry.getAll().find((m) => m.id === pattern);
+  subscribe(fn: (msg: Outbound) => void): () => void {
+    this.subscribers.add(fn);
+    fn({ sessions: this.list() }); // catch the new client up
+    return () => {
+      this.subscribers.delete(fn);
+    };
   }
 
-  /** Register the session synchronously (as a promise) and start building it. */
-  spawn(id: string, req: SpawnRequest, emit: (event: UiEvent) => void): void {
-    const promise = this.createSession(id, req, emit);
-    this.sessions.set(id, promise);
-    promise.catch((err) => {
-      console.error('spawn failed:', err);
-      this.sessions.delete(id);
-      this.preambles.delete(id);
-      emit({ kind: 'session_end' });
-    });
+  list(): SessionInfo[] {
+    return [...this.sessions.values()].map((s) => s.info);
   }
 
-  private async createSession(
-    id: string,
-    req: SpawnRequest,
-    emit: (event: UiEvent) => void,
-  ): Promise<AgentSession> {
-    const model = this.resolveModel(req.model);
-    const { session } = await createAgentSession({
-      model,
-      authStorage: this.authStorage,
-      modelRegistry: this.registry,
-      cwd: req.cwd ?? process.cwd(),
-    });
-
-    if (model) emit({ kind: 'model', provider: model.provider, id: model.id });
-
-    session.subscribe((event: RawAgentEvent) => {
-      const ui = translate(event);
-      if (ui) emit(ui);
-      if (event.type === 'agent_end') {
-        const stats = session.getSessionStats();
-        emit({
-          kind: 'stats',
-          tokens: stats.tokens.total,
-          cost: stats.cost,
-          context_pct: stats.contextUsage?.percent ?? null,
-        });
+  spawn(id: string, req: SpawnRequest, origin: 'ui' | 'cli' = 'ui'): void {
+    if (this.sessions.has(id)) return;
+    const info: SessionInfo = {
+      id,
+      model: req.model,
+      cwd: req.cwd,
+      agent: req.agent,
+      projectName: req.projectName,
+      origin,
+    };
+    const session = new PiSession(req, (event) => {
+      this.broadcast({ session: id, event });
+      if (event.kind === 'session_end') {
+        this.sessions.delete(id);
+        this.broadcast({ sessions: this.list() });
       }
     });
-
-    // A non-default agent layers its role prompt. The SDK has no
-    // append-system-prompt knob, so we prepend the role to the agent's context
-    // as a leading instruction. (default agent = pi's own prompt.)
-    if (req.agent) {
-      const instructions = await resolveAgentInstructions(req.agent, req.cwd);
-      if (instructions) this.preambles.set(id, instructions);
-    }
-
-    return session;
+    this.sessions.set(id, { session, info });
+    this.broadcast({ sessions: this.list() });
   }
 
-  async prompt(id: string, text: string): Promise<void> {
-    const pending = this.sessions.get(id);
-    if (!pending) throw new Error(`no such session: ${id}`);
-    const session = await pending; // wait until the session has finished constructing
-    const preamble = this.preambles.get(id);
-    if (preamble) {
-      this.preambles.delete(id);
-      await session.prompt(`<role>\n${preamble}\n</role>\n\n${text}`);
-    } else {
-      await session.prompt(text);
-    }
+  prompt(id: string, text: string): void {
+    this.sessions.get(id)?.session.prompt(text);
   }
 
-  async stop(id: string, emit: (event: UiEvent) => void): Promise<void> {
-    const pending = this.sessions.get(id);
-    if (!pending) return;
+  stop(id: string): void {
+    const entry = this.sessions.get(id);
+    if (!entry) return;
+    entry.session.stop();
     this.sessions.delete(id);
-    this.preambles.delete(id);
-    try {
-      (await pending).dispose();
-    } catch {
-      // spawn failed; nothing to dispose
-    }
-    emit({ kind: 'session_end' });
+    this.broadcast({ sessions: this.list() });
+  }
+
+  private broadcast(msg: Outbound): void {
+    for (const fn of this.subscribers) fn(msg);
   }
 }
 
-function translate(event: RawAgentEvent): UiEvent | null {
-  switch (event.type) {
-    case 'message_update':
-      if (event.assistantMessageEvent?.type === 'text_delta' && event.assistantMessageEvent.delta) {
-        return { kind: 'text', delta: event.assistantMessageEvent.delta };
-      }
-      return null;
-    case 'tool_execution_start':
-      return {
-        kind: 'tool_start',
-        id: event.toolCallId ?? '',
-        name: event.toolName ?? '',
-        args: JSON.stringify(event.args ?? {}),
-      };
-    case 'tool_execution_end':
-      return {
-        kind: 'tool_end',
-        id: event.toolCallId ?? '',
-        name: event.toolName ?? '',
-        ok: !event.isError,
-      };
-    case 'auto_retry_start':
-      return { kind: 'retry', attempt: event.attempt ?? 0, max: event.maxAttempts ?? 0 };
-    case 'agent_end':
-      return { kind: 'agent_end' };
-    default:
-      return null;
-  }
-}
+/** Engine-wide singleton. */
+export const sessionManager = new SessionManager();
