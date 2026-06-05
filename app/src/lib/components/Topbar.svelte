@@ -4,14 +4,14 @@
   let { activeSession }: { activeSession: Session } = $props();
 </script>
 
-<header class="topbar">
+<header class="topbar" data-tauri-drag-region>
   <span class="project-chip">{activeSession.projectName}</span>
   <span class="summary">{activeSession.agent} · {activeSession.model}</span>
   <span class="model">{activeSession.modelLabel ?? "…"}</span>
   {#if activeSession.status === "stopped"}
     <span class="stopped-tag">stopped</span>
   {/if}
-  <span class="spacer"></span>
+  <span class="spacer" data-tauri-drag-region></span>
   {#if activeSession.stats}
     <span class="gauge">
       ctx {activeSession.stats.context_pct ?? "–"}% · {activeSession.stats.tokens} tok · ${activeSession.stats.cost.toFixed(4)}
@@ -24,9 +24,10 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 16px;
+    padding: 28px 16px 10px 16px;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--obsidian);
+    user-select: none;
   }
   .project-chip {
     color: var(--ice);

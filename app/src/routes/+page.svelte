@@ -4,6 +4,7 @@
   import Topbar from "$lib/components/Topbar.svelte";
   import Ledger from "$lib/components/Ledger.svelte";
   import Composer from "$lib/components/Composer.svelte";
+  import ProjectModal from "$lib/components/ProjectModal.svelte";
   import { EngineSocket, addProject as apiAddProject, listAgents, listProjects } from "$lib/api";
 
   import type { Project, Agent, UiEvent, Session } from "$lib/types";
@@ -192,6 +193,15 @@
     onStartSession={startSession}
     onSelectSession={selectSession}
     onCloseSession={closeSession}
+  />
+
+  <ProjectModal
+    bind:isOpen={adding}
+    bind:newName={newName}
+    bind:newPath={newPath}
+    addError={addError}
+    onAdd={addProject}
+    onClose={() => (adding = false)}
   />
 
   <main class="main">

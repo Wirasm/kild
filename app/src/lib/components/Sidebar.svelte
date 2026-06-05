@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Project, Agent, Session } from "../types";
+  import Dropdown from "./Dropdown.svelte";
 
   interface Props {
     projects: Project[];
@@ -52,29 +53,13 @@
       <span class="p-path">{p.path}</span>
     </button>
   {/each}
-  {#if adding}
-    <div class="add-form">
-      <input bind:value={newName} placeholder="name" />
-      <input bind:value={newPath} placeholder="~/projects/my-app" />
-      {#if addError}<div class="add-error">{addError}</div>{/if}
-      <div class="add-actions">
-        <button class="primary" onclick={onAddProject}>Add</button>
-        <button onclick={() => (adding = false)}>Cancel</button>
-      </div>
-    </div>
-  {:else}
-    <button class="new" onclick={() => (adding = true)}>+ add project</button>
-  {/if}
+  <button class="new" onclick={() => (adding = true)}>+ add project</button>
 
   {#if active}
     <div class="section-label">New session · {active.name}</div>
     <div class="new-session">
-      <select bind:value={agentName} title="Agent (system prompt)">
-        {#each agents as a}<option value={a.name}>{a.name}</option>{/each}
-      </select>
-      <select bind:value={model} title="Model">
-        {#each models as m}<option value={m}>{m}</option>{/each}
-      </select>
+      <Dropdown bind:value={agentName} options={agents.map((a) => a.name)} label="Select Agent" />
+      <Dropdown bind:value={model} options={models} label="Select Model" />
       <button class="primary start" onclick={onStartSession}>+ start session</button>
     </div>
   {/if}
@@ -99,12 +84,15 @@
     background: var(--obsidian-translucent);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border-right: 1px solid var(--border-translucent);
-    padding: 12px;
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
+    padding: 28px 12px 12px 12px; /* Offset for macOS traffic lights */
     display: flex;
     flex-direction: column;
     gap: 4px;
     overflow-y: auto;
+    user-select: none;
+    z-index: 10; /* Cast shadow on top of main panel */
   }
   .brand {
     font-weight: 600;
@@ -169,37 +157,6 @@
     color: var(--ice) !important;
     border-color: var(--ice) !important;
   }
-  .add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px;
-    background: var(--surface);
-    border-radius: 8px;
-    border: 1px solid var(--border-subtle);
-  }
-  .add-form input {
-    background: var(--void);
-    color: var(--text-bright);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    font: inherit;
-    font-size: 12px;
-    transition: border-color 0.2s ease;
-  }
-  .add-form input:focus {
-    outline: none;
-    border-color: var(--ice);
-  }
-  .add-error {
-    color: var(--ember);
-    font-size: 11px;
-  }
-  .add-actions {
-    display: flex;
-    gap: 6px;
-  }
   .primary {
     background: var(--ice) !important;
     color: var(--void) !important;
@@ -213,21 +170,8 @@
   .new-session {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
     padding: 2px 4px 4px;
-  }
-  .new-session select {
-    background: var(--surface);
-    color: var(--text-bright);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    font: inherit;
-    transition: border-color 0.2s ease;
-  }
-  .new-session select:focus {
-    outline: none;
-    border-color: var(--ice);
   }
   .new-session .start {
     text-align: center;
