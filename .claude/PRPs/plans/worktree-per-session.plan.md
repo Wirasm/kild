@@ -29,15 +29,44 @@ branch.
 
 ## Solution Statement
 
-A session spawn may carry an optional `branch`. When present, the **worker**
-creates a `kild/<branch>` worktree of the repo on startup and uses it as the
-agent's `cwd` (keeping `SessionManager.spawn` synchronous — no re-introduced race;
-the async git work happens in the worker, and stdin buffers any early prompt). The
-engine computes the deterministic worktree path for `SessionInfo`, so the cockpit
-shows the branch + path immediately. On explicit close, the engine removes the
-worktree (the `kild/<branch>` branch persists for review/merge). The git domain
-logic lives in kild (no `@flue` dependency on the hot path); a parallel,
-self-contained `worktree()` `SandboxFactory` is the Flue contribution.
+A session spawn carries an optional `worktree` **name**. Absent → the agent runs in
+the project's **main/dev checkout** (cwd = project dir; the default — planners,
+reviews-of-main, the brain). Present → the agent runs in the `kild/<name>` worktree;
+the **worker** *ensures* it (creates it if missing, **attaches** to it if it already
+exists — so a reviewer named the same worktree as the coder works in the same tree).
+Worker-side creation keeps `SessionManager.spawn` synchronous (no re-introduced race;
+async git in the worker; stdin buffers early prompts). The engine derives the
+deterministic worktree path for `SessionInfo` so the cockpit updates instantly.
+Worktrees **persist** (removal is an explicit action, never on session close — a
+shared worktree must survive any one session closing); the git domain logic lives in
+kild (no `@flue` on the hot path); a self-contained `worktree()` factory is the Flue
+contribution.
+
+## Policy model — worktree is selectable, shareable, persistent
+
+A worktree is a **named resource** (`<name>` → branch `kild/<name>` → dir
+`$KILD_HOME/worktrees/<name>`), not 1:1 with a session. A session *selects* where it
+runs:
+
+| Selection (`worktree` field) | cwd | Use |
+|---|---|---|
+| *absent* | project main/dev checkout | planning agent, brain, review-of-main |
+| `"fix-auth"` (new) | fresh `kild/fix-auth` worktree | coding agent |
+| `"fix-auth"` (exists) | the **same** `kild/fix-auth` worktree (attach) | reviewer joining the coder's tree |
+
+- **Same name = shared; different names = split.** This single field expresses all of
+  it — and is exactly what a future **room** needs: one shared name for the room, or a
+  name per agent, with no new primitive. Agents can also self-create worktrees (the
+  brain's `create_worktree` tool) and spawn sub-sessions into them.
+- **`ensureWorktree` (create-or-attach), not force-create.** The session path must NOT
+  reset an existing worktree (that would blow away a coder's work when a reviewer
+  joins). `createWorktree` (force `-B`) stays for explicit "new worktree"; the session
+  path uses `ensureWorktree`.
+- **Worktrees persist; removal is explicit** — `kild worktree rm` / a UI action. **The
+  one automatic path in v1:** a worktree whose `kild/<name>` branch is **merged** into
+  the repo's default branch is auto-pruned (worktree removed + branch `-d` deleted) —
+  checked on engine start and on each worktree-list refresh (via `git branch --merged
+  <default>`). No remove-on-close, no refcounting, **no background polling**.
 
 ## Metadata
 
@@ -55,7 +84,7 @@ self-contained `worktree()` `SandboxFactory` is the Flue contribution.
 
 | | **kild-owned (POLICY + product)** | **Flue-promotable (general MECHANISM)** |
 |---|---|---|
-| What | `kild/<name>` branch naming, `$KILD_HOME/worktrees/<name>` path, branch validation, git CRUD, the SDK-session-path wiring (worker creates worktree from `KILD_BRANCH`), `SessionInfo.branch/worktreePath`, cleanup policy, cockpit chip + "open worktree", CLI `--branch` | A standalone `worktree({ repo, branch, root })` → `{ sandbox, cleanup() }` — creates on `createSessionEnv`, caller-managed `cleanup()` (Flue has no teardown hook — see mapping), parameterized, **no kild conventions**, liftable into Flue verbatim |
+| What | `kild/<name>` naming, `$KILD_HOME/worktrees/<name>` path, validation, git CRUD + `ensureWorktree` (create-or-attach), SDK-session-path wiring (worker ensures from `KILD_WORKTREE`), `SessionInfo.branch/worktreePath`, **persist + merge-prune + explicit `rm`** policy, cockpit "Run in" selector + chip + Worktrees panel, CLI `--worktree` + `kild worktree ls/rm/prune` | A standalone `worktree({ repo, branch, root })` → `{ sandbox, cleanup() }` — creates on `createSessionEnv`, caller-managed `cleanup()` (Flue has no teardown hook — see mapping), parameterized, **no kild conventions**, liftable into Flue verbatim |
 | Where | `engine/src/kild/worktree.ts` (de-Flue'd), `engine/src/worker.ts`, `engine/src/kild/sessions.ts`, `engine/src/server.ts`, `engine/src/cli.ts`, `app/src/**` | `engine/src/flue/worktree-sandbox.ts` (new), used by the Flue layer (`brain`/`workflows`) + packaged as the upstream reference |
 | Hot path? | YES — the shipped session path (coding-agent SDK + `cwd`) | NO — Flue sandboxes aren't on kild's session hot path |
 | Depends on `@flue/runtime`? | **No** (currently `worktree.ts` wrongly does; this plan removes it) | Yes (it *is* a Flue sandbox) |
@@ -111,21 +140,22 @@ The Flue-promotable module must map onto Flue's **real** interface. Verified fac
 ### After State
 ```
 ╔════════════════════════════════════════════════════════════════════════╗
-║  AFTER — opt-in isolated worktree per session                            ║
+║  AFTER — each session SELECTS where it runs (main / new / existing wt)   ║
 ╠════════════════════════════════════════════════════════════════════════╣
-║  [+ start session]                                                       ║
-║    [✓ isolate in worktree]  branch: [fix-auth]                           ║
-║          │                                                               ║
-║          ▼  spawn{cwd: repo, branch:'fix-auth'}                          ║
-║   worker: createWorktree(repo,'fix-auth') → cwd = ~/.config/kild/        ║
-║                                              worktrees/fix-auth          ║
+║  [+ start session]   Run in: ( main checkout ▾ | worktree: [fix-auth] )  ║
 ║                                                                          ║
-║   Agent A ──►  …/worktrees/fix-auth   (branch kild/fix-auth)             ║
-║   Agent B ──►  …/worktrees/refactor   (branch kild/refactor)            ║
+║   planner   ─ worktree:absent ─►  /Users/me/proj        (main/dev)       ║
+║   brain     ─ worktree:absent ─►  /Users/me/proj        (main/dev)       ║
+║   coder     ─ worktree:fix-auth ─► …/worktrees/fix-auth (kild/fix-auth)  ║
+║   reviewer  ─ worktree:fix-auth ─► …/worktrees/fix-auth (SAME — attach)  ║
+║   coder-2   ─ worktree:refactor ─► …/worktrees/refactor (split)          ║
 ║                                                                          ║
+║  worker: ensureWorktree(repo,name) — create if missing, ATTACH if exists ║
 ║  Topbar:  proj · agent · model   [⎇ kild/fix-auth]  [open ⧉]            ║
+║  worktrees PERSIST — removed only via `kild worktree rm` / UI action     ║
 ║                                                                          ║
-║  VALUE: safe parallel agents; each branch reviewable/mergeable later.    ║
+║  VALUE: planners/brain on main; coders isolated; reviewers share the     ║
+║  coder's tree; nothing auto-deleted out from under a shared worktree.    ║
 ╚════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -246,9 +276,11 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 |------|--------|---------------|
 | `engine/src/kild/worktree.ts` | UPDATE | Remove `@flue` imports + `worktreeSandbox` (move to flue/); add `worktreePath(name)` + `worktreeRef(name)` deterministic helpers; keep CRUD. Now kild-owned, hot-path-safe |
 | `engine/src/kild/worktree.test.ts` | CREATE | Deterministic tests: branch validation, path/ref derivation |
-| `engine/src/worker.ts` | UPDATE | If `KILD_BRANCH` set, `createWorktree(KILD_CWD, branch)` → use its path as `cwd`; emit `error` on failure |
-| `engine/src/kild/sessions.ts` | UPDATE | `SpawnRequest.branch?`; `SessionInfo.branch?/worktreePath?`; set `KILD_BRANCH` env; populate SessionInfo via `worktreeRef/worktreePath`; remove worktree on `stop()` |
-| `engine/src/server.ts` | UPDATE | `ClientMessage.spawn.branch?`; validate in `parseClientMessage` |
+| `engine/src/worker.ts` | UPDATE | If `KILD_WORKTREE` set, `ensureWorktree(KILD_CWD, name)` (create-or-attach) → use its path as `cwd`; emit `error` on failure |
+| `engine/src/kild/sessions.ts` | UPDATE | `SpawnRequest.worktree?`; `SessionInfo.branch?/worktreePath?`; set `KILD_WORKTREE` env; fill SessionInfo via `worktreeRef/worktreePath`; **does NOT remove worktrees on stop** |
+| `engine/src/server.ts` | UPDATE | `ClientMessage.spawn.worktree?` (validate); `GET/DELETE /api/worktrees` + prune-merged on start/list; (optional) `POST /api/open` |
+| `engine/src/cli.ts` | UPDATE | `run --worktree`; a `kild worktree ls/rm/prune` command group |
+| `app/` worktrees UI | UPDATE | "Run in" selector (main / new / existing worktree) + a Worktrees panel (list + ✕ remove + prune) |
 | `engine/src/server.ts` | UPDATE | (optional, Phase 4) `POST /api/open` — reveal a worktree path in the OS, scoped to the worktree root |
 | `engine/src/cli.ts` | UPDATE | `--branch` option; pass through in `runViaEngine`/`runInProcess` |
 | `engine/src/flue/worktree-sandbox.ts` | CREATE | **Flue-promotable** `worktree()` → `{sandbox, cleanup}` (caller-managed; the contribution) |
@@ -267,10 +299,11 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 
 ## NOT Building (Scope Limits)
 
-- **Multi-repo / `Project.roots`** — explicitly deferred. The worktree primitive is per-repo; a project spanning N repos maps over it later as an additive layer (`Project.roots`, create N worktrees, a workspace cwd). YAGNI until a real multi-repo project drives it.
-- **Default-on isolation** — for this slice the worktree is **opt-in** per session (toggle / `--branch`). Making it the default for git repos (auto-branch naming) is a fast-follow, not in scope.
-- **Auto-commit / dirty-tree handling on close** — the agent is responsible for committing; close does `worktree remove --force` (uncommitted changes discarded). A "commit/stash before remove" safety net is future work.
-- **Worktree GC on engine restart** — orphaned worktrees from a crashed/restarted engine are left in place for now; a `kild worktree prune` command is future work.
+- **Multi-repo / `Project.roots`** — deferred. The worktree primitive is per-repo; a project spanning N repos maps over it later (`Project.roots`, N worktrees, a workspace cwd). YAGNI until a real multi-repo project drives it.
+- **Rooms** — the room-level "one shared worktree vs split per agent" selection is future. It needs **zero new primitives**: a room picks one `worktree` name (shared) or a name per agent (split); agents self-create via the brain's `create_worktree`. Not built now.
+- **Default-on isolation** — the worktree is **opt-in** ("Run in" defaults to main checkout / `--worktree` absent). Auto-isolating coders by default is a fast-follow.
+- **Remove-on-close / refcounting** — sessions never remove worktrees; worktrees persist. The **only** automatic removal is the merge-prune (Task 2.8). No refcounting, no background polling.
+- **Auto-commit / dirty-tree safety** — explicit `rm` does `worktree remove --force` (discards uncommitted work). Merge-prune is safe (merged ⇒ integrated). A "commit/stash before rm" net is future work.
 - **The actual Flue PR being merged** — Phase 6 produces the reference impl + opens the issue; acceptance into Flue is out of our control.
 
 ---
@@ -280,20 +313,27 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 ### PHASE 1 — kild-owned: make `worktree.ts` hot-path-safe (de-Flue the domain logic)
 
 **Task 1.1: UPDATE `engine/src/kild/worktree.ts`**
-- **ACTION**: Remove `import type { SandboxFactory } from '@flue/runtime'` and `import { local } from '@flue/runtime/node'`, and **delete** `worktreeSandbox()` (it moves to `flue/` in Phase 5). Add two pure, deterministic helpers used by both engine and worker:
+- **ACTION**: Remove `import type { SandboxFactory } from '@flue/runtime'` and `import { local } from '@flue/runtime/node'`, and **delete** `worktreeSandbox()` (it moves to `flue/` in Phase 5). Add deterministic path helpers + a create-or-attach `ensureWorktree`:
 - **IMPLEMENT**:
   ```typescript
-  /** kild policy: the git branch ref for a session branch name. */
   export function worktreeRef(name: string): string { assertSafeBranch(name); return `kild/${name}`; }
-  /** kild policy: the on-disk worktree path for a session branch name. */
   export function worktreePath(name: string): string {
     assertSafeBranch(name);
     return path.join(worktreesRoot(), name.replace(/\//g, '-'));
   }
+  /** Create the worktree if missing, ATTACH (reuse) if it already exists. The
+   *  session path uses this — it must never reset a shared worktree. */
+  export async function ensureWorktree(repo: string, name: string): Promise<Worktree> {
+    const wtPath = worktreePath(name);
+    const ref = worktreeRef(name);
+    if (existsSync(wtPath)) return { branch: ref, path: wtPath }; // attach
+    await execFile('git', ['-C', repo, 'worktree', 'add', '-B', ref, wtPath]); // create (no pre-remove)
+    return { branch: ref, path: wtPath };
+  }
   ```
-  Refactor `createWorktree(repo, name)` to use these helpers (returns `{ branch: worktreeRef(name), path: worktreePath(name) }`). `export assertSafeBranch` so the server can validate.
+  Keep `createWorktree` (force `-B` + pre-remove) for the brain's explicit "new worktree". `export assertSafeBranch` for the server.
 - **MIRROR**: existing `engine/src/kild/worktree.ts:24-39`
-- **GOTCHA**: `createWorktree` already force-removes a stale worktree at the path before `add -B` (idempotent) — keep that.
+- **GOTCHA**: `ensureWorktree` must NOT pre-remove (attach case). `createWorktree` keeps its force-remove (fresh). Import `existsSync` from `node:fs`.
 - **VALIDATE**: `cd engine && bun run typecheck && bun run lint`
 
 **Task 1.2: CREATE `engine/src/kild/worktree.test.ts`**
@@ -304,46 +344,59 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 ### PHASE 2 — kild-owned: wire worktree into the session path
 
 **Task 2.1: UPDATE `engine/src/kild/sessions.ts` (types + env)**
-- **ACTION**: Add `branch?: string` to `SpawnRequest`; add `branch?: string; worktreePath?: string` to `SessionInfo`. In `PiSession` env, add `KILD_BRANCH: req.branch ?? ''`.
+- **ACTION**: Add `worktree?: string` (the worktree *name*) to `SpawnRequest`; add `branch?: string; worktreePath?: string` to `SessionInfo`. In `PiSession` env, add `KILD_WORKTREE: req.worktree ?? ''`. Keep `KILD_CWD = req.cwd` as the **repo** path.
 - **MIRROR**: `engine/src/kild/sessions.ts:5-20, 34-44`
-- **GOTCHA**: Keep `KILD_CWD = req.cwd` as the **repo** path; the worktree is created *from* it in the worker. Don't pre-resolve cwd to the worktree here (keeps spawn sync → no race).
+- **GOTCHA**: the worktree is ensured *from* the repo in the worker — don't pre-resolve cwd here (keeps spawn sync → no race).
 - **VALIDATE**: `bun run typecheck`
 
-**Task 2.2: UPDATE `engine/src/kild/sessions.ts` (`SessionManager.spawn` populates branch/worktreePath)**
-- **ACTION**: When `req.branch`, set `info.branch = worktreeRef(req.branch)` and `info.worktreePath = worktreePath(req.branch)` (deterministic, no await). Import from `./worktree.ts`.
+**Task 2.2: UPDATE `engine/src/kild/sessions.ts` (`SessionManager.spawn` fills branch/worktreePath)**
+- **ACTION**: When `req.worktree`, set `info.branch = worktreeRef(req.worktree)` and `info.worktreePath = worktreePath(req.worktree)` (deterministic, no await). Import from `./worktree.ts`.
 - **MIRROR**: `engine/src/kild/sessions.ts:101-108`
-- **GOTCHA**: `worktreeRef/worktreePath` throw on a bad name — wrap in try/catch and broadcast an `error` event for that session id rather than throwing out of `spawn`.
+- **GOTCHA**: those throw on a bad name → wrap in try/catch and broadcast an `error` event for that id rather than throwing out of `spawn`.
 - **VALIDATE**: `bun run typecheck`
 
-**Task 2.3: UPDATE `engine/src/kild/sessions.ts` (`SessionManager.stop` removes the worktree)**
-- **ACTION**: In `stop(id)`, after `entry.session.stop()`, if `entry.info.branch && entry.info.worktreePath && entry.info.cwd`, call `removeWorktree(entry.info.cwd, entry.info.worktreePath).catch(() => {})` (fire-and-forget; the `kild/<branch>` branch persists).
-- **MIRROR**: `engine/src/kild/sessions.ts:124-129`
-- **GOTCHA**: Only remove on **explicit stop**, NOT on natural `session_end` (worker exit) — a finished agent's worktree stays for review.
-- **VALIDATE**: `bun run typecheck`
+**Task 2.3: (no remove-on-close)** — `SessionManager.stop` does **NOT** touch the worktree. Worktrees persist; they're removed only via the explicit mechanism (Task 2.7). A shared worktree must survive any one session closing. *(This task is a deliberate non-change + a comment in `stop()`.)*
 
-**Task 2.4: UPDATE `engine/src/worker.ts` (create the worktree)**
-- **ACTION**: After reading `cwd`, read `const branch = process.env.KILD_BRANCH || undefined;`. If set, `try { cwd = (await createWorktree(cwd, branch)).path } catch (err) { emit({kind:'error',message:\`worktree: ${errText(err)}\`}); process.exit(1) }` — BEFORE `createAgentSession`.
+**Task 2.4: UPDATE `engine/src/worker.ts` (ensure the worktree)**
+- **ACTION**: After reading `cwd`, read `const wt = process.env.KILD_WORKTREE || undefined;`. If set, `try { cwd = (await ensureWorktree(cwd, wt)).path } catch (err) { emit({kind:'error',message:\`worktree: ${errText(err)}\`}); process.exit(1) }` — BEFORE `createAgentSession`. (`ensureWorktree` = create-or-attach.)
 - **MIRROR**: `engine/src/worker.ts:14-34`
-- **IMPORTS**: `import { createWorktree } from './kild/worktree.ts'`
-- **GOTCHA**: Stdin prompts sent before the worktree finishes creating are buffered by the OS pipe — no loss. createAgentSession then resolves `cwd` to the worktree (so `AGENTS.md`/skills load from there).
+- **IMPORTS**: `import { ensureWorktree } from './kild/worktree.ts'`
+- **GOTCHA**: prompts sent before the worktree is ready are OS-buffered on stdin — no loss.
 - **VALIDATE**: `bun run typecheck && bun run lint`
 
-**Task 2.5: UPDATE `engine/src/server.ts` (accept + validate `branch`)**
-- **ACTION**: Add `branch?: string` to `ClientMessage`'s `spawn` variant. In `parseClientMessage`, if `m.branch !== undefined && typeof m.branch !== 'string'` return null.
+**Task 2.5: UPDATE `engine/src/server.ts` (accept + validate `worktree`)**
+- **ACTION**: Add `worktree?: string` to `ClientMessage`'s `spawn` variant. In `parseClientMessage`, reject `m.worktree !== undefined && typeof m.worktree !== 'string'`.
 - **MIRROR**: `engine/src/server.ts:60-71` + the existing `parseClientMessage` shape-checks
 - **VALIDATE**: `bun run typecheck && bun run lint`
 
-**Task 2.6: CREATE `engine/src/kild/sessions.test.ts` (or extend)**
-- **ACTION**: Unit-test the pure derivations the manager relies on (branch→ref→worktreePath in `SessionInfo`), without spawning a subprocess. (Subprocess/git behavior is covered by the worktree tests + manual validation.)
+**Task 2.6: CREATE/extend `engine/src/kild/sessions.test.ts`**
+- **ACTION**: Unit-test the pure derivations (worktree-name → ref → worktreePath in `SessionInfo`), no subprocess.
 - **VALIDATE**: `bun test`
 
-### PHASE 3 — kild-owned: CLI (`--branch`), CLI-first
+**Task 2.7: CREATE the separate worktree-management surface (engine)**
+- **ACTION**: `GET /api/worktrees?project=<name>` → `listWorktrees(projectPath)` (existing) filtered to `kild/*`. `DELETE /api/worktrees` body `{ project, name }` → `removeWorktree(projectPath, worktreePath(name))` (frees disk; the branch persists). Add `removeWorktree`/`listWorktrees` are already in `worktree.ts`.
+- **MIRROR**: existing route style `engine/src/server.ts:37-54`; reuse the `assertSafeBranch`/`worktreePath` helpers.
+- **GOTCHA**: validate `name` (allowlist) before building the path; only operate under `worktreesRoot()`. Removing a worktree that a live session is using should warn/refuse if any session's `info.worktree === name` (cross-check `sessionManager.list()`).
+- **VALIDATE**: `bun run typecheck && bun run lint`
 
-**Task 3.1: UPDATE `engine/src/cli.ts`**
-- **ACTION**: Add `branch: { type: 'string' }` to `parseArgs` options. In `runViaEngine`, add `branch: values.branch` to the spawn message. In `runInProcess`, if `values.branch`, create the worktree (`createWorktree(projectPath, values.branch)`) and use its path as `cwd` (mirror the worker).
+**Task 2.8: CREATE the one automatic cleanup — prune merged worktrees (kild-owned)**
+- **ACTION**: In `engine/src/kild/worktree.ts`, add `pruneMergedWorktrees(repo: string): Promise<string[]>` — detect the repo's default branch (`git rev-parse --abbrev-ref origin/HEAD` → fallback `main`/`master`/current), list branches merged into it (`git branch --merged <default>`), and for each `kild/*` worktree whose branch is merged: `git worktree remove --force <path>` + `git branch -d <branch>`. Returns the names pruned. Wire it: (a) once on engine start (`server.ts`, fire-and-forget per registered project), and (b) at the top of `GET /api/worktrees` before listing.
+- **MIRROR**: the `execFile` git style in `worktree.ts`; route style in `server.ts`.
+- **GOTCHA**: NEVER prune a worktree a live session is using (cross-check `sessionManager.list()` for `info.worktree`). `branch -d` (safe delete) not `-D` — refuses unmerged, a backstop. No background timer — only start + on-demand/list.
+- **VALIDATE**: `bun run typecheck && bun run lint`; manual: merge a `kild/x` branch into main → hit `GET /api/worktrees` → the `x` worktree is gone, branch deleted.
+
+### PHASE 3 — kild-owned: CLI (`--worktree` + `kild worktree …`), CLI-first
+
+**Task 3.1: UPDATE `engine/src/cli.ts` (run `--worktree`)**
+- **ACTION**: Add `worktree: { type: 'string' }` to `parseArgs` options. In `runViaEngine`, add `worktree: values.worktree` to the spawn message. In `runInProcess`, if `values.worktree`, `cwd = (await ensureWorktree(projectPath, values.worktree)).path` (mirror the worker — create-or-attach).
 - **MIRROR**: `engine/src/cli.ts:16-24, 117-126, 164-176`
-- **GOTCHA**: `runInProcess` is the engine-down fallback; it must replicate the worker's worktree step so `--branch` works standalone too.
-- **VALIDATE**: `bun run typecheck && bun run lint`; manual: `bun run cli -- run --project <p> --branch test "ls" --json`
+- **GOTCHA**: `runInProcess` is the engine-down fallback; replicate the worker's `ensureWorktree` so `--worktree` works standalone.
+- **VALIDATE**: `bun run typecheck && bun run lint`; manual: `bun run cli -- run --project <p> --worktree test "touch X" --json`
+
+**Task 3.2: UPDATE `engine/src/cli.ts` (the `kild worktree` command group — explicit management)**
+- **ACTION**: Add a `worktree` group alongside `project`/`agent`/`run`: `kild worktree ls --project <p>` (lists `kild/*` worktrees, after prune-merged), `kild worktree rm <name> --project <p>` (explicit remove), `kild worktree prune --project <p>` (run the merge-prune now). Delegate to `listWorktrees`/`removeWorktree`/`pruneMergedWorktrees`. `--json` supported (CLI-first contract).
+- **MIRROR**: the existing `project`/`agent` subcommand dispatch in `cli.ts`
+- **VALIDATE**: `bun run typecheck && bun run lint`; manual: `bun run cli -- worktree ls --project <p> --json`
 
 ### PHASE 4 — kild-owned: cockpit
 
@@ -353,14 +406,14 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 - **VALIDATE**: `cd app && bun run check`
 
 **Task 4.2: UPDATE `app/src/lib/api.ts`**
-- **ACTION**: Add `branch?: string` to `SpawnOptions` (it spreads into the WS spawn message automatically).
-- **MIRROR**: `app/src/lib/api.ts:32, 90-92`
+- **ACTION**: Add `worktree?: string` to `SpawnOptions` (the selected worktree name; spreads into the WS spawn message). Add `listWorktrees(project)` / `removeWorktree(project, name)` / `pruneWorktrees(project)` REST helpers (GET/DELETE/POST `/api/worktrees`).
+- **MIRROR**: `app/src/lib/api.ts:32, 90-92` + the existing `listProjects`/`addProject` fetch helpers.
 - **VALIDATE**: `bun run check`
 
-**Task 4.3: UPDATE `app/src/lib/components/Sidebar.svelte` + `app/src/routes/+page.svelte` (new-session branch)**
-- **ACTION**: Add a "isolate in worktree" toggle + branch text input to the new-session form (Sidebar `showCreator` block). Thread a `branch` state through to `+page.svelte:startSession`, which passes `branch` (only when toggled) into `socket.spawn(...)` and stores it on the local `Session`.
-- **MIRROR**: existing Sidebar `Dropdown`/new-session block + `+page.svelte:131-151`
-- **GOTCHA**: keep the toggle OFF by default (non-breaking). Auto-suggest a branch name (e.g. `${agentName}-${shortId}`) but let the user edit.
+**Task 4.3: UPDATE `app/src/lib/components/Sidebar.svelte` + `app/src/routes/+page.svelte` (run-location selector)**
+- **ACTION**: In the new-session form, add a "Run in" selector: **main checkout** (default) | **new worktree** (text input for a name) | **existing worktree** (a `Dropdown` populated from `listWorktrees(active.path)` — this is how a reviewer attaches to a coder's tree). Thread the chosen `worktree` name (undefined for main) into `startSession` → `socket.spawn({..., worktree})` → store `branch`/`worktreePath` on the local `Session` (from the next `{sessions}` reconcile, or leave null until the engine broadcasts).
+- **MIRROR**: the Sidebar `showCreator` block + `Dropdown` usage + `+page.svelte:131-151`
+- **GOTCHA**: default = main checkout (non-breaking). For "new worktree", auto-suggest `${agentName}-${shortId}` but let the user edit. For "existing", refresh the list when the project changes.
 - **VALIDATE**: `bun run check`
 
 **Task 4.4: UPDATE `app/src/routes/+page.svelte` (`reconcileSessions` carries branch)**
@@ -377,6 +430,12 @@ export function worktreeSandbox(wt: Worktree): SandboxFactory {
 - **ACTION**: Engine: `POST /api/open { path }` that validates `path` starts with `worktreesRoot()` then `execFile('open'|'xdg-open', [path])`. Cockpit: `openWorktree(path)` → `fetch(POST /api/open)`. Keeps the FE pure-web (no Tauri API) and is loopback-only.
 - **GOTCHA**: validate the path against `worktreesRoot()` before shelling `open` — never open arbitrary paths. (Alternative considered: Tauri `opener:allow-open-path` + re-add `@tauri-apps/api` — rejected to keep the FE pure-web.)
 - **VALIDATE**: `bun run typecheck && bun run lint`; `bun run check`
+
+**Task 4.7: CREATE the worktrees panel (explicit remove in the UI)**
+- **ACTION**: A small "Worktrees" section (Sidebar, under the active project) listing `kild/*` worktrees via `listWorktrees(active.path)` with a ✕ to `removeWorktree(project, name)` and a "prune merged" action. This is the UI half of the explicit remove mechanism (the merge-prune is automatic; everything else is here).
+- **MIRROR**: the Sidebar Sessions list (`Sidebar.svelte:77-86`) for row + ✕ styling.
+- **GOTCHA**: refuse/confirm removing a worktree that a live session uses (the engine already cross-checks; surface its error).
+- **VALIDATE**: `bun run check`
 
 ### PHASE 5 — Flue-promotable: the `worktree()` SandboxFactory
 
@@ -465,7 +524,8 @@ EXPECT: each agent's file lands only in its own worktree; both branches exist.
 - [ ] Two concurrent branch-isolated sessions on one repo do not share a working tree.
 - [ ] `SessionInfo`/`Session` carry `branch` + `worktreePath`; the cockpit shows the branch chip; "open worktree" reveals it.
 - [ ] `kild run --branch` works both via the engine and in-process (engine-down).
-- [ ] Explicit close removes the worktree; the branch persists. Natural end keeps the worktree.
+- [ ] Closing a session never touches its worktree; worktrees persist. A `kild/<name>` branch merged into the default branch is auto-pruned (worktree + branch gone) on engine start / list refresh; `kild worktree rm` removes one explicitly.
+- [ ] Naming the same `worktree` for two sessions attaches both to the same tree (shared); different names = split; absent = main checkout.
 - [ ] **Boundary holds:** `engine/src/kild/worktree.ts` has **no** `@flue` import and is the only worktree code on the session hot path; the general mechanism lives in `engine/src/flue/worktree-sandbox.ts` with no `kild/*` imports.
 - [ ] Level 1 + 2 green; manual Level 3 verified.
 
@@ -475,7 +535,8 @@ EXPECT: each agent's file lands only in its own worktree; both branches exist.
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Worktree creation in the worker delays the first turn / loses an early prompt | MED | MED | Stdin is OS-buffered; worktree create runs before `createAgentSession`; prompts wait. Surface failures as `error` events |
-| `worktree remove --force` discards uncommitted agent work on close | MED | MED | Only remove on **explicit** close; keep on natural end; document; (future: commit/stash-before-remove) |
+| Explicit `rm` (`--force`) discards uncommitted agent work | MED | MED | Sessions never auto-remove; merge-prune is safe (merged ⇒ integrated); only manual `rm` force-removes; (future: commit/stash-before-rm) |
+| Merge-prune removes a worktree still in use, or the "default branch" is mis-detected | LOW | MED | Cross-check `sessionManager.list()` before pruning; `branch -d` (safe) not `-D`; detect default via `origin/HEAD` → `main`/`master`/current fallback |
 | Branch-name injection (brain feeds LLM names) | LOW | HIGH | `assertSafeBranch` allowlist + `execFile` (no shell) — already in place; reused everywhere |
 | `/api/open` opens arbitrary paths | LOW | MED | Validate path is under `worktreesRoot()` before shelling `open`; engine is loopback-only |
 | Project isn't a git repo | MED | LOW | `git worktree add` fails → `error` event; branch toggle is opt-in; (future: detect + disable toggle for non-git dirs) |
