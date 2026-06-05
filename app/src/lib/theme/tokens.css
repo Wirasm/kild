@@ -1,33 +1,33 @@
 /* Tallinn Night — Design Tokens */
 :root {
   /* Voids & Surfaces (The Long Dark) */
-  --color-void: #050507;          /* Absolute deepest background */
-  --color-obsidian: #0b0c10;      /* Sidebar and pane backgrounds */
-  --color-surface: #12141c;       /* Card and element backgrounds */
-  --color-elevated: #1a1d29;      /* Modals, tooltips, active states */
+  --void: #050507;          /* Absolute deepest background */
+  --obsidian: #0b0c10;      /* Sidebar and pane backgrounds */
+  --surface: #12141c;       /* Card and element backgrounds */
+  --elevated: #1a1d29;      /* Modals, tooltips, active states */
 
   /* Borders & Dividers (The Blade) */
-  --color-border-subtle: #191c26;
-  --color-border: #2b3040;
-  --color-border-focus: #3b82f6;
+  --border-subtle: #191c26;
+  --border: #2b3040;
+  --border-focus: #3b82f6;
 
   /* Typography (Baltic Ice & Frost) */
-  --color-text-bright: #f3f4f6;   /* Headings, active text */
-  --color-text: #d1d5db;          /* Body text */
-  --color-text-subtle: #9ca3af;   /* Metadata, labels */
-  --color-text-muted: #6b7280;    /* Disabled, line numbers, path details */
+  --text-bright: #f3f4f6;   /* Headings, active text */
+  --text: #d1d5db;          /* Body text */
+  --text-subtle: #9ca3af;   /* Metadata, labels */
+  --text-muted: #6b7280;    /* Disabled, line numbers, path details */
 
   /* Semantic Accents (Cold Neon) */
-  --color-ice: #7cb4c8;           /* Primary brand, core navigation */
-  --color-ice-dim: #5e9ab2;       /* Secondary brand shade */
-  --color-electric-blue: #3b82f6; /* Action button, selected state */
-  --color-aurora: #6b8f5e;        /* Agent success, active running state */
-  --color-ember: #e06c75;         /* Errors, crashes, destructive options */
-  --color-copper: #c49a5c;        /* Warning, steering required */
+  --ice: #7cb4c8;           /* Primary brand, core navigation */
+  --ice-dim: #5e9ab2;       /* Secondary brand shade */
+  --electric-blue: #3b82f6; /* Action button, selected state */
+  --aurora: #6b8f5e;        /* Agent success, active running state */
+  --ember: #e06c75;         /* Errors, crashes, destructive options */
+  --copper: #c49a5c;        /* Warning, steering required */
 
   /* Fonts */
-  --font-ui: "Inter", -apple-system, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --ui: "Inter", -apple-system, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* Shadows */
   --shadow-subtle: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);

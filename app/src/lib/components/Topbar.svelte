@@ -1,20 +1,5 @@
 <script lang="ts">
-  type Item =
-    | { type: "user"; text: string }
-    | { type: "assistant"; text: string }
-    | { type: "tool"; id: string; name: string; args: string; status: "running" | "ok" | "error" };
-
-  type Session = {
-    id: number;
-    projectName: string;
-    agent: string;
-    model: string;
-    items: Item[];
-    running: boolean;
-    status: "running" | "stopped";
-    modelLabel: string | null;
-    stats: { tokens: number; cost: number; context_pct: number | null } | null;
-  };
+  import type { Session } from "../types";
 
   let { activeSession }: { activeSession: Session } = $props();
 </script>

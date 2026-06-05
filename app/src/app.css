@@ -1,24 +1,5 @@
 @import "./lib/theme/tokens.css";
 
-:root {
-  --void: var(--color-void);
-  --obsidian: var(--color-obsidian);
-  --surface: var(--color-surface);
-  --elevated: var(--color-elevated);
-  --border-subtle: var(--color-border-subtle);
-  --border: var(--color-border);
-  --text-muted: var(--color-text-muted);
-  --text-subtle: var(--color-text-subtle);
-  --text: var(--color-text);
-  --text-bright: var(--color-text-bright);
-  --ice: var(--color-ice);
-  --ice-dim: var(--color-ice-dim);
-  --aurora: var(--color-aurora);
-  --copper: var(--color-copper);
-  --ember: var(--color-ember);
-  --mono: var(--font-mono);
-  --ui: var(--font-ui);
-}
 
 * {
   box-sizing: border-box;

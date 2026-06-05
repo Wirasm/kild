@@ -7,35 +7,7 @@
   import Ledger from "$lib/components/Ledger.svelte";
   import Composer from "$lib/components/Composer.svelte";
 
-  type Project = { name: string; path: string };
-  type Agent = { name: string; system_prompt: string };
-
-  type Item =
-    | { type: "user"; text: string }
-    | { type: "assistant"; text: string }
-    | { type: "tool"; id: string; name: string; args: string; status: "running" | "ok" | "error" };
-
-  type UiEvent =
-    | { kind: "model"; provider: string; id: string }
-    | { kind: "text"; delta: string }
-    | { kind: "tool_start"; id: string; name: string; args: string }
-    | { kind: "tool_end"; id: string; name: string; ok: boolean }
-    | { kind: "retry"; attempt: number; max: number }
-    | { kind: "agent_end" }
-    | { kind: "stats"; tokens: number; cost: number; context_pct: number | null }
-    | { kind: "session_end" };
-
-  type Session = {
-    id: number;
-    projectName: string;
-    agent: string;
-    model: string;
-    items: Item[];
-    running: boolean;
-    status: "running" | "stopped";
-    modelLabel: string | null;
-    stats: { tokens: number; cost: number; context_pct: number | null } | null;
-  };
+  import type { Project, Agent, Item, UiEvent, Session } from "$lib/types";
 
   const MODELS = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8", "gpt-5.5", "MiniMax-M3"];
 

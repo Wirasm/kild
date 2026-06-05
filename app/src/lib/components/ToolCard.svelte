@@ -35,11 +35,11 @@
     align-self: flex-start;
     display: flex;
     flex-direction: column;
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-size: 12px;
-    color: var(--color-text-subtle);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border-subtle);
+    color: var(--text-subtle);
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 8px 12px;
     min-width: 300px;
@@ -47,17 +47,17 @@
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   .tool:hover {
-    border-color: var(--color-border);
+    border-color: var(--border);
     box-shadow: var(--shadow-subtle);
   }
   .tool.running {
-    border-left: 3px solid var(--color-ice);
+    border-left: 3px solid var(--ice);
   }
   .tool.ok {
-    border-left: 3px solid var(--color-aurora);
+    border-left: 3px solid var(--aurora);
   }
   .tool.error {
-    border-left: 3px solid var(--color-ember);
+    border-left: 3px solid var(--ember);
     background: #1a0f10;
   }
 
@@ -77,21 +77,21 @@
   }
 
   .tool-name {
-    color: var(--color-ice);
+    color: var(--ice);
     font-weight: 600;
   }
   .tool-status-mark {
     font-size: 11px;
-    color: var(--color-text-muted);
+    color: var(--text-muted);
   }
   .tool-status-mark.running {
-    color: var(--color-ice-dim);
+    color: var(--ice-dim);
   }
   .tool-status-mark.ok {
-    color: var(--color-aurora);
+    color: var(--aurora);
   }
   .tool-status-mark.error {
-    color: var(--color-ember);
+    color: var(--ember);
   }
 
   .tool-mark {
@@ -99,16 +99,16 @@
     font-weight: bold;
   }
   .tool.ok .tool-mark {
-    color: var(--color-aurora);
+    color: var(--aurora);
   }
   .tool.error .tool-mark {
-    color: var(--color-ember);
+    color: var(--ember);
   }
 
   .tool-details {
     margin-top: 10px;
     padding-top: 8px;
-    border-top: 1px solid var(--color-border-subtle);
+    border-top: 1px solid var(--border-subtle);
   }
   .detail-row {
     display: flex;
@@ -118,17 +118,17 @@
   .label {
     font-size: 10px;
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--text-muted);
     letter-spacing: 0.5px;
   }
   .args-code {
     margin: 0;
     padding: 8px;
-    background: var(--color-void);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--void);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
     overflow-x: auto;
-    color: var(--color-text);
+    color: var(--text);
   }
   .args-code code {
     white-space: pre-wrap;

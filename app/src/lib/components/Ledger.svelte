@@ -1,10 +1,7 @@
 <script lang="ts">
   import ToolCard from "./ToolCard.svelte";
 
-  type Item =
-    | { type: "user"; text: string }
-    | { type: "assistant"; text: string }
-    | { type: "tool"; id: string; name: string; args: string; status: "running" | "ok" | "error" };
+  import type { Item } from "../types";
 
   interface Props {
     items: Item[];
