@@ -62,13 +62,19 @@ export class EngineSocket {
       this.queue = [];
     });
     this.ws.addEventListener("message", (ev) => {
-      const msg = JSON.parse(ev.data) as
-        | { session: string; event: UiEvent }
-        | { sessions: SessionInfo[] };
-      if ("sessions" in msg) this.onSessions?.(msg.sessions);
-      else this.onEvent(msg.session, msg.event);
+      let msg: { session?: string; event?: UiEvent; sessions?: SessionInfo[] };
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return; // ignore malformed frames
+      }
+      if (Array.isArray(msg.sessions)) this.onSessions?.(msg.sessions);
+      else if (typeof msg.session === "string" && msg.event) this.onEvent(msg.session, msg.event);
     });
     this.ws.addEventListener("close", () => {
+      // Drop queued commands: the restarted engine has lost those sessions, so
+      // replaying prompt/stop for them would silently no-op.
+      this.queue = [];
       this.onStatus?.(false);
       if (!this.closed) setTimeout(() => this.connect(), 1000);
     });

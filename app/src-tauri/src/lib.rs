@@ -12,11 +12,11 @@ pub fn run() {
             #[cfg(not(debug_assertions))]
             {
                 use tauri_plugin_shell::ShellExt;
-                match app.shell().sidecar("kild-engine") {
-                    Ok(cmd) => {
-                        let _ = cmd.spawn();
-                    }
-                    Err(e) => eprintln!("kild: failed to start engine sidecar: {e}"),
+                // Surface a launch failure rather than discarding it: otherwise the
+                // window opens to a dead :4517 and loops "reconnecting…" with no
+                // root cause. (A user-facing dialog would be the next step.)
+                if let Err(e) = app.shell().sidecar("kild-engine").and_then(|cmd| cmd.spawn()) {
+                    eprintln!("kild: failed to start engine sidecar: {e}");
                 }
             }
             #[cfg(debug_assertions)]

@@ -15,16 +15,19 @@
     queueMicrotask(() => transcriptEl?.scrollTo({ top: transcriptEl.scrollHeight }));
   }
 
-  // Svelte 5 effect to automatically scroll to bottom on updates
+  // Follow output: re-run on new items, on streamed text growth (a text delta
+  // mutates items[last].text without changing items.length), and while running.
   $effect(() => {
-    if (items.length || running) {
-      scrollDown();
-    }
+    void items.length;
+    const tail = items[items.length - 1];
+    if (tail && tail.type === "assistant") void tail.text;
+    void running;
+    scrollDown();
   });
 </script>
 
 <section class="transcript" bind:this={transcriptEl}>
-  {#each items as item}
+  {#each items as item, i (item.type === "tool" ? `tool-${item.id}` : `msg-${i}`)}
     {#if item.type === "user"}
       <div class="msg user">{item.text}</div>
     {:else if item.type === "assistant"}

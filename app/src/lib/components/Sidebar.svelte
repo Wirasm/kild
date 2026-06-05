@@ -47,7 +47,7 @@
   <div class="brand">kild</div>
 
   <div class="section-label">Projects</div>
-  {#each projects as p}
+  {#each projects as p (p.name)}
     <button class="project" class:active={active?.name === p.name} onclick={() => onSelectProject(p)}>
       <span class="p-name">{p.name}</span>
       <span class="p-path">{p.path}</span>
@@ -66,7 +66,7 @@
 
   {#if sessions.length > 0}
     <div class="section-label">Sessions</div>
-    {#each sessions as s}
+    {#each sessions as s (s.id)}
       <div class="session-row" class:active={s.id === activeId}>
         <button class="session-pick" onclick={() => onSelectSession(s.id)}>
           <span class="dot {s.status}" class:busy={s.running}></span>

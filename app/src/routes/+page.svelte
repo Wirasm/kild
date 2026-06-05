@@ -79,6 +79,11 @@
         break;
       case "retry":
         break;
+      default: {
+        // A new UiEvent variant should fail compilation here, not silently no-op.
+        const _exhaustive: never = ev;
+        void _exhaustive;
+      }
     }
   }
 
@@ -111,29 +116,26 @@
     }
   }
 
-  async function startSession() {
+  function startSession() {
     if (!active || !socket) return;
     error = null;
     const id = crypto.randomUUID();
-    try {
-      await socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name });
-      sessions.push({
-        id,
-        projectName: active.name,
-        agent: agentName,
-        model,
-        items: [],
-        running: false,
-        status: "running",
-        modelLabel: null,
-        stats: null,
-        origin: "ui",
-      });
-      activeId = id;
-      input = "";
-    } catch (e) {
-      error = `Could not start a session: ${e}`;
-    }
+    socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name });
+    ownedIds.add(id);
+    sessions.push({
+      id,
+      projectName: active.name,
+      agent: agentName,
+      model,
+      items: [],
+      running: false,
+      status: "running",
+      modelLabel: null,
+      stats: null,
+      origin: "ui",
+    });
+    activeId = id;
+    input = "";
   }
 
   function selectSession(id: string) {
@@ -141,17 +143,14 @@
     input = "";
   }
 
-  async function closeSession(id: string) {
-    try {
-      await socket?.stop(id);
-    } catch (e) {
-      console.warn("stop failed", e);
-    }
+  function closeSession(id: string) {
+    socket?.stop(id);
+    ownedIds.delete(id);
     sessions = sessions.filter((s) => s.id !== id);
     if (activeId === id) activeId = sessions[sessions.length - 1]?.id ?? null;
   }
 
-  async function send() {
+  function send() {
     const s = activeSession;
     if (!s || s.running || s.status === "stopped" || !socket) return;
     const text = input.trim();
@@ -159,18 +158,20 @@
     s.items.push({ type: "user", text });
     input = "";
     s.running = true;
-    error = null;
-    try {
-      await socket.prompt(s.id, text);
-    } catch (e) {
-      s.running = false;
-      error = `Send failed: ${e}`;
-    }
+    // Sends never throw (they queue while disconnected). A failure comes back as
+    // an `error` event, which handle() renders and clears the spinner.
+    socket.prompt(s.id, text);
   }
 
-  // The engine broadcasts the full session list (including sessions other clients,
-  // e.g. the CLI, started). Add any we don't already track so they show up live.
+  // Sessions we started locally, vs. foreign ones from the engine broadcast (e.g. a
+  // CLI run). We keep our own for their transcript; foreign ones mirror the engine.
+  const ownedIds = new Set<string>();
+
+  // Mirror the engine's session list: add foreign sessions so they show up live,
+  // and drop ones the engine no longer has so a finished CLI run doesn't zombie.
   function reconcileSessions(infos: SessionInfo[]) {
+    const live = new Set(infos.map((i) => i.id));
+    sessions = sessions.filter((s) => ownedIds.has(s.id) || live.has(s.id));
     const known = new Set(sessions.map((s) => s.id));
     for (const info of infos) {
       if (known.has(info.id)) continue;
@@ -180,12 +181,15 @@
         agent: info.agent ?? "default",
         model: info.model ?? "default",
         items: [],
-        running: true,
+        running: false, // the broadcast carries no run-state; events drive it
         status: "running",
         modelLabel: null,
         stats: null,
         origin: info.origin,
       });
+    }
+    if (activeId && !sessions.some((s) => s.id === activeId)) {
+      activeId = sessions[sessions.length - 1]?.id ?? null;
     }
   }
 
@@ -249,6 +253,13 @@
   />
 
   <main class="main">
+    {#if error}
+      <div class="banner">
+        <span>{error}</span>
+        <button onclick={() => (error = null)}>✕</button>
+      </div>
+    {/if}
+
     {#if projects.length === 0}
       <div class="empty">
         <h2>No project yet</h2>
@@ -263,13 +274,6 @@
       </div>
     {:else}
       <Topbar activeSession={activeSession} />
-
-      {#if error}
-        <div class="banner">
-          <span>{error}</span>
-          <button onclick={() => (error = null)}>✕</button>
-        </div>
-      {/if}
 
       <Ledger items={activeSession.items} running={activeSession.running} />
 
