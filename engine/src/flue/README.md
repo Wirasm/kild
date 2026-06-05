@@ -19,7 +19,7 @@ worktree. Verified against Flue's real interface (`packages/runtime/src/types.ts
   through `local({ cwd }).createSessionEnv({ id })` rather than calling the lower-level
   helper the plan assumed.
 
-### The upstream issue (two coupled proposals) — TODO: open at withastro/flue
+### The upstream RFC (two coupled proposals) — [withastro/flue#207](https://github.com/withastro/flue/discussions/207)
 
 1. **A first-class `worktree()` git-aware sandbox.** None of Flue's sandboxes
    (virtual just-bash / `local` / Daytona) are git-aware, yet branch-per-agent
@@ -32,4 +32,4 @@ worktree. Verified against Flue's real interface (`packages/runtime/src/types.ts
    `SandboxFactory.teardown?(env)`) called at session end; the `worktree()` sandbox is
    the motivating use-case. Frame as a discussion so #1 lands even if #2 isn't adopted.
 
-Record the issue link here and in the `flue-framework-prior-art` memory once opened.
+Opened 2026-06-05 as a Feature Request discussion (RFC): https://github.com/withastro/flue/discussions/207
