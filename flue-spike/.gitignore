@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.flue-vite/
+.cache/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+# spike-created git worktrees + local state
+.kild-spike/

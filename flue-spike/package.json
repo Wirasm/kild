@@ -1,0 +1,24 @@
+{
+  "name": "kild-flue-spike",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Spike: rebuild kild's capabilities (and the unbuilt batteries) on Flue, to compare against the Rust+pi-RPC kild.",
+  "scripts": {
+    "dev": "flue dev --target node",
+    "build": "flue build --target node",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@flue/runtime": "^0.9.2",
+    "hono": "^4.8.3",
+    "just-bash": "^3.0.1",
+    "valibot": "^1.1.0"
+  },
+  "devDependencies": {
+    "@flue/cli": "^0.9.2",
+    "typescript": "^5.6.0"
+  }
+}
