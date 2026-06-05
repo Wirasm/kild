@@ -1,5 +1,12 @@
 # kild
 
+> **kild v2 — a ground-up rewrite, under active development.** kild was rebuilt
+> from Rust to **TypeScript on bun** (engine + CLI) with a Tauri + SvelteKit
+> cockpit. Expect churn while v2 stabilises. The original Rust implementation
+> (v1) is preserved at the [`v1-rust`](https://github.com/Wirasm/kild/releases/tag/v1-rust)
+> tag and the [`archive/rust`](https://github.com/Wirasm/kild/tree/archive/rust)
+> branch.
+
 A developer cockpit for orchestrating coding-agent teams across projects. The
 human plans and reviews; agents (**pi**) automate the coding. kild gives
 observability and steering — a native UI to watch and steer many agents at once,
