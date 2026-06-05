@@ -4,12 +4,13 @@ This file guides Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
-**kild** is a developer cockpit for orchestrating coding-agent teams across
-projects. The human **plans and reviews**; agents **automate the coding**. kild
-gives observability and steering where it matters — and, over time, a merge agent
-team, GitHub-integrated reviews, and a learning operator-mirror "brain." It is a
-single-developer tool — no multi-tenant complexity. Optimize for one power user
-orchestrating many agents.
+**kild** is an **opinionated orchestrator for pi/Flue agent teams** — one operator
+directs many coding agents, each isolated, all visible, the work landed. The
+operator is **either a human or an orchestrator agent that stands in for them**;
+both drive the same surface (invoke, author, prompt, hand off, land). The "brain"
+is not special infrastructure — just an agent holding kild's orchestration tools.
+It is a single-developer tool — no multi-tenant complexity. Optimize for one
+operator directing many agents. See [`VISION.md`](./VISION.md).
 
 **Two halves, one boundary:**
 
@@ -21,11 +22,16 @@ orchestrating many agents.
   UI. The frontend talks to the engine over HTTP + WebSocket. The Rust in the shell
   is the irreducible Tauri bootstrap only — no logic lives there.
 
-**pi owns the agent runtime** — LLM providers, sessions, context compaction, tool
-calling, agent status, and **auth** (it reads `~/.pi/agent/auth.json`, so the
-user's Claude Max / ChatGPT OAuth subscriptions work natively). **kild owns
-orchestration** — projects, agents, sessions, worktrees, rooms, the cockpit. We do
-not reimplement what pi already does.
+**pi owns cognition** — LLM providers, sessions, context compaction, tool calling,
+agent status, and **auth** (it reads `~/.pi/agent/auth.json`, so the user's Claude
+Max / ChatGPT OAuth subscriptions work natively). **kild owns orchestration** — who
+runs where, how agents hand off, and how work lands: projects, agents, sessions,
+worktrees, the cockpit. We do not reimplement what pi already does.
+
+**Prompts are data, not code.** Agent personalities — including the orchestrator's
+own — live in `.pi/agents` / `.claude/agents`, authored and edited by humans *and*
+agents. kild ships orchestration mechanism and, at most, a default system prompt;
+it never bakes an agent personality into the codebase.
 
 ## Stack
 
@@ -34,9 +40,11 @@ not reimplement what pi already does.
 - **Web framework:** hono (the engine's HTTP + WS server; also Flue's framework).
 - **Agent kernel:** `@earendil-works/pi-coding-agent` (the in-process SDK) +
   `@earendil-works/pi-ai`. The cockpit/CLI use the **coding-agent SDK** directly.
-- **Flue** (`@flue/runtime`) is a **complementary layer** — its sandbox abstraction,
-  deploy targets, and workflow model — and the upstream we contribute back to. It is
-  not the runtime the hot path flows through.
+- **Flue** (`@flue/runtime`) is a **committed dependency** — its sandbox abstraction,
+  deploy targets, and workflow model, and the upstream we contribute back to. kild
+  bets on **pi + Flue; it is not agent-agnostic.** Flue is not yet on the session hot
+  path (that is the coding-agent SDK today), but the direction is deeper integration,
+  not a swap-out.
 - **UI:** SvelteKit (Svelte 5 runes) + adapter-static, in a Tauri 2 shell.
 
 ## Core Principles
@@ -46,10 +54,11 @@ this touch? Is it sound or itself incomplete? Root cause vs symptom. What is the
 minimal change that fixes the root cause? Surface tradeoffs; if multiple
 interpretations exist, present them — don't pick silently.
 
-**Lego — Vertical Slices** — Small, composable, swappable parts. Each slice owns its
-types and logic. Extend by adding a slice, never by editing a god-module. The
-single most important boundary: **only the engine knows pi exists** — keep that
-narrow so the agent backbone stays swappable.
+**Lego — Vertical Slices** — Small, composable parts. Each slice owns its types and
+logic. Extend by adding a slice, never by editing a god-module. The single most
+important boundary: **only the engine knows pi exists** — keep that narrow so pi's
+shapes are translated into kild domain types in one place and the cockpit/CLI never
+couple to them.
 
 **KISS + YAGNI** — Minimum code that solves the problem, nothing speculative. No
 config key, feature flag, or "flexibility" without a current caller. Rule of three
