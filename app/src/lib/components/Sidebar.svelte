@@ -43,6 +43,20 @@
   }: Props = $props();
 
   let showCreator = $state(false);
+  let filterMode = $state<"project" | "all">("project");
+
+  // Reset filter mode to show current active project sessions by default
+  $effect(() => {
+    if (active) {
+      filterMode = "project";
+    }
+  });
+
+  let filteredSessions = $derived(
+    active && filterMode === "project"
+      ? sessions.filter((s) => s.projectName === active.name)
+      : sessions
+  );
 </script>
 
 <aside class="sidebar">
@@ -57,7 +71,19 @@
   {/each}
   <button class="new" onclick={() => (adding = true)}>+ add project</button>
 
-  <div class="section-label">Sessions</div>
+  <div class="sessions-header-row">
+    <div class="section-label">Sessions</div>
+    {#if active}
+      <div class="filter-toggle">
+        <button class:selected={filterMode === "project"} onclick={() => filterMode = "project"}>
+          {active.name}
+        </button>
+        <button class:selected={filterMode === "all"} onclick={() => filterMode = "all"}>
+          all
+        </button>
+      </div>
+    {/if}
+  </div>
   {#if active}
     <button class="new" onclick={() => showCreator = !showCreator}>
       {showCreator ? "✕ close creator" : "+ new session"}
@@ -72,7 +98,7 @@
     </div>
   {/if}
 
-  {#each sessions as s (s.id)}
+  {#each filteredSessions as s (s.id)}
     <div class="session-row" class:active={s.id === activeId}>
       <button class="session-pick" onclick={() => onSelectSession(s.id)}>
         <span class="dot {s.status}" class:busy={s.running}></span>
@@ -267,5 +293,47 @@
   .session-close:hover {
     color: var(--ember) !important;
     background: transparent !important;
+  }
+  .sessions-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 8px;
+  }
+  .sessions-header-row .section-label {
+    padding: 4px 8px;
+    margin: 0;
+  }
+  .filter-toggle {
+    display: flex;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 2px;
+    margin-right: 8px;
+  }
+  .filter-toggle button {
+    background: transparent !important;
+    border: none !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    font-weight: 500 !important;
+    padding: 2px 8px !important;
+    border-radius: 10px !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+  }
+  .filter-toggle button.selected {
+    background: var(--surface) !important;
+    color: var(--ice) !important;
+    box-shadow: var(--shadow-subtle);
+  }
+  .filter-toggle button:hover:not(.selected) {
+    color: var(--text-bright) !important;
   }
 </style>
