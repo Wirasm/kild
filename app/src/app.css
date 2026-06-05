@@ -12,9 +12,14 @@ body {
 }
 
 body {
-  background: var(--void);
+  background: radial-gradient(circle at 60% 10%, #0d111a 0%, var(--void) 70%);
   color: var(--text);
   font-family: var(--ui);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Global button transitions for active micro-interactions */
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }

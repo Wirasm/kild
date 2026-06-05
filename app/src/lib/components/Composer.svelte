@@ -66,6 +66,14 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .composer button:hover:not(:disabled) {
+    background: var(--ice-dim);
+    transform: translateY(-1px);
+    box-shadow: var(--glow-ice);
+  }
+  .composer button:active:not(:disabled) {
+    transform: translateY(0);
+  }
   .composer button:disabled {
     background: var(--border);
     color: var(--text-muted);

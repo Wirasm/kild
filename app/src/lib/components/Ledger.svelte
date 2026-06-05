@@ -34,7 +34,10 @@
     {/if}
   {/each}
   {#if running}
-    <div class="thinking">▍</div>
+    <div class="thinking-container">
+      <div class="spinner"></div>
+      <span class="thinking-text">thinking…</span>
+    </div>
   {/if}
 </section>
 
@@ -65,13 +68,34 @@
     background: var(--surface);
     color: var(--text-bright);
   }
-  .thinking {
-    color: var(--ice);
-    animation: blink 1s steps(2) infinite;
+  .thinking-container {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    color: var(--text-subtle);
+    font-size: 11px;
+    font-family: var(--ui);
+    box-shadow: var(--shadow-subtle);
   }
-  @keyframes blink {
-    50% {
-      opacity: 0.25;
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(124, 180, 200, 0.2);
+    border-top: 2px solid var(--ice);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
     }
   }
 </style>

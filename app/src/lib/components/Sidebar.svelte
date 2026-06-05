@@ -96,8 +96,10 @@
 
 <style>
   .sidebar {
-    background: var(--obsidian);
-    border-right: 1px solid var(--border-subtle);
+    background: var(--obsidian-translucent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-right: 1px solid var(--border-translucent);
     padding: 12px;
     display: flex;
     flex-direction: column;
@@ -126,14 +128,26 @@
     border-radius: 6px;
     cursor: pointer;
     font: inherit;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar button:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.03);
+    border-color: var(--border-subtle);
   }
   .project {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    border: 1px solid transparent !important;
   }
   .project.active {
-    background: var(--surface);
+    background: var(--surface-translucent);
+    border-color: rgba(124, 180, 200, 0.2) !important;
+    box-shadow: var(--shadow-subtle);
+  }
+  .project.active .p-name {
+    color: var(--ice);
   }
   .project .p-name {
     color: var(--text-bright);
@@ -150,6 +164,11 @@
     color: var(--text-muted);
     border: 1px dashed var(--border) !important;
   }
+  .new:hover {
+    border-style: solid !important;
+    color: var(--ice) !important;
+    border-color: var(--ice) !important;
+  }
   .add-form {
     display: flex;
     flex-direction: column;
@@ -157,6 +176,7 @@
     padding: 8px;
     background: var(--surface);
     border-radius: 8px;
+    border: 1px solid var(--border-subtle);
   }
   .add-form input {
     background: var(--void);
@@ -166,6 +186,11 @@
     padding: 6px 8px;
     font: inherit;
     font-size: 12px;
+    transition: border-color 0.2s ease;
+  }
+  .add-form input:focus {
+    outline: none;
+    border-color: var(--ice);
   }
   .add-error {
     color: var(--ember);
@@ -181,6 +206,10 @@
     font-weight: 600;
     border: none !important;
   }
+  .primary:hover {
+    background: var(--ice-dim) !important;
+    box-shadow: var(--glow-ice);
+  }
   .new-session {
     display: flex;
     flex-direction: column;
@@ -194,6 +223,11 @@
     border-radius: 6px;
     padding: 6px 8px;
     font: inherit;
+    transition: border-color 0.2s ease;
+  }
+  .new-session select:focus {
+    outline: none;
+    border-color: var(--ice);
   }
   .new-session .start {
     text-align: center;
@@ -203,9 +237,13 @@
     display: flex;
     align-items: center;
     border-radius: 6px;
+    border: 1px solid transparent;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .session-row.active {
-    background: var(--surface);
+    background: var(--surface-translucent);
+    border: 1px solid rgba(124, 180, 200, 0.25);
+    box-shadow: var(--glow-ice);
   }
   .session-pick {
     flex: 1;
@@ -213,6 +251,11 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+    border: none !important;
+  }
+  .session-pick:hover {
+    background: transparent !important;
+    border-color: transparent !important;
   }
   .session-pick .s-title {
     color: var(--text-bright);
@@ -231,27 +274,49 @@
     height: 8px;
     border-radius: 50%;
     flex: none;
+    position: relative;
+    transition: all 0.2s ease;
   }
   .dot.running {
     background: var(--aurora);
+    box-shadow: 0 0 6px var(--aurora);
   }
   .dot.stopped {
     background: var(--text-muted);
   }
   .dot.busy {
-    animation: pulse 1s ease-in-out infinite;
+    background: var(--aurora);
+    box-shadow: 0 0 6px var(--aurora);
   }
-  @keyframes pulse {
-    50% {
-      opacity: 0.3;
+  .dot.busy::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border: 1px solid var(--aurora);
+    border-radius: 50%;
+    animation: ripple 1.6s cubic-bezier(0.25, 0, 0, 1) infinite;
+  }
+  @keyframes ripple {
+    0% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+    100% {
+      transform: scale(2.2);
+      opacity: 0;
     }
   }
   .session-close {
     color: var(--text-muted) !important;
     padding: 4px 8px !important;
     flex: none;
+    border: none !important;
   }
   .session-close:hover {
     color: var(--ember) !important;
+    background: transparent !important;
   }
 </style>

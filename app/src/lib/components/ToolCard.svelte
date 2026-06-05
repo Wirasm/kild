@@ -6,28 +6,31 @@
   }
 
   let { name, args, status }: Props = $props();
+  let isOpen = $state(false);
 </script>
 
-<div class="tool {status}">
-  <details>
-    <summary>
-      <span class="tool-name">🔧 {name}</span>
-      <span class="tool-status-mark" class:running={status === "running"} class:ok={status === "ok"} class:error={status === "error"}>
-        {#if status === "running"}
-          running…
-        {:else}
-          {status === "ok" ? "completed" : "failed"}
-        {/if}
-      </span>
-      <span class="tool-mark">{status === "running" ? "…" : status === "ok" ? "✓" : "✗"}</span>
-    </summary>
+<div class="tool {status}" class:open={isOpen}>
+  <button class="tool-header" onclick={() => isOpen = !isOpen}>
+    <span class="tool-name">🔧 {name}</span>
+    <span class="tool-status-mark" class:running={status === "running"} class:ok={status === "ok"} class:error={status === "error"}>
+      {#if status === "running"}
+        running…
+      {:else}
+        {status === "ok" ? "completed" : "failed"}
+      {/if}
+    </span>
+    <span class="chevron" class:open={isOpen}>▾</span>
+    <span class="tool-mark">{status === "running" ? "…" : status === "ok" ? "✓" : "✗"}</span>
+  </button>
+  
+  <div class="tool-details-wrapper">
     <div class="tool-details">
       <div class="detail-row">
         <span class="label">arguments:</span>
         <pre class="args-code"><code>{args}</code></pre>
       </div>
     </div>
-  </details>
+  </div>
 </div>
 
 <style>
@@ -44,7 +47,7 @@
     padding: 8px 12px;
     min-width: 300px;
     max-width: 90%;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .tool:hover {
     border-color: var(--border);
@@ -53,27 +56,36 @@
   .tool.running {
     border-left: 3px solid var(--ice);
   }
+  .tool.running.open {
+    box-shadow: var(--glow-ice);
+  }
   .tool.ok {
     border-left: 3px solid var(--aurora);
+  }
+  .tool.ok.open {
+    box-shadow: var(--glow-aurora);
   }
   .tool.error {
     border-left: 3px solid var(--ember);
     background: #1a0f10;
   }
-
-  details {
-    width: 100%;
+  .tool.error.open {
+    box-shadow: var(--glow-ember);
   }
-  summary {
+
+  .tool-header {
     display: flex;
     align-items: center;
     gap: 12px;
     cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-  summary::-webkit-details-marker {
-    display: none;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
   }
 
   .tool-name {
@@ -94,6 +106,16 @@
     color: var(--ember);
   }
 
+  .chevron {
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: center;
+  }
+  .chevron.open {
+    transform: rotate(-180deg);
+  }
+
   .tool-mark {
     margin-left: auto;
     font-weight: bold;
@@ -105,15 +127,27 @@
     color: var(--ember);
   }
 
-  .tool-details {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-subtle);
+  /* Grid Height Animation Technique */
+  .tool-details-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  .tool.open .tool-details-wrapper {
+    grid-template-rows: 1fr;
+  }
+  .tool-details {
+    overflow: hidden;
+    min-height: 0;
+  }
+
   .detail-row {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
   .label {
     font-size: 10px;
