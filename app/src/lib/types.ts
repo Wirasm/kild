@@ -26,4 +26,16 @@ export type Session = {
   status: "running" | "stopped";
   modelLabel: string | null;
   stats: { tokens: number; cost: number; context_pct: number | null } | null;
+  origin: "ui" | "cli";
+};
+
+/** Session metadata broadcast by the engine — including sessions other clients
+ *  (e.g. the CLI) started. */
+export type SessionInfo = {
+  id: string;
+  model?: string;
+  cwd?: string;
+  agent?: string;
+  projectName?: string;
+  origin: "ui" | "cli";
 };

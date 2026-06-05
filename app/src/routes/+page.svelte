@@ -7,7 +7,7 @@
   import ProjectModal from "$lib/components/ProjectModal.svelte";
   import { EngineSocket, addProject as apiAddProject, listAgents, listProjects } from "$lib/api";
 
-  import type { Project, Agent, UiEvent, Session } from "$lib/types";
+  import type { Project, Agent, UiEvent, Session, SessionInfo } from "$lib/types";
 
   const MODELS = [
     "anthropic/claude-haiku-4-5",
@@ -112,7 +112,7 @@
     error = null;
     const id = crypto.randomUUID();
     try {
-      await socket.spawn(id, { model, cwd: active.path, agent: agentName });
+      await socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name });
       sessions.push({
         id,
         projectName: active.name,
@@ -123,6 +123,7 @@
         status: "running",
         modelLabel: null,
         stats: null,
+        origin: "ui",
       });
       activeId = id;
       input = "";
@@ -163,6 +164,27 @@
     }
   }
 
+  // The engine broadcasts the full session list (including sessions other clients,
+  // e.g. the CLI, started). Add any we don't already track so they show up live.
+  function reconcileSessions(infos: SessionInfo[]) {
+    const known = new Set(sessions.map((s) => s.id));
+    for (const info of infos) {
+      if (known.has(info.id)) continue;
+      sessions.push({
+        id: info.id,
+        projectName: info.projectName ?? info.cwd ?? "—",
+        agent: info.agent ?? "default",
+        model: info.model ?? "default",
+        items: [],
+        running: true,
+        status: "running",
+        modelLabel: null,
+        stats: null,
+        origin: info.origin,
+      });
+    }
+  }
+
   onMount(() => {
     socket = new EngineSocket(
       (session, event) => handle(session, event),
@@ -181,6 +203,7 @@
           error = "Engine disconnected — reconnecting…";
         }
       },
+      (infos) => reconcileSessions(infos),
     );
     loadProjects()
       .then(() => {

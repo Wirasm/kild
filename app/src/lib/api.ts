@@ -1,4 +1,4 @@
-import type { Agent, Project, UiEvent } from "./types";
+import type { Agent, Project, SessionInfo, UiEvent } from "./types";
 
 /** The kild engine's base URL. Override with VITE_KILD_ENGINE. */
 const BASE = import.meta.env.VITE_KILD_ENGINE ?? "http://localhost:4517";
@@ -29,7 +29,7 @@ export async function listAgents(project?: string): Promise<Agent[]> {
   return r.json();
 }
 
-export type SpawnOptions = { model?: string; cwd?: string; agent?: string };
+export type SpawnOptions = { model?: string; cwd?: string; agent?: string; projectName?: string };
 
 /**
  * WebSocket client to the kild engine — spawn/prompt/stop sessions and receive
@@ -48,6 +48,7 @@ export class EngineSocket {
   constructor(
     private onEvent: (session: string, event: UiEvent) => void,
     private onStatus?: (connected: boolean) => void,
+    private onSessions?: (sessions: SessionInfo[]) => void,
   ) {
     this.connect();
   }
@@ -61,8 +62,11 @@ export class EngineSocket {
       this.queue = [];
     });
     this.ws.addEventListener("message", (ev) => {
-      const { session, event } = JSON.parse(ev.data) as { session: string; event: UiEvent };
-      this.onEvent(session, event);
+      const msg = JSON.parse(ev.data) as
+        | { session: string; event: UiEvent }
+        | { sessions: SessionInfo[] };
+      if ("sessions" in msg) this.onSessions?.(msg.sessions);
+      else this.onEvent(msg.session, msg.event);
     });
     this.ws.addEventListener("close", () => {
       this.onStatus?.(false);
