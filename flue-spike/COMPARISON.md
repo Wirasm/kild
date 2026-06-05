@@ -58,13 +58,13 @@ process boundary*. Flue embeds pi-agent-core, so that boundary is a function cal
 
 ## Where Rust / pi-CLI still wins (the honest cons)
 
-1. **Auth regression — real.** Flue's runtime does **not** read pi's
-   `~/.pi/agent/auth.json`. A plain `anthropic/...` run failed with *"No API key for
-   provider: anthropic."* The spike only ran because minimax has a raw API key in
-   auth.json. The user's **Anthropic (Claude Max) and openai-codex OAuth
-   subscriptions don't work out of the box** — they'd need an API key or a token
-   bridge. kild-via-pi-CLI inherits pi's full auth for free. *Likely solvable* (same
-   pi-ai underneath) but it is not free today.
+1. ~~**Auth regression.**~~ **RESOLVED (proven live).** Flue's runtime doesn't read
+   `~/.pi/agent/auth.json` *by default*, but the bridge is ~30 lines (`src/kild/auth.ts`):
+   `getOAuthApiKey()` from `@earendil-works/pi-ai/oauth` refreshes the stored token and
+   `configureProvider()` hands it to pi-ai, whose anthropic provider auto-detects the
+   `sk-ant-oat…` OAuth token and adds the Claude Code beta headers. Verified: both
+   `anthropic/claude-haiku-4-5` (Claude Max) and `openai-codex/gpt-5.5` (ChatGPT)
+   run through the user's OAuth subscriptions. `flue run auth-test`. No longer a con.
 2. **No crash isolation.** pi-agent-core runs in the Node process. One agent that
    wedges or OOMs can take the host process with it. kild's subprocess-per-session
    gives crash isolation for many parallel agents — a real property for a fleet.
