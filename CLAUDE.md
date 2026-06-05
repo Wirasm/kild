@@ -121,7 +121,7 @@ kild/
 │   │   ├── server.ts           #   Hono HTTP (projects/agents) + WS (sessions) — cockpit backend + daemon
 │   │   ├── cli.ts              #   the `kild` CLI (project/agent/run); thin, delegates to the lib
 │   │   └── kild/               #   shared library
-│   │       ├── config.ts       #     default model + state dir (~/.config/kild via $KILD_SPIKE_HOME)
+│   │       ├── config.ts       #     default model + state dir (~/.config/kild via $KILD_HOME)
 │   │       ├── projects.ts     #     project registry (a project = a directory an agent works in)
 │   │       ├── agents.ts       #     agents read from .kild/.claude/.pi convention dirs
 │   │       ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream

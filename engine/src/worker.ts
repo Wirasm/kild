@@ -2,6 +2,7 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
+import { resolveModel, withRole } from './kild/models.ts';
 
 /**
  * One agent session, one process. The engine spawns this (the same binary with
@@ -20,19 +21,14 @@ export async function runWorker(): Promise<never> {
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
 
-  // A given-but-unresolvable model is surfaced, not silently swapped for pi's
-  // default. No model = pi's configured default (intentional).
-  const model = modelPattern ? resolveModel(registry, modelPattern) : undefined;
-  if (modelPattern && !model) {
-    emit({ kind: 'error', message: `unknown model: ${modelPattern}` });
-    process.exit(1);
-  }
-
+  // A given-but-unknown model errors (resolveModel throws); no model = pi default.
+  let model: ReturnType<typeof resolveModel>;
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   try {
+    model = resolveModel(registry, modelPattern);
     ({ session } = await createAgentSession({ model, authStorage, modelRegistry: registry, cwd }));
   } catch (err) {
-    emit({ kind: 'error', message: `failed to start agent: ${errText(err)}` });
+    emit({ kind: 'error', message: errText(err) });
     process.exit(1);
   }
   if (model) emit({ kind: 'model', provider: model.provider, id: model.id });
@@ -63,11 +59,8 @@ export async function runWorker(): Promise<never> {
       if (!line) continue;
       const msg = JSON.parse(line) as { type: string; text?: string };
       if (msg.type === 'prompt' && msg.text) {
-        let text = msg.text;
-        if (preamble) {
-          text = `<role>\n${preamble}\n</role>\n\n${text}`;
-          preamble = null;
-        }
+        const text = withRole(msg.text, preamble);
+        preamble = null;
         try {
           await session.prompt(text);
         } catch (err) {
@@ -86,12 +79,6 @@ export async function runWorker(): Promise<never> {
 
   // Keep the process alive on the stdin event loop until stop / EOF.
   return new Promise<never>(() => {});
-}
-
-function resolveModel(registry: ModelRegistry, pattern: string) {
-  const slash = pattern.indexOf('/');
-  if (slash !== -1) return registry.find(pattern.slice(0, slash), pattern.slice(slash + 1));
-  return registry.getAll().find((m) => m.id === pattern);
 }
 
 function errText(err: unknown): string {

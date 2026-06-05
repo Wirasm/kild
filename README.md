@@ -1,32 +1,33 @@
 # kild
 
-Run parallel AI coding agents (**pi**) in isolated git worktrees, with a native UI
-to watch and steer them. A single-developer tool — built like Lego: small,
-composable, swappable parts.
+A developer cockpit for orchestrating coding-agent teams across projects. The
+human plans and reviews; agents (**pi**) automate the coding. kild gives
+observability and steering — a native UI to watch and steer many agents at once,
+plus a CLI any command-line agent can drive.
 
-- **Daemon** (planned) supervises many `pi --mode rpc` sessions (local or VPS).
-- **Client** (Tauri + web, and a CLI) renders the structured agent event stream
-  (streamed text, tool cards, context/cost) plus a worktree/artifact browser.
+- **Engine** (`engine/`, TypeScript on bun) — the agent runtime, daemon, and CLI.
+  Runs each agent session in its own subprocess on the pi coding-agent SDK (native
+  pi auth, real concurrency), and exposes them over HTTP + WebSocket.
+- **Cockpit** (`app/`, Tauri + SvelteKit) — a native window that talks to the
+  engine over HTTP + WebSocket. The only Rust is the thin Tauri shell.
 
-pi owns the agent runtime (providers, sessions, compaction, status); kild owns
-orchestration (worktrees, projects, supervision, comms, UI). We don't reimplement
+pi owns the agent runtime (providers, sessions, compaction, auth); kild owns
+orchestration (sessions, worktrees, projects, the cockpit). We don't reimplement
 what pi already does.
 
-See [`CLAUDE.md`](./CLAUDE.md) for principles and architecture, and
-[`.claude/MANIFEST.md`](./.claude/MANIFEST.md) for the audited reuse plan from the
-previous Rust implementation (`../kild-old`).
+## Run
 
-## Status
+```bash
+cd app && bun install && bun run tauri dev   # builds the engine, opens the window
+```
 
-- **`rpc` slice + CLI spike** — drive `pi --mode rpc`, render the event stream:
-  ```bash
-  cargo run -p kild -- "what files are in this directory?"
-  ```
-- **`project` slice** — projects persisted to `~/.config/kild/projects.json`.
-- **Tauri conversation UI** (`app/`) — pick a project, chat with an agent in it,
-  watch streamed text + tool cards + a context/cost gauge:
-  ```bash
-  cd app && bun install && bun run tauri dev
-  ```
+The engine on its own:
 
-Requires `pi` 0.78+ on `PATH` and authenticated (`~/.pi/agent/auth.json`).
+```bash
+cd engine && bun install && bun run dev      # HTTP + WS on 127.0.0.1:4517
+bun run cli -- run --model anthropic/claude-haiku-4-5 "what files are here?"
+```
+
+`pi` must be on PATH and authenticated (`~/.pi/agent/auth.json`).
+
+See [`CLAUDE.md`](./CLAUDE.md) for principles and architecture.

@@ -12,6 +12,7 @@
     "serve": "bun run src/server.ts",
     "cli": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome check src",
     "format": "biome format --write src",
     "compile": "bun build --compile --minify --target=bun-darwin-arm64 src/server.ts --outfile dist/kild-engine",

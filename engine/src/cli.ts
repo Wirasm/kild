@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util';
 import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
+import { resolveModel, withRole } from './kild/models.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 
 const { values, positionals } = parseArgs({
@@ -190,12 +191,8 @@ async function runInProcess(prompt: string): Promise<void> {
     },
   );
 
-  let message = prompt;
-  if (values.agent) {
-    const instr = await resolveAgentInstructions(values.agent, projectPath);
-    if (instr) message = `<role>\n${instr}\n</role>\n\n${prompt}`;
-  }
-  await session.prompt(message);
+  const instr = values.agent ? await resolveAgentInstructions(values.agent, projectPath) : null;
+  await session.prompt(withRole(prompt, instr));
   const stats = session.getSessionStats();
   session.dispose();
 
@@ -213,11 +210,4 @@ async function runInProcess(prompt: string): Promise<void> {
       `\x1b[2m───── ${outcome.model}  tokens=${outcome.tokens}  cost=$${outcome.cost.toFixed(4)}\x1b[0m`,
     );
   }
-}
-
-function resolveModel(registry: ModelRegistry, pattern?: string) {
-  if (!pattern) return undefined;
-  const slash = pattern.indexOf('/');
-  if (slash !== -1) return registry.find(pattern.slice(0, slash), pattern.slice(slash + 1));
-  return registry.getAll().find((m) => m.id === pattern);
 }
