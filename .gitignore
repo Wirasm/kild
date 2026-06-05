@@ -6,3 +6,4 @@ node_modules
 dist
 target/
 app/src-tauri/binaries/
+.claude/PRPs/
