@@ -18,17 +18,18 @@ description: |
   code means failure. Parse stdout, check the exit code.
 
   Prerequisite: `pi` must be on PATH and authenticated. This skill drives the
-  `kild` binary built from this repo (`cargo build` → `target/debug/kild`, or an
-  installed `kild`). It does NOT manage the older worktree/session `kild` — that is
-  the separate `kild` skill.
+  kild engine CLI: from `engine/`, run `bun run cli -- <args>` (or the linked
+  `kild` bin). It does NOT manage the older worktree/session `kild` — that is the
+  separate `kild` skill.
 ---
 
 # kild CLI
 
 `kild` runs **pi** coding agents in your projects. It is the scriptable interface
-an agent can drive over the Bash tool. There is no daemon yet, so sessions are
-**one-shot**: `kild run` starts an agent, lets it work to completion, and prints
-the result. (Live, steerable sessions — `kild session …` — are not built yet.)
+an agent can drive over the Bash tool — the engine CLI (`engine/src/cli.ts`, run
+with `bun run cli -- <args>`). The CLI's `run` is **one-shot**: it starts an agent,
+lets it work to completion, and prints the result. (Live, steerable sessions are
+driven from the cockpit UI over the engine's WebSocket, not the CLI.)
 
 ## Command reference
 

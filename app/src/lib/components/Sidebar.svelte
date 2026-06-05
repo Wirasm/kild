@@ -13,12 +13,12 @@
     model: string;
     models: string[];
     sessions: Session[];
-    activeId: number | null;
+    activeId: string | null;
     onSelectProject: (p: Project) => void;
     onAddProject: () => void;
     onStartSession: () => void;
-    onSelectSession: (id: number) => void;
-    onCloseSession: (id: number) => void;
+    onSelectSession: (id: string) => void;
+    onCloseSession: (id: string) => void;
   }
 
   let {

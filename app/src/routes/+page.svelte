@@ -1,15 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Topbar from "$lib/components/Topbar.svelte";
   import Ledger from "$lib/components/Ledger.svelte";
   import Composer from "$lib/components/Composer.svelte";
+  import { EngineSocket, addProject as apiAddProject, listAgents, listProjects } from "$lib/api";
 
-  import type { Project, Agent, Item, UiEvent, Session } from "$lib/types";
+  import type { Project, Agent, UiEvent, Session } from "$lib/types";
 
-  const MODELS = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8", "gpt-5.5", "MiniMax-M3"];
+  const MODELS = [
+    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-opus-4-8",
+    "openai-codex/gpt-5.5",
+    "minimax/MiniMax-M3",
+  ];
 
   // Projects + new-session config
   let projects = $state<Project[]>([]);
@@ -24,14 +29,14 @@
 
   // Sessions (runtime registry)
   let sessions = $state<Session[]>([]);
-  let activeId = $state<number | null>(null);
+  let activeId = $state<string | null>(null);
   let input = $state("");
   let error = $state<string | null>(null);
-  let unlisten: UnlistenFn | null = null;
+  let socket: EngineSocket | null = null;
 
   let activeSession = $derived(sessions.find((s) => s.id === activeId) ?? null);
 
-  function handle(sessionId: number, ev: UiEvent) {
+  function handle(sessionId: string, ev: UiEvent) {
     const s = sessions.find((x) => x.id === sessionId);
     if (!s) return;
     switch (ev.kind) {
@@ -73,10 +78,10 @@
   }
 
   async function loadProjects() {
-    projects = await invoke<Project[]>("list_projects");
+    projects = await listProjects();
   }
   async function loadAgents(projectPath: string) {
-    agents = await invoke<Agent[]>("list_agents", { project: projectPath });
+    agents = await listAgents(projectPath);
     if (!agents.some((a) => a.name === agentName)) agentName = "default";
   }
   async function selectProject(p: Project) {
@@ -90,22 +95,23 @@
   async function addProject() {
     addError = null;
     try {
-      const p = await invoke<Project>("add_project", { name: newName.trim(), path: newPath.trim() });
+      const p = await apiAddProject(newName.trim(), newPath.trim());
       await loadProjects();
       adding = false;
       newName = "";
       newPath = "";
       await selectProject(p);
     } catch (e) {
-      addError = String(e);
+      addError = String(e instanceof Error ? e.message : e);
     }
   }
 
   async function startSession() {
-    if (!active) return;
+    if (!active || !socket) return;
     error = null;
+    const id = crypto.randomUUID();
     try {
-      const id = await invoke<number>("spawn_session", { model, cwd: active.path, agent: agentName });
+      await socket.spawn(id, { model, cwd: active.path, agent: agentName });
       sessions.push({
         id,
         projectName: active.name,
@@ -124,16 +130,16 @@
     }
   }
 
-  function selectSession(id: number) {
+  function selectSession(id: string) {
     activeId = id;
     input = "";
   }
 
-  async function closeSession(id: number) {
+  async function closeSession(id: string) {
     try {
-      await invoke("stop_session", { session: id });
+      await socket?.stop(id);
     } catch (e) {
-      console.warn("stop_session failed", e);
+      console.warn("stop failed", e);
     }
     sessions = sessions.filter((s) => s.id !== id);
     if (activeId === id) activeId = sessions[sessions.length - 1]?.id ?? null;
@@ -141,7 +147,7 @@
 
   async function send() {
     const s = activeSession;
-    if (!s || s.running || s.status === "stopped") return;
+    if (!s || s.running || s.status === "stopped" || !socket) return;
     const text = input.trim();
     if (!text) return;
     s.items.push({ type: "user", text });
@@ -149,7 +155,7 @@
     s.running = true;
     error = null;
     try {
-      await invoke("send_prompt", { session: s.id, text });
+      await socket.prompt(s.id, text);
     } catch (e) {
       s.running = false;
       error = `Send failed: ${e}`;
@@ -157,22 +163,13 @@
   }
 
   onMount(() => {
-    let alive = true;
-    listen<{ session: number; event: UiEvent }>("pi-event", (e) =>
-      handle(e.payload.session, e.payload.event)
-    ).then((fn) => {
-      if (alive) unlisten = fn;
-      else fn();
-    });
+    socket = new EngineSocket((session, event) => handle(session, event));
     loadProjects()
       .then(() => {
-        if (alive && projects.length > 0) selectProject(projects[0]);
+        if (projects.length > 0) selectProject(projects[0]);
       })
       .catch((e) => (error = `Could not load projects: ${e}`));
-    return () => {
-      alive = false;
-      unlisten?.();
-    };
+    return () => socket?.close();
   });
 </script>
 

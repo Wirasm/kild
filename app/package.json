@@ -1,7 +1,7 @@
 {
   "name": "app",
-  "version": "0.1.0",
-  "description": "",
+  "version": "0.0.1",
+  "description": "kild cockpit — the desktop UI (SvelteKit in a Tauri shell)",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -12,10 +12,6 @@
     "tauri": "tauri"
   },
   "license": "MIT",
-  "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
-  },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",

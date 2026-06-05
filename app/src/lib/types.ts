@@ -1,5 +1,5 @@
 export type Project = { name: string; path: string };
-export type Agent = { name: string; system_prompt: string };
+export type Agent = { name: string; systemPrompt: string };
 
 export type Item =
   | { type: "user"; text: string }
@@ -17,7 +17,7 @@ export type UiEvent =
   | { kind: "session_end" };
 
 export type Session = {
-  id: number;
+  id: string;
   projectName: string;
   agent: string;
   model: string;
