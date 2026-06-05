@@ -186,6 +186,24 @@ async function runViaEngine(prompt: string): Promise<void> {
   let cost = 0;
 
   await new Promise<void>((resolve, reject) => {
+    // Settle exactly once, then tear the worker down. Without this the CLI hung
+    // forever: it only resolved on `agent_end` and only rejected on a socket
+    // `error`, so a worker-emitted `error`/`session_end` or a *graceful* close
+    // (the engine restarting under `--watch`) left the run waiting on nothing.
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      try {
+        ws.send(JSON.stringify({ type: 'stop', id })); // one-shot: clean up the worker
+      } catch {
+        // socket already closing/closed — nothing to stop
+      }
+      ws.close();
+      if (err) reject(err);
+      else resolve();
+    };
+
     ws.addEventListener('open', () => {
       ws.send(
         JSON.stringify({
@@ -216,15 +234,20 @@ async function runViaEngine(prompt: string): Promise<void> {
       else if (ev.kind === 'stats') {
         tokens = ev.tokens as number;
         cost = ev.cost as number;
+      } else if (ev.kind === 'error') {
+        finish(new Error(String(ev.message ?? 'engine error')));
       } else if (ev.kind === 'agent_end') {
-        setTimeout(() => {
-          ws.send(JSON.stringify({ type: 'stop', id })); // one-shot: clean up the worker
-          ws.close();
-          resolve();
-        }, 150); // catch the trailing stats event
+        setTimeout(finish, 150); // settle after the trailing stats event
+      } else if (ev.kind === 'session_end') {
+        finish(); // worker ended (normally after our stop, or abnormally) — don't hang
       }
     });
-    ws.addEventListener('error', () => reject(new Error('engine socket error')));
+    // A graceful close (e.g. the engine reloading under `--watch`) is not an
+    // 'error' event, so it needs its own settle path or the run hangs.
+    ws.addEventListener('close', () =>
+      finish(new Error('connection to the engine closed before the run completed')),
+    );
+    ws.addEventListener('error', () => finish(new Error('engine socket error')));
   });
 
   if (json) {

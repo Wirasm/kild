@@ -86,6 +86,12 @@ class PiSession {
     this.child.stdin?.write(`${JSON.stringify({ type: 'stop' })}\n`);
     this.child.kill();
   }
+
+  /** Hard-kill the worker (no graceful stop handshake) — for engine shutdown,
+   *  where we just need children gone before the process exits. */
+  kill(): void {
+    this.child.kill();
+  }
 }
 
 /**
@@ -162,6 +168,12 @@ class SessionManager {
     entry.session.stop();
     this.sessions.delete(id);
     this.broadcast({ sessions: this.list() });
+  }
+
+  /** Kill every worker subprocess. Called on engine shutdown so a `--watch`
+   *  reload (or Ctrl-C) never orphans workers (they'd otherwise reparent to init). */
+  shutdown(): void {
+    for (const { session } of this.sessions.values()) session.kill();
   }
 
   private broadcast(msg: Outbound): void {

@@ -228,4 +228,13 @@ void loadProjects()
   )
   .catch((err) => console.warn(`kild: startup prune failed: ${errText(err)}`));
 
+// Kill child workers on shutdown so a `--watch` reload or Ctrl-C never orphans
+// them (otherwise they reparent to init and linger as zombie sessions).
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    sessionManager.shutdown();
+    process.exit(0);
+  });
+}
+
 export default { port: PORT, hostname: HOST, fetch: app.fetch, websocket };
