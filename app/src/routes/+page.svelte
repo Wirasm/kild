@@ -164,7 +164,24 @@
   }
 
   onMount(() => {
-    socket = new EngineSocket((session, event) => handle(session, event));
+    socket = new EngineSocket(
+      (session, event) => handle(session, event),
+      (connected) => {
+        if (connected) {
+          if (error?.startsWith("Engine")) error = null;
+        } else {
+          // The engine dropped (in dev it restarts on every change, losing its
+          // sessions). Clear spinners and mark live sessions dead.
+          for (const s of sessions) {
+            if (s.status === "running") {
+              s.running = false;
+              s.status = "stopped";
+            }
+          }
+          error = "Engine disconnected — reconnecting…";
+        }
+      },
+    );
     loadProjects()
       .then(() => {
         if (projects.length > 0) selectProject(projects[0]);

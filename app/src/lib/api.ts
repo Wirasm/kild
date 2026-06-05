@@ -33,42 +33,61 @@ export type SpawnOptions = { model?: string; cwd?: string; agent?: string };
 
 /**
  * WebSocket client to the kild engine — spawn/prompt/stop sessions and receive
- * the streamed {@link UiEvent}s, tagged by session id. Replaces the old Tauri
- * `invoke`/`listen` surface; the event shape is unchanged.
+ * the streamed {@link UiEvent}s, tagged by session id.
+ *
+ * It auto-reconnects: in dev the engine restarts on every code change (and
+ * loses its in-memory sessions), so the socket reconnects and `onStatus(false)`
+ * lets the UI mark live sessions dead. Messages sent while disconnected are
+ * queued and flushed on reconnect.
  */
 export class EngineSocket {
-  private ws: WebSocket;
-  private ready: Promise<void>;
+  private ws!: WebSocket;
+  private closed = false;
+  private queue: string[] = [];
 
-  constructor(onEvent: (session: string, event: UiEvent) => void) {
+  constructor(
+    private onEvent: (session: string, event: UiEvent) => void,
+    private onStatus?: (connected: boolean) => void,
+  ) {
+    this.connect();
+  }
+
+  private connect(): void {
     this.ws = new WebSocket(`${BASE.replace(/^http/, "ws")}/ws`);
-    this.ready = new Promise((resolve, reject) => {
-      this.ws.addEventListener("open", () => resolve(), { once: true });
-      this.ws.addEventListener("error", () => reject(new Error("engine socket error")), {
-        once: true,
-      });
+
+    this.ws.addEventListener("open", () => {
+      this.onStatus?.(true);
+      for (const m of this.queue) this.ws.send(m);
+      this.queue = [];
     });
     this.ws.addEventListener("message", (ev) => {
       const { session, event } = JSON.parse(ev.data) as { session: string; event: UiEvent };
-      onEvent(session, event);
+      this.onEvent(session, event);
     });
+    this.ws.addEventListener("close", () => {
+      this.onStatus?.(false);
+      if (!this.closed) setTimeout(() => this.connect(), 1000);
+    });
+    this.ws.addEventListener("error", () => this.ws.close());
   }
 
-  private async send(msg: unknown): Promise<void> {
-    await this.ready;
-    this.ws.send(JSON.stringify(msg));
+  private send(msg: unknown): void {
+    const data = JSON.stringify(msg);
+    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(data);
+    else this.queue.push(data);
   }
 
-  spawn(id: string, opts: SpawnOptions): Promise<void> {
-    return this.send({ type: "spawn", id, ...opts });
+  spawn(id: string, opts: SpawnOptions): void {
+    this.send({ type: "spawn", id, ...opts });
   }
-  prompt(id: string, text: string): Promise<void> {
-    return this.send({ type: "prompt", id, text });
+  prompt(id: string, text: string): void {
+    this.send({ type: "prompt", id, text });
   }
-  stop(id: string): Promise<void> {
-    return this.send({ type: "stop", id });
+  stop(id: string): void {
+    this.send({ type: "stop", id });
   }
   close(): void {
+    this.closed = true;
     this.ws.close();
   }
 }
