@@ -3,7 +3,7 @@
 //! A session binds to a project's `path` as its cwd. Services (multiple
 //! repos/folders under the project) are a later, additive concern for git and
 //! worktree management; the primitive here is just `{ name, path }`, persisted
-//! to `~/.kild/projects.json`.
+//! to `~/.config/kild/projects.json`.
 
 mod project_errors;
 mod project_store;

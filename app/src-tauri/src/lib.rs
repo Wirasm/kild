@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 /// many concurrent pi sessions.
 #[derive(Default)]
 struct AppState {
-    sessions: Arc<Mutex<HashMap<u64, PiRpcWriter>>>,
+    sessions: Arc<Mutex<HashMap<u64, Arc<Mutex<PiRpcWriter>>>>>,
     next_id: Arc<AtomicU64>,
 }
 
@@ -30,11 +30,27 @@ struct SessionEvent {
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum UiEvent {
-    Model { provider: String, id: String },
-    Text { delta: String },
-    ToolStart { id: String, name: String, args: String },
-    ToolEnd { id: String, name: String, ok: bool },
-    Retry { attempt: u32, max: u32 },
+    Model {
+        provider: String,
+        id: String,
+    },
+    Text {
+        delta: String,
+    },
+    ToolStart {
+        id: String,
+        name: String,
+        args: String,
+    },
+    ToolEnd {
+        id: String,
+        name: String,
+        ok: bool,
+    },
+    Retry {
+        attempt: u32,
+        max: u32,
+    },
     AgentEnd,
     Stats {
         tokens: u64,
@@ -58,12 +74,16 @@ async fn spawn_session(
     let id = state.next_id.fetch_add(1, Ordering::SeqCst) + 1;
 
     // A non-default agent's prompt is resolved within the project and layered on
-    // pi's default; `default`/unknown -> None -> pi's own prompt.
-    let append_system_prompt = agent.as_deref().and_then(|name| {
-        kild_core::agent::resolve_prompt(name, cwd.as_deref().map(std::path::Path::new))
-            .ok()
-            .flatten()
-    });
+    // pi's default. A read/write failure is surfaced rather than silently
+    // downgraded; `Ok(None)` (the default or an unknown agent) intentionally falls
+    // back to pi's own prompt.
+    let append_system_prompt = match agent.as_deref() {
+        Some(name) => {
+            kild_core::agent::resolve_prompt(name, cwd.as_deref().map(std::path::Path::new))
+                .map_err(|e| e.to_string())?
+        }
+        None => None,
+    };
     let session = PiRpcSession::spawn(SpawnOptions {
         model,
         cwd: cwd.map(std::path::PathBuf::from),
@@ -72,24 +92,29 @@ async fn spawn_session(
     })
     .map_err(|e| e.to_string())?;
     let (writer, mut events) = session.split();
+    let writer = Arc::new(Mutex::new(writer));
 
-    {
-        let mut map = sessions.lock().await;
-        map.insert(id, writer);
-        if let Some(w) = map.get_mut(&id) {
-            let _ = w.send(&RpcCommand::GetState).await; // report resolved model
-        }
-    }
+    let _ = writer.lock().await.send(&RpcCommand::GetState).await; // report resolved model
+    sessions.lock().await.insert(id, writer);
 
     let pump_sessions = sessions.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(ev) = events.recv().await {
             if let Some(ui) = translate(&ev) {
-                let _ = app.emit("pi-event", SessionEvent { session: id, event: ui });
+                let _ = app.emit(
+                    "pi-event",
+                    SessionEvent {
+                        session: id,
+                        event: ui,
+                    },
+                );
             }
             if matches!(ev, PiOutput::AgentEnd) {
-                if let Some(w) = pump_sessions.lock().await.get_mut(&id) {
-                    let _ = w.send(&RpcCommand::GetSessionStats).await;
+                // Clone the handle out of the map, then drop the registry lock
+                // before writing to pi — never hold it across a stdin write.
+                let writer = pump_sessions.lock().await.get(&id).cloned();
+                if let Some(writer) = writer {
+                    let _ = writer.lock().await.send(&RpcCommand::GetSessionStats).await;
                 }
             }
         }
@@ -110,12 +135,16 @@ async fn spawn_session(
 /// Send a user prompt to a specific session.
 #[tauri::command]
 async fn send_prompt(state: State<'_, AppState>, session: u64, text: String) -> Result<(), String> {
-    let mut map = state.sessions.lock().await;
-    let writer = map.get_mut(&session).ok_or("no such session")?;
-    writer
-        .send(&RpcCommand::Prompt { message: text })
+    let writer = state.sessions.lock().await.get(&session).cloned();
+    let writer = writer.ok_or("no such session")?;
+    // Bind the result so the MutexGuard drops before `writer` (tail-expression
+    // temporaries would otherwise outlive the local).
+    let result = writer
+        .lock()
         .await
-        .map_err(|e| e.to_string())
+        .send(&RpcCommand::Prompt { message: text })
+        .await;
+    result.map_err(|e| e.to_string())
 }
 
 /// Stop a session: dropping its writer closes stdin, so pi exits and the pump
@@ -195,6 +224,43 @@ fn translate(ev: &PiOutput) -> Option<UiEvent> {
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kild_core::rpc::{AssistantDelta, DeltaKind};
+
+    #[test]
+    fn tool_end_error_flag_maps_to_ok() {
+        assert!(matches!(
+            translate(&PiOutput::ToolExecutionEnd {
+                tool_call_id: "c1".into(),
+                tool_name: "bash".into(),
+                is_error: true,
+            }),
+            Some(UiEvent::ToolEnd { ok: false, .. })
+        ));
+        assert!(matches!(
+            translate(&PiOutput::ToolExecutionEnd {
+                tool_call_id: "c1".into(),
+                tool_name: "bash".into(),
+                is_error: false,
+            }),
+            Some(UiEvent::ToolEnd { ok: true, .. })
+        ));
+    }
+
+    #[test]
+    fn only_text_delta_updates_become_text() {
+        let ui = translate(&PiOutput::MessageUpdate {
+            assistant_message_event: AssistantDelta {
+                kind: DeltaKind::ThinkingDelta,
+                delta: Some("hmm".into()),
+            },
+        });
+        assert!(ui.is_none());
     }
 }
 

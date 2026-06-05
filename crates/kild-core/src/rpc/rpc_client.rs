@@ -61,9 +61,18 @@ impl PiRpcSession {
             .stderr(Stdio::piped());
 
         let mut child = cmd.spawn().map_err(RpcError::Spawn)?;
-        let stdin = child.stdin.take().ok_or(RpcError::PipeUnavailable("stdin"))?;
-        let stdout = child.stdout.take().ok_or(RpcError::PipeUnavailable("stdout"))?;
-        let stderr = child.stderr.take().ok_or(RpcError::PipeUnavailable("stderr"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or(RpcError::PipeUnavailable("stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or(RpcError::PipeUnavailable("stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or(RpcError::PipeUnavailable("stderr"))?;
 
         // Reader task: JSONL stdout -> parsed events. pi's RPC mode is strict LF
         // framing; tokio's `lines()` splits only on `\n` and strips a trailing

@@ -108,7 +108,7 @@ pub enum DeltaKind {
     ThinkingDelta,
     ToolcallDelta,
     #[serde(other)]
-    Other,
+    Unknown,
 }
 
 #[cfg(test)]
@@ -137,11 +137,12 @@ mod tests {
 
     #[test]
     fn unknown_delta_kind_falls_through_to_other() {
-        let ev = parse(r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start"}}"#);
+        let ev =
+            parse(r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start"}}"#);
         match ev {
             PiOutput::MessageUpdate {
                 assistant_message_event,
-            } => assert_eq!(assistant_message_event.kind, DeltaKind::Other),
+            } => assert_eq!(assistant_message_event.kind, DeltaKind::Unknown),
             other => panic!("expected MessageUpdate, got {other:?}"),
         }
     }
@@ -195,7 +196,9 @@ mod tests {
     #[test]
     fn response_parses_and_unknown_event_never_errors() {
         assert!(matches!(
-            parse(r#"{"type":"response","command":"get_session_stats","success":true,"data":{"cost":0.01}}"#),
+            parse(
+                r#"{"type":"response","command":"get_session_stats","success":true,"data":{"cost":0.01}}"#
+            ),
             PiOutput::Response { .. }
         ));
         // A future / unrecognized event type must route to Unknown, not fail.

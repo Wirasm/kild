@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// A reusable agent role: a name and a system prompt.
 ///
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// prompt. The built-in `default` agent has no file and an empty prompt — it runs
 /// pi's own default behavior. A non-empty prompt is layered on pi's default via
 /// `--append-system-prompt` (see [`crate::rpc::SpawnOptions`]).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Agent {
     /// Unique, user-facing name (also the `.md` filename).
     pub name: String,

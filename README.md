@@ -22,7 +22,7 @@ previous Rust implementation (`../kild-old`).
   ```bash
   cargo run -p kild -- "what files are in this directory?"
   ```
-- **`project` slice** — projects persisted to `~/.kild/projects.json`.
+- **`project` slice** — projects persisted to `~/.config/kild/projects.json`.
 - **Tauri conversation UI** (`app/`) — pick a project, chat with an agent in it,
   watch streamed text + tool cards + a context/cost gauge:
   ```bash

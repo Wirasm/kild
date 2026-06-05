@@ -51,7 +51,9 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            PiOutput::ToolExecutionStart { tool_name, args, .. } => {
+            PiOutput::ToolExecutionStart {
+                tool_name, args, ..
+            } => {
                 println!(
                     "\n\x1b[36m🔧 {tool_name}\x1b[0m \x1b[2m{}\x1b[0m",
                     compact_args(&args)

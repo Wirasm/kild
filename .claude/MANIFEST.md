@@ -47,7 +47,7 @@ guards) is exactly what to copy rather than re-derive.
 - **`rpc` slice** (`kild-core::rpc`) — drives `pi --mode rpc`. New code, not
   mirrored: it is the spine the old PTY supervisor becomes.
 - **`project` slice** (`kild-core::project`) — `Project { name, path }`, the
-  session's cwd; persisted to `~/.kild/projects.json`. New code.
+  session's cwd; persisted to `~/.config/kild/projects.json`. New code.
 - **Tauri `app/`** — conversation UI (project picker + streamed transcript).
 - **`.claude/PRPs/branding/`** — carried over verbatim.
 

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +35,7 @@ pub fn list_agents(project_root: Option<&Path>) -> Result<Vec<Agent>, AgentError
         name: DEFAULT_NAME.to_string(),
         system_prompt: String::new(),
     }];
-    let mut seen: Vec<String> = vec![DEFAULT_NAME.to_string()];
+    let mut seen: HashSet<String> = HashSet::from([DEFAULT_NAME.to_string()]);
 
     for dir in agent_dirs(project_root) {
         let entries = match fs::read_dir(&dir) {
@@ -51,10 +52,16 @@ pub fn list_agents(project_root: Option<&Path>) -> Result<Vec<Agent>, AgentError
                     if seen.contains(&name) {
                         return None;
                     }
-                    let system_prompt = strip_frontmatter(&fs::read_to_string(&path).ok()?);
+                    let content = match fs::read_to_string(&path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            eprintln!("agent: skipping unreadable {}: {e}", path.display());
+                            return None;
+                        }
+                    };
                     Some(Agent {
                         name,
-                        system_prompt,
+                        system_prompt: strip_frontmatter(&content),
                     })
                 } else {
                     None
@@ -63,7 +70,7 @@ pub fn list_agents(project_root: Option<&Path>) -> Result<Vec<Agent>, AgentError
             .collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
         for agent in found {
-            seen.push(agent.name.clone());
+            seen.insert(agent.name.clone());
             agents.push(agent);
         }
     }
@@ -107,9 +114,6 @@ fn find_agent_file(name: &str, project_root: Option<&Path>) -> Option<PathBuf> {
 fn strip_frontmatter(content: &str) -> String {
     let normalized = content.replace("\r\n", "\n");
     if let Some(rest) = normalized.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---\n") {
-            return rest[end + 5..].trim().to_string();
-        }
         if let Some(end) = rest.find("\n---") {
             return rest[end + 4..].trim().to_string();
         }
@@ -123,13 +127,17 @@ mod tests {
 
     #[test]
     fn strips_frontmatter_keeps_body() {
-        let body = strip_frontmatter("---\nname: planner\ndescription: plans\n---\nYou are a planner.\n");
+        let body =
+            strip_frontmatter("---\nname: planner\ndescription: plans\n---\nYou are a planner.\n");
         assert_eq!(body, "You are a planner.");
     }
 
     #[test]
     fn passes_through_when_no_frontmatter() {
-        assert_eq!(strip_frontmatter("You are a planner."), "You are a planner.");
+        assert_eq!(
+            strip_frontmatter("You are a planner."),
+            "You are a planner."
+        );
     }
 
     #[test]

@@ -112,7 +112,11 @@
   }
   async function selectProject(p: Project) {
     active = p;
-    await loadAgents(p.path);
+    try {
+      await loadAgents(p.path);
+    } catch (e) {
+      error = `Could not load agents: ${e}`;
+    }
   }
   async function addProject() {
     addError = null;
@@ -160,8 +164,8 @@
   async function closeSession(id: number) {
     try {
       await invoke("stop_session", { session: id });
-    } catch {
-      /* best-effort */
+    } catch (e) {
+      console.warn("stop_session failed", e);
     }
     sessions = sessions.filter((s) => s.id !== id);
     if (activeId === id) activeId = sessions[sessions.length - 1]?.id ?? null;

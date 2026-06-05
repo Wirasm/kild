@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::project_errors::ProjectError;
 use super::project_types::Project;
 
-/// On-disk shape (`~/.kild/projects.json`). Wrapped in an object so fields can
+/// On-disk shape (`~/.config/kild/projects.json`). Wrapped in an object so fields can
 /// be added later without breaking the format.
 #[derive(Default, Serialize, Deserialize)]
 struct ProjectsFile {

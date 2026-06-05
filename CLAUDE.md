@@ -102,27 +102,33 @@ kild/
 │   ├── MANIFEST.md                # what to mirror from ../kild-old (audited reuse plan)
 │   └── PRPs/branding/             # brand + vision + design system (Tallinn Night)
 ├── app/                           # Tauri 2 + SvelteKit conversation UI (its own workspace)
-│   ├── src/routes/+page.svelte    #   conversation view (transcript, model picker, projects)
-│   └── src-tauri/src/lib.rs       #   commands (spawn_session/send_prompt/projects) + event pump
+│   ├── src/routes/+page.svelte    #   sidebar (projects/sessions/new) + per-session transcript
+│   └── src-tauri/src/lib.rs       #   commands (sessions/projects/agents) + per-session event pump
 └── crates/
     ├── kild-core/                 # orchestration library — vertical slices
     │   └── src/
     │       ├── lib.rs
+    │       ├── paths.rs           # kild's state paths (~/.config/kild; $KILD_HOME override)
     │       ├── rpc/               # the ONLY pi boundary — drives `pi --mode rpc`
     │       │   ├── rpc_types.rs   #   RpcCommand (in) + PiOutput/DeltaKind events (out)
     │       │   ├── rpc_client.rs  #   PiRpcSession + PiRpcWriter (split for concurrent drive)
     │       │   └── rpc_errors.rs
-    │       └── project/           # a project is a directory an agent works in (session cwd)
-    │           ├── project_types.rs   #   Project { name, path }
-    │           ├── project_store.rs    #   persisted to ~/.kild/projects.json
-    │           └── project_errors.rs
+    │       ├── project/           # a project is a directory an agent works in (session cwd)
+    │       │   ├── project_types.rs   #   Project { name, path }
+    │       │   ├── project_store.rs    #   persisted to ~/.config/kild/projects.json
+    │       │   └── project_errors.rs
+    │       └── agent/             # a reusable role: name + system prompt (read from convention dirs)
+    │           ├── agent_types.rs     #   Agent { name, system_prompt }
+    │           ├── agent_store.rs      #   scans .kild/.claude/.pi agents; --append-system-prompt
+    │           └── agent_errors.rs
     └── kild/                      # CLI binary (currently: the rpc spike)
         └── src/main.rs
 ```
 
-Planned slices (see `.claude/MANIFEST.md`): `supervisor` (many pi sessions +
-aggregated fleet state), `worktree`, `git`, `config`, `forge`, plus the
-`kild-daemon` binary. (`project` and the Tauri `app/` now exist.)
+Planned slices (see `.claude/MANIFEST.md`): `worktree`, `git`, `comms`, `config`,
+`forge`, plus the `kild-daemon` binary (extracting the in-app supervisor for
+persistence / VPS). (`rpc`, `project`, `agent`, the in-app multi-session registry,
+and the Tauri `app/` now exist.)
 
 ### Naming conventions
 
