@@ -64,25 +64,28 @@
     opacity: 0.6;
   }
   .composer button {
-    background: var(--ice);
-    color: var(--void);
-    border: none;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0 18px;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .composer button:hover:not(:disabled) {
-    background: var(--ice-dim);
-    transform: translateY(-1px);
+    border-color: var(--ice);
+    color: var(--ice);
+    background: rgba(124, 180, 200, 0.05);
     box-shadow: var(--glow-ice);
   }
   .composer button:active:not(:disabled) {
-    transform: translateY(0);
+    background: rgba(124, 180, 200, 0.1);
   }
   .composer button:disabled {
-    background: var(--border);
+    border-color: var(--border-subtle);
     color: var(--text-muted);
+    opacity: 0.5;
     cursor: default;
   }
 </style>

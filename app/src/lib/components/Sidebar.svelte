@@ -57,14 +57,12 @@
   {/each}
   <button class="new" onclick={() => (adding = true)}>+ add project</button>
 
-  <div class="section-header">
-    <span class="section-label">Sessions</span>
-    {#if active}
-      <button class="new-session-toggle" onclick={() => showCreator = !showCreator}>
-        {showCreator ? "close" : "+ new session"}
-      </button>
-    {/if}
-  </div>
+  <div class="section-label">Sessions</div>
+  {#if active}
+    <button class="new" onclick={() => showCreator = !showCreator}>
+      {showCreator ? "✕ close creator" : "+ new session"}
+    </button>
+  {/if}
 
   {#if showCreator && active}
     <div class="new-session">
@@ -113,34 +111,6 @@
     text-transform: uppercase;
     letter-spacing: 0.6px;
     padding: 12px 8px 4px;
-  }
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 8px;
-  }
-  .section-header .section-label {
-    padding: 4px 8px;
-    margin: 0;
-  }
-  .new-session-toggle {
-    background: transparent !important;
-    border: none !important;
-    color: var(--ice) !important;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    padding: 4px 8px !important;
-    margin-right: 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  .new-session-toggle:hover {
-    color: var(--text-bright) !important;
-    background: rgba(124, 180, 200, 0.1) !important;
   }
   .sidebar button {
     text-align: left;
