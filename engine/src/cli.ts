@@ -29,6 +29,7 @@ const { values, positionals } = parseArgs({
     agent: { type: 'string' },
     model: { type: 'string' },
     worktree: { type: 'string' },
+    members: { type: 'string' }, // `kild channel` room members, e.g. orchestrator,worker,reviewer
   },
 });
 
@@ -178,14 +179,20 @@ async function run(prompt: string): Promise<void> {
 }
 
 /**
- * `kild channel <goal>` — the two-agent channel demo. Opens an `orchestrator` +
- * `worker` channel through the engine, posts the goal to @orchestrator, and streams
- * every message: the orchestrator delegates to @worker; the worker reports back to
- * @orchestrator and @human. Ctrl-C is the kill switch — it closes the channel
- * (stopping both members) and exits. Requires the engine (it is multi-session).
+ * `kild channel <goal>` — the room demo. Opens a channel of predefined members
+ * (`--members orchestrator,worker,reviewer`; default `orchestrator,worker`), posts
+ * the goal to the first member, and streams every message. With `--worktree <name>`
+ * the whole room shares one `kild/<name>` tree (members attach to it). You can keep
+ * typing to post more messages into the room (address members with @name); Ctrl-C
+ * is the kill switch — it closes the channel (stopping all members) and exits.
+ * Requires the engine (it is multi-session).
  */
 async function channel(goal: string): Promise<void> {
-  if (!goal) throw new Error('usage: kild channel <goal…> [--project <p>] [--model <m>]');
+  if (!goal) {
+    throw new Error(
+      'usage: kild channel <goal…> [--members a,b,c] [--worktree <n>] [--project <p>]',
+    );
+  }
   const engineUp = await fetch(`${ENGINE}/api/health`)
     .then((r) => r.ok)
     .catch(() => false);
@@ -196,6 +203,14 @@ async function channel(goal: string): Promise<void> {
     ? ((await findProject(values.project))?.path ?? values.project)
     : process.cwd();
   const name = values.project ?? 'channel';
+  const memberNames = (values.members ?? 'orchestrator,worker')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (memberNames.length === 0) throw new Error('--members must name at least one agent');
+  const lead = memberNames[0] as string;
+  // Address the lead member unless the goal already @mentions someone.
+  const kickoff = /@[A-Za-z0-9_-]+/.test(goal) ? goal : `@${lead} ${goal}`;
   const channelId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
@@ -216,6 +231,18 @@ async function channel(goal: string): Promise<void> {
       closeChannel();
     });
 
+    // Mid-flight steering: each line you type is posted into the room (address
+    // members with @name). Off in --json mode, which is machine-driven.
+    if (!json) {
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk: string) => {
+        for (const raw of chunk.split('\n')) {
+          const text = raw.trim();
+          if (text) ws.send(JSON.stringify({ type: 'channel_post', id: channelId, text }));
+        }
+      });
+    }
+
     ws.addEventListener('open', () => {
       ws.send(
         JSON.stringify({
@@ -223,17 +250,16 @@ async function channel(goal: string): Promise<void> {
           id: channelId,
           name,
           cwd,
-          members: [
-            { name: 'orchestrator', agent: 'orchestrator', model: values.model },
-            { name: 'worker', agent: 'worker', model: values.model },
-          ],
+          worktree: values.worktree,
+          members: memberNames.map((n) => ({ name: n, agent: n, model: values.model })),
         }),
       );
-      ws.send(
-        JSON.stringify({ type: 'channel_post', id: channelId, text: `@orchestrator ${goal}` }),
-      );
+      ws.send(JSON.stringify({ type: 'channel_post', id: channelId, text: kickoff }));
       if (!json) {
-        console.error(`\x1b[2m# channel "${name}" — orchestrator + worker · Ctrl-C to stop\x1b[0m`);
+        const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
+        console.error(
+          `\x1b[2m# channel "${name}" — ${memberNames.join(', ')}${where} · type to post · Ctrl-C to stop\x1b[0m`,
+        );
       }
     });
 

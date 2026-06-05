@@ -46,6 +46,9 @@ export interface OpenChannelSpec {
   name: string;
   cwd: string;
   members: Array<{ name: string; agent: string; model?: string }>;
+  /** Optional shared worktree name — every member attaches to `kild/<name>`, so the
+   *  room collaborates on one branch/tree. Absent → members run in the main checkout. */
+  worktree?: string;
 }
 
 /** Lightweight channel descriptor for client lists. */

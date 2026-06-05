@@ -54,6 +54,9 @@ class ChannelManager {
           cwd: spec.cwd,
           agent: m.agent,
           projectName: spec.name,
+          // Optional shared room tree: all members name the same worktree, so they
+          // create-or-attach to one tree (concurrent cold-start attaches, never resets).
+          worktree: spec.worktree,
           // Opaque to the SessionManager; the worker reads these to register
           // `post_message` and tag its outbound messages with this member.
           env: { KILD_CHANNEL: channelId, KILD_MEMBER: m.name },

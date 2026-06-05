@@ -168,6 +168,7 @@ type ClientMessage =
       name: string;
       cwd: string;
       members: Array<{ name: string; agent: string; model?: string }>;
+      worktree?: string;
     }
   | { type: 'channel_post'; id: string; text: string }
   | { type: 'channel_close'; id: string };
@@ -192,6 +193,7 @@ function parseClientMessage(data: string): ClientMessage | null {
     if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.members)) {
       return null;
     }
+    if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
     return m as ClientMessage;
   }
   if (m.type === 'channel_post' && typeof m.text === 'string') return m as ClientMessage;
@@ -226,7 +228,12 @@ app.get(
         } else if (msg.type === 'stop') {
           sessionManager.stop(msg.id);
         } else if (msg.type === 'channel_open') {
-          channelManager.open(msg.id, { name: msg.name, cwd: msg.cwd, members: msg.members });
+          channelManager.open(msg.id, {
+            name: msg.name,
+            cwd: msg.cwd,
+            members: msg.members,
+            worktree: msg.worktree,
+          });
         } else if (msg.type === 'channel_post') {
           channelManager.postFromHuman(msg.id, msg.text);
         } else if (msg.type === 'channel_close') {
