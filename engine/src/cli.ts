@@ -24,6 +24,7 @@ const { values, positionals } = parseArgs({
 
 const json = values.json ?? false;
 const [group, action, ...rest] = positionals;
+const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
 
 try {
   await dispatch();
@@ -91,6 +92,75 @@ async function agent(action: string | undefined, args: string[]): Promise<void> 
 
 async function run(prompt: string): Promise<void> {
   if (!prompt) throw new Error('usage: kild run <prompt…>');
+  // If the engine is up, run THROUGH it so the session shows up in the cockpit;
+  // otherwise run the agent in-process so the CLI works standalone.
+  const engineUp = await fetch(`${ENGINE}/api/health`)
+    .then((r) => r.ok)
+    .catch(() => false);
+  return engineUp ? runViaEngine(prompt) : runInProcess(prompt);
+}
+
+async function runViaEngine(prompt: string): Promise<void> {
+  const projectPath = values.project ? (await findProject(values.project))?.path : undefined;
+  const id = crypto.randomUUID();
+  const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+
+  let text = '';
+  let model = 'default';
+  let tokens = 0;
+  let cost = 0;
+
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'spawn',
+          id,
+          model: values.model,
+          cwd: projectPath ?? process.cwd(),
+          agent: values.agent,
+          projectName: values.project,
+          origin: 'cli',
+        }),
+      );
+      ws.send(JSON.stringify({ type: 'prompt', id, text: prompt }));
+    });
+    ws.addEventListener('message', (e) => {
+      const msg = JSON.parse(String((e as { data: unknown }).data)) as {
+        session?: string;
+        event?: { kind: string; [k: string]: unknown };
+      };
+      if (msg.session !== id || !msg.event) return;
+      const ev = msg.event;
+      if (ev.kind === 'model') model = `${ev.provider}/${ev.id}`;
+      else if (ev.kind === 'text') {
+        text += ev.delta as string;
+        if (!json) process.stdout.write(ev.delta as string);
+      } else if (ev.kind === 'tool_start') process.stderr.write(`\x1b[2m🔧 ${ev.name}\x1b[0m\n`);
+      else if (ev.kind === 'stats') {
+        tokens = ev.tokens as number;
+        cost = ev.cost as number;
+      } else if (ev.kind === 'agent_end') {
+        setTimeout(() => {
+          ws.close();
+          resolve();
+        }, 150); // catch the trailing stats event
+      }
+    });
+    ws.addEventListener('error', () => reject(new Error('engine socket error')));
+  });
+
+  if (json) {
+    console.log(JSON.stringify({ model, text, tokens, cost }, null, 2));
+  } else {
+    if (!text.endsWith('\n')) console.log();
+    console.error(
+      `\x1b[2m───── ${model}  tokens=${tokens}  cost=$${cost.toFixed(4)}  · live in kild UI\x1b[0m`,
+    );
+  }
+}
+
+async function runInProcess(prompt: string): Promise<void> {
   const projectPath = values.project ? (await findProject(values.project))?.path : undefined;
 
   const authStorage = AuthStorage.create();

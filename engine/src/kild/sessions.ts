@@ -45,10 +45,10 @@ class PiSession {
 
     this.child.stdout?.on('data', (chunk: Buffer) => {
       this.buf += chunk.toString();
-      let nl: number;
-      while ((nl = this.buf.indexOf('\n')) >= 0) {
-        const line = this.buf.slice(0, nl).trim();
-        this.buf = this.buf.slice(nl + 1);
+      const lines = this.buf.split('\n');
+      this.buf = lines.pop() ?? ''; // keep the incomplete trailing line
+      for (const raw of lines) {
+        const line = raw.trim();
         if (!line) continue;
         try {
           const event = JSON.parse(line) as UiEvent;

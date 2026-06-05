@@ -48,10 +48,10 @@ export async function runWorker(): Promise<never> {
   let buf = '';
   process.stdin.on('data', async (chunk: Buffer) => {
     buf += chunk.toString();
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? ''; // keep the incomplete trailing line
+    for (const raw of lines) {
+      const line = raw.trim();
       if (!line) continue;
       const msg = JSON.parse(line) as { type: string; text?: string };
       if (msg.type === 'prompt' && msg.text) {

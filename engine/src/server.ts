@@ -68,6 +68,7 @@ type ClientMessage =
       cwd?: string;
       agent?: string;
       projectName?: string;
+      origin?: 'ui' | 'cli';
     }
   | { type: 'prompt'; id: string; text: string }
   | { type: 'stop'; id: string };
@@ -83,7 +84,7 @@ app.get(
       onMessage(evt) {
         const msg = JSON.parse(String(evt.data)) as ClientMessage;
         if (msg.type === 'spawn') {
-          sessionManager.spawn(msg.id, msg, 'ui');
+          sessionManager.spawn(msg.id, msg, msg.origin ?? 'ui');
         } else if (msg.type === 'prompt') {
           sessionManager.prompt(msg.id, msg.text);
         } else if (msg.type === 'stop') {
