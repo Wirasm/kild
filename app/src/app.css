@@ -1,22 +1,23 @@
-/* Tallinn Night — ported from the old kild theme (see .claude/PRPs/branding) */
+@import "./lib/theme/tokens.css";
+
 :root {
-  --void: #08090a;
-  --obsidian: #0e1012;
-  --surface: #151719;
-  --elevated: #1c1f22;
-  --border-subtle: #1f2328;
-  --border: #2d3139;
-  --text-muted: #5c6370;
-  --text-subtle: #848d9c;
-  --text: #b8c0cc;
-  --text-bright: #e8ecf0;
-  --ice: #7cb4c8;
-  --ice-dim: #5e9ab2;
-  --aurora: #6b8f5e;
-  --copper: #c49a5c;
-  --ember: #b87060;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --ui: Inter, -apple-system, system-ui, sans-serif;
+  --void: var(--color-void);
+  --obsidian: var(--color-obsidian);
+  --surface: var(--color-surface);
+  --elevated: var(--color-elevated);
+  --border-subtle: var(--color-border-subtle);
+  --border: var(--color-border);
+  --text-muted: var(--color-text-muted);
+  --text-subtle: var(--color-text-subtle);
+  --text: var(--color-text);
+  --text-bright: var(--color-text-bright);
+  --ice: var(--color-ice);
+  --ice-dim: var(--color-ice-dim);
+  --aurora: var(--color-aurora);
+  --copper: var(--color-copper);
+  --ember: var(--color-ember);
+  --mono: var(--font-mono);
+  --ui: var(--font-ui);
 }
 
 * {
