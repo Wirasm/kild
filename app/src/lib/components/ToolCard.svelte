@@ -7,11 +7,61 @@
 
   let { name, args, status }: Props = $props();
   let isOpen = $state(false);
+
+  // Parse arguments and extract primary target for display
+  function getInlineArg(name: string, argsStr: string): string {
+    if (!argsStr) return "";
+    try {
+      const parsed = JSON.parse(argsStr);
+      if (typeof parsed !== 'object' || parsed === null) return "";
+
+      switch (name) {
+        case "read_file":
+        case "write_to_file":
+        case "replace_file_content":
+        case "multi_replace_file_content":
+        case "view_file": {
+          const file = parsed.TargetFile || parsed.AbsolutePath || parsed.path || parsed.Target;
+          if (file) {
+            // Extract relative-looking suffix for readability
+            const parts = file.split(/[/\\]/);
+            return parts.slice(-2).join("/");
+          }
+          break;
+        }
+        case "run_command":
+          return parsed.CommandLine || "";
+        case "grep_search":
+          return parsed.Query || "";
+        case "list_dir": {
+          const dir = parsed.DirectoryPath || "";
+          const parts = dir.split(/[/\\]/);
+          return parts.slice(-2).join("/") || dir;
+        }
+        default: {
+          const common = parsed.TargetFile || parsed.AbsolutePath || parsed.path || parsed.CommandLine || parsed.Query || parsed.DirectoryPath;
+          if (common) {
+            if (typeof common === 'string' && (common.includes('/') || common.includes('\\'))) {
+              return common.split(/[/\\]/).slice(-2).join("/");
+            }
+            return String(common);
+          }
+        }
+      }
+    } catch {
+      // Not JSON or parsing failed
+    }
+    return "";
+  }
+
+  let inlineArg = $derived(getInlineArg(name, args));
 </script>
 
 <div class="tool {status}" class:open={isOpen}>
   <button class="tool-header" onclick={() => isOpen = !isOpen}>
-    <span class="tool-name">🔧 {name}</span>
+    <span class="tool-name">
+      🔧 {name}{#if inlineArg}<span class="tool-arg">: {inlineArg}</span>{/if}
+    </span>
     <span class="tool-status-mark" class:running={status === "running"} class:ok={status === "ok"} class:error={status === "error"}>
       {#if status === "running"}
         running…
@@ -167,5 +217,11 @@
   .args-code code {
     white-space: pre-wrap;
     word-break: break-all;
+  }
+  .tool-arg {
+    color: var(--text-bright);
+    font-weight: normal;
+    font-family: var(--mono);
+    opacity: 0.85;
   }
 </style>

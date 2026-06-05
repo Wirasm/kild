@@ -41,8 +41,8 @@
     display: flex;
     gap: 10px;
     padding: 14px 16px;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--obsidian);
+    border-top: 1px solid var(--border-translucent);
+    background: transparent;
   }
   .composer textarea {
     flex: 1;
@@ -53,6 +53,12 @@
     border-radius: 8px;
     padding: 10px 12px;
     font: inherit;
+    transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .composer textarea:focus {
+    border-color: var(--ice);
+    outline: none;
+    box-shadow: var(--glow-ice);
   }
   .composer textarea:disabled {
     opacity: 0.6;

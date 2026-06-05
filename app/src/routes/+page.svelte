@@ -28,6 +28,18 @@
   let agentName = $state("default");
   let model = $state(MODELS[0]);
 
+  $effect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("kild_last_agent", agentName);
+    }
+  });
+
+  $effect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("kild_last_model", model);
+    }
+  });
+
   // Sessions (runtime registry)
   let sessions = $state<Session[]>([]);
   let activeId = $state<string | null>(null);
@@ -194,6 +206,12 @@
   }
 
   onMount(() => {
+    if (typeof localStorage !== "undefined") {
+      const savedAgent = localStorage.getItem("kild_last_agent");
+      const savedModel = localStorage.getItem("kild_last_model");
+      if (savedAgent) agentName = savedAgent;
+      if (savedModel && MODELS.includes(savedModel)) model = savedModel;
+    }
     socket = new EngineSocket(
       (session, event) => handle(session, event),
       (connected) => {

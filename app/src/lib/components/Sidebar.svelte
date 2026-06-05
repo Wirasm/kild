@@ -41,6 +41,8 @@
     onSelectSession,
     onCloseSession,
   }: Props = $props();
+
+  let showCreator = $state(false);
 </script>
 
 <aside class="sidebar">
@@ -55,28 +57,33 @@
   {/each}
   <button class="new" onclick={() => (adding = true)}>+ add project</button>
 
-  {#if active}
-    <div class="section-label">New session · {active.name}</div>
+  <div class="section-header">
+    <span class="section-label">Sessions</span>
+    {#if active}
+      <button class="new-session-toggle" onclick={() => showCreator = !showCreator}>
+        {showCreator ? "close" : "+ new session"}
+      </button>
+    {/if}
+  </div>
+
+  {#if showCreator && active}
     <div class="new-session">
       <Dropdown bind:value={agentName} options={agents.map((a) => a.name)} label="Select Agent" />
       <Dropdown bind:value={model} options={models} label="Select Model" />
-      <button class="primary start" onclick={onStartSession}>+ start session</button>
+      <button class="primary start" onclick={() => { onStartSession(); showCreator = false; }}>+ start session</button>
     </div>
   {/if}
 
-  {#if sessions.length > 0}
-    <div class="section-label">Sessions</div>
-    {#each sessions as s (s.id)}
-      <div class="session-row" class:active={s.id === activeId}>
-        <button class="session-pick" onclick={() => onSelectSession(s.id)}>
-          <span class="dot {s.status}" class:busy={s.running}></span>
-          <span class="s-title">{s.agent} · {s.model}</span>
-          <span class="s-proj">{s.projectName}</span>
-        </button>
-        <button class="session-close" title="Close session" onclick={() => onCloseSession(s.id)}>✕</button>
-      </div>
-    {/each}
-  {/if}
+  {#each sessions as s (s.id)}
+    <div class="session-row" class:active={s.id === activeId}>
+      <button class="session-pick" onclick={() => onSelectSession(s.id)}>
+        <span class="dot {s.status}" class:busy={s.running}></span>
+        <span class="s-title">{s.agent} · {s.model}</span>
+        <span class="s-proj">{s.projectName}</span>
+      </button>
+      <button class="session-close" title="Close session" onclick={() => onCloseSession(s.id)}>✕</button>
+    </div>
+  {/each}
 </aside>
 
 <style>
@@ -106,6 +113,34 @@
     text-transform: uppercase;
     letter-spacing: 0.6px;
     padding: 12px 8px 4px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
+  .section-header .section-label {
+    padding: 4px 8px;
+    margin: 0;
+  }
+  .new-session-toggle {
+    background: transparent !important;
+    border: none !important;
+    color: var(--ice) !important;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 4px 8px !important;
+    margin-right: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .new-session-toggle:hover {
+    color: var(--text-bright) !important;
+    background: rgba(124, 180, 200, 0.1) !important;
   }
   .sidebar button {
     text-align: left;
