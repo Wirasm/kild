@@ -14,3 +14,4 @@ kild-core = { path = "../kild-core" }
 tokio.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+clap.workspace = true

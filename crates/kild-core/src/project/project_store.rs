@@ -58,6 +58,11 @@ pub fn add_project(name: String, path: String) -> Result<Project, ProjectError> 
     Ok(project)
 }
 
+/// Find a registered project by name (`None` if there is no match).
+pub fn find_project(name: &str) -> Result<Option<Project>, ProjectError> {
+    Ok(load_projects()?.into_iter().find(|p| p.name == name))
+}
+
 /// Remove a project by name (no-op if it doesn't exist).
 pub fn remove_project(name: &str) -> Result<(), ProjectError> {
     let mut projects = load_projects()?;

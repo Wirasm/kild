@@ -10,8 +10,10 @@
 
 mod rpc_client;
 mod rpc_errors;
+mod rpc_run;
 mod rpc_types;
 
 pub use rpc_client::{PiRpcSession, PiRpcWriter, SpawnOptions};
 pub use rpc_errors::RpcError;
+pub use rpc_run::{run_to_completion, RunOutcome, RunProgress, ToolRun};
 pub use rpc_types::{AssistantDelta, DeltaKind, PiOutput, RpcCommand};

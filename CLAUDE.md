@@ -112,6 +112,7 @@ kild/
     │       ├── rpc/               # the ONLY pi boundary — drives `pi --mode rpc`
     │       │   ├── rpc_types.rs   #   RpcCommand (in) + PiOutput/DeltaKind events (out)
     │       │   ├── rpc_client.rs  #   PiRpcSession + PiRpcWriter (split for concurrent drive)
+    │       │   ├── rpc_run.rs     #   run_to_completion → RunOutcome (one-shot, for CLI/daemon)
     │       │   └── rpc_errors.rs
     │       ├── project/           # a project is a directory an agent works in (session cwd)
     │       │   ├── project_types.rs   #   Project { name, path }
@@ -121,14 +122,26 @@ kild/
     │           ├── agent_types.rs     #   Agent { name, system_prompt }
     │           ├── agent_store.rs      #   scans .kild/.claude/.pi agents; --append-system-prompt
     │           └── agent_errors.rs
-    └── kild/                      # CLI binary (currently: the rpc spike)
-        └── src/main.rs
+    └── kild/                      # CLI — the primary, skill-friendly interface
+        └── src/
+            ├── main.rs           #   parse → dispatch → exit code; no logic here
+            └── commands/         #   thin presentation layer (delegates to kild-core)
+                ├── mod.rs        #     clap Cli + dispatch router
+                ├── project.rs    #     kild project {ls,add,rm}
+                ├── agent.rs      #     kild agent {ls,show}
+                └── run.rs        #     kild run — one-shot agent task, --json for skills
 ```
+
+The CLI is **thin by contract**: it parses args, delegates to a `kild-core` slice,
+and formats output. No business logic lives in `crates/kild`. Reads go to stdout
+(plain or `--json`); progress/errors go to stderr; non-zero exit means failure — so
+an agent can drive kild over the Bash tool and parse stdout cleanly.
 
 Planned slices (see `.claude/MANIFEST.md`): `worktree`, `git`, `comms`, `config`,
 `forge`, plus the `kild-daemon` binary (extracting the in-app supervisor for
-persistence / VPS). (`rpc`, `project`, `agent`, the in-app multi-session registry,
-and the Tauri `app/` now exist.)
+persistence / VPS — and the owner of live, shareable sessions for `kild session …`).
+(`rpc`, `project`, `agent`, the in-app multi-session registry, the Tauri `app/`, and
+the `project`/`agent`/`run` CLI now exist.)
 
 ### Naming conventions
 

@@ -10,5 +10,5 @@ mod project_store;
 mod project_types;
 
 pub use project_errors::ProjectError;
-pub use project_store::{add_project, load_projects, remove_project};
+pub use project_store::{add_project, find_project, load_projects, remove_project};
 pub use project_types::Project;
