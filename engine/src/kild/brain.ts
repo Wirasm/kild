@@ -2,9 +2,9 @@ import type { CreatedAgent, FlueContext, ToolDefinition } from '@flue/runtime';
 import { createAgent, defineTool, Type } from '@flue/runtime';
 
 import { listAgents } from './agents.ts';
+import { commsBus } from './comms-bus.ts';
 import { DEFAULT_MODEL } from './config.ts';
 import { findProject, loadProjects } from './projects.ts';
-import { rooms } from './rooms.ts';
 import { runToCompletion } from './run.ts';
 import { createWorktree } from './worktree.ts';
 
@@ -75,7 +75,7 @@ export function kildTools(init: Init): ToolDefinition[] {
       }),
       execute: async (args) => {
         const a = args as { room: string; text: string };
-        rooms.post(a.room, 'brain', a.text);
+        commsBus.post(a.room, 'brain', a.text);
         return 'posted';
       },
     }),

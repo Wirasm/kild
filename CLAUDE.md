@@ -137,7 +137,7 @@ kild/
 │   │   │   ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream
 │   │   │   ├── worktree.ts     #     [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (NO @flue)
 │   │   │   ├── run.ts          #     [Flue layer] one-shot run via Flue
-│   │   │   ├── rooms.ts        #     [Flue layer] agent-to-agent rooms (peer comms)
+│   │   │   ├── comms-bus.ts    #     [Flue layer] agent-to-agent peer comms bus (Flue-demo; NOT the Room primitive)
 │   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild capabilities as tools)
 │   │   │   ├── observability.ts#     [Flue layer] observe() → cockpit event log
 │   │   │   └── auth.ts         #     [Flue layer] bridge ~/.pi auth into the Flue runtime

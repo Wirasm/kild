@@ -1,8 +1,8 @@
 import type { FlueContext } from '@flue/runtime';
 
 import { createBrain } from '../kild/brain.ts';
+import { commsBus } from '../kild/comms-bus.ts';
 import { startCockpitLog } from '../kild/observability.ts';
-import { rooms } from '../kild/rooms.ts';
 
 /**
  * BATTERY #3 — the brain (operator mirror) + observability.
@@ -27,7 +27,7 @@ export async function run({ init, payload }: FlueContext) {
 
   return {
     reply: res.text,
-    roomOps: rooms.history('ops').map((m) => `${m.from}: ${m.text}`),
+    roomOps: commsBus.history('ops').map((m) => `${m.from}: ${m.text}`),
     toolCalls: cockpit.filter((e) => e.t === 'tool_start').map((e) => e.detail),
     cockpitEventCount: cockpit.length,
   };

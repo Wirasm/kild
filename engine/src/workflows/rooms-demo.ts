@@ -1,7 +1,6 @@
 import { createAgent, type FlueContext } from '@flue/runtime';
-
+import { commsBus, commsTools } from '../kild/comms-bus.ts';
 import { DEFAULT_MODEL } from '../kild/config.ts';
-import { rooms, roomTools } from '../kild/rooms.ts';
 
 /**
  * BATTERY #2 — agent rooms / peer-to-peer comms.
@@ -17,12 +16,12 @@ export async function run({ init }: FlueContext) {
   const planner = createAgent(() => ({
     model: DEFAULT_MODEL,
     instructions: 'You are the planner. Use the room tools. Keep each message to one sentence.',
-    tools: roomTools(room, 'planner'),
+    tools: commsTools(room, 'planner'),
   }));
   const reviewer = createAgent(() => ({
     model: DEFAULT_MODEL,
     instructions: 'You are the reviewer. Use the room tools. Keep each message to one sentence.',
-    tools: roomTools(room, 'reviewer'),
+    tools: commsTools(room, 'reviewer'),
   }));
 
   const plannerSession = await (await init(planner, { name: 'planner' })).session();
@@ -37,7 +36,7 @@ export async function run({ init }: FlueContext) {
   );
 
   return {
-    members: rooms.roster(room),
-    transcript: rooms.history(room).map((m) => `${m.from}: ${m.text}`),
+    members: commsBus.roster(room),
+    transcript: commsBus.history(room).map((m) => `${m.from}: ${m.text}`),
   };
 }
