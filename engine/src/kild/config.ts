@@ -11,3 +11,14 @@ export function kildHome(): string {
   const base = process.env.XDG_CONFIG_HOME ?? path.join(process.env.HOME ?? '', '.config');
   return path.join(base, 'kild');
 }
+
+/** Whether agents get the web tools. On by default; `KILD_WEB=off` is the kill-switch. */
+export function webEnabled(): boolean {
+  return (process.env.KILD_WEB ?? '').toLowerCase() !== 'off';
+}
+
+/** The self-hosted SearXNG base URL backing `web_search`, or undefined if unset.
+ *  kild only *points at* this instance — it never spawns or manages it. */
+export function searxngUrl(): string | undefined {
+  return process.env.KILD_SEARXNG_URL || undefined;
+}

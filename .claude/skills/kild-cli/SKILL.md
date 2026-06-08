@@ -44,6 +44,8 @@ driven from the cockpit UI over the engine's WebSocket, not the CLI.)
 | `kild worktree ls --project <p>` | List the project's `kild/*` worktrees |
 | `kild worktree rm <name> --project <p>` | Remove a worktree (frees disk; the `kild/<name>` branch persists) |
 | `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only; dirty/in-use ones are kept) |
+| `kild web fetch <url> [--format markdown\|html]` | Fetch a URL as markdown (in-process; keyless) |
+| `kild web search "<query>"` | Query the web via the configured SearXNG (`KILD_SEARXNG_URL`) |
 
 Add `--json` to any command for machine-readable output on stdout.
 
@@ -139,6 +141,10 @@ kild agent ls --project ~/projects/myapp --json | jq -r '.[].name'
   `.pi/agents/`, or globally in `~/.config/kild/agents/` or `~/.claude/agents/`.
   The built-in `default` agent uses pi's own prompt. To add an agent, drop a file —
   kild only reads them.
+- **Web access.** A `kild run` agent automatically gets `webfetch` (read a URL as
+  markdown — keyless, in-process) and, when `KILD_SEARXNG_URL` points at a SearXNG
+  instance, `web_search`. Works for any model. `KILD_WEB=off` disables both. Use
+  `kild web fetch/search` to exercise them directly without spending agent tokens.
 - **One-shot only.** `kild run` blocks until the agent finishes. For a long task,
   expect it to take a while; tool progress streams to stderr so you can see it
   working. There is no way yet to attach to or steer a running agent from the CLI.

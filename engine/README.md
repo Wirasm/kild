@@ -15,11 +15,29 @@ bun run cli -- project ls --json   # the kild CLI (secondary interface)
 bun run cli -- run --model anthropic/claude-haiku-4-5 "what files are here?"
 bun run cli -- run --worktree fix-auth "…"   # run isolated in a kild/fix-auth worktree
 bun run cli -- worktree ls --project <p>     # list/rm/prune kild worktrees
+bun run cli -- web fetch https://example.com # read a url as markdown (in-process)
+bun run cli -- web search "claude opus"      # query the web (needs KILD_SEARXNG_URL)
 bun run typecheck && bun run lint  # tsc + biome
 ```
 
 `pi` must be on PATH and authenticated (`~/.pi/agent/auth.json` — Claude Max /
 ChatGPT OAuth work natively).
+
+## Web tools
+
+Agents get `webfetch` (URL → markdown, in-process, keyless) and — when a search
+backend is configured — `web_search`. Search is backed by a **self-hosted SearXNG**
+kild only points at; it never runs the container:
+
+```bash
+cd ../infra/searxng && docker compose up -d
+export KILD_SEARXNG_URL=http://localhost:8888
+```
+
+`webfetch` works regardless; without `KILD_SEARXNG_URL`, `web_search` is simply not
+offered (the worker logs a one-line notice). `KILD_WEB=off` disables both. The search
+backend sits behind a `SearchProvider` seam (`kild/web/search.ts`) — DDG/fastCRW/Tavily
+are a new impl + a switch arm later, no tool/worker changes.
 
 ## Layout
 
@@ -34,6 +52,7 @@ src/
     agents.ts      agents from .kild/.claude/.pi convention dirs
     sessions.ts    SessionManager: coding-agent SDK sessions → UiEvent stream
     worktree.ts    [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (no @flue)
+    web/           web_search (SearXNG seam) + webfetch (in-process turndown) tools
     run/rooms/brain/observability/auth.ts   [Flue layer]
   flue/
     worktree-sandbox.ts   [Flue layer] worktree() SandboxFactory — the upstream contribution

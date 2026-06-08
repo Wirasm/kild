@@ -1,10 +1,18 @@
-import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import {
+  AuthStorage,
+  createAgentSession,
+  ModelRegistry,
+  type ToolDefinition,
+} from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
+import { webEnabled } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
 import { createPostMessageTool } from './kild/room/post-message-tool.ts';
+import { webSearchProvider } from './kild/web/search.ts';
+import { webTools } from './kild/web/tools.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
 /**
@@ -49,14 +57,16 @@ export async function runWorker(): Promise<never> {
   let postedThisTurn = false;
   let turnText = '';
 
-  // A given-but-unknown model errors (resolveModel throws); no model = pi default.
-  let model: ReturnType<typeof resolveModel>;
-  let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
-  try {
-    model = resolveModel(registry, modelPattern);
+  // Web tools (any model): `webfetch` is in-process and always available when web is
+  // enabled; `web_search` needs a backend, so it registers only when one is configured.
+  if (webEnabled() && !webSearchProvider()) {
+    process.stderr.write('kild: web_search disabled — set KILD_SEARXNG_URL (see infra/searxng)\n');
+  }
+  const customTools: ToolDefinition[] = [
+    ...webTools(),
     // A room participant gets `post_message` + `invite_agent`; their calls become
     // control lines on stdout the engine routes back into the room.
-    const customTools = inRoom
+    ...(inRoom
       ? [
           createPostMessageTool((text) => {
             postedThisTurn = true;
@@ -64,13 +74,20 @@ export async function runWorker(): Promise<never> {
           }),
           createInviteAgentTool(emitInvite),
         ]
-      : undefined;
+      : []),
+  ];
+
+  // A given-but-unknown model errors (resolveModel throws); no model = pi default.
+  let model: ReturnType<typeof resolveModel>;
+  let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
+  try {
+    model = resolveModel(registry, modelPattern);
     ({ session } = await createAgentSession({
       model,
       authStorage,
       modelRegistry: registry,
       cwd,
-      customTools,
+      customTools: customTools.length ? customTools : undefined,
     }));
   } catch (err) {
     emit({ kind: 'error', message: errText(err) });

@@ -25,12 +25,14 @@
     "@flue/runtime": "^0.9.2",
     "hono": "^4.8.3",
     "just-bash": "^3.0.1",
+    "turndown": "^7.2.4",
     "valibot": "^1.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@flue/cli": "^0.9.2",
     "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.6",
     "typescript": "^5.6.0"
   }
 }

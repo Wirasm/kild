@@ -1,0 +1,19 @@
+# Optional, self-hosted SearXNG backing kild's `web_search` tool.
+# kild only POINTS at this over HTTP (KILD_SEARXNG_URL) — the engine never spawns or
+# manages it. Bring it up yourself:
+#
+#   cd infra/searxng && docker compose up -d
+#   export KILD_SEARXNG_URL=http://localhost:8888
+#
+# Then any agent gets `web_search` (and `webfetch` works regardless).
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: kild-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    restart: unless-stopped
