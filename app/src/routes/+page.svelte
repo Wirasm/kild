@@ -282,6 +282,9 @@
     const live = new Set(summaries.map((s) => s.id));
     rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id));
     for (const sum of summaries) {
+      // The engine now knows this room — it's no longer "pending the open echo", so a
+      // later restart that wipes the engine's list drops it instead of leaving a ghost.
+      ownedIds.delete(sum.id);
       let room = rooms.find((r) => r.id === sum.id);
       if (!room) {
         room = {
