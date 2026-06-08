@@ -12,6 +12,9 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import { fetchUrl } from './kild/web/fetch.ts';
+import { webSearchProvider } from './kild/web/search.ts';
+import { webTools } from './kild/web/tools.ts';
 import {
   ensureWorktree,
   listWorktrees,
@@ -30,6 +33,7 @@ const { values, positionals } = parseArgs({
     model: { type: 'string' },
     worktree: { type: 'string' },
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
+    format: { type: 'string' }, // `kild web fetch` output format: markdown (default) | html
   },
 });
 
@@ -53,12 +57,14 @@ async function dispatch(): Promise<void> {
       return agent(action, rest);
     case 'worktree':
       return worktree(action, rest);
+    case 'web':
+      return web(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
     case 'room':
       return room([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run|room> …');
+      console.error('usage: kild <project|agent|worktree|web|run|room> …');
       process.exit(2);
   }
 }
@@ -165,6 +171,32 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
     else console.log(pruned.length ? `pruned: ${pruned.join(', ')}` : 'nothing to prune');
   } else {
     throw new Error('usage: kild worktree <ls|rm|prune> --project <p>');
+  }
+}
+
+// Debug surface for the web tools — exercise the search backend / fetch a page
+// without spending agent tokens (CLI-first). The agent itself uses the tools directly.
+async function web(action: string | undefined, args: string[]): Promise<void> {
+  if (action === 'search') {
+    const query = args.join(' ');
+    if (!query) throw new Error('usage: kild web search "<query>"');
+    const provider = webSearchProvider();
+    if (!provider) throw new Error('web search needs KILD_SEARXNG_URL (see infra/searxng)');
+    const hits = await provider.search(query, 8);
+    if (json) return void console.log(JSON.stringify(hits, null, 2));
+    if (hits.length === 0) return void console.error('no results');
+    for (const [i, h] of hits.entries()) {
+      console.log(`${i + 1}. ${h.title}\n   ${h.url}${h.snippet ? `\n   ${h.snippet}` : ''}`);
+    }
+  } else if (action === 'fetch') {
+    const [url] = args;
+    if (!url) throw new Error('usage: kild web fetch <url> [--format markdown|html]');
+    const format = values.format === 'html' ? 'html' : 'markdown';
+    const text = await fetchUrl(url, format);
+    if (json) console.log(JSON.stringify({ url, format, text }, null, 2));
+    else console.log(text);
+  } else {
+    throw new Error('usage: kild web <search|fetch>');
   }
 }
 
@@ -383,11 +415,13 @@ async function runInProcess(prompt: string): Promise<void> {
   const registry = ModelRegistry.create(authStorage);
   const model = resolveModel(registry, values.model);
 
+  const tools = webTools();
   const { session } = await createAgentSession({
     model,
     authStorage,
     modelRegistry: registry,
     cwd,
+    customTools: tools.length ? tools : undefined,
   });
 
   let text = '';

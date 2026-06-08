@@ -1,0 +1,18 @@
+# Minimal SearXNG override for kild. Merges with SearXNG's shipped defaults
+# (use_default_settings: true), changing only what kild needs:
+#   - json format ON  (the keyless API kild's web_search calls)
+#   - limiter OFF     (this instance is loopback-only and serves a single user/agent)
+# Tune `engines` here if you want to drop CAPTCHA-prone sources (e.g. google) or
+# favor brave/duckduckgo/startpage.
+use_default_settings: true
+
+server:
+  # CHANGE THIS for anything beyond local dev.
+  secret_key: "kild-local-dev-change-me"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json

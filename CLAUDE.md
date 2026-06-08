@@ -136,6 +136,7 @@ kild/
 │   │   │   ├── agents.ts       #     agents read from .kild/.claude/.pi convention dirs
 │   │   │   ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream
 │   │   │   ├── worktree.ts     #     [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (NO @flue)
+│   │   │   ├── web/            #     [kild-owned] web_search (SearXNG seam) + webfetch (in-process) tools
 │   │   │   ├── run.ts          #     [Flue layer] one-shot run via Flue
 │   │   │   ├── comms-bus.ts    #     [Flue layer] agent-to-agent peer comms bus (Flue-demo; NOT the Room primitive)
 │   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild capabilities as tools)
@@ -173,6 +174,13 @@ kild/
   self-contained (no `kild/*` imports) so it can be lifted into Flue verbatim.
   Worktrees **persist**: a session closing never removes one; only an explicit
   `kild worktree rm` / UI action or the automatic merge-prune does.
+- **The web boundary.** kild owns the `web_search` / `webfetch` *tools*
+  (`engine/src/kild/web/`); the search *backend* is external — a self-hosted SearXNG
+  kild only points at via `KILD_SEARXNG_URL`. The engine never spawns or manages the
+  container. The backend sits behind a `SearchProvider` seam, so DDG/fastCRW/Tavily
+  are a new impl + a switch arm later — no tool or worker changes. `webfetch` is
+  in-process (turndown), keyless, and needs no backend. Works for any model (e.g.
+  MiniMax) since it's a plain pi tool, not a provider-native capability.
 
 ### Naming conventions
 
