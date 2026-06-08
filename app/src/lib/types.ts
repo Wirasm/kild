@@ -48,9 +48,22 @@ export type Room = {
   log: Message[];
   status: "running" | "stopped";
   origin: "ui" | "cli";
+  /** True for a room recovered from the engine's on-disk history — a read-only
+   *  transcript from a past run, with no live participants. */
+  archived?: boolean;
   /** Shared worktree branch (`kild/<name>`), when the room runs in one. */
   branch?: string;
   worktreePath?: string;
+};
+
+/** A past room as returned by `GET /api/rooms/archive` — its conversation log only
+ *  (the participant subprocesses are gone). Rendered read-only in the cockpit. */
+export type ArchivedRoom = {
+  id: string;
+  name: string;
+  worktree?: string;
+  participants: { name: string; agent?: string }[];
+  log: Message[];
 };
 
 /** Room descriptor broadcast by the engine — the room-list source. */
@@ -59,6 +72,8 @@ export type RoomSummary = {
   name: string;
   worktree?: string;
   participants: { name: string; agent?: string }[];
+  /** True when the operator has halted the room (sessions stopped, kept read-only). */
+  stopped?: boolean;
 };
 
 /** Spec to open a room. */

@@ -135,15 +135,15 @@ kild/
 │   │   │   ├── projects.ts     #     project registry (a project = a directory an agent works in)
 │   │   │   ├── agents.ts       #     agents read from .kild/.claude/.pi convention dirs
 │   │   │   ├── sessions.ts     #     SessionManager: coding-agent SDK sessions → UiEvent stream
+│   │   │   ├── room/           #     the Room primitive: registry/router/manager + post_message/invite tools
 │   │   │   ├── worktree.ts     #     [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (NO @flue)
 │   │   │   ├── run.ts          #     [Flue layer] one-shot run via Flue
-│   │   │   ├── comms-bus.ts    #     [Flue layer] agent-to-agent peer comms bus (Flue-demo; NOT the Room primitive)
-│   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild capabilities as tools)
+│   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild tools; posts into real Rooms)
 │   │   │   ├── observability.ts#     [Flue layer] observe() → cockpit event log
 │   │   │   └── auth.ts         #     [Flue layer] bridge ~/.pi auth into the Flue runtime
 │   │   └── flue/               #   [Flue layer] Flue-promotable mechanisms
 │   │       └── worktree-sandbox.ts #  worktree() SandboxFactory (self-contained; upstream contribution)
-│   └── src/workflows/          #   [Flue layer] runnable Flue workflows (rooms/brain/merge/run demos)
+│   └── src/workflows/          #   [Flue layer] runnable Flue workflows (brain/merge/run demos)
 └── app/                        # the cockpit — Tauri 2 + SvelteKit
     ├── src/
     │   ├── lib/api.ts          #   engine client (REST + EngineSocket over WS)
@@ -162,7 +162,7 @@ kild/
 - **SDK substrate, Flue layer.** Interactive cockpit/CLI sessions run on the
   coding-agent SDK (`createAgentSession`, native auth, `AgentSession.subscribe`
   events). Flue is used for the sandbox abstraction, deploy, and the orchestration
-  workflows (rooms, brain, merge team) — and is the upstream we contribute to.
+  workflows (brain, merge team) — and is the upstream we contribute to.
 - **The cockpit is a web client.** The frontend reaches the engine over HTTP + WS
   only; the Tauri shell hosts the webview and nothing else.
 - **The worktree boundary.** kild owns worktree *policy* — the `kild/<name>` naming,

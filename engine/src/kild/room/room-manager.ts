@@ -5,6 +5,7 @@ import { parseMentions } from './parse-mentions.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { type RoomDelivery, routeRoomMessage } from './room-router.ts';
 import {
+  type ArchivedRoom,
   HUMAN,
   type OpenRoomSpec,
   type ParticipantSpec,
@@ -74,6 +75,23 @@ class RoomManager {
     this.post(roomId, HUMAN, text);
   }
 
+  /** An operator-side author (e.g. the brain) posts into a room — the agent-driven
+   *  mirror of {@link postFromHuman}, routed identically. This is how the brain
+   *  speaks into the real Room primitive instead of a separate bus. */
+  postAs(roomId: string, from: string, text: string): void {
+    this.post(roomId, from, text);
+  }
+
+  /** A room's shared log (empty if the room is unknown) — for demos / inspection. */
+  messages(roomId: string): RoomMessage[] {
+    return this.registry.get(roomId)?.log ?? [];
+  }
+
+  /** Past rooms recovered from disk (read-only logs from previous engine runs). */
+  archived(): ArchivedRoom[] {
+    return this.registry.archived();
+  }
+
   /** Add a participant to a live room (the human "invite"). */
   addParticipant(roomId: string, spec: ParticipantSpec): void {
     const room = this.registry.get(roomId);
@@ -88,6 +106,18 @@ class RoomManager {
     if (!room) return;
     for (const p of room.participants) sessionManager.stop(p.sessionId);
     this.registry.remove(roomId);
+    this.broadcast({ rooms: this.registry.summaries() });
+  }
+
+  /** Manual circuit breaker: stop every participant session but KEEP the room, so its
+   *  transcript stays visible (read-only). The operator trips this to halt a runaway or
+   *  off-track room without tearing it down (vs {@link close}). Idempotent. */
+  halt(roomId: string): void {
+    const room = this.registry.get(roomId);
+    if (!room || room.stopped) return;
+    for (const p of room.participants) sessionManager.stop(p.sessionId);
+    room.stopped = true;
+    this.post(roomId, HUMAN, 'Room halted by the operator.', { system: true });
     this.broadcast({ rooms: this.registry.summaries() });
   }
 

@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { CreatedAgent, FlueContext, ToolDefinition } from '@flue/runtime';
 import { createAgent, defineTool, Type } from '@flue/runtime';
 
 import { listAgents } from './agents.ts';
-import { commsBus } from './comms-bus.ts';
 import { DEFAULT_MODEL } from './config.ts';
 import { findProject, loadProjects } from './projects.ts';
+import { roomManager } from './room/room-manager.ts';
 import { runToCompletion } from './run.ts';
 import { createWorktree } from './worktree.ts';
 
@@ -15,6 +16,9 @@ type Init = FlueContext['init'];
  * operator mirror. Because the orchestration layer is in-runtime TypeScript,
  * the agent can *do* what the human operator can by calling these directly.
  * (In the Rust kild, the brain would have to shell out to the kild CLI.)
+ *
+ * Communication goes through the real Room primitive ({@link roomManager}) — the
+ * same surface the human drives from the cockpit/CLI — not a separate bus.
  */
 export function kildTools(init: Init): ToolDefinition[] {
   return [
@@ -67,15 +71,34 @@ export function kildTools(init: Init): ToolDefinition[] {
       },
     }),
     defineTool({
-      name: 'post_to_room',
-      description: 'Broadcast a status update to a kild room the human and other agents observe.',
+      name: 'open_room',
+      description:
+        'Open a kild room the human and other agents observe in the cockpit. Returns the room ' +
+        'id to post into with post_to_room.',
       parameters: Type.Object({
-        room: Type.String({ description: 'Room name.' }),
+        name: Type.String({ description: 'A short room name, e.g. "ops".' }),
+      }),
+      execute: async (args) => {
+        const id = randomUUID();
+        roomManager.open(id, {
+          name: String((args as { name: string }).name),
+          cwd: process.cwd(),
+          participants: [],
+        });
+        return id;
+      },
+    }),
+    defineTool({
+      name: 'post_to_room',
+      description:
+        'Post a status update into a kild room (by id from open_room) the human and other agents observe.',
+      parameters: Type.Object({
+        roomId: Type.String({ description: 'Room id returned by open_room.' }),
         text: Type.String({ description: 'The update.' }),
       }),
       execute: async (args) => {
-        const a = args as { room: string; text: string };
-        commsBus.post(a.room, 'brain', a.text);
+        const a = args as { roomId: string; text: string };
+        roomManager.postAs(a.roomId, 'brain', a.text);
         return 'posted';
       },
     }),
@@ -90,7 +113,8 @@ export function createBrain(init: Init, model: string = DEFAULT_MODEL): CreatedA
       'You are the kild operator brain — a mirror of the human operator. You orchestrate ' +
       'coding-agent work across projects using your kild tools: inspect projects and agents, ' +
       'create isolated worktrees, dispatch agents into them, and report progress to rooms. ' +
-      'Prefer doing the work via tools over describing it. Be concise.',
+      'To report, open_room to get a room id (or reuse one you were given), then post_to_room ' +
+      'with that id. Prefer doing the work via tools over describing it. Be concise.',
     tools: kildTools(init),
   }));
 }

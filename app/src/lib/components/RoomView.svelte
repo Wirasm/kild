@@ -14,6 +14,7 @@
     onSelectParticipant: (name: string) => void;
     onInvite: (agent: string) => void;
     onClose: () => void;
+    onHalt: () => void;
     onOpenWorktree: (path: string) => void;
     onSend: () => void;
   }
@@ -25,6 +26,7 @@
     onSelectParticipant,
     onInvite,
     onClose,
+    onHalt,
     onOpenWorktree,
     onSend,
   }: Props = $props();
@@ -45,9 +47,9 @@
   }
 </script>
 
-<Topbar {room} participant={activeParticipant} {onClose} {onOpenWorktree} />
+<Topbar {room} participant={activeParticipant} {onClose} {onHalt} {onOpenWorktree} />
 
-{#if !solo}
+{#if room.participants.length > 1}
   <div class="roster">
     {#each room.participants as p (p.name)}
       <button
@@ -58,22 +60,28 @@
         <span class="dot" class:running={p.running}></span>@{p.name}
       </button>
     {/each}
-    <div class="invite">
-      {#if inviting}
-        <Dropdown bind:value={inviteAgent} options={invitable} label="Agent" />
-        <button class="mini" onclick={doInvite}>add</button>
-        <button class="mini" onclick={() => (inviting = false)}>✕</button>
-      {:else}
-        <button class="mini" onclick={() => (inviting = true)} disabled={invitable.length === 0}>
-          + invite
-        </button>
-      {/if}
-    </div>
+    {#if !room.archived}
+      <div class="invite">
+        {#if inviting}
+          <Dropdown bind:value={inviteAgent} options={invitable} label="Agent" />
+          <button class="mini" onclick={doInvite}>add</button>
+          <button class="mini" onclick={() => (inviting = false)}>✕</button>
+        {:else}
+          <button class="mini" onclick={() => (inviting = true)} disabled={invitable.length === 0}>
+            + invite
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 {/if}
 
 <div class="body">
-  {#if solo}
+  {#if room.archived}
+    <!-- Read-only history: per-participant transcripts aren't persisted, so show the
+         shared room log (the conversation record) regardless of participant count. -->
+    <div class="archived-log"><RoomLog log={room.log} /></div>
+  {:else if solo}
     {#if activeParticipant}
       <Ledger
         items={activeParticipant.items}
@@ -176,6 +184,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .archived-log {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
   }
   .split {
     flex: 1;

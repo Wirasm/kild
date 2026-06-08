@@ -85,8 +85,10 @@ export async function runWorker(): Promise<never> {
       if (ui.kind === 'text') turnText += ui.delta; // accumulate the turn's reply text
     }
     if (e.type === 'agent_end') {
-      // Implicit reply: if the agent didn't post explicitly this turn, treat its
-      // turn-final text as a reply addressed back to whoever delivered the turn.
+      // Implicit reply: if the agent didn't post explicitly this turn, surface its
+      // turn-final text so the human sees what it said. Tagged with the sender for
+      // display only — the engine broadcasts it but does NOT deliver it as a turn
+      // (see room-router.ts), so narration can't ping-pong agents into a loop.
       if (inRoom && !postedThisTurn && turnText.trim()) {
         emitMessage(turnText, [turnSender], true);
       }
