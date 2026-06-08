@@ -1,21 +1,17 @@
 <script lang="ts">
-  import type { Project, Session, Worktree } from "../types";
+  import type { Project, Room, Worktree } from "../types";
 
   interface Props {
     projects: Project[];
     active: Project | null;
     adding: boolean;
-    newName: string;
-    newPath: string;
-    addError: string | null;
-    sessions: Session[];
-    activeId: string | null;
+    rooms: Room[];
+    activeRoomId: string | null;
     worktrees: Worktree[];
     onSelectProject: (p: Project) => void;
-    onAddProject: () => void;
-    onNewSession: () => void;
-    onSelectSession: (id: string) => void;
-    onCloseSession: (id: string) => void;
+    onNewRoom: () => void;
+    onSelectRoom: (id: string) => void;
+    onCloseRoom: (id: string) => void;
     onRemoveWorktree: (name: string) => void;
     onPruneWorktrees: () => void;
   }
@@ -24,35 +20,31 @@
     projects,
     active = $bindable(),
     adding = $bindable(),
-    newName = $bindable(),
-    newPath = $bindable(),
-    addError = $bindable(),
-    sessions = $bindable(),
-    activeId = $bindable(),
+    rooms,
+    activeRoomId,
     worktrees,
     onSelectProject,
-    onAddProject,
-    onNewSession,
-    onSelectSession,
-    onCloseSession,
+    onNewRoom,
+    onSelectRoom,
+    onCloseRoom,
     onRemoveWorktree,
     onPruneWorktrees,
   }: Props = $props();
 
   let filterMode = $state<"project" | "all">("project");
 
-  // Reset filter mode to show current active project sessions by default
   $effect(() => {
-    if (active) {
-      filterMode = "project";
-    }
+    if (active) filterMode = "project";
   });
 
-  let filteredSessions = $derived(
-    active && filterMode === "project"
-      ? sessions.filter((s) => s.projectName === active.name)
-      : sessions
+  let filteredRooms = $derived(
+    active && filterMode === "project" ? rooms.filter((r) => r.name === active.name) : rooms,
   );
+
+  function roomLabel(r: Room): string {
+    if (r.participants.length === 1) return `@${r.participants[0]?.name ?? "agent"}`;
+    return `${r.participants.length} agents`;
+  }
 </script>
 
 <aside class="sidebar">
@@ -68,32 +60,28 @@
   <button class="new" onclick={() => (adding = true)}>+ add project</button>
 
   <div class="sessions-header-row">
-    <div class="section-label">Sessions</div>
+    <div class="section-label">Rooms</div>
     {#if active}
       <div class="filter-toggle">
-        <button class:selected={filterMode === "project"} onclick={() => filterMode = "project"}>
+        <button class:selected={filterMode === "project"} onclick={() => (filterMode = "project")}>
           {active.name}
         </button>
-        <button class:selected={filterMode === "all"} onclick={() => filterMode = "all"}>
-          all
-        </button>
+        <button class:selected={filterMode === "all"} onclick={() => (filterMode = "all")}>all</button>
       </div>
     {/if}
   </div>
   {#if active && filterMode === "project"}
-    <button class="new" onclick={onNewSession}>
-      + new session
-    </button>
+    <button class="new" onclick={onNewRoom}>+ new room</button>
   {/if}
 
-  {#each filteredSessions as s (s.id)}
-    <div class="session-row" class:active={s.id === activeId}>
-      <button class="session-pick" onclick={() => onSelectSession(s.id)}>
-        <span class="dot {s.status}" class:busy={s.running}></span>
-        <span class="s-title">{s.agent} · {s.model}</span>
-        <span class="s-proj">{s.projectName}</span>
+  {#each filteredRooms as r (r.id)}
+    <div class="session-row" class:active={r.id === activeRoomId}>
+      <button class="session-pick" onclick={() => onSelectRoom(r.id)}>
+        <span class="dot {r.status}" class:busy={r.participants.some((p) => p.running)}></span>
+        <span class="s-title">{roomLabel(r)}</span>
+        <span class="s-proj">{r.name}</span>
       </button>
-      <button class="session-close" title="Close session" onclick={() => onCloseSession(s.id)}>✕</button>
+      <button class="session-close" title="Close room" onclick={() => onCloseRoom(r.id)}>✕</button>
     </div>
   {/each}
 
@@ -126,13 +114,13 @@
     -webkit-backdrop-filter: blur(16px);
     border-right: 1px solid var(--border);
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
-    padding: 28px 12px 12px 12px; /* Offset for macOS traffic lights */
+    padding: 28px 12px 12px 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
     overflow-y: auto;
     user-select: none;
-    z-index: 10; /* Cast shadow on top of main panel */
+    z-index: 10;
   }
   .brand {
     font-weight: 600;
@@ -196,16 +184,6 @@
     border-style: solid !important;
     color: var(--ice) !important;
     border-color: var(--ice) !important;
-  }
-  .primary {
-    background: var(--ice) !important;
-    color: var(--void) !important;
-    font-weight: 600;
-    border: none !important;
-  }
-  .primary:hover {
-    background: var(--ice-dim) !important;
-    box-shadow: var(--glow-ice);
   }
   .session-row {
     display: flex;

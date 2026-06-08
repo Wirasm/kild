@@ -29,6 +29,23 @@ class RoomManager {
   private readonly registry = new RoomRegistry();
   private readonly subscribers = new Set<(msg: RoomOutbound) => void>();
 
+  constructor() {
+    // Forward each participant's transcript (its UiEvent stream from the session
+    // substrate) to room clients, tagged by room + participant — so the cockpit can
+    // render per-participant working detail. The session bus stays internal.
+    sessionManager.subscribe((msg) => {
+      if (!('session' in msg)) return;
+      const located = this.registry.locateSession(msg.session);
+      if (located) {
+        this.broadcast({
+          room: located.room.id,
+          participant: located.participant.name,
+          event: msg.event,
+        });
+      }
+    });
+  }
+
   subscribe(fn: (msg: RoomOutbound) => void): () => void {
     this.subscribers.add(fn);
     fn({ rooms: this.registry.summaries() }); // catch the new client up

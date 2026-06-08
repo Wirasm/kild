@@ -1,5 +1,5 @@
 export type Project = { name: string; path: string };
-export type Agent = { name: string; systemPrompt: string };
+export type Agent = { name: string; description?: string; systemPrompt: string };
 
 export type Item =
   | { type: "user"; text: string }
@@ -17,35 +17,56 @@ export type UiEvent =
   | { kind: "error"; message: string }
   | { kind: "session_end" };
 
-export type Session = {
+/** A post on a room's shared log — the conversation unit. */
+export type Message = {
   id: string;
-  projectName: string;
-  agent: string;
+  from: string; // participant @handle, or "human"
+  to: string[]; // resolved addressees ([] = broadcast)
+  text: string;
+  ts: number;
+  implicit?: boolean;
+  system?: boolean;
+};
+
+/** One agent instance in a room. `items` is its UiEvent transcript (the working detail). */
+export type Participant = {
+  name: string; // @handle
+  agent?: string;
   model: string;
   items: Item[];
   running: boolean;
-  status: "running" | "stopped";
   modelLabel: string | null;
   stats: { tokens: number; cost: number; context_pct: number | null } | null;
+};
+
+/** A room — a set of participants + the human, with a shared message log. A single
+ *  agent is just a 1-participant room. */
+export type Room = {
+  id: string;
+  name: string;
+  participants: Participant[];
+  log: Message[];
+  status: "running" | "stopped";
   origin: "ui" | "cli";
-  /** `kild/<name>` branch, when the session runs in an isolated worktree. */
+  /** Shared worktree branch (`kild/<name>`), when the room runs in one. */
   branch?: string;
-  /** On-disk worktree path, when the session runs in an isolated worktree. */
   worktreePath?: string;
 };
 
-/** Session metadata broadcast by the engine — including sessions other clients
- *  (e.g. the CLI) started. */
-export type SessionInfo = {
+/** Room descriptor broadcast by the engine — the room-list source. */
+export type RoomSummary = {
   id: string;
-  model?: string;
-  cwd?: string;
-  agent?: string;
-  projectName?: string;
-  origin: "ui" | "cli";
+  name: string;
   worktree?: string;
-  branch?: string;
-  worktreePath?: string;
+  participants: { name: string; agent?: string }[];
+};
+
+/** Spec to open a room. */
+export type RoomSpec = {
+  name: string;
+  cwd: string;
+  participants: { name: string; agent?: string; model?: string }[];
+  worktree?: string;
 };
 
 /** A kild worktree (`kild/<name>` branch) as listed by the engine. `name` is the

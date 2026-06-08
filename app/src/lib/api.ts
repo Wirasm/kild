@@ -1,4 +1,4 @@
-import type { Agent, Project, SessionInfo, UiEvent, Worktree } from "./types";
+import type { Agent, Message, Project, RoomSpec, RoomSummary, UiEvent, Worktree } from "./types";
 
 /** The kild engine's base URL. Override with VITE_KILD_ENGINE. */
 const BASE = import.meta.env.VITE_KILD_ENGINE ?? "http://localhost:4517";
@@ -75,23 +75,18 @@ export async function openWorktree(path: string): Promise<void> {
   }
 }
 
-export type SpawnOptions = {
-  model?: string;
-  cwd?: string;
-  agent?: string;
-  projectName?: string;
-  /** Selected worktree name; undefined = run in the project's main checkout. */
-  worktree?: string;
-};
+/** A room message as broadcast by the engine (carries the room id for routing). */
+type WireRoomMessage = Message & { roomId: string };
 
 /**
- * WebSocket client to the kild engine — spawn/prompt/stop sessions and receive
- * the streamed {@link UiEvent}s, tagged by session id.
+ * WebSocket client to the kild engine — open / post / close rooms, and receive the
+ * room list ({@link RoomSummary}[]), the shared message log ({@link Message}), and
+ * each participant's streamed transcript ({@link UiEvent}s tagged by room +
+ * participant).
  *
- * It auto-reconnects: in dev the engine restarts on every code change (and
- * loses its in-memory sessions), so the socket reconnects and `onStatus(false)`
- * lets the UI mark live sessions dead. Messages sent while disconnected are
- * queued and flushed on reconnect.
+ * It auto-reconnects: in dev the engine restarts on every code change (and loses its
+ * in-memory rooms), so the socket reconnects and `onStatus(false)` lets the UI mark
+ * live participants dead. Frames sent while disconnected are queued and flushed.
  */
 export class EngineSocket {
   private ws!: WebSocket;
@@ -99,9 +94,10 @@ export class EngineSocket {
   private queue: string[] = [];
 
   constructor(
-    private onEvent: (session: string, event: UiEvent) => void,
+    private onEvent: (room: string, participant: string, event: UiEvent) => void,
     private onStatus?: (connected: boolean) => void,
-    private onSessions?: (sessions: SessionInfo[]) => void,
+    private onRooms?: (rooms: RoomSummary[]) => void,
+    private onRoomMessage?: (room: string, message: Message) => void,
   ) {
     this.connect();
   }
@@ -115,18 +111,26 @@ export class EngineSocket {
       this.queue = [];
     });
     this.ws.addEventListener("message", (ev) => {
-      let msg: { session?: string; event?: UiEvent; sessions?: SessionInfo[] };
+      let msg: {
+        rooms?: RoomSummary[];
+        roomMessage?: WireRoomMessage;
+        room?: string;
+        participant?: string;
+        event?: UiEvent;
+      };
       try {
         msg = JSON.parse(ev.data);
       } catch {
         return; // ignore malformed frames
       }
-      if (Array.isArray(msg.sessions)) this.onSessions?.(msg.sessions);
-      else if (typeof msg.session === "string" && msg.event) this.onEvent(msg.session, msg.event);
+      if (Array.isArray(msg.rooms)) this.onRooms?.(msg.rooms);
+      else if (msg.roomMessage) this.onRoomMessage?.(msg.roomMessage.roomId, msg.roomMessage);
+      else if (typeof msg.room === "string" && typeof msg.participant === "string" && msg.event) {
+        this.onEvent(msg.room, msg.participant, msg.event);
+      }
     });
     this.ws.addEventListener("close", () => {
-      // Drop queued commands: the restarted engine has lost those sessions, so
-      // replaying prompt/stop for them would silently no-op.
+      // Drop queued frames: the restarted engine has lost those rooms.
       this.queue = [];
       this.onStatus?.(false);
       if (!this.closed) setTimeout(() => this.connect(), 1000);
@@ -140,14 +144,17 @@ export class EngineSocket {
     else this.queue.push(data);
   }
 
-  spawn(id: string, opts: SpawnOptions): void {
-    this.send({ type: "spawn", id, ...opts });
+  openRoom(id: string, spec: RoomSpec): void {
+    this.send({ type: "room_open", id, ...spec });
   }
-  prompt(id: string, text: string): void {
-    this.send({ type: "prompt", id, text });
+  postToRoom(id: string, text: string): void {
+    this.send({ type: "room_post", id, text });
   }
-  stop(id: string): void {
-    this.send({ type: "stop", id });
+  addParticipant(id: string, participant: { name: string; agent?: string; model?: string }): void {
+    this.send({ type: "room_add", id, participant });
+  }
+  closeRoom(id: string): void {
+    this.send({ type: "room_close", id });
   }
   close(): void {
     this.closed = true;

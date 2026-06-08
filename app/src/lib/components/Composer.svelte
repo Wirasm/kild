@@ -4,6 +4,7 @@
     status: "running" | "stopped";
     running: boolean;
     onSend: () => void;
+    placeholder?: string;
   }
 
   let {
@@ -11,6 +12,7 @@
     status,
     running,
     onSend,
+    placeholder = "Message the agent…  (Enter to send, Shift+Enter for newline)",
   }: Props = $props();
 
   function onKeydown(e: KeyboardEvent) {
@@ -25,9 +27,7 @@
   <textarea
     bind:value={input}
     onkeydown={onKeydown}
-    placeholder={status === "stopped"
-      ? "Session stopped — start a new one to continue"
-      : "Message the agent…  (Enter to send, Shift+Enter for newline)"}
+    placeholder={status === "stopped" ? "Room stopped — start a new one to continue" : placeholder}
     rows="2"
     disabled={status === "stopped"}
   ></textarea>

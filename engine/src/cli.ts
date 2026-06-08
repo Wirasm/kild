@@ -306,9 +306,9 @@ async function runViaEngine(prompt: string): Promise<void> {
       if (settled) return;
       settled = true;
       try {
-        ws.send(JSON.stringify({ type: 'stop', id })); // one-shot: clean up the worker
+        ws.send(JSON.stringify({ type: 'room_close', id })); // one-shot: tear the room down
       } catch {
-        // socket already closing/closed — nothing to stop
+        // socket already closing/closed — nothing to close
       }
       ws.close();
       if (err) reject(err);
@@ -316,26 +316,27 @@ async function runViaEngine(prompt: string): Promise<void> {
     };
 
     ws.addEventListener('open', () => {
+      // A one-shot run is a 1-participant room: the agent is the sole participant, so
+      // the bare post (no @mention) is delivered straight to it.
       ws.send(
         JSON.stringify({
-          type: 'spawn',
+          type: 'room_open',
           id,
-          model: values.model,
+          name: values.project ?? 'run',
           cwd: projectPath ?? process.cwd(),
-          agent: values.agent,
-          projectName: values.project,
-          origin: 'cli',
           worktree: values.worktree,
+          participants: [{ name: 'agent', agent: values.agent, model: values.model }],
         }),
       );
-      ws.send(JSON.stringify({ type: 'prompt', id, text: prompt }));
+      ws.send(JSON.stringify({ type: 'room_post', id, text: prompt }));
     });
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(String((e as { data: unknown }).data)) as {
-        session?: string;
+        room?: string;
+        participant?: string;
         event?: { kind: string; [k: string]: unknown };
       };
-      if (msg.session !== id || !msg.event) return;
+      if (msg.room !== id || !msg.event) return;
       const ev = msg.event;
       if (ev.kind === 'model') model = `${ev.provider}/${ev.id}`;
       else if (ev.kind === 'text') {

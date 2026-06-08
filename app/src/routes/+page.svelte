@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
-  import Topbar from "$lib/components/Topbar.svelte";
-  import Ledger from "$lib/components/Ledger.svelte";
-  import Composer from "$lib/components/Composer.svelte";
+  import RoomView from "$lib/components/RoomView.svelte";
   import ProjectModal from "$lib/components/ProjectModal.svelte";
-  import SessionModal from "$lib/components/SessionModal.svelte";
+  import RoomModal from "$lib/components/RoomModal.svelte";
   import {
     EngineSocket,
     addProject as apiAddProject,
@@ -17,7 +15,7 @@
     openWorktree as apiOpenWorktree,
   } from "$lib/api";
 
-  import type { Project, Agent, UiEvent, Session, SessionInfo, Worktree } from "$lib/types";
+  import type { Project, Agent, UiEvent, Room, Message, RoomSummary, RoomSpec, Worktree } from "$lib/types";
 
   const MODELS = [
     "anthropic/claude-haiku-4-5",
@@ -27,67 +25,65 @@
     "minimax/MiniMax-M3",
   ];
 
-  // Projects + new-session config
+  // Projects + new-room config
   let projects = $state<Project[]>([]);
-  let active = $state<Project | null>(null); // active project = context for new sessions
+  let active = $state<Project | null>(null); // active project = context for new rooms
   let adding = $state(false);
-  let startingSession = $state(false);
+  let startingRoom = $state(false);
   let newName = $state("");
   let newPath = $state("");
   let addError = $state<string | null>(null);
   let agents = $state<Agent[]>([]);
-  let agentName = $state("default");
+  let selectedAgents = $state<string[]>(["default"]); // room participants to spawn
   let model = $state(MODELS[0]);
 
-  // Run-location for a new session: main checkout (default), a new worktree, or an
-  // existing one (attach). `worktrees` holds the active project's `kild/*` trees.
+  // Run-location for a new room: main checkout (default), a new worktree, or an
+  // existing one (attach — shared by all participants). `worktrees` = the project's trees.
   let runMode = $state<"main" | "new" | "existing">("main");
   let worktreeName = $state("");
   let existingWorktree = $state("");
   let worktrees = $state<Worktree[]>([]);
-  // The engine carries each worktree's name (branch minus `kild/`); that's the id spawn expects.
   let worktreeNames = $derived(worktrees.map((w) => w.name ?? w.branch));
 
   $effect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("kild_last_agent", agentName);
-    }
+    if (typeof localStorage !== "undefined") localStorage.setItem("kild_last_model", model);
   });
 
-  $effect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("kild_last_model", model);
-    }
-  });
-
-  // Sessions (runtime registry)
-  let sessions = $state<Session[]>([]);
-  let activeId = $state<string | null>(null);
+  // Rooms (runtime registry). A single agent is a 1-participant room.
+  let rooms = $state<Room[]>([]);
+  let activeRoomId = $state<string | null>(null);
+  let activeParticipantId = $state<string | null>(null); // a participant @handle
   let input = $state("");
   let error = $state<string | null>(null);
   let socket: EngineSocket | null = null;
 
-  let activeSession = $derived(sessions.find((s) => s.id === activeId) ?? null);
+  let activeRoom = $derived(rooms.find((r) => r.id === activeRoomId) ?? null);
+  let activeParticipant = $derived(
+    activeRoom?.participants.find((p) => p.name === activeParticipantId) ?? null,
+  );
 
-  function handle(sessionId: string, ev: UiEvent) {
-    const s = sessions.find((x) => x.id === sessionId);
-    if (!s) return;
+  // Route a participant's transcript event (UiEvent) to that participant's items.
+  function handle(roomId: string, participantName: string, ev: UiEvent) {
+    const room = rooms.find((r) => r.id === roomId);
+    const p = room?.participants.find((x) => x.name === participantName);
+    if (!p) return;
+    if (ev.kind === "text" || ev.kind === "tool_start" || ev.kind === "model") p.running = true;
     switch (ev.kind) {
       case "model":
-        s.modelLabel = `${ev.provider} / ${ev.id}`;
+        p.modelLabel = `${ev.provider} / ${ev.id}`;
         break;
       case "text": {
-        const last = s.items[s.items.length - 1];
+        const last = p.items[p.items.length - 1];
         if (last && last.type === "assistant") last.text += ev.delta;
-        else s.items.push({ type: "assistant", text: ev.delta });
+        else p.items.push({ type: "assistant", text: ev.delta });
         break;
       }
       case "tool_start":
-        s.items.push({ type: "tool", id: ev.id, name: ev.name, args: ev.args, status: "running" });
+        p.items.push({ type: "tool", id: ev.id, name: ev.name, args: ev.args, status: "running" });
         break;
       case "tool_end":
-        for (let i = s.items.length - 1; i >= 0; i--) {
-          const it = s.items[i];
+        for (let i = p.items.length - 1; i >= 0; i--) {
+          const it = p.items[i];
           if (it.type === "tool" && it.id === ev.id && it.status === "running") {
             it.status = ev.ok ? "ok" : "error";
             break;
@@ -95,28 +91,31 @@
         }
         break;
       case "stats":
-        s.stats = { tokens: ev.tokens, cost: ev.cost, context_pct: ev.context_pct };
+        p.stats = { tokens: ev.tokens, cost: ev.cost, context_pct: ev.context_pct };
         break;
       case "agent_end":
-        s.running = false;
+        p.running = false;
         break;
       case "error":
-        s.items.push({ type: "assistant", text: `⚠️ ${ev.message}` });
-        s.running = false;
+        p.items.push({ type: "assistant", text: `⚠️ ${ev.message}` });
+        p.running = false;
         break;
       case "session_end":
-        for (const it of s.items) if (it.type === "tool" && it.status === "running") it.status = "error";
-        s.running = false;
-        s.status = "stopped";
+        for (const it of p.items) if (it.type === "tool" && it.status === "running") it.status = "error";
+        p.running = false;
         break;
       case "retry":
         break;
       default: {
-        // A new UiEvent variant should fail compilation here, not silently no-op.
         const _exhaustive: never = ev;
         void _exhaustive;
       }
     }
+  }
+
+  // Append a post to the room's shared log (the conversation feed).
+  function handleRoomMessage(roomId: string, msg: Message) {
+    rooms.find((r) => r.id === roomId)?.log.push(msg);
   }
 
   async function loadProjects() {
@@ -124,7 +123,8 @@
   }
   async function loadAgents(projectPath: string) {
     agents = await listAgents(projectPath);
-    if (!agents.some((a) => a.name === agentName)) agentName = "default";
+    selectedAgents = selectedAgents.filter((a) => agents.some((x) => x.name === a));
+    if (selectedAgents.length === 0) selectedAgents = ["default"];
   }
   async function selectProject(p: Project) {
     active = p;
@@ -149,13 +149,12 @@
     }
   }
 
-  // Open the new-session modal: load the project's worktrees (so "existing" can
-  // attach) and seed a suggested name for "new" (editable).
-  async function openSessionModal() {
+  // Open the new-room modal: load worktrees (so "existing" can attach) + seed a name.
+  async function openRoomModal() {
     runMode = "main";
     existingWorktree = "";
-    worktreeName = `${agentName}-${crypto.randomUUID().slice(0, 4)}`;
-    startingSession = true;
+    worktreeName = `${selectedAgents[0] ?? "room"}-${crypto.randomUUID().slice(0, 4)}`;
+    startingRoom = true;
     if (active) {
       try {
         worktrees = await listWorktrees(active.path);
@@ -166,37 +165,82 @@
     }
   }
 
-  // Resolve the selected run-location to a worktree name (undefined = main checkout).
   function selectedWorktree(): string | undefined {
     if (runMode === "new") return worktreeName.trim() || undefined;
     if (runMode === "existing") return existingWorktree || undefined;
     return undefined;
   }
 
-  function startSession() {
-    if (!active || !socket) return;
+  const ownedIds = new Set<string>();
+
+  function startRoom() {
+    if (!active || !socket || selectedAgents.length === 0) return;
     error = null;
     const worktree = selectedWorktree();
+    const spec: RoomSpec = {
+      name: active.name,
+      cwd: active.path,
+      participants: selectedAgents.map((a) => ({ name: a, agent: a, model })),
+      worktree,
+    };
     const id = crypto.randomUUID();
-    socket.spawn(id, { model, cwd: active.path, agent: agentName, projectName: active.name, worktree });
+    socket.openRoom(id, spec);
     ownedIds.add(id);
-    sessions.push({
+    rooms.push({
       id,
-      projectName: active.name,
-      agent: agentName,
-      model,
-      items: [],
-      running: false,
+      name: spec.name,
+      participants: spec.participants.map((p) => ({
+        name: p.name,
+        agent: p.agent,
+        model: p.model ?? "default",
+        items: [],
+        running: false,
+        modelLabel: null,
+        stats: null,
+      })),
+      log: [],
       status: "running",
-      modelLabel: null,
-      stats: null,
       origin: "ui",
-      // Instant chip; the on-disk worktreePath arrives via the engine broadcast.
       branch: worktree ? `kild/${worktree}` : undefined,
     });
-    activeId = id;
+    activeRoomId = id;
+    activeParticipantId = spec.participants[0]?.name ?? null;
     input = "";
-    startingSession = false;
+    startingRoom = false;
+  }
+
+  function selectRoom(id: string) {
+    activeRoomId = id;
+    activeParticipantId = rooms.find((r) => r.id === id)?.participants[0]?.name ?? null;
+    input = "";
+  }
+
+  function closeRoom(id: string) {
+    socket?.closeRoom(id);
+    ownedIds.delete(id);
+    rooms = rooms.filter((r) => r.id !== id);
+    if (activeRoomId === id) {
+      activeRoomId = rooms[rooms.length - 1]?.id ?? null;
+      activeParticipantId = null;
+    }
+  }
+
+  // Post into the active room — addressing the focused participant if no @mention.
+  function send() {
+    if (!activeRoom || !socket) return;
+    const text = input.trim();
+    if (!text) return;
+    const target = activeParticipant;
+    const body = /@[A-Za-z0-9_-]+/.test(text) || !target ? text : `@${target.name} ${text}`;
+    socket.postToRoom(activeRoom.id, body);
+    input = "";
+    if (target) target.running = true; // optimistic spinner
+  }
+
+  // Invite an agent into the active room on the fly (turns a single agent into a room).
+  function inviteParticipant(agentName: string) {
+    if (!activeRoom || !socket) return;
+    socket.addParticipant(activeRoom.id, { name: agentName, agent: agentName, model });
   }
 
   async function refreshWorktrees() {
@@ -207,7 +251,6 @@
       error = `Could not load worktrees: ${e instanceof Error ? e.message : e}`;
     }
   }
-
   async function removeWorktree(name: string) {
     if (!active) return;
     try {
@@ -217,7 +260,6 @@
       error = `Could not remove worktree: ${e instanceof Error ? e.message : e}`;
     }
   }
-
   async function pruneWorktrees() {
     if (!active) return;
     try {
@@ -227,7 +269,6 @@
       error = `Could not prune worktrees: ${e instanceof Error ? e.message : e}`;
     }
   }
-
   async function onOpenWorktree(path: string) {
     try {
       await apiOpenWorktree(path);
@@ -236,94 +277,69 @@
     }
   }
 
-  function selectSession(id: string) {
-    activeId = id;
-    input = "";
-  }
-
-  function closeSession(id: string) {
-    socket?.stop(id);
-    ownedIds.delete(id);
-    sessions = sessions.filter((s) => s.id !== id);
-    if (activeId === id) activeId = sessions[sessions.length - 1]?.id ?? null;
-  }
-
-  function send() {
-    const s = activeSession;
-    if (!s || s.running || s.status === "stopped" || !socket) return;
-    const text = input.trim();
-    if (!text) return;
-    s.items.push({ type: "user", text });
-    input = "";
-    s.running = true;
-    // Sends never throw (they queue while disconnected). A failure comes back as
-    // an `error` event, which handle() renders and clears the spinner.
-    socket.prompt(s.id, text);
-  }
-
-  // Sessions we started locally, vs. foreign ones from the engine broadcast (e.g. a
-  // CLI run). We keep our own for their transcript; foreign ones mirror the engine.
-  const ownedIds = new Set<string>();
-
-  // Mirror the engine's session list: add foreign sessions so they show up live,
-  // and drop ones the engine no longer has so a finished CLI run doesn't zombie.
-  function reconcileSessions(infos: SessionInfo[]) {
-    const live = new Set(infos.map((i) => i.id));
-    sessions = sessions.filter((s) => ownedIds.has(s.id) || live.has(s.id));
-    for (const info of infos) {
-      const existing = sessions.find((s) => s.id === info.id);
-      if (existing) {
-        // Patch in branch/worktreePath now the engine has broadcast them (owned
-        // sessions get their on-disk path here; the chip was already set on spawn).
-        if (info.branch) existing.branch = info.branch;
-        if (info.worktreePath) existing.worktreePath = info.worktreePath;
-        continue;
+  // Mirror the engine's room list: upsert rooms + participants, drop dead ones.
+  function reconcileRooms(summaries: RoomSummary[]) {
+    const live = new Set(summaries.map((s) => s.id));
+    rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id));
+    for (const sum of summaries) {
+      let room = rooms.find((r) => r.id === sum.id);
+      if (!room) {
+        room = {
+          id: sum.id,
+          name: sum.name,
+          participants: [],
+          log: [],
+          status: "running",
+          origin: "cli",
+          branch: sum.worktree ? `kild/${sum.worktree}` : undefined,
+        };
+        rooms.push(room);
+      } else if (sum.worktree && !room.branch) {
+        room.branch = `kild/${sum.worktree}`;
       }
-      sessions.push({
-        id: info.id,
-        projectName: info.projectName ?? info.cwd ?? "—",
-        agent: info.agent ?? "default",
-        model: info.model ?? "default",
-        items: [],
-        running: false, // the broadcast carries no run-state; events drive it
-        status: "running",
-        modelLabel: null,
-        stats: null,
-        origin: info.origin,
-        branch: info.branch,
-        worktreePath: info.worktreePath,
-      });
+      for (const p of sum.participants) {
+        if (!room.participants.some((x) => x.name === p.name)) {
+          room.participants.push({
+            name: p.name,
+            agent: p.agent,
+            model: "default",
+            items: [],
+            running: false,
+            modelLabel: null,
+            stats: null,
+          });
+        }
+      }
     }
-    if (activeId && !sessions.some((s) => s.id === activeId)) {
-      activeId = sessions[sessions.length - 1]?.id ?? null;
+    if (activeRoomId && !rooms.some((r) => r.id === activeRoomId)) {
+      activeRoomId = rooms[rooms.length - 1]?.id ?? null;
+      activeParticipantId = null;
+    }
+    if (activeRoom && !activeParticipant) {
+      activeParticipantId = activeRoom.participants[0]?.name ?? null;
     }
   }
 
   onMount(() => {
     if (typeof localStorage !== "undefined") {
-      const savedAgent = localStorage.getItem("kild_last_agent");
       const savedModel = localStorage.getItem("kild_last_model");
-      if (savedAgent) agentName = savedAgent;
       if (savedModel && MODELS.includes(savedModel)) model = savedModel;
     }
     socket = new EngineSocket(
-      (session, event) => handle(session, event),
+      (room, participant, event) => handle(room, participant, event),
       (connected) => {
         if (connected) {
           if (error?.startsWith("Engine")) error = null;
         } else {
-          // The engine dropped (in dev it restarts on every change, losing its
-          // sessions). Clear spinners and mark live sessions dead.
-          for (const s of sessions) {
-            if (s.status === "running") {
-              s.running = false;
-              s.status = "stopped";
-            }
+          for (const r of rooms) {
+            for (const p of r.participants) p.running = false;
+            r.status = "stopped";
           }
           error = "Engine disconnected — reconnecting…";
         }
       },
-      (infos) => reconcileSessions(infos),
+      (summaries) => reconcileRooms(summaries),
+      (room, msg) => handleRoomMessage(room, msg),
     );
     loadProjects()
       .then(() => {
@@ -339,17 +355,13 @@
     projects={projects}
     bind:active={active}
     bind:adding={adding}
-    bind:newName={newName}
-    bind:newPath={newPath}
-    bind:addError={addError}
-    bind:sessions={sessions}
-    bind:activeId={activeId}
+    rooms={rooms}
+    activeRoomId={activeRoomId}
     worktrees={worktrees}
     onSelectProject={selectProject}
-    onAddProject={addProject}
-    onNewSession={openSessionModal}
-    onSelectSession={selectSession}
-    onCloseSession={closeSession}
+    onNewRoom={openRoomModal}
+    onSelectRoom={selectRoom}
+    onCloseRoom={closeRoom}
     onRemoveWorktree={removeWorktree}
     onPruneWorktrees={pruneWorktrees}
   />
@@ -363,10 +375,10 @@
     onClose={() => (adding = false)}
   />
 
-  <SessionModal
-    bind:isOpen={startingSession}
+  <RoomModal
+    bind:isOpen={startingRoom}
     agents={agents}
-    bind:agentName={agentName}
+    bind:selectedAgents={selectedAgents}
     bind:model={model}
     models={MODELS}
     projectName={active?.name ?? ""}
@@ -374,8 +386,8 @@
     bind:runMode={runMode}
     bind:worktreeName={worktreeName}
     bind:existingWorktree={existingWorktree}
-    onStart={startSession}
-    onClose={() => (startingSession = false)}
+    onStart={startRoom}
+    onClose={() => (startingRoom = false)}
   />
 
   <main class="main">
@@ -389,21 +401,27 @@
     {#if projects.length === 0}
       <div class="empty">
         <h2>No project yet</h2>
-        <p>Add a project directory to start chatting with an agent in it.</p>
+        <p>Add a project directory to start working with agents in it.</p>
         <button class="primary" onclick={() => (adding = true)}>+ add project</button>
       </div>
-    {:else if !activeSession}
+    {:else if !activeRoom}
       <div class="empty">
-        <h2>No session</h2>
-        <p>Pick a project, choose an agent + model, and start a session.</p>
-        {#if active}<button class="primary" onclick={openSessionModal}>+ start session</button>{/if}
+        <h2>No room</h2>
+        <p>Pick a project, choose an agent (or several), and start a room.</p>
+        {#if active}<button class="primary" onclick={openRoomModal}>+ new room</button>{/if}
       </div>
     {:else}
-      <Topbar activeSession={activeSession} onOpenWorktree={onOpenWorktree} />
-
-      <Ledger items={activeSession.items} running={activeSession.running} />
-
-      <Composer bind:input={input} status={activeSession.status} running={activeSession.running} onSend={send} />
+      <RoomView
+        room={activeRoom}
+        activeParticipant={activeParticipant}
+        agents={agents}
+        bind:input={input}
+        onSelectParticipant={(name) => (activeParticipantId = name)}
+        onInvite={inviteParticipant}
+        onClose={() => activeRoom && closeRoom(activeRoom.id)}
+        onOpenWorktree={onOpenWorktree}
+        onSend={send}
+      />
     {/if}
   </main>
 </div>

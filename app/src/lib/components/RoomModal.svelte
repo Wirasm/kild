@@ -7,7 +7,7 @@
   interface Props {
     isOpen: boolean;
     agents: Agent[];
-    agentName: string;
+    selectedAgents: string[];
     model: string;
     models: string[];
     projectName: string;
@@ -22,7 +22,7 @@
   let {
     isOpen = $bindable(),
     agents,
-    agentName = $bindable(),
+    selectedAgents = $bindable(),
     model = $bindable(),
     models,
     projectName,
@@ -39,22 +39,17 @@
   $effect(() => {
     if (dialogEl) {
       if (isOpen) {
-        if (!dialogEl.open) {
-          dialogEl.showModal();
-        }
-      } else {
-        if (dialogEl.open) {
-          dialogEl.close();
-        }
+        if (!dialogEl.open) dialogEl.showModal();
+      } else if (dialogEl.open) {
+        dialogEl.close();
       }
     }
   });
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onStart();
-    }
+  function toggle(name: string) {
+    selectedAgents = selectedAgents.includes(name)
+      ? selectedAgents.filter((x) => x !== name)
+      : [...selectedAgents, name];
   }
 </script>
 
@@ -64,28 +59,45 @@
   bind:this={dialogEl}
   onclose={onClose}
   onclick={(e) => {
-    if (e.target === dialogEl) {
-      onClose();
-    }
+    if (e.target === dialogEl) onClose();
   }}
 >
   <div class="modal-card">
     <header class="modal-header">
-      <h3>New Session</h3>
+      <h3>New Room</h3>
       <button class="close-btn" type="button" onclick={onClose}>✕</button>
     </header>
 
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-body" onkeydown={handleKeydown}>
-      <p class="description">Start an AI workspace session inside the project <strong>{projectName}</strong>.</p>
-      
+    <div class="modal-body">
+      <p class="description">
+        A room of one or more agents inside <strong>{projectName}</strong>. Pick one for a single
+        agent, or several to start a room.
+      </p>
+
       <div class="form-group">
-        <span class="field-label">Select Agent</span>
-        <Dropdown bind:value={agentName} options={agents.map((a) => a.name)} label="Agent" />
+        <span class="field-label">Participants ({selectedAgents.length})</span>
+        <div class="agent-list">
+          {#each agents as a (a.name)}
+            <button
+              type="button"
+              class="agent"
+              class:on={selectedAgents.includes(a.name)}
+              onclick={() => toggle(a.name)}
+            >
+              <span class="check">{selectedAgents.includes(a.name) ? "✓" : ""}</span>
+              <span class="a-name">{a.name}</span>
+              {#if a.description}<span class="a-desc">{a.description}</span>{/if}
+            </button>
+          {/each}
+        </div>
+        <span class="hint">
+          {#if selectedAgents.length <= 1}Single agent.{:else}Room of {selectedAgents.length} — lead
+            is <code>@{selectedAgents[0]}</code>.{/if}
+        </span>
       </div>
 
       <div class="form-group">
-        <span class="field-label">Select Model</span>
+        <span class="field-label">Model</span>
         <Dropdown bind:value={model} options={models} label="Model" />
       </div>
 
@@ -110,16 +122,11 @@
         </div>
 
         {#if runMode === "new"}
-          <input
-            class="wt-input"
-            type="text"
-            placeholder="branch name, e.g. fix-auth"
-            bind:value={worktreeName}
-          />
-          <span class="hint">Isolated on <code>kild/{worktreeName || "<name>"}</code>.</span>
+          <input class="wt-input" type="text" placeholder="branch name, e.g. fix-auth" bind:value={worktreeName} />
+          <span class="hint">Shared on <code>kild/{worktreeName || "<name>"}</code> (all agents attach).</span>
         {:else if runMode === "existing"}
           <Dropdown bind:value={existingWorktree} options={worktrees} label="Worktree" />
-          <span class="hint">Attach to the existing <code>kild/{existingWorktree}</code> tree (shared).</span>
+          <span class="hint">Attach the room to <code>kild/{existingWorktree}</code> (shared).</span>
         {:else}
           <span class="hint">Runs in the project's main checkout — no isolation.</span>
         {/if}
@@ -128,7 +135,9 @@
 
     <footer class="modal-footer">
       <button class="secondary" type="button" onclick={onClose}>Cancel</button>
-      <button class="primary" type="button" onclick={onStart}>Start Session</button>
+      <button class="primary" type="button" disabled={selectedAgents.length === 0} onclick={onStart}>
+        {selectedAgents.length <= 1 ? "Start Agent" : "Start Room"}
+      </button>
     </footer>
   </div>
 </dialog>
@@ -142,47 +151,11 @@
     max-width: 460px;
     width: 90%;
     outline: none;
-    opacity: 0;
-    transform: scale(0.95);
-    transition: 
-      opacity 0.2s ease-out,
-      transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
-      display 0.2s allow-discrete,
-      overlay 0.2s allow-discrete;
   }
-
-  dialog[open] {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  @starting-style {
-    dialog[open] {
-      opacity: 0;
-      transform: scale(0.95);
-    }
-  }
-
   dialog::backdrop {
     background: rgba(5, 5, 7, 0.6);
     backdrop-filter: blur(4px);
-    opacity: 0;
-    transition: 
-      opacity 0.2s ease-out,
-      display 0.2s allow-discrete,
-      overlay 0.2s allow-discrete;
   }
-
-  dialog[open]::backdrop {
-    opacity: 1;
-  }
-
-  @starting-style {
-    dialog[open]::backdrop {
-      opacity: 0;
-    }
-  }
-
   .modal-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -192,7 +165,6 @@
     flex-direction: column;
     overflow: visible;
   }
-
   .modal-header {
     display: flex;
     align-items: center;
@@ -201,14 +173,12 @@
     border-bottom: 1px solid var(--border-subtle);
     background: var(--obsidian);
   }
-
   .modal-header h3 {
     margin: 0;
     color: var(--text-bright);
     font-size: 15px;
     font-weight: 600;
   }
-
   .close-btn {
     background: transparent;
     border: none;
@@ -216,13 +186,10 @@
     cursor: pointer;
     font-size: 14px;
     padding: 4px;
-    line-height: 1;
-    transition: color 0.15s ease;
   }
   .close-btn:hover {
     color: var(--ember);
   }
-
   .modal-body {
     padding: 20px;
     display: flex;
@@ -230,7 +197,6 @@
     gap: 20px;
     overflow: visible;
   }
-
   .description {
     margin: 0;
     font-size: 12px;
@@ -240,22 +206,58 @@
   .description strong {
     color: var(--ice);
   }
-
   .form-group {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    overflow: visible;
   }
-
-  .form-group .field-label {
+  .field-label {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-muted);
     font-weight: 600;
   }
-
+  .agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 4px;
+  }
+  .agent {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-subtle);
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+  }
+  .agent:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .agent.on {
+    color: var(--ice);
+  }
+  .agent .check {
+    width: 12px;
+    color: var(--ice);
+  }
+  .agent .a-desc {
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .run-toggle {
     display: flex;
     background: rgba(255, 255, 255, 0.03);
@@ -270,14 +272,9 @@
     border: none;
     color: var(--text-muted);
     font-size: 11px;
-    font-weight: 500;
     padding: 5px 8px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .run-toggle button:hover:not(.selected):not(:disabled) {
-    color: var(--text-bright);
   }
   .run-toggle button.selected {
     background: var(--surface);
@@ -288,7 +285,6 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
-
   .wt-input {
     background: var(--surface);
     color: var(--text-bright);
@@ -301,18 +297,16 @@
   .wt-input:focus {
     outline: none;
     border-color: var(--border-focus);
-    box-shadow: var(--glow-ice);
   }
-
   .hint {
     font-size: 11px;
     color: var(--text-muted);
   }
-  .hint code {
+  .hint code,
+  code {
     font-family: var(--mono);
     color: var(--ice);
   }
-
   .modal-footer {
     display: flex;
     justify-content: flex-end;
@@ -321,7 +315,6 @@
     border-top: 1px solid var(--border-subtle);
     background: var(--obsidian);
   }
-
   .modal-footer button {
     padding: 8px 16px;
     border-radius: 6px;
@@ -330,24 +323,17 @@
     cursor: pointer;
     border: 1px solid transparent;
   }
-
   .modal-footer button.primary {
     background: var(--ice);
     color: var(--void);
   }
-  .modal-footer button.primary:hover {
-    background: var(--ice-dim);
-    box-shadow: var(--glow-ice);
+  .modal-footer button.primary:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
-
   .modal-footer button.secondary {
     background: transparent;
     border-color: var(--border);
     color: var(--text-subtle);
-  }
-  .modal-footer button.secondary:hover {
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-bright);
-    border-color: var(--border-focus);
   }
 </style>

@@ -15,7 +15,7 @@ import { cors } from 'hono/cors';
 import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import { roomManager } from './kild/room/room-manager.ts';
-import { type Outbound, sessionManager } from './kild/sessions.ts';
+import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
   listWorktrees,
@@ -145,23 +145,10 @@ app.post('/api/open', async (c) => {
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
-// Every connection subscribes to the same broadcast — so sessions started by any
-// client (UI or CLI) are visible to all. Sessions are engine-owned and survive a
-// connection drop.
+// Every connection subscribes to the room broadcast — so rooms opened by any client
+// (cockpit or CLI) are visible to all. Rooms are engine-owned and survive a drop.
+// Frames carry the room id as `id`; sessions are the internal substrate, not on the wire.
 type ClientMessage =
-  | {
-      type: 'spawn';
-      id: string;
-      model?: string;
-      cwd?: string;
-      agent?: string;
-      projectName?: string;
-      origin?: 'ui' | 'cli';
-      worktree?: string;
-    }
-  | { type: 'prompt'; id: string; text: string }
-  | { type: 'stop'; id: string }
-  // Room frames carry the room id as `id` (same as sessions carry session id).
   | {
       type: 'room_open';
       id: string;
@@ -184,12 +171,6 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
   if (typeof m.id !== 'string') return null;
-  if (m.type === 'spawn') {
-    if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
-    return m as ClientMessage;
-  }
-  if (m.type === 'stop') return m as ClientMessage;
-  if (m.type === 'prompt' && typeof m.text === 'string') return m as ClientMessage;
   if (m.type === 'room_open') {
     if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.participants)) {
       return null;
@@ -212,26 +193,15 @@ app.get(
     return next();
   },
   upgradeWebSocket(() => {
-    // One connection subscribes to both buses: bare-session transcripts and rooms.
-    let unsubscribeSessions: (() => void) | undefined;
     let unsubscribeRooms: (() => void) | undefined;
     return {
       onOpen(_evt, ws) {
-        unsubscribeSessions = sessionManager.subscribe((msg: Outbound) =>
-          ws.send(JSON.stringify(msg)),
-        );
         unsubscribeRooms = roomManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
         const msg = parseClientMessage(String(evt.data));
         if (!msg) return; // ignore malformed / unknown frames
-        if (msg.type === 'spawn') {
-          sessionManager.spawn(msg.id, msg, msg.origin ?? 'ui');
-        } else if (msg.type === 'prompt') {
-          sessionManager.prompt(msg.id, msg.text);
-        } else if (msg.type === 'stop') {
-          sessionManager.stop(msg.id);
-        } else if (msg.type === 'room_open') {
+        if (msg.type === 'room_open') {
           roomManager.open(msg.id, {
             name: msg.name,
             cwd: msg.cwd,
@@ -247,7 +217,6 @@ app.get(
         }
       },
       onClose() {
-        unsubscribeSessions?.();
         unsubscribeRooms?.();
       },
     };

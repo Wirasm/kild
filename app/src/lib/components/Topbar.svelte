@@ -1,38 +1,53 @@
 <script lang="ts">
-  import type { Session } from "../types";
+  import type { Participant, Room } from "../types";
 
   let {
-    activeSession,
+    room,
+    participant,
+    onClose,
     onOpenWorktree,
-  }: { activeSession: Session; onOpenWorktree: (path: string) => void } = $props();
+  }: {
+    room: Room;
+    participant: Participant | null;
+    onClose: () => void;
+    onOpenWorktree: (path: string) => void;
+  } = $props();
+
+  let solo = $derived(room.participants.length === 1);
 </script>
 
 <header class="topbar" data-tauri-drag-region>
-  <span class="project-chip">{activeSession.projectName}</span>
-  <span class="summary">{activeSession.agent} · {activeSession.model}</span>
-  <span class="model">{activeSession.modelLabel ?? "…"}</span>
-  {#if activeSession.branch}
-    {#if activeSession.worktreePath}
+  <span class="project-chip">{room.name}</span>
+  {#if solo}
+    <span class="summary">
+      {room.participants[0]?.name} · {participant?.modelLabel ?? participant?.model ?? "…"}
+    </span>
+  {:else}
+    <span class="summary">{room.participants.length} agents{participant ? ` · @${participant.name}` : ""}</span>
+  {/if}
+  {#if room.branch}
+    {#if room.worktreePath}
       <button
         class="branch-chip"
-        title="Open {activeSession.worktreePath}"
-        onclick={() => onOpenWorktree(activeSession.worktreePath!)}
+        title="Open {room.worktreePath}"
+        onclick={() => onOpenWorktree(room.worktreePath!)}
       >
-        ⎇ {activeSession.branch} ⧉
+        ⎇ {room.branch} ⧉
       </button>
     {:else}
-      <span class="branch-chip static">⎇ {activeSession.branch}</span>
+      <span class="branch-chip static">⎇ {room.branch}</span>
     {/if}
   {/if}
-  {#if activeSession.status === "stopped"}
+  {#if room.status === "stopped"}
     <span class="stopped-tag">stopped</span>
   {/if}
   <span class="spacer" data-tauri-drag-region></span>
-  {#if activeSession.stats}
+  {#if participant?.stats}
     <span class="gauge">
-      ctx {activeSession.stats.context_pct ?? "–"}% · {activeSession.stats.tokens} tok · ${activeSession.stats.cost.toFixed(4)}
+      ctx {participant.stats.context_pct ?? "–"}% · {participant.stats.tokens} tok · ${participant.stats.cost.toFixed(4)}
     </span>
   {/if}
+  <button class="close-room" title="Close room" onclick={onClose}>✕</button>
 </header>
 
 <style>
@@ -52,11 +67,6 @@
   .topbar .summary {
     color: var(--text-subtle);
     font-size: 13px;
-  }
-  .topbar .model {
-    color: var(--text-muted);
-    font-family: var(--mono);
-    font-size: 12px;
   }
   .topbar .branch-chip {
     color: var(--aurora);
@@ -90,5 +100,18 @@
     color: var(--text-subtle);
     font-family: var(--mono);
     font-size: 12px;
+  }
+  .topbar .close-room {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 1px 7px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .topbar .close-room:hover {
+    color: var(--ember);
+    border-color: var(--ember);
   }
 </style>
