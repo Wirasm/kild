@@ -13,8 +13,8 @@ import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
-import { channelManager } from './kild/channel/channel-manager.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
+import { roomManager } from './kild/room/room-manager.ts';
 import { type Outbound, sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
@@ -161,17 +161,18 @@ type ClientMessage =
     }
   | { type: 'prompt'; id: string; text: string }
   | { type: 'stop'; id: string }
-  // Channel frames carry the channel id as `id` (same as sessions carry session id).
+  // Room frames carry the room id as `id` (same as sessions carry session id).
   | {
-      type: 'channel_open';
+      type: 'room_open';
       id: string;
       name: string;
       cwd: string;
-      members: Array<{ name: string; agent: string; model?: string }>;
+      participants: Array<{ name: string; agent?: string; model?: string }>;
       worktree?: string;
     }
-  | { type: 'channel_post'; id: string; text: string }
-  | { type: 'channel_close'; id: string };
+  | { type: 'room_post'; id: string; text: string }
+  | { type: 'room_add'; id: string; participant: { name: string; agent?: string; model?: string } }
+  | { type: 'room_close'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
   let msg: unknown;
@@ -189,15 +190,18 @@ function parseClientMessage(data: string): ClientMessage | null {
   }
   if (m.type === 'stop') return m as ClientMessage;
   if (m.type === 'prompt' && typeof m.text === 'string') return m as ClientMessage;
-  if (m.type === 'channel_open') {
-    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.members)) {
+  if (m.type === 'room_open') {
+    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.participants)) {
       return null;
     }
     if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
     return m as ClientMessage;
   }
-  if (m.type === 'channel_post' && typeof m.text === 'string') return m as ClientMessage;
-  if (m.type === 'channel_close') return m as ClientMessage;
+  if (m.type === 'room_post' && typeof m.text === 'string') return m as ClientMessage;
+  if (m.type === 'room_add' && typeof m.participant === 'object' && m.participant !== null) {
+    return m as ClientMessage;
+  }
+  if (m.type === 'room_close') return m as ClientMessage;
   return null;
 }
 
@@ -208,15 +212,15 @@ app.get(
     return next();
   },
   upgradeWebSocket(() => {
-    // One connection subscribes to both buses: session events and channel messages.
+    // One connection subscribes to both buses: bare-session transcripts and rooms.
     let unsubscribeSessions: (() => void) | undefined;
-    let unsubscribeChannels: (() => void) | undefined;
+    let unsubscribeRooms: (() => void) | undefined;
     return {
       onOpen(_evt, ws) {
         unsubscribeSessions = sessionManager.subscribe((msg: Outbound) =>
           ws.send(JSON.stringify(msg)),
         );
-        unsubscribeChannels = channelManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
+        unsubscribeRooms = roomManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
         const msg = parseClientMessage(String(evt.data));
@@ -227,22 +231,24 @@ app.get(
           sessionManager.prompt(msg.id, msg.text);
         } else if (msg.type === 'stop') {
           sessionManager.stop(msg.id);
-        } else if (msg.type === 'channel_open') {
-          channelManager.open(msg.id, {
+        } else if (msg.type === 'room_open') {
+          roomManager.open(msg.id, {
             name: msg.name,
             cwd: msg.cwd,
-            members: msg.members,
+            participants: msg.participants,
             worktree: msg.worktree,
           });
-        } else if (msg.type === 'channel_post') {
-          channelManager.postFromHuman(msg.id, msg.text);
-        } else if (msg.type === 'channel_close') {
-          channelManager.close(msg.id);
+        } else if (msg.type === 'room_post') {
+          roomManager.postFromHuman(msg.id, msg.text);
+        } else if (msg.type === 'room_add') {
+          roomManager.addParticipant(msg.id, msg.participant);
+        } else if (msg.type === 'room_close') {
+          roomManager.close(msg.id);
         }
       },
       onClose() {
         unsubscribeSessions?.();
-        unsubscribeChannels?.();
+        unsubscribeRooms?.();
       },
     };
   }),

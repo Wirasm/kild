@@ -13,8 +13,8 @@ export interface SpawnRequest {
    *  sessions naming the same worktree share its tree (attach); different names
    *  split. The worker creates-or-attaches from `cwd` (the repo). */
   worktree?: string;
-  /** Extra environment for the worker — opaque to the manager. Channel members use
-   *  it to carry `KILD_CHANNEL` / `KILD_MEMBER`; it never overrides the `KILD_*`
+  /** Extra environment for the worker — opaque to the manager. Room participants use
+   *  it to carry `KILD_ROOM` / `KILD_PARTICIPANT`; it never overrides the `KILD_*`
    *  vars the manager itself sets. */
   env?: Record<string, string>;
 }
@@ -38,6 +38,14 @@ export interface SessionInfo {
 /** A message broadcast to every connected client. */
 export type Outbound = { session: string; event: UiEvent } | { sessions: SessionInfo[] };
 
+/** Control-line callbacks for a session's worker — used by the RoomManager to route
+ *  a participant's `post_message` / `invite_agent` back into its room. A bare
+ *  (non-room) session passes none, so the control lines are simply never emitted. */
+export interface SessionCallbacks {
+  onMessage?: (m: { text: string; to?: string[]; implicit?: boolean }) => void;
+  onInvite?: (i: { name: string; agent?: string; model?: string }) => void;
+}
+
 /**
  * One agent session = one worker subprocess (see `worker.ts`). The worker is the
  * same binary re-invoked with `KILD_ROLE=worker`; we talk to it over its stdio:
@@ -47,15 +55,11 @@ class PiSession {
   private readonly child: ChildProcess;
   private buf = '';
 
-  constructor(
-    req: SpawnRequest,
-    onEvent: (event: UiEvent) => void,
-    onMessage?: (text: string) => void,
-  ) {
+  constructor(req: SpawnRequest, onEvent: (event: UiEvent) => void, callbacks?: SessionCallbacks) {
     this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
       env: {
         ...process.env,
-        ...req.env, // extra worker env (e.g. channel membership); our KILD_* win below
+        ...req.env, // extra worker env (e.g. room membership); our KILD_* win below
         KILD_ROLE: 'worker',
         KILD_MODEL: req.model ?? '',
         KILD_CWD: req.cwd ?? process.cwd(),
@@ -73,16 +77,33 @@ class PiSession {
       for (const raw of lines) {
         const line = raw.trim();
         if (!line) continue;
-        let parsed: { kind?: string; text?: string };
+        let parsed: {
+          kind?: string;
+          text?: string;
+          to?: string[];
+          implicit?: boolean;
+          name?: string;
+          agent?: string;
+          model?: string;
+        };
         try {
           parsed = JSON.parse(line);
         } catch {
           continue; // non-JSON line from the worker (a stray log); ignore.
         }
-        // A channel member's `post_message` arrives as a `message_out` control line:
-        // route it to the channel, not the transcript. Everything else is a UiEvent.
-        if (parsed.kind === 'message_out') onMessage?.(parsed.text ?? '');
-        else if (parsed.kind) onEvent(parsed as UiEvent);
+        // A room participant's `post_message` / `invite_agent` arrive as control lines
+        // routed back to its room, not the transcript. Everything else is a UiEvent.
+        if (parsed.kind === 'message_out') {
+          callbacks?.onMessage?.({
+            text: parsed.text ?? '',
+            to: parsed.to,
+            implicit: parsed.implicit,
+          });
+        } else if (parsed.kind === 'invite' && parsed.name) {
+          callbacks?.onInvite?.({ name: parsed.name, agent: parsed.agent, model: parsed.model });
+        } else if (parsed.kind) {
+          onEvent(parsed as UiEvent);
+        }
       }
     });
     this.child.on('error', (err) =>
@@ -91,8 +112,8 @@ class PiSession {
     this.child.on('exit', () => onEvent({ kind: 'session_end' }));
   }
 
-  prompt(text: string): void {
-    this.child.stdin?.write(`${JSON.stringify({ type: 'prompt', text })}\n`);
+  prompt(text: string, from?: string): void {
+    this.child.stdin?.write(`${JSON.stringify({ type: 'prompt', text, from })}\n`);
   }
 
   stop(): void {
@@ -133,7 +154,7 @@ class SessionManager {
     id: string,
     req: SpawnRequest,
     origin: 'ui' | 'cli' = 'ui',
-    onMessage?: (text: string) => void,
+    callbacks?: SessionCallbacks,
   ): void {
     if (this.sessions.has(id)) return;
     const info: SessionInfo = {
@@ -170,14 +191,14 @@ class SessionManager {
           this.broadcast({ sessions: this.list() });
         }
       },
-      onMessage,
+      callbacks,
     );
     this.sessions.set(id, { session, info });
     this.broadcast({ sessions: this.list() });
   }
 
-  prompt(id: string, text: string): void {
-    this.sessions.get(id)?.session.prompt(text);
+  prompt(id: string, text: string, from?: string): void {
+    this.sessions.get(id)?.session.prompt(text, from);
   }
 
   stop(id: string): void {

@@ -1,26 +1,31 @@
 import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
-import { createPostMessageTool } from './kild/channel/post-message-tool.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { resolveModel, withRole } from './kild/models.ts';
+import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
+import { createPostMessageTool } from './kild/room/post-message-tool.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
 /**
  * One agent session, one process. The engine spawns this (the same binary with
  * `KILD_ROLE=worker`) once per session — the coding-agent SDK keeps process-global
- * state and supports only a single session per process, so concurrency *requires*
- * a process per session. Events are written to stdout as `UiEvent` JSONL; prompt
- * and stop commands are read from stdin as JSONL.
+ * state and supports only a single session per process, so concurrency *requires* a
+ * process per session. `UiEvent` JSONL (and, in a room, `message_out` / `invite`
+ * control lines) go to stdout; prompt / stop commands are read from stdin.
  */
 export async function runWorker(): Promise<never> {
   let cwd = process.env.KILD_CWD || process.cwd();
   const worktreeName = process.env.KILD_WORKTREE || undefined;
   const agentName = process.env.KILD_AGENT || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
-  const channelId = process.env.KILD_CHANNEL || undefined;
+  const inRoom = !!process.env.KILD_ROOM;
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
+  const emitMessage = (text: string, to?: string[], implicit?: boolean) =>
+    process.stdout.write(`${JSON.stringify({ kind: 'message_out', text, to, implicit })}\n`);
+  const emitInvite = (spec: { name: string; agent?: string; model?: string }) =>
+    process.stdout.write(`${JSON.stringify({ kind: 'invite', ...spec })}\n`);
 
   // Optional isolation: run inside the named git worktree (create-or-attach) rather
   // than the raw repo. Done here (not in the manager) so spawn stays synchronous;
@@ -37,18 +42,27 @@ export async function runWorker(): Promise<never> {
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
 
+  // Per-turn state for the implicit-reply rule (room only): the turn's sender, whether
+  // the agent posted explicitly this turn, and its accumulated final text. Reset at
+  // the start of each turn (in drainPrompts).
+  let turnSender = 'human';
+  let postedThisTurn = false;
+  let turnText = '';
+
   // A given-but-unknown model errors (resolveModel throws); no model = pi default.
   let model: ReturnType<typeof resolveModel>;
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   try {
     model = resolveModel(registry, modelPattern);
-    // A channel member gets a `post_message` tool; its calls become `message_out`
-    // control lines on stdout, which the engine routes into the channel.
-    const customTools = channelId
+    // A room participant gets `post_message` + `invite_agent`; their calls become
+    // control lines on stdout the engine routes back into the room.
+    const customTools = inRoom
       ? [
-          createPostMessageTool((text) =>
-            process.stdout.write(`${JSON.stringify({ kind: 'message_out', text })}\n`),
-          ),
+          createPostMessageTool((text) => {
+            postedThisTurn = true;
+            emitMessage(text);
+          }),
+          createInviteAgentTool(emitInvite),
         ]
       : undefined;
     ({ session } = await createAgentSession({
@@ -66,8 +80,16 @@ export async function runWorker(): Promise<never> {
 
   session.subscribe((e: RawAgentEvent) => {
     const ui = translate(e);
-    if (ui) emit(ui);
+    if (ui) {
+      emit(ui);
+      if (ui.kind === 'text') turnText += ui.delta; // accumulate the turn's reply text
+    }
     if (e.type === 'agent_end') {
+      // Implicit reply: if the agent didn't post explicitly this turn, treat its
+      // turn-final text as a reply addressed back to whoever delivered the turn.
+      if (inRoom && !postedThisTurn && turnText.trim()) {
+        emitMessage(turnText, [turnSender], true);
+      }
       const stats = session.getSessionStats();
       emit({
         kind: 'stats',
@@ -80,18 +102,21 @@ export async function runWorker(): Promise<never> {
 
   let preamble = agentName ? await resolveAgentInstructions(agentName, cwd) : null;
 
-  // pi runs one turn at a time. A channel can deliver a message (prompt) to this
-  // member while it is still mid-turn, so we queue prompts and drain them strictly
-  // sequentially rather than awaiting inside the stdin handler.
-  const promptQueue: string[] = [];
+  // pi runs one turn at a time. A room can deliver a message (prompt) to this
+  // participant while it is still mid-turn, so we queue prompts and drain them
+  // strictly sequentially rather than awaiting inside the stdin handler.
+  const promptQueue: Array<{ text: string; from: string }> = [];
   let draining = false;
   async function drainPrompts(): Promise<void> {
     if (draining) return;
     draining = true;
     while (promptQueue.length > 0) {
-      const text = promptQueue.shift() as string;
+      const next = promptQueue.shift() as { text: string; from: string };
+      turnSender = next.from;
+      turnText = '';
+      postedThisTurn = false;
       try {
-        await session.prompt(text);
+        await session.prompt(next.text);
       } catch (err) {
         emit({ kind: 'error', message: errText(err) });
       }
@@ -107,14 +132,14 @@ export async function runWorker(): Promise<never> {
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
-      let msg: { type: string; text?: string };
+      let msg: { type: string; text?: string; from?: string };
       try {
-        msg = JSON.parse(line) as { type: string; text?: string };
+        msg = JSON.parse(line) as { type: string; text?: string; from?: string };
       } catch {
         continue; // a malformed command line must not crash the worker; skip it
       }
       if (msg.type === 'prompt' && msg.text) {
-        promptQueue.push(withRole(msg.text, preamble));
+        promptQueue.push({ text: withRole(msg.text, preamble), from: msg.from ?? 'human' });
         preamble = null; // the agent preamble rides only the first delivered turn
         void drainPrompts();
       } else if (msg.type === 'stop') {

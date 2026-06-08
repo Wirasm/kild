@@ -29,7 +29,7 @@ const { values, positionals } = parseArgs({
     agent: { type: 'string' },
     model: { type: 'string' },
     worktree: { type: 'string' },
-    members: { type: 'string' }, // `kild channel` room members, e.g. orchestrator,worker,reviewer
+    participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
   },
 });
 
@@ -55,10 +55,10 @@ async function dispatch(): Promise<void> {
       return worktree(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
-    case 'channel':
-      return channel([action, ...rest].filter(Boolean).join(' '));
+    case 'room':
+      return room([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run|channel> …');
+      console.error('usage: kild <project|agent|worktree|run|room> …');
       process.exit(2);
   }
 }
@@ -179,18 +179,18 @@ async function run(prompt: string): Promise<void> {
 }
 
 /**
- * `kild channel <goal>` — the room demo. Opens a channel of predefined members
- * (`--members orchestrator,worker,reviewer`; default `orchestrator,worker`), posts
- * the goal to the first member, and streams every message. With `--worktree <name>`
- * the whole room shares one `kild/<name>` tree (members attach to it). You can keep
- * typing to post more messages into the room (address members with @name); Ctrl-C
- * is the kill switch — it closes the channel (stopping all members) and exits.
- * Requires the engine (it is multi-session).
+ * `kild room <goal>` — the room demo. Opens a room of predefined participants
+ * (`--participants orchestrator,worker,reviewer`; default `orchestrator,worker`),
+ * posts the goal to the first one, and streams every message. With `--worktree
+ * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
+ * You can keep typing to post more messages (address participants with @name);
+ * Ctrl-C is the kill switch — it closes the room (stopping all participants) and
+ * exits. Requires the engine (it is multi-session).
  */
-async function channel(goal: string): Promise<void> {
+async function room(goal: string): Promise<void> {
   if (!goal) {
     throw new Error(
-      'usage: kild channel <goal…> [--members a,b,c] [--worktree <n>] [--project <p>]',
+      'usage: kild room <goal…> [--participants a,b,c] [--worktree <n>] [--project <p>]',
     );
   }
   const engineUp = await fetch(`${ENGINE}/api/health`)
@@ -202,22 +202,22 @@ async function channel(goal: string): Promise<void> {
   const cwd = values.project
     ? ((await findProject(values.project))?.path ?? values.project)
     : process.cwd();
-  const name = values.project ?? 'channel';
-  const memberNames = (values.members ?? 'orchestrator,worker')
+  const name = values.project ?? 'room';
+  const participantNames = (values.participants ?? 'orchestrator,worker')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  if (memberNames.length === 0) throw new Error('--members must name at least one agent');
-  const lead = memberNames[0] as string;
-  // Address the lead member unless the goal already @mentions someone.
+  if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
+  const lead = participantNames[0] as string;
+  // Address the lead participant unless the goal already @mentions someone.
   const kickoff = /@[A-Za-z0-9_-]+/.test(goal) ? goal : `@${lead} ${goal}`;
-  const channelId = crypto.randomUUID();
+  const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
   await new Promise<void>((resolve, reject) => {
-    const closeChannel = () => {
+    const closeRoom = () => {
       try {
-        ws.send(JSON.stringify({ type: 'channel_close', id: channelId }));
+        ws.send(JSON.stringify({ type: 'room_close', id: roomId }));
       } catch {
         // socket already gone — nothing to close
       }
@@ -227,18 +227,18 @@ async function channel(goal: string): Promise<void> {
       }, 200); // let the close frame flush before we exit
     };
     process.on('SIGINT', () => {
-      if (!json) console.error('\n\x1b[2m— closing channel —\x1b[0m');
-      closeChannel();
+      if (!json) console.error('\n\x1b[2m— closing room —\x1b[0m');
+      closeRoom();
     });
 
     // Mid-flight steering: each line you type is posted into the room (address
-    // members with @name). Off in --json mode, which is machine-driven.
+    // participants with @name). Off in --json mode, which is machine-driven.
     if (!json) {
       process.stdin.setEncoding('utf8');
       process.stdin.on('data', (chunk: string) => {
         for (const raw of chunk.split('\n')) {
           const text = raw.trim();
-          if (text) ws.send(JSON.stringify({ type: 'channel_post', id: channelId, text }));
+          if (text) ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
         }
       });
     }
@@ -246,40 +246,38 @@ async function channel(goal: string): Promise<void> {
     ws.addEventListener('open', () => {
       ws.send(
         JSON.stringify({
-          type: 'channel_open',
-          id: channelId,
+          type: 'room_open',
+          id: roomId,
           name,
           cwd,
           worktree: values.worktree,
-          members: memberNames.map((n) => ({ name: n, agent: n, model: values.model })),
+          participants: participantNames.map((n) => ({ name: n, agent: n, model: values.model })),
         }),
       );
-      ws.send(JSON.stringify({ type: 'channel_post', id: channelId, text: kickoff }));
+      ws.send(JSON.stringify({ type: 'room_post', id: roomId, text: kickoff }));
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# channel "${name}" — ${memberNames.join(', ')}${where} · type to post · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# room "${name}" — ${participantNames.join(', ')}${where} · type to post · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
 
     ws.addEventListener('message', (e) => {
       let parsed: {
-        channelMessage?: { channelId: string; from: string; mentions: string[]; text: string };
+        roomMessage?: { roomId: string; from: string; to: string[]; text: string };
       };
       try {
         parsed = JSON.parse(String((e as { data: unknown }).data));
       } catch {
         return;
       }
-      const m = parsed.channelMessage;
-      if (!m || m.channelId !== channelId) return;
+      const m = parsed.roomMessage;
+      if (!m || m.roomId !== roomId) return;
       if (json) {
         console.log(JSON.stringify(m));
       } else {
-        const to = m.mentions.length
-          ? ` \x1b[2m→ ${m.mentions.map((x) => `@${x}`).join(' ')}\x1b[0m`
-          : '';
+        const to = m.to.length ? ` \x1b[2m→ ${m.to.map((x) => `@${x}`).join(' ')}\x1b[0m` : '';
         console.log(`\x1b[1m${m.from}\x1b[0m${to}: ${m.text}`);
       }
     });
