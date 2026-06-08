@@ -1,4 +1,13 @@
-import type { Agent, Message, Project, RoomSpec, RoomSummary, UiEvent, Worktree } from "./types";
+import type {
+  Agent,
+  ArchivedRoom,
+  Message,
+  Project,
+  RoomSpec,
+  RoomSummary,
+  UiEvent,
+  Worktree,
+} from "./types";
 
 /** The kild engine's base URL. Override with VITE_KILD_ENGINE. */
 const BASE = import.meta.env.VITE_KILD_ENGINE ?? "http://localhost:4517";
@@ -73,6 +82,14 @@ export async function openWorktree(path: string): Promise<void> {
     const body = (await r.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `open failed (${r.status})`);
   }
+}
+
+/** Fetch past rooms (read-only history) recovered from the engine's on-disk store.
+ *  Their participant subprocesses are gone — these are conversation records only. */
+export async function listArchivedRooms(): Promise<ArchivedRoom[]> {
+  const r = await fetch(`${BASE}/api/rooms/archive`);
+  if (!r.ok) throw new Error(`archived rooms request failed (${r.status})`);
+  return r.json();
 }
 
 /** A room message as broadcast by the engine (carries the room id for routing). */
@@ -152,6 +169,10 @@ export class EngineSocket {
   }
   addParticipant(id: string, participant: { name: string; agent?: string; model?: string }): void {
     this.send({ type: "room_add", id, participant });
+  }
+  /** Trip the manual circuit breaker: stop the room's agents but keep it read-only. */
+  haltRoom(id: string): void {
+    this.send({ type: "room_halt", id });
   }
   closeRoom(id: string): void {
     this.send({ type: "room_close", id });

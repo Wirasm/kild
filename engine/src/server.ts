@@ -144,6 +144,12 @@ app.post('/api/open', async (c) => {
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
+// ── Rooms ─────────────────────────────────────────────────────────────────────
+// Past rooms recovered from disk (read-only history). Live rooms flow over the WS
+// (`{rooms}` summaries + `{roomMessage}` posts); this is the conversation record of
+// rooms from previous engine runs — their participant subprocesses are long gone.
+app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
+
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the room broadcast — so rooms opened by any client
 // (cockpit or CLI) are visible to all. Rooms are engine-owned and survive a drop.
@@ -159,6 +165,7 @@ type ClientMessage =
     }
   | { type: 'room_post'; id: string; text: string }
   | { type: 'room_add'; id: string; participant: { name: string; agent?: string; model?: string } }
+  | { type: 'room_halt'; id: string }
   | { type: 'room_close'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
@@ -182,6 +189,7 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (m.type === 'room_add' && typeof m.participant === 'object' && m.participant !== null) {
     return m as ClientMessage;
   }
+  if (m.type === 'room_halt') return m as ClientMessage;
   if (m.type === 'room_close') return m as ClientMessage;
   return null;
 }
@@ -212,6 +220,8 @@ app.get(
           roomManager.postFromHuman(msg.id, msg.text);
         } else if (msg.type === 'room_add') {
           roomManager.addParticipant(msg.id, msg.participant);
+        } else if (msg.type === 'room_halt') {
+          roomManager.halt(msg.id);
         } else if (msg.type === 'room_close') {
           roomManager.close(msg.id);
         }

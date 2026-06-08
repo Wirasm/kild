@@ -5,11 +5,13 @@
     room,
     participant,
     onClose,
+    onHalt,
     onOpenWorktree,
   }: {
     room: Room;
     participant: Participant | null;
     onClose: () => void;
+    onHalt: () => void;
     onOpenWorktree: (path: string) => void;
   } = $props();
 
@@ -46,6 +48,11 @@
     <span class="gauge">
       ctx {participant.stats.context_pct ?? "–"}% · {participant.stats.tokens} tok · ${participant.stats.cost.toFixed(4)}
     </span>
+  {/if}
+  {#if room.status !== "stopped" && !room.archived}
+    <button class="halt-room" title="Halt the agents now (keeps the room read-only)" onclick={onHalt}>
+      ⏹ halt
+    </button>
   {/if}
   <button class="close-room" title="Close room" onclick={onClose}>✕</button>
 </header>
@@ -100,6 +107,20 @@
     color: var(--text-subtle);
     font-family: var(--mono);
     font-size: 12px;
+  }
+  .topbar .halt-room {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .topbar .halt-room:hover {
+    color: var(--ember);
+    border-color: var(--ember);
+    background: rgba(216, 92, 92, 0.06);
   }
   .topbar .close-room {
     background: transparent;

@@ -30,9 +30,19 @@ function resolveAddressees(message: RoomMessage): string[] {
  * - no addressee + multiple participants → broadcast only (no turn).
  * `@human` is never delivered as a turn (the broadcast is how the operator receives),
  * and a participant is never delivered its own post.
+ *
+ * **Implicit replies broadcast but never deliver a turn.** An implicit reply is an
+ * agent's turn-final narration auto-posted because it did not call `post_message`. If
+ * we delivered those as turns, two agents would ping-pong forever — each delivered turn
+ * produces narration that is delivered back, so "I'll stay quiet" becomes a message
+ * that prompts the other agent. Prompting another agent therefore requires an *explicit*
+ * `post_message` (@mention) — exactly what the room agent prompts instruct ("no one sees
+ * your normal output — only what you post"). The human still sees the narration (it's
+ * broadcast); it just doesn't drive another turn.
  */
 export function routeRoomMessage(room: Room, message: RoomMessage, delivery: RoomDelivery): void {
   delivery.broadcast(message);
+  if (message.implicit) return; // narration is shown to the human, never delivered as a turn
 
   let targets = resolveAddressees(message).filter((t) => t !== HUMAN && t !== message.from);
   if (targets.length === 0 && room.participants.length === 1) {

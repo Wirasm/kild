@@ -10,6 +10,7 @@
     listAgents,
     listProjects,
     listWorktrees,
+    listArchivedRooms,
     removeWorktree as apiRemoveWorktree,
     pruneWorktrees as apiPruneWorktrees,
     openWorktree as apiOpenWorktree,
@@ -121,6 +122,39 @@
   async function loadProjects() {
     projects = await listProjects();
   }
+
+  // Merge the engine's on-disk room history into the list as read-only entries. Runs
+  // whenever the engine (re)connects — after a dev `--watch` reload the engine loses
+  // its live rooms but keeps their logs, so this restores the conversation record.
+  async function loadArchivedRooms() {
+    try {
+      const archived = await listArchivedRooms();
+      for (const a of archived) {
+        if (rooms.some((r) => r.id === a.id)) continue; // a live/owned room wins
+        rooms.push({
+          id: a.id,
+          name: a.name,
+          participants: a.participants.map((p) => ({
+            name: p.name,
+            agent: p.agent,
+            model: "default",
+            items: [],
+            running: false,
+            modelLabel: null,
+            stats: null,
+          })),
+          log: a.log,
+          status: "stopped",
+          origin: "cli",
+          archived: true,
+          branch: a.worktree ? `kild/${a.worktree}` : undefined,
+        });
+      }
+    } catch (e) {
+      // Past-room history is optional enrichment — never block the cockpit on it.
+      console.warn("kild: could not load room history", e);
+    }
+  }
   async function loadAgents(projectPath: string) {
     agents = await listAgents(projectPath);
     selectedAgents = selectedAgents.filter((a) => agents.some((x) => x.name === a));
@@ -225,6 +259,17 @@
     }
   }
 
+  // Manual circuit breaker: stop the room's agents but keep it (read-only). Optimistic —
+  // the engine confirms via the next room summary (stopped: true).
+  function haltRoom(id: string) {
+    socket?.haltRoom(id);
+    const room = rooms.find((r) => r.id === id);
+    if (room) {
+      room.status = "stopped";
+      for (const p of room.participants) p.running = false;
+    }
+  }
+
   // Post into the active room — addressing the focused participant if no @mention.
   function send() {
     if (!activeRoom || !socket) return;
@@ -280,7 +325,9 @@
   // Mirror the engine's room list: upsert rooms + participants, drop dead ones.
   function reconcileRooms(summaries: RoomSummary[]) {
     const live = new Set(summaries.map((s) => s.id));
-    rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id));
+    // Keep live + owned (pending the open echo) + archived (read-only history). A
+    // formerly-live room the engine no longer has, and which isn't archived, is dropped.
+    rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id) || r.archived);
     for (const sum of summaries) {
       // The engine now knows this room — it's no longer "pending the open echo", so a
       // later restart that wipes the engine's list drops it instead of leaving a ghost.
@@ -300,6 +347,7 @@
       } else if (sum.worktree && !room.branch) {
         room.branch = `kild/${sum.worktree}`;
       }
+      room.status = sum.stopped ? "stopped" : "running"; // engine is the source of truth
       for (const p of sum.participants) {
         if (!room.participants.some((x) => x.name === p.name)) {
           room.participants.push({
@@ -333,6 +381,7 @@
       (connected) => {
         if (connected) {
           if (error?.startsWith("Engine")) error = null;
+          void loadArchivedRooms(); // restore read-only history once the engine is reachable
         } else {
           for (const r of rooms) {
             for (const p of r.participants) p.running = false;
@@ -422,6 +471,7 @@
         onSelectParticipant={(name) => (activeParticipantId = name)}
         onInvite={inviteParticipant}
         onClose={() => activeRoom && closeRoom(activeRoom.id)}
+        onHalt={() => activeRoom && haltRoom(activeRoom.id)}
         onOpenWorktree={onOpenWorktree}
         onSend={send}
       />

@@ -8,9 +8,10 @@ import { Type } from 'typebox';
  * prose, which is the failure mode of pi's coms-net POC. The transport is injected:
  * the worker passes an `emit` that writes a `message_out` control line to the engine.
  *
- * Note: a participant need not call this to reply to whoever addressed it — the
- * worker auto-posts its turn-final text as an implicit reply (see worker.ts). This
- * tool is for *addressing others* (or replying explicitly).
+ * Note: an agent's turn-final text is still auto-posted as an *implicit reply* so the
+ * human can see what it said (see worker.ts) — but that broadcast never prompts another
+ * agent. Reaching another participant (delivering them a turn) requires calling this
+ * tool with an `@mention`; otherwise your normal output is private to you.
  */
 export function createPostMessageTool(emit: (text: string) => void): ToolDefinition {
   return {
