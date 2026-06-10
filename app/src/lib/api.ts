@@ -92,6 +92,15 @@ export async function listArchivedRooms(): Promise<ArchivedRoom[]> {
   return r.json();
 }
 
+/** Fetch LIVE rooms with their logs — so the cockpit can load the conversation so far
+ *  for a room it didn't open itself (e.g. one set up via the CLI), or after a reload.
+ *  Same shape as {@link ArchivedRoom} but these rooms are still running. */
+export async function listLiveRooms(): Promise<ArchivedRoom[]> {
+  const r = await fetch(`${BASE}/api/rooms/live`);
+  if (!r.ok) throw new Error(`live rooms request failed (${r.status})`);
+  return r.json();
+}
+
 /** A room message as broadcast by the engine (carries the room id for routing). */
 type WireRoomMessage = Message & { roomId: string };
 
@@ -115,6 +124,7 @@ export class EngineSocket {
     private onStatus?: (connected: boolean) => void,
     private onRooms?: (rooms: RoomSummary[]) => void,
     private onRoomMessage?: (room: string, message: Message) => void,
+    private onArchivedRoom?: (room: ArchivedRoom) => void,
   ) {
     this.connect();
   }
@@ -131,6 +141,7 @@ export class EngineSocket {
       let msg: {
         rooms?: RoomSummary[];
         roomMessage?: WireRoomMessage;
+        archivedRoom?: ArchivedRoom;
         room?: string;
         participant?: string;
         event?: UiEvent;
@@ -141,6 +152,7 @@ export class EngineSocket {
         return; // ignore malformed frames
       }
       if (Array.isArray(msg.rooms)) this.onRooms?.(msg.rooms);
+      else if (msg.archivedRoom) this.onArchivedRoom?.(msg.archivedRoom);
       else if (msg.roomMessage) this.onRoomMessage?.(msg.roomMessage.roomId, msg.roomMessage);
       else if (typeof msg.room === "string" && typeof msg.participant === "string" && msg.event) {
         this.onEvent(msg.room, msg.participant, msg.event);

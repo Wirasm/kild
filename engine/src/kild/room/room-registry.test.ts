@@ -53,3 +53,20 @@ test('a fresh registry loads past rooms into the archive (read-only) with their 
   // Archived rooms are history only — they are NOT live in-memory rooms.
   expect(reg.get('room-a')).toBeUndefined();
 });
+
+test('remove() archives a room with history immediately and returns the snapshot', () => {
+  const reg = new RoomRegistry();
+  reg.create(room('room-b'));
+  reg.appendMessage('room-b', msg('room-b', 'hi'));
+  const snap = reg.remove('room-b');
+  expect(snap?.id).toBe('room-b');
+  expect(reg.get('room-b')).toBeUndefined(); // no longer live
+  expect(reg.archived().some((a) => a.id === 'room-b')).toBe(true); // archived now, no restart
+});
+
+test('remove() of an empty room archives nothing', () => {
+  const reg = new RoomRegistry();
+  reg.create(room('room-c'));
+  expect(reg.remove('room-c')).toBeUndefined();
+  expect(reg.archived().some((a) => a.id === 'room-c')).toBe(false);
+});

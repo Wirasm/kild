@@ -95,6 +95,9 @@ export interface ArchivedRoom {
 export type RoomOutbound =
   | { roomMessage: RoomMessage }
   | { rooms: RoomSummary[] }
+  /** A room that just closed with history — pushed so clients show it as read-only
+   *  history immediately, without refetching the archive or restarting. */
+  | { archivedRoom: ArchivedRoom }
   /** A participant's transcript event (its UiEvent stream), tagged by room+participant. */
   | { room: string; participant: string; event: UiEvent };
 

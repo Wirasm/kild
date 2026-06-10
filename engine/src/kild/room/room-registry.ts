@@ -40,10 +40,22 @@ export class RoomRegistry {
     return this.rooms.get(roomId);
   }
 
-  remove(roomId: string): void {
-    // Drop the live room only — its on-disk log stays, so it returns as history on
-    // the next engine start. (Worktrees persist the same way.)
+  /** Drop the live room. If it had any history, move it into the in-memory archive
+   *  immediately (and return the snapshot) so it shows as read-only history without
+   *  waiting for the next engine start. Its on-disk log already persists. */
+  remove(roomId: string): ArchivedRoom | undefined {
+    const room = this.rooms.get(roomId);
     this.rooms.delete(roomId);
+    if (!room || room.log.length === 0) return undefined;
+    const archived: ArchivedRoom = {
+      id: room.id,
+      name: room.name,
+      worktree: room.worktree,
+      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      log: room.log,
+    };
+    this.archive.set(room.id, archived);
+    return archived;
   }
 
   /** Find which room + participant a session belongs to — the reverse lookup that
@@ -70,6 +82,18 @@ export class RoomRegistry {
       worktree: r.worktree,
       participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
       stopped: r.stopped,
+    }));
+  }
+
+  /** Live rooms with their full logs — lets a client joining mid-room (or after a
+   *  refresh) load the conversation so far. Same shape as an archived snapshot. */
+  liveWithLogs(): ArchivedRoom[] {
+    return [...this.rooms.values()].map((r) => ({
+      id: r.id,
+      name: r.name,
+      worktree: r.worktree,
+      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      log: r.log,
     }));
   }
 

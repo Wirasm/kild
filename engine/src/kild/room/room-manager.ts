@@ -92,6 +92,12 @@ class RoomManager {
     return this.registry.archived();
   }
 
+  /** Live rooms with their logs — for a client joining a room it didn't open (or
+   *  reloading), so it can render the conversation so far. */
+  liveRooms(): ArchivedRoom[] {
+    return this.registry.liveWithLogs();
+  }
+
   /** Add a participant to a live room (the human "invite"). */
   addParticipant(roomId: string, spec: ParticipantSpec): void {
     const room = this.registry.get(roomId);
@@ -100,12 +106,15 @@ class RoomManager {
     this.post(roomId, HUMAN, `@${spec.name} joined the room.`, { system: true });
   }
 
-  /** Stop every participant session — the human kill switch / room teardown. */
+  /** Stop every participant session — the human kill switch / room teardown. A room
+   *  with history moves straight into the archive and is pushed to clients, so it stays
+   *  visible as a read-only transcript without an engine restart. */
   close(roomId: string): void {
     const room = this.registry.get(roomId);
     if (!room) return;
     for (const p of room.participants) sessionManager.stop(p.sessionId);
-    this.registry.remove(roomId);
+    const archived = this.registry.remove(roomId);
+    if (archived) this.broadcast({ archivedRoom: archived });
     this.broadcast({ rooms: this.registry.summaries() });
   }
 
