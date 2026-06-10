@@ -12,6 +12,12 @@
   let { items, running, agentName = "Agent" }: Props = $props();
   let transcriptEl: HTMLElement | undefined = $state();
 
+  // Tool calls are hidden by default — they bloat the pane and bury the agent's
+  // messages. The toggle reveals them on demand.
+  let showTools = $state(false);
+  let toolCount = $derived(items.filter((i) => i.type === "tool").length);
+  let shown = $derived(showTools ? items : items.filter((i) => i.type !== "tool"));
+
   function scrollDown() {
     queueMicrotask(() => transcriptEl?.scrollTo({ top: transcriptEl.scrollHeight }));
   }
@@ -34,7 +40,14 @@
 </script>
 
 <section class="transcript" bind:this={transcriptEl}>
-  {#each items as item}
+  {#if toolCount > 0}
+    <div class="ledger-controls">
+      <button class="tools-toggle" class:active={showTools} onclick={() => (showTools = !showTools)}>
+        🔧 {toolCount} tool call{toolCount === 1 ? "" : "s"} · {showTools ? "hide" : "show"}
+      </button>
+    </div>
+  {/if}
+  {#each shown as item}
     <div class="message-wrapper {item.type}">
       <div class="gutter">
         {#if item.type === "user"}
@@ -105,6 +118,36 @@
     display: flex;
     flex-direction: column;
     gap: 24px; /* Spacious gaps between events */
+  }
+
+  .ledger-controls {
+    position: sticky;
+    top: -20px; /* counter the transcript's top padding so it pins to the very top */
+    z-index: 2;
+    display: flex;
+    justify-content: flex-end;
+    margin: -12px -4px -8px; /* tuck into the gap, don't add a full 24px row */
+    padding: 4px 0;
+    background: var(--obsidian);
+  }
+  .tools-toggle {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .tools-toggle:hover {
+    color: var(--copper);
+    border-color: var(--copper);
+  }
+  .tools-toggle.active {
+    color: var(--copper);
+    border-color: var(--copper);
+    background: rgba(196, 154, 92, 0.08);
   }
 
   .message-wrapper {
