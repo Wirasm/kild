@@ -101,6 +101,20 @@ export async function listLiveRooms(): Promise<ArchivedRoom[]> {
   return r.json();
 }
 
+/** Open an external URL in the OS browser (engine validates http/https). Rendered link
+ *  clicks route here so they never navigate the Tauri webview away from the cockpit. */
+export async function openUrl(url: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/open-url`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `open url failed (${r.status})`);
+  }
+}
+
 /** A room message as broadcast by the engine (carries the room id for routing). */
 type WireRoomMessage = Message & { roomId: string };
 

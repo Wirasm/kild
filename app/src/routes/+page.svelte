@@ -15,6 +15,7 @@
     removeWorktree as apiRemoveWorktree,
     pruneWorktrees as apiPruneWorktrees,
     openWorktree as apiOpenWorktree,
+    openUrl,
   } from "$lib/api";
 
   import type { Project, Agent, UiEvent, Room, Message, RoomSummary, RoomSpec, Worktree, ArchivedRoom } from "$lib/types";
@@ -414,7 +415,18 @@
     }
   }
 
+  // Open rendered links (e.g. the maintainer's #refs) in the OS browser instead of
+  // letting them navigate the Tauri webview away from the cockpit.
+  function interceptLinks(e: MouseEvent) {
+    const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (a && /^https?:\/\//i.test(a.href)) {
+      e.preventDefault();
+      void openUrl(a.href).catch((err) => console.warn("kild: could not open url", err));
+    }
+  }
+
   onMount(() => {
+    document.addEventListener("click", interceptLinks);
     if (typeof localStorage !== "undefined") {
       const savedModel = localStorage.getItem("kild_last_model");
       if (savedModel && MODELS.includes(savedModel)) model = savedModel;
@@ -443,7 +455,10 @@
         if (projects.length > 0) selectProject(projects[0]);
       })
       .catch((e) => (error = `Could not load projects: ${e}`));
-    return () => socket?.close();
+    return () => {
+      document.removeEventListener("click", interceptLinks);
+      socket?.close();
+    };
   });
 </script>
 

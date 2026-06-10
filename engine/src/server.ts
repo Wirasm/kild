@@ -141,6 +141,29 @@ app.post('/api/open', async (c) => {
   }
 });
 
+// Open an external http(s) URL in the OS browser. The cockpit routes rendered links
+// here so a click never navigates the Tauri webview away from the app. Restricted to
+// http/https — never file://, app schemes, etc. execFile (no shell) → no injection.
+app.post('/api/open-url', async (c) => {
+  const { url } = await c.req.json<{ url: string }>();
+  let parsed: URL;
+  try {
+    parsed = new URL(url ?? '');
+  } catch {
+    return c.json({ error: 'invalid url' }, 400);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return c.json({ error: 'only http(s) urls may be opened' }, 403);
+  }
+  try {
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+    await execFile(opener, [parsed.toString()]);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
