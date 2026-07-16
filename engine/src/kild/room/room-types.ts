@@ -91,6 +91,23 @@ export interface ArchivedRoom {
   log: RoomMessage[];
 }
 
+/** Typed room-domain result: every command either succeeds with a value or fails with
+ *  an explicit room error code + message. */
+export type CommandResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; code: RoomErrorCode; message: string };
+
+/** Room-domain failure categories — transport-agnostic, mapped by REST/worker layers. */
+export type RoomErrorCode = 'not_found' | 'invalid_state' | 'rejected';
+
+export interface RoomActionSuccess {
+  message: string;
+}
+
+export interface OpenRoomSuccess extends RoomActionSuccess {
+  roomId: string;
+}
+
 /** What the engine broadcasts to clients about rooms. */
 export type RoomOutbound =
   | { roomMessage: RoomMessage }
@@ -105,6 +122,7 @@ export type RoomOutbound =
  *  `UiEvent` — routed to the room, not shown as the participant's raw transcript. */
 export interface MessageOut {
   kind: 'message_out';
+  requestId?: string;
   text: string;
   /** Explicit addressees. The implicit-reply path sets this; the tool path omits it
    *  and the router falls back to parsing `@mentions` from the text. */
@@ -115,7 +133,22 @@ export interface MessageOut {
 /** Worker→engine control line: an agent called `invite_agent` to pull in another. */
 export interface InviteOut {
   kind: 'invite';
+  requestId?: string;
   name: string;
   agent?: string;
   model?: string;
+}
+
+/** Worker→engine control line: the room lead called `close_room`. */
+export interface CloseRoomOut {
+  kind: 'close_room';
+  requestId?: string;
+  reason?: string;
+}
+
+/** Engine→worker acknowledgement for an explicit room command. */
+export interface RoomCommandAck {
+  type: 'room_command_result';
+  requestId: string;
+  result: CommandResult<RoomActionSuccess>;
 }

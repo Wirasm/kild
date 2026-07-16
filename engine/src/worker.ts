@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
@@ -10,6 +12,12 @@ import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
 import { createPostMessageTool } from './kild/room/post-message-tool.ts';
+import type {
+  CloseRoomOut,
+  InviteOut,
+  MessageOut,
+  RoomCommandAck,
+} from './kild/room/room-types.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
 /**
@@ -29,12 +37,20 @@ export async function runWorker(): Promise<never> {
   const fleetEnabled = process.env.KILD_FLEET === '1';
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
-  const emitMessage = (text: string, to?: string[], implicit?: boolean) =>
-    process.stdout.write(`${JSON.stringify({ kind: 'message_out', text, to, implicit })}\n`);
-  const emitInvite = (spec: { name: string; agent?: string; model?: string }) =>
-    process.stdout.write(`${JSON.stringify({ kind: 'invite', ...spec })}\n`);
-  const emitCloseRoom = (spec: { reason?: string }) =>
-    process.stdout.write(`${JSON.stringify({ kind: 'close_room', ...spec })}\n`);
+  const pendingCommands = new Map<
+    string,
+    { resolve: (text: string) => void; reject: (error: Error) => void }
+  >();
+
+  const emitRoomCommand = <T extends MessageOut | InviteOut | CloseRoomOut>(
+    command: T,
+  ): Promise<string> => {
+    const requestId = randomUUID();
+    process.stdout.write(`${JSON.stringify({ ...command, requestId })}\n`);
+    return new Promise<string>((resolve, reject) => {
+      pendingCommands.set(requestId, { resolve, reject });
+    });
+  };
 
   // Optional isolation: run inside the named git worktree (create-or-attach) rather
   // than the raw repo. Done here (not in the manager) so spawn stays synchronous;
@@ -68,12 +84,14 @@ export async function runWorker(): Promise<never> {
     // non-room session instead gets the engine REST room-control tools.
     const customTools = inRoom
       ? [
-          createPostMessageTool((text) => {
+          createPostMessageTool(async (text) => {
             postedThisTurn = true;
-            emitMessage(text);
+            return emitRoomCommand({ kind: 'message_out', text });
           }),
-          createInviteAgentTool(emitInvite),
-          ...(isRoomLead ? [createCloseRoomTool(emitCloseRoom)] : []),
+          createInviteAgentTool((spec) => emitRoomCommand({ kind: 'invite', ...spec })),
+          ...(isRoomLead
+            ? [createCloseRoomTool((spec) => emitRoomCommand({ kind: 'close_room', ...spec }))]
+            : []),
         ]
       : fleetEnabled
         ? [
@@ -108,7 +126,9 @@ export async function runWorker(): Promise<never> {
       // display only — the engine broadcasts it but does NOT deliver it as a turn
       // (see room-router.ts), so narration can't ping-pong agents into a loop.
       if (inRoom && !postedThisTurn && turnText.trim()) {
-        emitMessage(turnText, [turnSender], true);
+        process.stdout.write(
+          `${JSON.stringify({ kind: 'message_out', text: turnText, to: [turnSender], implicit: true })}\n`,
+        );
       }
       const stats = session.getSessionStats();
       emit({
@@ -152,9 +172,15 @@ export async function runWorker(): Promise<never> {
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
-      let msg: { type: string; text?: string; from?: string };
+      let msg: {
+        type?: string;
+        text?: string;
+        from?: string;
+        requestId?: string;
+        result?: RoomCommandAck['result'];
+      };
       try {
-        msg = JSON.parse(line) as { type: string; text?: string; from?: string };
+        msg = JSON.parse(line) as typeof msg;
       } catch {
         continue; // a malformed command line must not crash the worker; skip it
       }
@@ -163,12 +189,22 @@ export async function runWorker(): Promise<never> {
         preamble = null; // the agent preamble rides only the first delivered turn
         void drainPrompts();
       } else if (msg.type === 'stop') {
+        for (const pending of pendingCommands.values()) pending.reject(new Error('worker stopped'));
+        pendingCommands.clear();
         session.dispose();
         process.exit(0);
+      } else if (msg.type === 'room_command_result' && msg.requestId && msg.result) {
+        const pending = pendingCommands.get(msg.requestId);
+        if (!pending) continue;
+        pendingCommands.delete(msg.requestId);
+        if (msg.result.ok) pending.resolve(msg.result.value.message);
+        else pending.reject(new Error(msg.result.message));
       }
     }
   });
   process.stdin.on('end', () => {
+    for (const pending of pendingCommands.values()) pending.reject(new Error('worker stdin ended'));
+    pendingCommands.clear();
     session.dispose();
     process.exit(0);
   });

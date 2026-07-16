@@ -1,6 +1,14 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 
 import type { UiEvent } from './events.ts';
+import type {
+  CloseRoomOut,
+  CommandResult,
+  InviteOut,
+  MessageOut,
+  RoomActionSuccess,
+  RoomCommandAck,
+} from './room/room-types.ts';
 import { worktreePath, worktreeRef } from './worktree.ts';
 
 export interface SpawnRequest {
@@ -38,13 +46,15 @@ export interface SessionInfo {
 /** A message broadcast to every connected client. */
 export type Outbound = { session: string; event: UiEvent } | { sessions: SessionInfo[] };
 
+type MaybePromise<T> = T | Promise<T>;
+
 /** Control-line callbacks for a session's worker — used by the RoomManager to route
  *  a participant's `post_message` / `invite_agent` back into its room. A bare
  *  (non-room) session passes none, so the control lines are simply never emitted. */
 export interface SessionCallbacks {
-  onMessage?: (m: { text: string; to?: string[]; implicit?: boolean }) => void;
-  onInvite?: (i: { name: string; agent?: string; model?: string }) => void;
-  onCloseRoom?: (c: { reason?: string }) => void;
+  onMessage?: (m: MessageOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
+  onInvite?: (i: InviteOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
+  onCloseRoom?: (c: CloseRoomOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
 }
 
 /**
@@ -78,33 +88,24 @@ class PiSession {
       for (const raw of lines) {
         const line = raw.trim();
         if (!line) continue;
-        let parsed: {
-          kind?: string;
-          text?: string;
-          to?: string[];
-          implicit?: boolean;
-          name?: string;
-          agent?: string;
-          model?: string;
-          reason?: string;
-        };
+        let parsed:
+          | (Partial<MessageOut> & { kind: 'message_out' })
+          | (Partial<InviteOut> & { kind: 'invite' })
+          | (Partial<CloseRoomOut> & { kind: 'close_room' })
+          | (UiEvent & { kind: UiEvent['kind'] });
         try {
-          parsed = JSON.parse(line);
+          parsed = JSON.parse(line) as typeof parsed;
         } catch {
           continue; // non-JSON line from the worker (a stray log); ignore.
         }
         // A room participant's `post_message` / `invite_agent` arrive as control lines
         // routed back to its room, not the transcript. Everything else is a UiEvent.
         if (parsed.kind === 'message_out') {
-          callbacks?.onMessage?.({
-            text: parsed.text ?? '',
-            to: parsed.to,
-            implicit: parsed.implicit,
-          });
+          void this.acknowledge(parsed.requestId, callbacks?.onMessage?.(parsed as MessageOut));
         } else if (parsed.kind === 'invite' && parsed.name) {
-          callbacks?.onInvite?.({ name: parsed.name, agent: parsed.agent, model: parsed.model });
+          void this.acknowledge(parsed.requestId, callbacks?.onInvite?.(parsed as InviteOut));
         } else if (parsed.kind === 'close_room') {
-          callbacks?.onCloseRoom?.({ reason: parsed.reason });
+          void this.acknowledge(parsed.requestId, callbacks?.onCloseRoom?.(parsed as CloseRoomOut));
         } else if (parsed.kind) {
           onEvent(parsed as UiEvent);
         }
@@ -129,6 +130,18 @@ class PiSession {
    *  where we just need children gone before the process exits. */
   kill(): void {
     this.child.kill();
+  }
+
+  private async acknowledge(
+    requestId: string | undefined,
+    pending: MaybePromise<CommandResult<RoomActionSuccess>> | undefined,
+  ): Promise<void> {
+    if (!requestId) return;
+    const result =
+      (await pending) ??
+      ({ ok: false, code: 'rejected', message: 'room command unavailable' } as const);
+    const ack: RoomCommandAck = { type: 'room_command_result', requestId, result };
+    this.child.stdin?.write(`${JSON.stringify(ack)}\n`);
   }
 }
 

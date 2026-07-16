@@ -13,7 +13,7 @@ import { Type } from 'typebox';
  * agent. Reaching another participant (delivering them a turn) requires calling this
  * tool with an `@mention`; otherwise your normal output is private to you.
  */
-export function createPostMessageTool(emit: (text: string) => void): ToolDefinition {
+export function createPostMessageTool(emit: (text: string) => Promise<string>): ToolDefinition {
   return {
     name: 'post_message',
     label: 'Post Message',
@@ -30,9 +30,9 @@ export function createPostMessageTool(emit: (text: string) => void): ToolDefinit
     }),
     async execute(_toolCallId, params) {
       const { text } = params as { text: string };
-      emit(text);
+      const message = await emit(text);
       return {
-        content: [{ type: 'text' as const, text: 'Posted to the room.' }],
+        content: [{ type: 'text' as const, text: message }],
         details: null,
       };
     },

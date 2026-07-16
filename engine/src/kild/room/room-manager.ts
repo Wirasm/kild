@@ -1,15 +1,22 @@
 import { randomUUID } from 'node:crypto';
 
-import { sessionManager } from '../sessions.ts';
+import { listAgents } from '../agents.ts';
+import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { parseMentions } from './parse-mentions.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
 import {
   type ArchivedRoom,
+  type CloseRoomOut,
+  type CommandResult,
   HUMAN,
+  type InviteOut,
+  type MessageOut,
   type OpenRoomSpec,
+  type OpenRoomSuccess,
   type ParticipantSpec,
   type Room,
+  type RoomActionSuccess,
   type RoomMessage,
   type RoomOutbound,
 } from './room-types.ts';
@@ -17,6 +24,37 @@ import {
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
  *  just the human kill switch). */
 const MAX_PARTICIPANTS = 8;
+
+interface SessionRuntime {
+  subscribe(
+    fn: (msg: { session: string; event: unknown } | { sessions: unknown[] }) => void,
+  ): () => void;
+  spawn(id: string, req: SpawnRequest, origin?: 'ui' | 'cli', callbacks?: SessionCallbacks): void;
+  prompt(id: string, text: string, from?: string): void;
+  stop(id: string): void;
+}
+
+interface RoomManagerDeps {
+  registry?: RoomRegistry;
+  sessions?: SessionRuntime;
+  listAgents?: typeof listAgents;
+  createId?: () => string;
+}
+
+interface ValidatedParticipantSpec extends ParticipantSpec {
+  resolvedAgent?: string;
+}
+
+function ok<T>(value: T): CommandResult<T> {
+  return { ok: true, value };
+}
+
+function fail<T>(
+  code: 'not_found' | 'invalid_state' | 'rejected',
+  message: string,
+): CommandResult<T> {
+  return { ok: false, code, message };
+}
 
 /**
  * Owns live rooms: opens them (one session per participant), routes every post
@@ -26,22 +64,30 @@ const MAX_PARTICIPANTS = 8;
  * SessionManager stays room-agnostic; it only forwards a participant's control
  * lines (`message_out` / `invite`) to the callbacks we hand it.
  */
-class RoomManager {
-  private readonly registry = new RoomRegistry();
+export class RoomManager {
+  private readonly registry: RoomRegistry;
+  private readonly sessions: SessionRuntime;
+  private readonly resolveAgents: typeof listAgents;
+  private readonly createId: () => string;
   private readonly subscribers = new Set<(msg: RoomOutbound) => void>();
 
-  constructor() {
+  constructor(deps: RoomManagerDeps = {}) {
+    this.registry = deps.registry ?? new RoomRegistry();
+    this.sessions = deps.sessions ?? sessionManager;
+    this.resolveAgents = deps.listAgents ?? listAgents;
+    this.createId = deps.createId ?? randomUUID;
+
     // Forward each participant's transcript (its UiEvent stream from the session
     // substrate) to room clients, tagged by room + participant — so the cockpit can
     // render per-participant working detail. The session bus stays internal.
-    sessionManager.subscribe((msg) => {
+    this.sessions.subscribe((msg) => {
       if (!('session' in msg)) return;
       const located = this.registry.locateSession(msg.session);
       if (located) {
         this.broadcast({
           room: located.room.id,
           participant: located.participant.name,
-          event: msg.event,
+          event: msg.event as never,
         });
       }
     });
@@ -56,7 +102,13 @@ class RoomManager {
   }
 
   /** Open a room under a caller-supplied id, spawning a session per participant. */
-  open(roomId: string, spec: OpenRoomSpec): void {
+  async open(roomId: string, spec: OpenRoomSpec): Promise<CommandResult<OpenRoomSuccess>> {
+    if (this.registry.get(roomId)) {
+      return fail('rejected', `duplicate room id: ${roomId}`);
+    }
+    const validated = await this.validateParticipants(spec.cwd, spec.participants, []);
+    if (!validated.ok) return validated;
+
     const room: Room = {
       id: roomId,
       name: spec.name,
@@ -66,20 +118,35 @@ class RoomManager {
       log: [],
     };
     this.registry.create(room);
-    for (const p of spec.participants) this.spawnParticipant(room, p);
+
+    const spawnedSessionIds: string[] = [];
+    for (const participant of validated.value) {
+      const result = this.spawnParticipant(room, participant);
+      if (!result.ok) {
+        this.rollbackOpen(roomId, spawnedSessionIds);
+        return result;
+      }
+      spawnedSessionIds.push(result.value.sessionId);
+    }
+
     this.broadcast({ rooms: this.registry.summaries() });
+    return ok({ roomId, message: `Room '${spec.name}' opened.` });
   }
 
   /** The human posts into the room (kick-off and steering). */
-  postFromHuman(roomId: string, text: string): void {
-    this.post(roomId, HUMAN, text);
+  async postFromHuman(roomId: string, text: string): Promise<CommandResult<RoomActionSuccess>> {
+    return this.post(roomId, HUMAN, text);
   }
 
   /** An operator-side author (e.g. the brain) posts into a room — the agent-driven
    *  mirror of {@link postFromHuman}, routed identically. This is how the brain
    *  speaks into the real Room primitive instead of a separate bus. */
-  postAs(roomId: string, from: string, text: string): void {
-    this.post(roomId, from, text);
+  async postAs(
+    roomId: string,
+    from: string,
+    text: string,
+  ): Promise<CommandResult<RoomActionSuccess>> {
+    return this.post(roomId, from, text);
   }
 
   /** A room's shared log (empty if the room is unknown) — for demos / inspection. */
@@ -99,123 +166,166 @@ class RoomManager {
   }
 
   /** Add a participant to a live room (the human "invite"). */
-  addParticipant(roomId: string, spec: ParticipantSpec): void {
+  async addParticipant(
+    roomId: string,
+    spec: ParticipantSpec,
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
-    if (!room || !this.spawnParticipant(room, spec)) return;
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+    if (room.stopped) return fail('invalid_state', `room '${room.name}' is halted`);
+
+    const validated = await this.validateParticipants(room.cwd, [spec], room.participants);
+    if (!validated.ok) return validated;
+
+    const result = this.spawnParticipant(room, validated.value[0] as ValidatedParticipantSpec);
+    if (!result.ok) return result;
     this.broadcast({ rooms: this.registry.summaries() });
-    this.post(roomId, HUMAN, `@${spec.name} joined the room.`, { system: true });
+    await this.post(roomId, HUMAN, `@${spec.name} joined the room.`, {
+      system: true,
+      allowStopped: true,
+    });
+    return ok({ message: `Invited @${spec.name} to the room.` });
   }
 
   /** Stop every participant session — the human kill switch / room teardown. A room
    *  with history moves straight into the archive and is pushed to clients, so it stays
    *  visible as a read-only transcript without an engine restart. */
-  close(roomId: string): void {
+  async close(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
-    if (!room) return;
-    for (const p of room.participants) sessionManager.stop(p.sessionId);
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+    for (const participant of room.participants) this.sessions.stop(participant.sessionId);
     const archived = this.registry.remove(roomId);
     if (archived) this.broadcast({ archivedRoom: archived });
     this.broadcast({ rooms: this.registry.summaries() });
+    return ok({ message: `Room '${room.name}' closed.` });
   }
 
   /** Manual circuit breaker: stop every participant session but KEEP the room, so its
    *  transcript stays visible (read-only). The operator trips this to halt a runaway or
-   *  off-track room without tearing it down (vs {@link close}). Idempotent. */
-  halt(roomId: string): void {
+   *  off-track room without tearing it down (vs {@link close}). */
+  async halt(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
-    if (!room || room.stopped) return;
-    for (const p of room.participants) sessionManager.stop(p.sessionId);
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+    if (room.stopped) return fail('invalid_state', `room '${room.name}' is already halted`);
+    for (const participant of room.participants) this.sessions.stop(participant.sessionId);
     room.stopped = true;
-    this.post(roomId, HUMAN, 'Room halted by the operator.', { system: true });
+    await this.post(roomId, HUMAN, 'Room halted by the operator.', {
+      system: true,
+      allowStopped: true,
+    });
     this.broadcast({ rooms: this.registry.summaries() });
+    return ok({ message: `Room '${room.name}' halted.` });
   }
 
-  /** Spawn one participant session, wired so its control lines route back here.
-   *  Returns false if rejected (name taken / reserved / at capacity). */
-  private spawnParticipant(room: Room, spec: ParticipantSpec): boolean {
-    if (spec.name === HUMAN) return false;
-    if (room.participants.some((p) => p.name === spec.name)) return false;
-    if (room.participants.length >= MAX_PARTICIPANTS) return false;
+  /** Spawn one participant session, wired so its control lines route back here. */
+  private spawnParticipant(
+    room: Room,
+    spec: ValidatedParticipantSpec,
+  ): CommandResult<{ sessionId: string }> {
     const isLead = room.participants.length === 0; // first participant leads the room
-    const sessionId = randomUUID();
+    const sessionId = this.createId();
     room.participants.push({ name: spec.name, sessionId, agent: spec.agent });
-    sessionManager.spawn(
-      sessionId,
-      {
-        model: spec.model,
-        cwd: room.cwd,
-        agent: spec.agent,
-        projectName: room.name,
-        // Every participant attaches to the room's shared worktree, if any.
-        worktree: room.worktree,
-        // Opaque to the SessionManager; the worker reads these to register its room
-        // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
-        // tag its outbound control lines.
-        env: {
-          KILD_ROOM: room.id,
-          KILD_PARTICIPANT: spec.name,
-          ...(isLead ? { KILD_ROOM_LEAD: '1' } : {}),
+    try {
+      this.sessions.spawn(
+        sessionId,
+        {
+          model: spec.model,
+          cwd: room.cwd,
+          agent: spec.resolvedAgent,
+          projectName: room.name,
+          // Every participant attaches to the room's shared worktree, if any.
+          worktree: room.worktree,
+          // Opaque to the SessionManager; the worker reads these to register its room
+          // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
+          // tag its outbound control lines.
+          env: {
+            KILD_ROOM: room.id,
+            KILD_PARTICIPANT: spec.name,
+            ...(isLead ? { KILD_ROOM_LEAD: '1' } : {}),
+          },
         },
-      },
-      'cli',
-      {
-        onMessage: (m) => this.handleParticipantMessage(sessionId, m),
-        onInvite: (i) => this.handleInvite(sessionId, i),
-        onCloseRoom: (c) => this.handleCloseRoom(sessionId, c.reason),
-      },
-    );
-    return true;
+        'cli',
+        {
+          onMessage: (m) => this.handleParticipantMessage(sessionId, m),
+          onInvite: (i) => this.handleInvite(sessionId, i),
+          onCloseRoom: (c) => this.handleCloseRoom(sessionId, c),
+        },
+      );
+    } catch (err) {
+      room.participants = room.participants.filter(
+        (participant) => participant.sessionId !== sessionId,
+      );
+      return fail('rejected', err instanceof Error ? err.message : String(err));
+    }
+    return ok({ sessionId });
   }
 
   /** A participant called `post_message`: resolve its room/name and route. */
-  private handleParticipantMessage(
+  private async handleParticipantMessage(
     sessionId: string,
-    m: { text: string; to?: string[]; implicit?: boolean },
-  ): void {
+    m: MessageOut,
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
-    if (!located) return; // not (or no longer) a participant
-    this.post(located.room.id, located.participant.name, m.text, {
+    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
+    return this.post(located.room.id, located.participant.name, m.text, {
       to: m.to,
       implicit: m.implicit,
     });
   }
 
   /** A participant called `invite_agent`: add the named agent to its room. */
-  private handleInvite(sessionId: string, spec: ParticipantSpec): void {
+  private async handleInvite(
+    sessionId: string,
+    spec: InviteOut,
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
-    if (located) this.addParticipant(located.room.id, spec);
+    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
+    return this.addParticipant(located.room.id, {
+      name: spec.name,
+      agent: spec.agent,
+      model: spec.model,
+    });
   }
 
   /** The room's lead called `close_room`: notice, then teardown. Only the lead holds
    *  the tool (worker-side), but enforce it here too — a control line is just stdout,
    *  so the engine, not the subprocess, is the authority on who may end a room. */
-  private handleCloseRoom(sessionId: string, reason?: string): void {
+  private async handleCloseRoom(
+    sessionId: string,
+    closeSpec: CloseRoomOut,
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
-    if (!located) return;
+    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
     const { room, participant } = located;
-    if (room.participants[0]?.sessionId !== sessionId) return; // not the lead — ignore
-    this.post(
+    if (room.participants[0]?.sessionId !== sessionId) {
+      return fail('rejected', `only the lead may close room '${room.name}'`);
+    }
+    await this.post(
       room.id,
       HUMAN,
-      `Room closed by @${participant.name}${reason ? `: ${reason}` : '.'}`,
+      `Room closed by @${participant.name}${closeSpec.reason ? `: ${closeSpec.reason}` : '.'}`,
       {
         system: true,
+        allowStopped: true,
       },
     );
-    this.close(room.id);
+    return this.close(room.id);
   }
 
   /** Record + route one post from `from` (a participant name or {@link HUMAN}). */
-  private post(
+  private async post(
     roomId: string,
     from: string,
     text: string,
-    opts: { to?: string[]; implicit?: boolean; system?: boolean } = {},
-  ): void {
+    opts: { to?: string[]; implicit?: boolean; system?: boolean; allowStopped?: boolean } = {},
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
-    if (!room) return;
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+    if (room.stopped && !opts.allowStopped) {
+      return fail('invalid_state', `room '${room.name}' is halted`);
+    }
     const message: RoomMessage = {
-      id: randomUUID(),
+      id: this.createId(),
       roomId,
       from,
       // The one place "who is this addressed to?" is answered: a notice addresses no
@@ -235,19 +345,55 @@ class RoomManager {
       const participants = room.participants
         .map((participant) => `@${participant.name}`)
         .join(', ');
-      this.post(
-        roomId,
-        HUMAN,
+      const warning =
         `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
-          `(in the room: ${participants || 'none'})`,
-        { system: true },
-      );
+        `(in the room: ${participants || 'none'})`;
+      await this.post(roomId, HUMAN, warning, { system: true, allowStopped: true });
+      return fail('rejected', warning);
     }
+    return ok({ message: 'Posted to the room.' });
+  }
+
+  private async validateParticipants(
+    cwd: string,
+    participants: ParticipantSpec[],
+    existing: Array<{ name: string }>,
+  ): Promise<CommandResult<ValidatedParticipantSpec[]>> {
+    if (existing.length + participants.length > MAX_PARTICIPANTS) {
+      return fail('rejected', `room capacity exceeded (max ${MAX_PARTICIPANTS} participants)`);
+    }
+
+    const knownAgents = new Set((await this.resolveAgents(cwd)).map((agent) => agent.name));
+    const seenNames = new Set(existing.map((participant) => participant.name));
+    const validated: ValidatedParticipantSpec[] = [];
+
+    for (const spec of participants) {
+      if (spec.name === HUMAN) {
+        return fail('rejected', `participant name '${HUMAN}' is reserved`);
+      }
+      if (seenNames.has(spec.name)) {
+        return fail('rejected', `duplicate participant: @${spec.name}`);
+      }
+      seenNames.add(spec.name);
+
+      const resolvedAgent = spec.agent ?? spec.name;
+      if (resolvedAgent !== 'default' && !knownAgents.has(resolvedAgent)) {
+        return fail('rejected', `unknown agent: ${resolvedAgent}`);
+      }
+      validated.push({ ...spec, resolvedAgent });
+    }
+
+    return ok(validated);
+  }
+
+  private rollbackOpen(roomId: string, sessionIds: string[]): void {
+    for (const sessionId of sessionIds) this.sessions.stop(sessionId);
+    this.registry.remove(roomId);
   }
 
   private delivery(): RoomDelivery {
     return {
-      deliverAsTurn: (sessionId, from, text) => sessionManager.prompt(sessionId, text, from),
+      deliverAsTurn: (sessionId, from, text) => this.sessions.prompt(sessionId, text, from),
       broadcast: (message) => this.broadcast({ roomMessage: message }),
     };
   }
