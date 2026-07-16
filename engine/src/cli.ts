@@ -244,7 +244,16 @@ async function room(goal: string): Promise<void> {
       process.stdin.on('data', (chunk: string) => {
         for (const raw of chunk.split('\n')) {
           const text = raw.trim();
-          if (text) ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
+          if (!text) continue;
+          const invite = text.match(/^\/invite(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?$/);
+          if (invite?.[1]) {
+            const [, name, agent, model] = invite;
+            ws.send(
+              JSON.stringify({ type: 'room_add', id: roomId, participant: { name, agent, model } }),
+            );
+          } else {
+            ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
+          }
         }
       });
     }
@@ -264,7 +273,7 @@ async function room(goal: string): Promise<void> {
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# room "${name}" — ${participantNames.join(', ')}${where} · type to post · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# room "${name}" — ${participantNames.join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
