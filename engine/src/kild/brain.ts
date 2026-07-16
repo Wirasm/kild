@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CreatedAgent, FlueContext, ToolDefinition } from '@flue/runtime';
 import { createAgent, defineTool, Type } from '@flue/runtime';
 
-import { listAgents } from './agents.ts';
+import { listAgents, resolveAgentInstructions } from './agents.ts';
 import { DEFAULT_MODEL } from './config.ts';
 import { findProject, loadProjects } from './projects.ts';
 import { roomManager } from './room/room-manager.ts';
@@ -107,14 +107,12 @@ export function kildTools(init: Init): ToolDefinition[] {
 
 /** The brain: one agent configured with kild's full capability surface. */
 export function createBrain(init: Init, model: string = DEFAULT_MODEL): CreatedAgent {
-  return createAgent(() => ({
-    model,
-    instructions:
-      'You are the kild operator brain — a mirror of the human operator. You orchestrate ' +
-      'coding-agent work across projects using your kild tools: inspect projects and agents, ' +
-      'create isolated worktrees, dispatch agents into them, and report progress to rooms. ' +
-      'To report, open_room to get a room id (or reuse one you were given), then post_to_room ' +
-      'with that id. Prefer doing the work via tools over describing it. Be concise.',
-    tools: kildTools(init),
-  }));
+  return createAgent(async () => {
+    const instructions = await resolveAgentInstructions('brain', process.cwd());
+    if (!instructions) {
+      throw new Error('Brain agent instructions not found: .pi/agents/brain.md');
+    }
+
+    return { model, instructions, tools: kildTools(init) };
+  });
 }
