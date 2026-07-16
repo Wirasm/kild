@@ -82,9 +82,64 @@
   .text :global(p) {
     margin: 0 0 6px 0;
   }
+  .text :global(p:last-child) {
+    margin-bottom: 0;
+  }
   .text :global(code) {
     font-family: var(--mono);
     font-size: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0 3px;
+    border-radius: 3px;
+  }
+  .text :global(strong) {
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+  .text :global(ul),
+  .text :global(ol) {
+    margin: 4px 0 8px;
+    padding-left: 18px;
+  }
+  .text :global(li) {
+    margin: 3px 0;
+  }
+  .text :global(li > ul),
+  .text :global(li > ol) {
+    margin: 3px 0 3px;
+  }
+  .text :global(h1),
+  .text :global(h2),
+  .text :global(h3) {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 10px 0 4px;
+  }
+  .text :global(table) {
+    border-collapse: collapse;
+    margin: 6px 0;
+    font-size: 12px;
+  }
+  .text :global(th),
+  .text :global(td) {
+    border: 1px solid var(--border-subtle);
+    padding: 3px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .text :global(th) {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .text :global(blockquote) {
+    margin: 4px 0;
+    padding-left: 10px;
+    border-left: 2px solid var(--border-subtle);
+    color: var(--text-subtle);
+  }
+  .text :global(a) {
+    color: var(--ice);
   }
   .sys {
     color: var(--text-muted);

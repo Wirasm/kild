@@ -5,6 +5,7 @@ import { parseMentions } from './parse-mentions.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { type RoomDelivery, routeRoomMessage } from './room-router.ts';
 import {
+  type ArchivedRoom,
   HUMAN,
   type OpenRoomSpec,
   type ParticipantSpec,
@@ -74,6 +75,29 @@ class RoomManager {
     this.post(roomId, HUMAN, text);
   }
 
+  /** An operator-side author (e.g. the brain) posts into a room — the agent-driven
+   *  mirror of {@link postFromHuman}, routed identically. This is how the brain
+   *  speaks into the real Room primitive instead of a separate bus. */
+  postAs(roomId: string, from: string, text: string): void {
+    this.post(roomId, from, text);
+  }
+
+  /** A room's shared log (empty if the room is unknown) — for demos / inspection. */
+  messages(roomId: string): RoomMessage[] {
+    return this.registry.get(roomId)?.log ?? [];
+  }
+
+  /** Past rooms recovered from disk (read-only logs from previous engine runs). */
+  archived(): ArchivedRoom[] {
+    return this.registry.archived();
+  }
+
+  /** Live rooms with their logs — for a client joining a room it didn't open (or
+   *  reloading), so it can render the conversation so far. */
+  liveRooms(): ArchivedRoom[] {
+    return this.registry.liveWithLogs();
+  }
+
   /** Add a participant to a live room (the human "invite"). */
   addParticipant(roomId: string, spec: ParticipantSpec): void {
     const room = this.registry.get(roomId);
@@ -82,12 +106,27 @@ class RoomManager {
     this.post(roomId, HUMAN, `@${spec.name} joined the room.`, { system: true });
   }
 
-  /** Stop every participant session — the human kill switch / room teardown. */
+  /** Stop every participant session — the human kill switch / room teardown. A room
+   *  with history moves straight into the archive and is pushed to clients, so it stays
+   *  visible as a read-only transcript without an engine restart. */
   close(roomId: string): void {
     const room = this.registry.get(roomId);
     if (!room) return;
     for (const p of room.participants) sessionManager.stop(p.sessionId);
-    this.registry.remove(roomId);
+    const archived = this.registry.remove(roomId);
+    if (archived) this.broadcast({ archivedRoom: archived });
+    this.broadcast({ rooms: this.registry.summaries() });
+  }
+
+  /** Manual circuit breaker: stop every participant session but KEEP the room, so its
+   *  transcript stays visible (read-only). The operator trips this to halt a runaway or
+   *  off-track room without tearing it down (vs {@link close}). Idempotent. */
+  halt(roomId: string): void {
+    const room = this.registry.get(roomId);
+    if (!room || room.stopped) return;
+    for (const p of room.participants) sessionManager.stop(p.sessionId);
+    room.stopped = true;
+    this.post(roomId, HUMAN, 'Room halted by the operator.', { system: true });
     this.broadcast({ rooms: this.registry.summaries() });
   }
 
@@ -97,6 +136,7 @@ class RoomManager {
     if (spec.name === HUMAN) return false;
     if (room.participants.some((p) => p.name === spec.name)) return false;
     if (room.participants.length >= MAX_PARTICIPANTS) return false;
+    const isLead = room.participants.length === 0; // first participant leads the room
     const sessionId = randomUUID();
     room.participants.push({ name: spec.name, sessionId, agent: spec.agent });
     sessionManager.spawn(
@@ -109,13 +149,19 @@ class RoomManager {
         // Every participant attaches to the room's shared worktree, if any.
         worktree: room.worktree,
         // Opaque to the SessionManager; the worker reads these to register its room
-        // tools (`post_message`, `invite_agent`) and tag its outbound control lines.
-        env: { KILD_ROOM: room.id, KILD_PARTICIPANT: spec.name },
+        // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
+        // tag its outbound control lines.
+        env: {
+          KILD_ROOM: room.id,
+          KILD_PARTICIPANT: spec.name,
+          ...(isLead ? { KILD_ROOM_LEAD: '1' } : {}),
+        },
       },
       'cli',
       {
         onMessage: (m) => this.handleParticipantMessage(sessionId, m),
         onInvite: (i) => this.handleInvite(sessionId, i),
+        onCloseRoom: (c) => this.handleCloseRoom(sessionId, c.reason),
       },
     );
     return true;
@@ -140,6 +186,25 @@ class RoomManager {
     if (located) this.addParticipant(located.room.id, spec);
   }
 
+  /** The room's lead called `close_room`: notice, then teardown. Only the lead holds
+   *  the tool (worker-side), but enforce it here too — a control line is just stdout,
+   *  so the engine, not the subprocess, is the authority on who may end a room. */
+  private handleCloseRoom(sessionId: string, reason?: string): void {
+    const located = this.registry.locateSession(sessionId);
+    if (!located) return;
+    const { room, participant } = located;
+    if (room.participants[0]?.sessionId !== sessionId) return; // not the lead — ignore
+    this.post(
+      room.id,
+      HUMAN,
+      `Room closed by @${participant.name}${reason ? `: ${reason}` : '.'}`,
+      {
+        system: true,
+      },
+    );
+    this.close(room.id);
+  }
+
   /** Record + route one post from `from` (a participant name or {@link HUMAN}). */
   private post(
     roomId: string,
@@ -153,7 +218,9 @@ class RoomManager {
       id: randomUUID(),
       roomId,
       from,
-      // System notices broadcast only (no turn). Otherwise: explicit `to`, else mentions.
+      // The one place "who is this addressed to?" is answered: a notice addresses no
+      // one, otherwise an explicit `to` wins, else the @mentions in the text. The router
+      // consumes this verbatim — it must never re-derive addressees from the text.
       to: opts.system ? [] : (opts.to ?? parseMentions(text)),
       text,
       ts: Date.now(),

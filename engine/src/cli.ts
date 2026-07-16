@@ -12,6 +12,7 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
   ensureWorktree,
   listWorktrees,
@@ -183,9 +184,10 @@ async function run(prompt: string): Promise<void> {
  * (`--participants orchestrator,worker,reviewer`; default `orchestrator,worker`),
  * posts the goal to the first one, and streams every message. With `--worktree
  * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
- * You can keep typing to post more messages (address participants with @name);
- * Ctrl-C is the kill switch — it closes the room (stopping all participants) and
- * exits. Requires the engine (it is multi-session).
+ * You can keep typing to post more messages (address participants with @name).
+ * The run ends when the room does: the lead closes it with its `close_room` tool
+ * after the final report, or Ctrl-C is the kill switch — it closes the room
+ * (stopping all participants) and exits. Requires the engine (it is multi-session).
  */
 async function room(goal: string): Promise<void> {
   if (!goal) {
@@ -209,8 +211,12 @@ async function room(goal: string): Promise<void> {
     .filter(Boolean);
   if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
   const lead = participantNames[0] as string;
-  // Address the lead participant unless the goal already @mentions someone.
-  const kickoff = /@[A-Za-z0-9_-]+/.test(goal) ? goal : `@${lead} ${goal}`;
+  // Address the lead unless the goal already addresses a PARTICIPANT. Testing for a
+  // bare @mention is not the same question: `@human` is never a participant, and it
+  // is exactly what a goal says when it names who to report back to — that would
+  // address no one and the room would sit idle.
+  const addressed = parseMentions(goal).some((h) => participantNames.includes(h));
+  const kickoff = addressed ? goal : `@${lead} ${goal}`;
   const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
@@ -266,10 +272,19 @@ async function room(goal: string): Promise<void> {
     ws.addEventListener('message', (e) => {
       let parsed: {
         roomMessage?: { roomId: string; from: string; to: string[]; text: string };
+        archivedRoom?: { id: string };
       };
       try {
         parsed = JSON.parse(String((e as { data: unknown }).data));
       } catch {
+        return;
+      }
+      // The engine archived our room (the lead called `close_room`, or another
+      // client closed it) — the run is over; resolve without re-closing.
+      if (parsed.archivedRoom?.id === roomId) {
+        if (!json) console.error('\x1b[2m— room closed —\x1b[0m');
+        ws.close();
+        resolve();
         return;
       }
       const m = parsed.roomMessage;

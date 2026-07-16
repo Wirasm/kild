@@ -3,6 +3,7 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { resolveModel, withRole } from './kild/models.ts';
+import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
 import { createPostMessageTool } from './kild/room/post-message-tool.ts';
 import { ensureWorktree } from './kild/worktree.ts';
@@ -20,12 +21,15 @@ export async function runWorker(): Promise<never> {
   const agentName = process.env.KILD_AGENT || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inRoom = !!process.env.KILD_ROOM;
+  const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
   const emitMessage = (text: string, to?: string[], implicit?: boolean) =>
     process.stdout.write(`${JSON.stringify({ kind: 'message_out', text, to, implicit })}\n`);
   const emitInvite = (spec: { name: string; agent?: string; model?: string }) =>
     process.stdout.write(`${JSON.stringify({ kind: 'invite', ...spec })}\n`);
+  const emitCloseRoom = (spec: { reason?: string }) =>
+    process.stdout.write(`${JSON.stringify({ kind: 'close_room', ...spec })}\n`);
 
   // Optional isolation: run inside the named git worktree (create-or-attach) rather
   // than the raw repo. Done here (not in the manager) so spawn stays synchronous;
@@ -54,8 +58,9 @@ export async function runWorker(): Promise<never> {
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   try {
     model = resolveModel(registry, modelPattern);
-    // A room participant gets `post_message` + `invite_agent`; their calls become
-    // control lines on stdout the engine routes back into the room.
+    // A room participant gets `post_message` + `invite_agent`; the room's LEAD also
+    // gets `close_room` (ending the room is the lead's explicit act). Their calls
+    // become control lines on stdout the engine routes back into the room.
     const customTools = inRoom
       ? [
           createPostMessageTool((text) => {
@@ -63,6 +68,7 @@ export async function runWorker(): Promise<never> {
             emitMessage(text);
           }),
           createInviteAgentTool(emitInvite),
+          ...(isRoomLead ? [createCloseRoomTool(emitCloseRoom)] : []),
         ]
       : undefined;
     ({ session } = await createAgentSession({
@@ -85,8 +91,10 @@ export async function runWorker(): Promise<never> {
       if (ui.kind === 'text') turnText += ui.delta; // accumulate the turn's reply text
     }
     if (e.type === 'agent_end') {
-      // Implicit reply: if the agent didn't post explicitly this turn, treat its
-      // turn-final text as a reply addressed back to whoever delivered the turn.
+      // Implicit reply: if the agent didn't post explicitly this turn, surface its
+      // turn-final text so the human sees what it said. Tagged with the sender for
+      // display only — the engine broadcasts it but does NOT deliver it as a turn
+      // (see room-router.ts), so narration can't ping-pong agents into a loop.
       if (inRoom && !postedThisTurn && turnText.trim()) {
         emitMessage(turnText, [turnSender], true);
       }

@@ -15,7 +15,8 @@
         "title": "kild",
         "width": 1100,
         "height": 760,
-        "titleBarStyle": "transparent"
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true
       }
     ],
     "security": {

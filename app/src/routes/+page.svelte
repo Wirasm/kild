@@ -10,12 +10,15 @@
     listAgents,
     listProjects,
     listWorktrees,
+    listArchivedRooms,
+    listLiveRooms,
     removeWorktree as apiRemoveWorktree,
     pruneWorktrees as apiPruneWorktrees,
     openWorktree as apiOpenWorktree,
+    openUrl,
   } from "$lib/api";
 
-  import type { Project, Agent, UiEvent, Room, Message, RoomSummary, RoomSpec, Worktree } from "$lib/types";
+  import type { Project, Agent, UiEvent, Room, Message, RoomSummary, RoomSpec, Worktree, ArchivedRoom } from "$lib/types";
 
   const MODELS = [
     "anthropic/claude-haiku-4-5",
@@ -121,6 +124,81 @@
   async function loadProjects() {
     projects = await listProjects();
   }
+
+  function mkParticipant(p: { name: string; agent?: string }): Room["participants"][number] {
+    return { name: p.name, agent: p.agent, model: "default", items: [], running: false, modelLabel: null, stats: null };
+  }
+
+  // Merge one archived room into the list: flip an existing entry to read-only history
+  // (with its full log), or add it fresh. Used by the startup fetch and by the live
+  // "room just closed" push from the engine.
+  function mergeArchived(a: ArchivedRoom) {
+    const existing = rooms.find((r) => r.id === a.id);
+    if (existing) {
+      existing.status = "stopped";
+      existing.archived = true;
+      existing.log = a.log;
+      for (const p of a.participants) {
+        if (!existing.participants.some((x) => x.name === p.name)) existing.participants.push(mkParticipant(p));
+      }
+      return;
+    }
+    rooms.push({
+      id: a.id,
+      name: a.name,
+      participants: a.participants.map(mkParticipant),
+      log: a.log,
+      status: "stopped",
+      origin: "cli",
+      archived: true,
+      branch: a.worktree ? `kild/${a.worktree}` : undefined,
+    });
+  }
+
+  // Load the log for a LIVE room set up elsewhere (e.g. via the CLI) or after a reload,
+  // so joining it shows the conversation so far instead of an empty pane. Never clobbers
+  // a room this client already drives.
+  function mergeLiveLog(r: ArchivedRoom) {
+    const existing = rooms.find((x) => x.id === r.id);
+    if (!existing) {
+      rooms.push({
+        id: r.id,
+        name: r.name,
+        participants: r.participants.map(mkParticipant),
+        log: r.log,
+        status: "running",
+        origin: "cli",
+        branch: r.worktree ? `kild/${r.worktree}` : undefined,
+      });
+      return;
+    }
+    if (existing.log.length === 0 && r.log.length > 0) existing.log = r.log;
+    for (const p of r.participants) {
+      if (!existing.participants.some((x) => x.name === p.name)) existing.participants.push(mkParticipant(p));
+    }
+  }
+
+  // Pull the engine's on-disk room history into the list as read-only entries. Runs
+  // whenever the engine (re)connects — after a dev `--watch` reload the engine loses
+  // its live rooms but keeps their logs, so this restores the conversation record.
+  async function loadArchivedRooms() {
+    try {
+      for (const a of await listArchivedRooms()) mergeArchived(a);
+    } catch (e) {
+      // Past-room history is optional enrichment — never block the cockpit on it.
+      console.warn("kild: could not load room history", e);
+    }
+  }
+
+  // Load conversation logs for live rooms this client didn't open (set up via CLI, or
+  // after a reload) so they're continuable, not blank.
+  async function loadLiveRooms() {
+    try {
+      for (const r of await listLiveRooms()) mergeLiveLog(r);
+    } catch (e) {
+      console.warn("kild: could not load live room logs", e);
+    }
+  }
   async function loadAgents(projectPath: string) {
     agents = await listAgents(projectPath);
     selectedAgents = selectedAgents.filter((a) => agents.some((x) => x.name === a));
@@ -225,6 +303,17 @@
     }
   }
 
+  // Manual circuit breaker: stop the room's agents but keep it (read-only). Optimistic —
+  // the engine confirms via the next room summary (stopped: true).
+  function haltRoom(id: string) {
+    socket?.haltRoom(id);
+    const room = rooms.find((r) => r.id === id);
+    if (room) {
+      room.status = "stopped";
+      for (const p of room.participants) p.running = false;
+    }
+  }
+
   // Post into the active room — addressing the focused participant if no @mention.
   function send() {
     if (!activeRoom || !socket) return;
@@ -280,7 +369,9 @@
   // Mirror the engine's room list: upsert rooms + participants, drop dead ones.
   function reconcileRooms(summaries: RoomSummary[]) {
     const live = new Set(summaries.map((s) => s.id));
-    rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id));
+    // Keep live + owned (pending the open echo) + archived (read-only history). A
+    // formerly-live room the engine no longer has, and which isn't archived, is dropped.
+    rooms = rooms.filter((r) => ownedIds.has(r.id) || live.has(r.id) || r.archived);
     for (const sum of summaries) {
       // The engine now knows this room — it's no longer "pending the open echo", so a
       // later restart that wipes the engine's list drops it instead of leaving a ghost.
@@ -300,6 +391,7 @@
       } else if (sum.worktree && !room.branch) {
         room.branch = `kild/${sum.worktree}`;
       }
+      room.status = sum.stopped ? "stopped" : "running"; // engine is the source of truth
       for (const p of sum.participants) {
         if (!room.participants.some((x) => x.name === p.name)) {
           room.participants.push({
@@ -323,7 +415,18 @@
     }
   }
 
+  // Open rendered links (e.g. the maintainer's #refs) in the OS browser instead of
+  // letting them navigate the Tauri webview away from the cockpit.
+  function interceptLinks(e: MouseEvent) {
+    const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (a && /^https?:\/\//i.test(a.href)) {
+      e.preventDefault();
+      void openUrl(a.href).catch((err) => console.warn("kild: could not open url", err));
+    }
+  }
+
   onMount(() => {
+    document.addEventListener("click", interceptLinks);
     if (typeof localStorage !== "undefined") {
       const savedModel = localStorage.getItem("kild_last_model");
       if (savedModel && MODELS.includes(savedModel)) model = savedModel;
@@ -333,6 +436,8 @@
       (connected) => {
         if (connected) {
           if (error?.startsWith("Engine")) error = null;
+          void loadArchivedRooms(); // restore read-only history once the engine is reachable
+          void loadLiveRooms(); // load logs for live rooms set up elsewhere, so they're continuable
         } else {
           for (const r of rooms) {
             for (const p of r.participants) p.running = false;
@@ -343,13 +448,17 @@
       },
       (summaries) => reconcileRooms(summaries),
       (room, msg) => handleRoomMessage(room, msg),
+      (a) => mergeArchived(a),
     );
     loadProjects()
       .then(() => {
         if (projects.length > 0) selectProject(projects[0]);
       })
       .catch((e) => (error = `Could not load projects: ${e}`));
-    return () => socket?.close();
+    return () => {
+      document.removeEventListener("click", interceptLinks);
+      socket?.close();
+    };
   });
 </script>
 
@@ -422,6 +531,7 @@
         onSelectParticipant={(name) => (activeParticipantId = name)}
         onInvite={inviteParticipant}
         onClose={() => activeRoom && closeRoom(activeRoom.id)}
+        onHalt={() => activeRoom && haltRoom(activeRoom.id)}
         onOpenWorktree={onOpenWorktree}
         onSend={send}
       />

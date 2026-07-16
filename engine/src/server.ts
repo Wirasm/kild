@@ -141,8 +141,40 @@ app.post('/api/open', async (c) => {
   }
 });
 
+// Open an external http(s) URL in the OS browser. The cockpit routes rendered links
+// here so a click never navigates the Tauri webview away from the app. Restricted to
+// http/https — never file://, app schemes, etc. execFile (no shell) → no injection.
+app.post('/api/open-url', async (c) => {
+  const { url } = await c.req.json<{ url: string }>();
+  let parsed: URL;
+  try {
+    parsed = new URL(url ?? '');
+  } catch {
+    return c.json({ error: 'invalid url' }, 400);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return c.json({ error: 'only http(s) urls may be opened' }, 403);
+  }
+  try {
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+    await execFile(opener, [parsed.toString()]);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
+
+// ── Rooms ─────────────────────────────────────────────────────────────────────
+// Past rooms recovered from disk (read-only history). Live rooms flow over the WS
+// (`{rooms}` summaries + `{roomMessage}` posts); this is the conversation record of
+// rooms from previous engine runs — their participant subprocesses are long gone.
+app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
+// Live rooms WITH their logs — so a cockpit joining a room it didn't open (or after a
+// refresh) can load the conversation so far. The WS only streams *new* messages.
+app.get('/api/rooms/live', (c) => c.json(roomManager.liveRooms()));
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the room broadcast — so rooms opened by any client
@@ -159,6 +191,7 @@ type ClientMessage =
     }
   | { type: 'room_post'; id: string; text: string }
   | { type: 'room_add'; id: string; participant: { name: string; agent?: string; model?: string } }
+  | { type: 'room_halt'; id: string }
   | { type: 'room_close'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
@@ -182,6 +215,7 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (m.type === 'room_add' && typeof m.participant === 'object' && m.participant !== null) {
     return m as ClientMessage;
   }
+  if (m.type === 'room_halt') return m as ClientMessage;
   if (m.type === 'room_close') return m as ClientMessage;
   return null;
 }
@@ -212,6 +246,8 @@ app.get(
           roomManager.postFromHuman(msg.id, msg.text);
         } else if (msg.type === 'room_add') {
           roomManager.addParticipant(msg.id, msg.participant);
+        } else if (msg.type === 'room_halt') {
+          roomManager.halt(msg.id);
         } else if (msg.type === 'room_close') {
           roomManager.close(msg.id);
         }

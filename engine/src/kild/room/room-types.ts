@@ -50,6 +50,9 @@ export interface Room {
   worktree?: string;
   participants: RoomParticipant[];
   log: RoomMessage[];
+  /** True once the operator trips the manual circuit breaker (halt): every participant
+   *  session is stopped but the room is kept, read-only, so its transcript stays. */
+  stopped?: boolean;
 }
 
 /** A participant to spawn into a room. */
@@ -74,12 +77,27 @@ export interface RoomSummary {
   name: string;
   worktree?: string;
   participants: Array<{ name: string; agent?: string }>;
+  /** True when the operator has halted the room (sessions stopped, kept read-only). */
+  stopped?: boolean;
+}
+
+/** A room recovered from disk after an engine restart — its conversation log with no
+ *  live participants (their sessions are gone). The cockpit renders it read-only. */
+export interface ArchivedRoom {
+  id: string;
+  name: string;
+  worktree?: string;
+  participants: Array<{ name: string; agent?: string }>;
+  log: RoomMessage[];
 }
 
 /** What the engine broadcasts to clients about rooms. */
 export type RoomOutbound =
   | { roomMessage: RoomMessage }
   | { rooms: RoomSummary[] }
+  /** A room that just closed with history — pushed so clients show it as read-only
+   *  history immediately, without refetching the archive or restarting. */
+  | { archivedRoom: ArchivedRoom }
   /** A participant's transcript event (its UiEvent stream), tagged by room+participant. */
   | { room: string; participant: string; event: UiEvent };
 

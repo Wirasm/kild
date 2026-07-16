@@ -20,8 +20,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "^0.78.1",
+    "@earendil-works/pi-ai": "^0.80.7",
+    "@earendil-works/pi-coding-agent": "0.80.7",
     "@flue/runtime": "^0.9.2",
     "hono": "^4.8.3",
     "just-bash": "^3.0.1",

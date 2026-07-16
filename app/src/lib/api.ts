@@ -1,4 +1,13 @@
-import type { Agent, Message, Project, RoomSpec, RoomSummary, UiEvent, Worktree } from "./types";
+import type {
+  Agent,
+  ArchivedRoom,
+  Message,
+  Project,
+  RoomSpec,
+  RoomSummary,
+  UiEvent,
+  Worktree,
+} from "./types";
 
 /** The kild engine's base URL. Override with VITE_KILD_ENGINE. */
 const BASE = import.meta.env.VITE_KILD_ENGINE ?? "http://localhost:4517";
@@ -75,6 +84,37 @@ export async function openWorktree(path: string): Promise<void> {
   }
 }
 
+/** Fetch past rooms (read-only history) recovered from the engine's on-disk store.
+ *  Their participant subprocesses are gone — these are conversation records only. */
+export async function listArchivedRooms(): Promise<ArchivedRoom[]> {
+  const r = await fetch(`${BASE}/api/rooms/archive`);
+  if (!r.ok) throw new Error(`archived rooms request failed (${r.status})`);
+  return r.json();
+}
+
+/** Fetch LIVE rooms with their logs — so the cockpit can load the conversation so far
+ *  for a room it didn't open itself (e.g. one set up via the CLI), or after a reload.
+ *  Same shape as {@link ArchivedRoom} but these rooms are still running. */
+export async function listLiveRooms(): Promise<ArchivedRoom[]> {
+  const r = await fetch(`${BASE}/api/rooms/live`);
+  if (!r.ok) throw new Error(`live rooms request failed (${r.status})`);
+  return r.json();
+}
+
+/** Open an external URL in the OS browser (engine validates http/https). Rendered link
+ *  clicks route here so they never navigate the Tauri webview away from the cockpit. */
+export async function openUrl(url: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/open-url`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `open url failed (${r.status})`);
+  }
+}
+
 /** A room message as broadcast by the engine (carries the room id for routing). */
 type WireRoomMessage = Message & { roomId: string };
 
@@ -98,6 +138,7 @@ export class EngineSocket {
     private onStatus?: (connected: boolean) => void,
     private onRooms?: (rooms: RoomSummary[]) => void,
     private onRoomMessage?: (room: string, message: Message) => void,
+    private onArchivedRoom?: (room: ArchivedRoom) => void,
   ) {
     this.connect();
   }
@@ -114,6 +155,7 @@ export class EngineSocket {
       let msg: {
         rooms?: RoomSummary[];
         roomMessage?: WireRoomMessage;
+        archivedRoom?: ArchivedRoom;
         room?: string;
         participant?: string;
         event?: UiEvent;
@@ -124,6 +166,7 @@ export class EngineSocket {
         return; // ignore malformed frames
       }
       if (Array.isArray(msg.rooms)) this.onRooms?.(msg.rooms);
+      else if (msg.archivedRoom) this.onArchivedRoom?.(msg.archivedRoom);
       else if (msg.roomMessage) this.onRoomMessage?.(msg.roomMessage.roomId, msg.roomMessage);
       else if (typeof msg.room === "string" && typeof msg.participant === "string" && msg.event) {
         this.onEvent(msg.room, msg.participant, msg.event);
@@ -152,6 +195,10 @@ export class EngineSocket {
   }
   addParticipant(id: string, participant: { name: string; agent?: string; model?: string }): void {
     this.send({ type: "room_add", id, participant });
+  }
+  /** Trip the manual circuit breaker: stop the room's agents but keep it read-only. */
+  haltRoom(id: string): void {
+    this.send({ type: "room_halt", id });
   }
   closeRoom(id: string): void {
     this.send({ type: "room_close", id });

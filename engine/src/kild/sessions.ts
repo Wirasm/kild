@@ -44,6 +44,7 @@ export type Outbound = { session: string; event: UiEvent } | { sessions: Session
 export interface SessionCallbacks {
   onMessage?: (m: { text: string; to?: string[]; implicit?: boolean }) => void;
   onInvite?: (i: { name: string; agent?: string; model?: string }) => void;
+  onCloseRoom?: (c: { reason?: string }) => void;
 }
 
 /**
@@ -85,6 +86,7 @@ class PiSession {
           name?: string;
           agent?: string;
           model?: string;
+          reason?: string;
         };
         try {
           parsed = JSON.parse(line);
@@ -101,6 +103,8 @@ class PiSession {
           });
         } else if (parsed.kind === 'invite' && parsed.name) {
           callbacks?.onInvite?.({ name: parsed.name, agent: parsed.agent, model: parsed.model });
+        } else if (parsed.kind === 'close_room') {
+          callbacks?.onCloseRoom?.({ reason: parsed.reason });
         } else if (parsed.kind) {
           onEvent(parsed as UiEvent);
         }

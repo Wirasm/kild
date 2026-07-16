@@ -27,7 +27,7 @@
   <textarea
     bind:value={input}
     onkeydown={onKeydown}
-    placeholder={status === "stopped" ? "Room stopped — start a new one to continue" : placeholder}
+    placeholder={status === "stopped" ? "Room ended — read-only history" : placeholder}
     rows="2"
     disabled={status === "stopped"}
   ></textarea>
