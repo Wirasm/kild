@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 
-import { formatDelivery, type RoomDelivery, routeRoomMessage } from './room-router.ts';
+import {
+  formatDelivery,
+  type RoomDelivery,
+  routeRoomMessage,
+  unknownRecipients,
+} from './room-router.ts';
 import type { Room, RoomMessage } from './room-types.ts';
 
 function fixture(participantNames: string[] = ['orchestrator', 'worker']) {
@@ -32,6 +37,19 @@ function implicitReply(from: string, to: string[], text: string): RoomMessage {
 function notice(text: string): RoomMessage {
   return { id: 'm1', roomId: 'r1', from: 'human', to: [], text, ts: 0, system: true };
 }
+
+test('finds only resolved recipients that are not participants or @human', () => {
+  const { room } = fixture();
+  expect(
+    unknownRecipients(room, message('orchestrator', ['worker', 'human', 'revewer'], '...')),
+  ).toEqual(['revewer']);
+});
+
+test('does not warn for system notices or implicit replies', () => {
+  const { room } = fixture();
+  expect(unknownRecipients(room, { ...notice('@revewer joined'), to: ['revewer'] })).toEqual([]);
+  expect(unknownRecipients(room, implicitReply('worker', ['revewer'], '...'))).toEqual([]);
+});
 
 test('delivers a mention to that participant as a turn AND broadcasts it', () => {
   const { room, delivered, broadcast, delivery } = fixture();
