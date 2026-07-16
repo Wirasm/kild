@@ -251,8 +251,6 @@ async function room(goal: string): Promise<void> {
             ws.send(
               JSON.stringify({ type: 'room_add', id: roomId, participant: { name, agent, model } }),
             );
-          } else if (text === '/invite' || text.startsWith('/invite ')) {
-            console.error('\x1b[31musage:\x1b[0m /invite <name> [agent] [model]');
           } else {
             ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
           }
