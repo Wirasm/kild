@@ -14,7 +14,7 @@ output). The goal is a real decision, not a vibe.
 | — | One-shot `kild run` → `RunOutcome` (`run.ts`) | ✅ model/text/tokens/cost, project cwd, named agent |
 | 1 | **Worktree-as-Sandbox** (`worktree.ts`) | ✅ agent shell/fs ran inside a real `git worktree`; file landed on disk; branch isolated |
 | 2 | **Agent rooms / peer comms** (`rooms.ts`) | ✅ two independent agents held a real proposal→concern→ack conversation through a kild channel |
-| 3 | **Brain (operator mirror) + observability** (`brain.ts`, `observability.ts`) | ✅ agent orchestrated via kild capability-tools; 71 runtime events captured |
+| 3 | **Brain (operator mirror)** (`brain.ts`) | ✅ agent orchestrated via kild capability-tools and posted status to a room |
 | ★ | Merge agent team (`merge-team-demo.ts`) | ✅ 3 reviewers in parallel + conflict-aware merge order |
 
 ## The headline: lines of code for the same capability
@@ -27,7 +27,7 @@ output). The goal is a real decision, not a vibe.
 | **Rebuild subtotal** | **~1,193** | **~342** | ~3.5× |
 | Worktree battery | — | 55 | not built in Rust yet |
 | Rooms battery | — | 80 | not built in Rust yet |
-| Brain + observability | — | 128 | not built in Rust yet |
+| Brain battery | — | 128 | not built in Rust yet |
 | 5 demo workflows | — | 223 | proofs |
 | **Total** | **1,193** (rebuild only) | **657** (rebuild **+** 3 batteries **+** demos) | |
 
@@ -49,11 +49,9 @@ process boundary*. Flue embeds pi-agent-core, so that boundary is a function cal
 3. **Batteries slot into real seams.** Worktree = `local({ cwd })` behind Flue's
    `SandboxFactory`. Rooms = three `defineTool()`s over an in-process bus. Both took
    tens of lines and worked first try after typecheck.
-4. **Observability for free.** `observe()` streams typed run/turn/message/tool/agent
-   events — the same shape kild's `rpc` slice hand-builds. The cockpit is a subscriber.
-5. **Structured output built in.** valibot `result:` schemas gave typed verdicts in the
+4. **Structured output built in.** valibot `result:` schemas gave typed verdicts in the
    merge team with zero parsing.
-6. **Deploy-anywhere + parallel delegation** (`session.task()`, separate harnesses)
+5. **Deploy-anywhere + parallel delegation** (`session.task()`, separate harnesses)
    come with the framework — kild's daemon/VPS story, partly handled.
 
 ## Where Rust / pi-CLI still wins (the honest cons)

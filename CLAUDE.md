@@ -40,11 +40,10 @@ it never bakes an agent personality into the codebase.
 - **Web framework:** hono (the engine's HTTP + WS server; also Flue's framework).
 - **Agent kernel:** `@earendil-works/pi-coding-agent` (the in-process SDK) +
   `@earendil-works/pi-ai`. The cockpit/CLI use the **coding-agent SDK** directly.
-- **Flue** (`@flue/runtime`) is a **committed dependency** — its sandbox abstraction,
-  deploy targets, and workflow model, and the upstream we contribute back to. kild
-  bets on **pi + Flue; it is not agent-agnostic.** Flue is not yet on the session hot
-  path (that is the coding-agent SDK today), but the direction is deeper integration,
-  not a swap-out.
+- **Flue** (`@flue/runtime`) is a **committed dependency** for sandbox experiments,
+  deploy targets, and the upstream we contribute back to. Its workflows are frozen,
+  explicitly invoked experiments—not on the session hot path—and must not grow until
+  the fleet layer names a real server or CLI endpoint.
 - **UI:** SvelteKit (Svelte 5 runes) + adapter-static, in a Tauri 2 shell.
 
 ## Core Principles
@@ -139,7 +138,6 @@ kild/
 │   │   │   ├── worktree.ts     #     [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (NO @flue)
 │   │   │   ├── run.ts          #     [Flue layer] one-shot run via Flue
 │   │   │   ├── brain.ts        #     [Flue layer] operator-mirror agent (kild tools; posts into real Rooms)
-│   │   │   ├── observability.ts#     [Flue layer] observe() → cockpit event log
 │   │   │   └── auth.ts         #     [Flue layer] bridge ~/.pi auth into the Flue runtime
 │   │   └── flue/               #   [Flue layer] Flue-promotable mechanisms
 │   │       └── worktree-sandbox.ts #  worktree() SandboxFactory (self-contained; upstream contribution)

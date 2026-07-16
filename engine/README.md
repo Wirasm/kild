@@ -34,7 +34,7 @@ src/
     agents.ts      agents from .kild/.claude/.pi convention dirs
     sessions.ts    SessionManager: coding-agent SDK sessions → UiEvent stream
     worktree.ts    [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (no @flue)
-    run/rooms/brain/observability/auth.ts   [Flue layer]
+    run/rooms/brain/auth.ts                 [Flue layer]
   flue/
     worktree-sandbox.ts   [Flue layer] worktree() SandboxFactory — the upstream contribution
   workflows/       [Flue layer] runnable Flue workflows (rooms/brain/merge/run demos)

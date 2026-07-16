@@ -98,12 +98,12 @@ kild room, ~$0.20 total:
 3. **Personalities only resolve globally via `~/.claude/agents`.** A new project gets no
    team; I had to copy `orchestrator.md`/`worker.md` into the smoke project. Consider
    `~/.kild/agents` in `agentDirs()`, or ship defaults.
-4. **The Flue layer is off the hot path.** It does have callers (run/auth/observability/
-   brain demos and the worktree-sandbox — see the 2026-07-15 runtime-integration research
-   in the PRP repo), but nothing on the session hot path uses it and the dogfood never
-   touched it. Note `brain.ts` already exposes open-room/post-to-room tools — it is the
-   seed of the fleet layer. Decide deliberately: promote it when the fleet layer lands, or
-   park it; just don't let it grow ambiently.
+4. **The Flue layer is off the hot path.** Its frozen, explicitly invoked experiments
+   include run/auth/brain demos and the worktree-sandbox (see the 2026-07-15
+   runtime-integration research in the PRP repo), but nothing on the session hot path uses
+   them and the dogfood never touched them. Do not extend them until the fleet layer names
+   a real server or CLI endpoint. Note `brain.ts` already exposes open-room/post-to-room
+   tools — it is the seed of the fleet layer.
 5. **Worktree convention overlap.** kild owns worktree policy (`$KILD_HOME/worktrees/`,
    `kild/<name>`); the PRP pack's `prp-worktree` skill uses in-repo `.worktrees/`. In the
    kild lane **kild's mechanism wins** — workers must not invoke `prp-worktree`. Worth one
