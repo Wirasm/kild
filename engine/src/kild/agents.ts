@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { kildHome } from './config.ts';
+
 /** A reusable role: a name + system prompt, read from convention dirs.
  *  Mirror of kild-core::agent (same .kild/.claude/.pi discovery). */
 export interface Agent {
@@ -20,6 +22,7 @@ function agentDirs(projectRoot?: string): string[] {
     dirs.push(path.join(projectRoot, '.claude/agents'));
     dirs.push(path.join(projectRoot, '.pi/agents'));
   }
+  dirs.push(path.join(kildHome(), 'agents'));
   const home = process.env.HOME;
   if (home) dirs.push(path.join(home, '.claude/agents'));
   return dirs;
