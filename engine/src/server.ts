@@ -17,7 +17,7 @@ import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import { parseMentions } from './kild/room/parse-mentions.ts';
 import { roomManager } from './kild/room/room-manager.ts';
-import { HUMAN, type ParticipantSpec } from './kild/room/room-types.ts';
+import { type CommandResult, HUMAN, type ParticipantSpec } from './kild/room/room-types.ts';
 import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
@@ -114,6 +114,10 @@ function addressKickoff(kickoff: string, participants: ParticipantSpec[]): strin
     participants.some((p) => p.name === handle),
   );
   return addressed ? kickoff : `@${lead} ${kickoff}`;
+}
+
+function roomResultStatus(result: Extract<CommandResult<unknown>, { ok: false }>): 404 | 409 {
+  return result.code === 'not_found' ? 404 : 409;
 }
 
 const worktreesInUse = (): Set<string> =>
@@ -270,48 +274,44 @@ app.post('/api/rooms', async (c) => {
     typeof body.project === 'string' ? await resolveProjectPath(body.project) : (body.cwd ?? null);
   if (!cwd) return c.json({ error: 'cwd or project required' }, 400);
 
-  try {
-    const id = randomUUID();
-    roomManager.open(id, {
-      name: body.name,
-      cwd,
-      participants,
-      worktree: body.worktree,
-    });
-    // Honest attribution: a kickoff posted by an agent operator (e.g. the fleet
-    // brain) carries its name; the transcript must never claim the human spoke.
-    const kickoff = addressKickoff(body.kickoff, participants);
-    if (typeof body.from === 'string' && body.from.trim()) {
-      roomManager.postAs(id, body.from.trim(), kickoff);
-    } else {
-      roomManager.postFromHuman(id, kickoff);
-    }
-    return c.json({ id });
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  const id = randomUUID();
+  const opened = await roomManager.open(id, {
+    name: body.name,
+    cwd,
+    participants,
+    worktree: body.worktree,
+  });
+  if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
+  // Honest attribution: a kickoff posted by an agent operator (e.g. the fleet
+  // brain) carries its name; the transcript must never claim the human spoke.
+  const kickoff = addressKickoff(body.kickoff, participants);
+  const posted =
+    typeof body.from === 'string' && body.from.trim()
+      ? await roomManager.postAs(id, body.from.trim(), kickoff)
+      : await roomManager.postFromHuman(id, kickoff);
+  if (!posted.ok) {
+    await roomManager.close(id);
+    return c.json({ error: posted.message }, roomResultStatus(posted));
   }
+  return c.json({ ok: true, id: opened.value.roomId, message: opened.value.message });
 });
 app.post('/api/rooms/:id/post', async (c) => {
   const { text, from } = await c.req.json<{ text?: unknown; from?: unknown }>();
   if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
-  try {
-    const id = c.req.param('id');
-    if ((from ?? HUMAN) === HUMAN) roomManager.postFromHuman(id, text);
-    else roomManager.postAs(id, from as string, text);
-    return c.json({ ok: true });
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
+  const id = c.req.param('id');
+  const result =
+    (from ?? HUMAN) === HUMAN
+      ? await roomManager.postFromHuman(id, text)
+      : await roomManager.postAs(id, from as string, text);
+  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+  return c.json({ ok: true, message: result.value.message });
 });
 app.post('/api/rooms/:id/close', async (c) => {
-  try {
-    roomManager.close(c.req.param('id'));
-    return c.json({ ok: true });
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
+  const result = await roomManager.close(c.req.param('id'));
+  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+  return c.json({ ok: true, message: result.value.message });
 });
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
@@ -421,20 +421,32 @@ app.get(
         } else if (msg.type === 'stop') {
           sessionManager.stop(msg.id);
         } else if (msg.type === 'room_open') {
-          roomManager.open(msg.id, {
-            name: msg.name,
-            cwd: msg.cwd,
-            participants: msg.participants,
-            worktree: msg.worktree,
-          });
+          void roomManager
+            .open(msg.id, {
+              name: msg.name,
+              cwd: msg.cwd,
+              participants: msg.participants,
+              worktree: msg.worktree,
+            })
+            .then((result) => {
+              if (!result.ok) console.warn(`kild: room_open rejected ${msg.id}: ${result.message}`);
+            });
         } else if (msg.type === 'room_post') {
-          roomManager.postFromHuman(msg.id, msg.text);
+          void roomManager.postFromHuman(msg.id, msg.text).then((result) => {
+            if (!result.ok) console.warn(`kild: room_post rejected ${msg.id}: ${result.message}`);
+          });
         } else if (msg.type === 'room_add') {
-          roomManager.addParticipant(msg.id, msg.participant);
+          void roomManager.addParticipant(msg.id, msg.participant).then((result) => {
+            if (!result.ok) console.warn(`kild: room_add rejected ${msg.id}: ${result.message}`);
+          });
         } else if (msg.type === 'room_halt') {
-          roomManager.halt(msg.id);
+          void roomManager.halt(msg.id).then((result) => {
+            if (!result.ok) console.warn(`kild: room_halt rejected ${msg.id}: ${result.message}`);
+          });
         } else if (msg.type === 'room_close') {
-          roomManager.close(msg.id);
+          void roomManager.close(msg.id).then((result) => {
+            if (!result.ok) console.warn(`kild: room_close rejected ${msg.id}: ${result.message}`);
+          });
         }
       },
       onClose() {

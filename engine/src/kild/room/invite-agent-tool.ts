@@ -9,7 +9,7 @@ import { Type } from 'typebox';
  * control line to the engine over stdout).
  */
 export function createInviteAgentTool(
-  emit: (spec: { name: string; agent?: string; model?: string }) => void,
+  emit: (spec: { name: string; agent?: string; model?: string }) => Promise<string>,
 ): ToolDefinition {
   return {
     name: 'invite_agent',
@@ -28,9 +28,9 @@ export function createInviteAgentTool(
     }),
     async execute(_toolCallId, params) {
       const p = params as { name: string; agent?: string; model?: string };
-      emit({ name: p.name, agent: p.agent ?? p.name, model: p.model });
+      const message = await emit({ name: p.name, agent: p.agent ?? p.name, model: p.model });
       return {
-        content: [{ type: 'text' as const, text: `Invited @${p.name} to the room.` }],
+        content: [{ type: 'text' as const, text: message }],
         details: null,
       };
     },

@@ -18,7 +18,12 @@ export async function run({ init, payload }: FlueContext) {
 
   // Pre-open a real room so the read-back is deterministic; the brain posts into it.
   const roomId = randomUUID();
-  roomManager.open(roomId, { name: 'ops', cwd: process.cwd(), participants: [] });
+  const opened = await roomManager.open(roomId, {
+    name: 'ops',
+    cwd: process.cwd(),
+    participants: [],
+  });
+  if (!opened.ok) throw new Error(opened.message);
 
   const brain = createBrain(init);
   const session = await (await init(brain)).session();

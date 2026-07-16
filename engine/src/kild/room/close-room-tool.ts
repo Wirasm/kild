@@ -9,7 +9,9 @@ import { Type } from 'typebox';
  * Without it a finished room idles forever — "the goal is done" is a judgement only
  * an agent (or the operator) can make, so it must be a tool call, not a heuristic.
  */
-export function createCloseRoomTool(emit: (spec: { reason?: string }) => void): ToolDefinition {
+export function createCloseRoomTool(
+  emit: (spec: { reason?: string }) => Promise<string>,
+): ToolDefinition {
   return {
     name: 'close_room',
     label: 'Close Room',
@@ -25,9 +27,9 @@ export function createCloseRoomTool(emit: (spec: { reason?: string }) => void): 
     }),
     async execute(_toolCallId, params) {
       const { reason } = params as { reason?: string };
-      emit({ reason });
+      const message = await emit({ reason });
       return {
-        content: [{ type: 'text' as const, text: 'Room closing.' }],
+        content: [{ type: 'text' as const, text: message }],
         details: null,
       };
     },

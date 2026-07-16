@@ -13,6 +13,17 @@ export interface OpenRoomRequest {
   from?: string;
 }
 
+export interface OpenRoomResponse {
+  ok: true;
+  id: string;
+  message: string;
+}
+
+export interface RoomActionResponse {
+  ok: true;
+  message: string;
+}
+
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${ENGINE}${path}`, init);
   if (!response.ok) {
@@ -22,7 +33,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function openRoom(req: OpenRoomRequest): Promise<{ id: string }> {
+export async function openRoom(req: OpenRoomRequest): Promise<OpenRoomResponse> {
   return engineFetch('/api/rooms', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -30,7 +41,11 @@ export async function openRoom(req: OpenRoomRequest): Promise<{ id: string }> {
   });
 }
 
-export async function postRoom(roomId: string, text: string, from?: string): Promise<{ ok: true }> {
+export async function postRoom(
+  roomId: string,
+  text: string,
+  from?: string,
+): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/post`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -38,7 +53,7 @@ export async function postRoom(roomId: string, text: string, from?: string): Pro
   });
 }
 
-export async function closeRoom(roomId: string): Promise<{ ok: true }> {
+export async function closeRoom(roomId: string): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/close`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

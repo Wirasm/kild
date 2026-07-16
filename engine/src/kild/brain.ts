@@ -80,11 +80,12 @@ export function kildTools(init: Init): ToolDefinition[] {
       }),
       execute: async (args) => {
         const id = randomUUID();
-        roomManager.open(id, {
+        const result = await roomManager.open(id, {
           name: String((args as { name: string }).name),
           cwd: process.cwd(),
           participants: [],
         });
+        if (!result.ok) throw new Error(result.message);
         return id;
       },
     }),
@@ -98,8 +99,9 @@ export function kildTools(init: Init): ToolDefinition[] {
       }),
       execute: async (args) => {
         const a = args as { roomId: string; text: string };
-        roomManager.postAs(a.roomId, 'brain', a.text);
-        return 'posted';
+        const result = await roomManager.postAs(a.roomId, 'brain', a.text);
+        if (!result.ok) throw new Error(result.message);
+        return result.value.message;
       },
     }),
   ];
