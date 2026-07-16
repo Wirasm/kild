@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { sessionManager } from '../sessions.ts';
 import { parseMentions } from './parse-mentions.ts';
 import { RoomRegistry } from './room-registry.ts';
-import { type RoomDelivery, routeRoomMessage } from './room-router.ts';
+import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
 import {
   type ArchivedRoom,
   HUMAN,
@@ -229,6 +229,20 @@ class RoomManager {
     };
     this.registry.appendMessage(roomId, message);
     routeRoomMessage(room, message, this.delivery());
+
+    const unknown = unknownRecipients(room, message);
+    if (unknown.length > 0) {
+      const participants = room.participants
+        .map((participant) => `@${participant.name}`)
+        .join(', ');
+      this.post(
+        roomId,
+        HUMAN,
+        `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
+          `(in the room: ${participants || 'none'})`,
+        { system: true },
+      );
+    }
   }
 
   private delivery(): RoomDelivery {

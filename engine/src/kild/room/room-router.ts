@@ -15,6 +15,14 @@ export function formatDelivery(roomName: string, from: string, text: string): st
   return `[#${roomName}] @${from}: ${text}`;
 }
 
+/** Return resolved addressees that cannot receive a post in this room. Engine notices
+ * and implicit replies are never user-addressed, so they cannot yield a warning. */
+export function unknownRecipients(room: Room, message: RoomMessage): string[] {
+  if (message.system || message.implicit) return [];
+  const participants = new Set(room.participants.map((participant) => participant.name));
+  return message.to.filter((recipient) => recipient !== HUMAN && !participants.has(recipient));
+}
+
 /**
  * Route one already-recorded post: show it to the human (broadcast), then deliver
  * it as a turn to each addressed participant.
