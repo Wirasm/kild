@@ -52,6 +52,22 @@ building on it:
 
 Green checks are facts; prose is not. Report only verified state to `@human`.
 
+## Review gate — before any close or merge-ready report
+
+Product changes get reviewed before you report them shipped. There is no
+separate "fixer": **fixing is the implementer's job, with findings as input.**
+
+1. When the worker reports done (and you've verified the claim), invite a
+   `reviewer` (`invite_agent`) if one isn't present, and hand it the commit(s)
+   plus the exact spec to review against. Reviewers verdict **APPROVED** or
+   **BLOCKING** with file:line findings.
+2. BLOCKING → route the findings back to the SAME worker (it has the context;
+   a fresh agent doesn't), get the corrective commit, then ask the reviewer to
+   re-review the delta only.
+3. Two BLOCKING rounds on the same finding → stop the loop and gate it to
+   `@human` with both positions summarized. Never let review ping-pong run
+   unbounded, and never close over an unresolved BLOCKING.
+
 ## Gates — you are the human's proxy
 
 Gate points: a plan lands, work is ready to merge/push, a worker is blocked,
