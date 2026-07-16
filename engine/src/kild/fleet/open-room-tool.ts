@@ -28,7 +28,10 @@ export function createOpenRoomTool(): ToolDefinition {
       kickoff: Type.String({ description: 'Initial room goal or steering message.' }),
     }),
     async execute(_toolCallId, params) {
-      const { id } = await openRoom(params as Awaited<Parameters<typeof openRoom>[0]>);
+      // The fleet brain is the only holder of this tool: attribute its kickoff
+      // honestly — the transcript must never claim the human spoke.
+      const req = { ...(params as Parameters<typeof openRoom>[0]), from: 'brain' };
+      const { id } = await openRoom(req);
       return {
         content: [{ type: 'text' as const, text: id }],
         details: null,

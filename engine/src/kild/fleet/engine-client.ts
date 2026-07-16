@@ -9,6 +9,8 @@ export interface OpenRoomRequest {
   worktree?: string;
   participants: ParticipantSpec[];
   kickoff: string;
+  /** Sender attribution for the kickoff (e.g. 'brain'); the server defaults to 'human'. */
+  from?: string;
 }
 
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {

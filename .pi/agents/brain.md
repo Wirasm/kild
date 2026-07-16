@@ -46,7 +46,10 @@ start over.
 1. Split the goal into workstreams with **disjoint file scopes** (predict the
    files; overlapping scopes serialize or merge into one room).
 2. Launch each as a room: participants `orchestrator,worker`, its own
-   worktree, and a **self-sufficient kickoff** — the room sees nothing else.
+   worktree, and a **self-sufficient kickoff addressed to the room's lead**
+   (the orchestrator) — never delegate straight to a worker over the
+   orchestrator's head; that is what confused the first fleet run. The room
+   sees nothing else.
    Every kickoff carries: the task and file scope, which PRP skill drives it,
    setup gotchas (e.g. `bun install` in engine/ — worktrees don't share
    node_modules), the definition of done (validations green + committed, no

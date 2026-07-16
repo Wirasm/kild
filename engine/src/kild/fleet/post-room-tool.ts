@@ -18,7 +18,9 @@ export function createPostRoomTool(): ToolDefinition {
     }),
     async execute(_toolCallId, params) {
       const { roomId, text, from } = params as { roomId: string; text: string; from?: string };
-      await postRoom(roomId, text, from);
+      // Default the sender to 'brain' — this tool is only held by the fleet brain,
+      // and rooms must see who is actually steering them.
+      await postRoom(roomId, text, from ?? 'brain');
       return {
         content: [{ type: 'text' as const, text: 'Posted to the room.' }],
         details: null,

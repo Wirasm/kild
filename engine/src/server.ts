@@ -225,6 +225,7 @@ app.post('/api/rooms', async (c) => {
     worktree?: unknown;
     participants?: unknown;
     kickoff?: unknown;
+    from?: unknown;
   }>();
   if (typeof body.name !== 'string') return c.json({ error: 'name required' }, 400);
   if (typeof body.kickoff !== 'string' || !body.kickoff.trim()) {
@@ -255,7 +256,14 @@ app.post('/api/rooms', async (c) => {
       participants,
       worktree: body.worktree,
     });
-    roomManager.postFromHuman(id, addressKickoff(body.kickoff, participants));
+    // Honest attribution: a kickoff posted by an agent operator (e.g. the fleet
+    // brain) carries its name; the transcript must never claim the human spoke.
+    const kickoff = addressKickoff(body.kickoff, participants);
+    if (typeof body.from === 'string' && body.from.trim()) {
+      roomManager.postAs(id, body.from.trim(), kickoff);
+    } else {
+      roomManager.postFromHuman(id, kickoff);
+    }
     return c.json({ id });
   } catch (err) {
     return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
