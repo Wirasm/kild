@@ -56,8 +56,10 @@ async function dispatch(): Promise<void> {
       return run([action, ...rest].filter(Boolean).join(' '));
     case 'room':
       return room([action, ...rest].filter(Boolean).join(' '));
+    case 'fleet':
+      return fleet([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run|room> …');
+      console.error('usage: kild <project|agent|worktree|run|room|fleet> …');
       process.exit(2);
   }
 }
@@ -167,14 +169,119 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
   }
 }
 
+async function engineRunning(): Promise<boolean> {
+  return fetch(`${ENGINE}/api/health`)
+    .then((r) => r.ok)
+    .catch(() => false);
+}
+
 async function run(prompt: string): Promise<void> {
   if (!prompt) throw new Error('usage: kild run <prompt…>');
   // If the engine is up, run THROUGH it so the session shows up in the cockpit;
   // otherwise run the agent in-process so the CLI works standalone.
-  const engineUp = await fetch(`${ENGINE}/api/health`)
-    .then((r) => r.ok)
-    .catch(() => false);
-  return engineUp ? runViaEngine(prompt) : runViaWorker(prompt);
+  return (await engineRunning()) ? runViaEngine(prompt) : runViaWorker(prompt);
+}
+
+async function fleet(goal: string): Promise<void> {
+  if (!goal) throw new Error('usage: kild fleet <goal…> [--project <p>] [--worktree <n>]');
+  if (!(await engineRunning())) {
+    throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
+  }
+
+  const cwd = values.project
+    ? ((await findProject(values.project))?.path ?? values.project)
+    : process.cwd();
+  const id = crypto.randomUUID();
+  const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let stopping = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      ws.close();
+      if (err) reject(err);
+      else resolve();
+    };
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      try {
+        ws.send(JSON.stringify({ type: 'stop', id }));
+      } catch {
+        finish();
+        return;
+      }
+      setTimeout(() => finish(), 200);
+    };
+
+    process.on('SIGINT', () => {
+      if (!json) console.error('\n\x1b[2m— stopping fleet session —\x1b[0m');
+      stop();
+    });
+
+    if (!json) {
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk: string) => {
+        for (const raw of chunk.split('\n')) {
+          const text = raw.trim();
+          if (!text) continue;
+          ws.send(JSON.stringify({ type: 'prompt', id, text }));
+        }
+      });
+    }
+
+    ws.addEventListener('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'spawn',
+          id,
+          cwd,
+          agent: 'brain',
+          model: values.model,
+          worktree: values.worktree,
+          projectName: values.project ?? 'fleet',
+          env: { KILD_FLEET: '1' },
+        }),
+      );
+      ws.send(JSON.stringify({ type: 'prompt', id, text: goal }));
+      if (!json) {
+        const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
+        console.error(`\x1b[2m# fleet brain${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
+      }
+    });
+
+    ws.addEventListener('message', (e) => {
+      const msg = JSON.parse(String((e as { data: unknown }).data)) as {
+        session?: string;
+        event?: { kind: string; [k: string]: unknown };
+      };
+      if (msg.session !== id || !msg.event) return;
+      const ev = msg.event;
+      if (ev.kind === 'text') {
+        if (!json) process.stdout.write(String(ev.delta ?? ''));
+      } else if (ev.kind === 'tool_start') {
+        process.stderr.write(`\x1b[2m🔧 ${ev.name}\x1b[0m\n`);
+      } else if (ev.kind === 'stats') {
+        if (!json) {
+          process.stderr.write(
+            `\x1b[2m───── tokens=${Number(ev.tokens ?? 0)}  cost=$${Number(ev.cost ?? 0).toFixed(4)}\x1b[0m\n`,
+          );
+        }
+      } else if (ev.kind === 'error') {
+        finish(new Error(String(ev.message ?? 'engine error')));
+      } else if (ev.kind === 'session_end') {
+        finish();
+      }
+    });
+    ws.addEventListener('close', () => {
+      if (!settled && !stopping) {
+        finish(new Error('connection to the engine closed before the fleet session completed'));
+      }
+    });
+    ws.addEventListener('error', () => finish(new Error('engine socket error')));
+  });
 }
 
 /**

@@ -2,6 +2,10 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
+import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
+import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
+import { createPostRoomTool } from './kild/fleet/post-room-tool.ts';
+import { createRoomsStatusTool } from './kild/fleet/rooms-status-tool.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
@@ -22,6 +26,7 @@ export async function runWorker(): Promise<never> {
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inRoom = !!process.env.KILD_ROOM;
   const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
+  const fleetEnabled = process.env.KILD_FLEET === '1';
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
   const emitMessage = (text: string, to?: string[], implicit?: boolean) =>
@@ -59,8 +64,8 @@ export async function runWorker(): Promise<never> {
   try {
     model = resolveModel(registry, modelPattern);
     // A room participant gets `post_message` + `invite_agent`; the room's LEAD also
-    // gets `close_room` (ending the room is the lead's explicit act). Their calls
-    // become control lines on stdout the engine routes back into the room.
+    // gets `close_room` (ending the room is the lead's explicit act). A fleet-enabled
+    // non-room session instead gets the engine REST room-control tools.
     const customTools = inRoom
       ? [
           createPostMessageTool((text) => {
@@ -70,7 +75,14 @@ export async function runWorker(): Promise<never> {
           createInviteAgentTool(emitInvite),
           ...(isRoomLead ? [createCloseRoomTool(emitCloseRoom)] : []),
         ]
-      : undefined;
+      : fleetEnabled
+        ? [
+            createOpenRoomTool(),
+            createPostRoomTool(),
+            createRoomsStatusTool(),
+            createFleetCloseRoomTool(),
+          ]
+        : undefined;
     ({ session } = await createAgentSession({
       model,
       authStorage,

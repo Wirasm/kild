@@ -5,6 +5,7 @@ if (process.env.KILD_ROLE === 'worker') {
 }
 
 import { execFile as execFileCb } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -14,7 +15,9 @@ import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
+import { parseMentions } from './kild/room/parse-mentions.ts';
 import { roomManager } from './kild/room/room-manager.ts';
+import { HUMAN, type ParticipantSpec } from './kild/room/room-types.ts';
 import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
@@ -73,6 +76,45 @@ async function resolveProjectPath(q: string | undefined): Promise<string | null>
   if (!q) return null;
   return (await findProject(q))?.path ?? q;
 }
+
+function participantSpecs(input: unknown): ParticipantSpec[] | null {
+  if (!Array.isArray(input)) return null;
+  const participants: ParticipantSpec[] = [];
+  for (const item of input) {
+    if (typeof item !== 'object' || item === null) return null;
+    const participant = item as Record<string, unknown>;
+    if (typeof participant.name !== 'string') return null;
+    if (participant.agent !== undefined && typeof participant.agent !== 'string') return null;
+    if (participant.model !== undefined && typeof participant.model !== 'string') return null;
+    participants.push({
+      name: participant.name,
+      agent: typeof participant.agent === 'string' ? participant.agent : undefined,
+      model: typeof participant.model === 'string' ? participant.model : undefined,
+    });
+  }
+  return participants;
+}
+
+function envRecord(input: unknown): Record<string, string> | undefined {
+  if (input === undefined) return undefined;
+  if (typeof input !== 'object' || input === null) return undefined;
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value !== 'string') return undefined;
+    env[key] = value;
+  }
+  return env;
+}
+
+function addressKickoff(kickoff: string, participants: ParticipantSpec[]): string {
+  const lead = participants[0]?.name;
+  if (!lead) return kickoff;
+  const addressed = parseMentions(kickoff).some((handle) =>
+    participants.some((p) => p.name === handle),
+  );
+  return addressed ? kickoff : `@${lead} ${kickoff}`;
+}
+
 const worktreesInUse = (): Set<string> =>
   new Set(
     sessionManager
@@ -175,12 +217,90 @@ app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
 // Live rooms WITH their logs — so a cockpit joining a room it didn't open (or after a
 // refresh) can load the conversation so far. The WS only streams *new* messages.
 app.get('/api/rooms/live', (c) => c.json(roomManager.liveRooms()));
+app.post('/api/rooms', async (c) => {
+  const body = await c.req.json<{
+    name?: unknown;
+    cwd?: unknown;
+    project?: unknown;
+    worktree?: unknown;
+    participants?: unknown;
+    kickoff?: unknown;
+  }>();
+  if (typeof body.name !== 'string') return c.json({ error: 'name required' }, 400);
+  if (typeof body.kickoff !== 'string' || !body.kickoff.trim()) {
+    return c.json({ error: 'kickoff required' }, 400);
+  }
+  if (body.cwd !== undefined && typeof body.cwd !== 'string')
+    return c.json({ error: 'cwd must be a string' }, 400);
+  if (body.project !== undefined && typeof body.project !== 'string') {
+    return c.json({ error: 'project must be a string' }, 400);
+  }
+  if (body.worktree !== undefined && typeof body.worktree !== 'string') {
+    return c.json({ error: 'worktree must be a string' }, 400);
+  }
+  const participants = participantSpecs(body.participants);
+  if (!participants || participants.length === 0) {
+    return c.json({ error: 'participants must name at least one agent' }, 400);
+  }
+
+  const cwd =
+    typeof body.project === 'string' ? await resolveProjectPath(body.project) : (body.cwd ?? null);
+  if (!cwd) return c.json({ error: 'cwd or project required' }, 400);
+
+  try {
+    const id = randomUUID();
+    roomManager.open(id, {
+      name: body.name,
+      cwd,
+      participants,
+      worktree: body.worktree,
+    });
+    roomManager.postFromHuman(id, addressKickoff(body.kickoff, participants));
+    return c.json({ id });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+app.post('/api/rooms/:id/post', async (c) => {
+  const { text, from } = await c.req.json<{ text?: unknown; from?: unknown }>();
+  if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
+  if (from !== undefined && typeof from !== 'string')
+    return c.json({ error: 'from must be a string' }, 400);
+  try {
+    const id = c.req.param('id');
+    if ((from ?? HUMAN) === HUMAN) roomManager.postFromHuman(id, text);
+    else roomManager.postAs(id, from as string, text);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
+app.post('/api/rooms/:id/close', async (c) => {
+  try {
+    roomManager.close(c.req.param('id'));
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+  }
+});
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the room broadcast — so rooms opened by any client
 // (cockpit or CLI) are visible to all. Rooms are engine-owned and survive a drop.
 // Frames carry the room id as `id`; sessions are the internal substrate, not on the wire.
 type ClientMessage =
+  | {
+      type: 'spawn';
+      id: string;
+      cwd?: string;
+      agent?: string;
+      model?: string;
+      worktree?: string;
+      projectName?: string;
+      env?: Record<string, string>;
+    }
+  | { type: 'prompt'; id: string; text: string; from?: string }
+  | { type: 'stop'; id: string }
   | {
       type: 'room_open';
       id: string;
@@ -204,6 +324,22 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
   if (typeof m.id !== 'string') return null;
+  if (m.type === 'spawn') {
+    if (m.cwd !== undefined && typeof m.cwd !== 'string') return null;
+    if (m.agent !== undefined && typeof m.agent !== 'string') return null;
+    if (m.model !== undefined && typeof m.model !== 'string') return null;
+    if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
+    if (m.projectName !== undefined && typeof m.projectName !== 'string') return null;
+    const env = envRecord(m.env);
+    if (m.env !== undefined && env === undefined) return null;
+    return { ...(m as Omit<Extract<ClientMessage, { type: 'spawn' }>, 'env'>), env };
+  }
+  if (m.type === 'prompt') {
+    if (typeof m.text !== 'string') return null;
+    if (m.from !== undefined && typeof m.from !== 'string') return null;
+    return m as ClientMessage;
+  }
+  if (m.type === 'stop') return m as ClientMessage;
   if (m.type === 'room_open') {
     if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.participants)) {
       return null;
@@ -228,14 +364,33 @@ app.get(
   },
   upgradeWebSocket(() => {
     let unsubscribeRooms: (() => void) | undefined;
+    let unsubscribeSessions: (() => void) | undefined;
     return {
       onOpen(_evt, ws) {
         unsubscribeRooms = roomManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
+        unsubscribeSessions = sessionManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
         const msg = parseClientMessage(String(evt.data));
         if (!msg) return; // ignore malformed / unknown frames
-        if (msg.type === 'room_open') {
+        if (msg.type === 'spawn') {
+          sessionManager.spawn(
+            msg.id,
+            {
+              cwd: msg.cwd,
+              agent: msg.agent,
+              model: msg.model,
+              worktree: msg.worktree,
+              projectName: msg.projectName,
+              env: msg.env,
+            },
+            'cli',
+          );
+        } else if (msg.type === 'prompt') {
+          sessionManager.prompt(msg.id, msg.text, msg.from);
+        } else if (msg.type === 'stop') {
+          sessionManager.stop(msg.id);
+        } else if (msg.type === 'room_open') {
           roomManager.open(msg.id, {
             name: msg.name,
             cwd: msg.cwd,
@@ -254,6 +409,7 @@ app.get(
       },
       onClose() {
         unsubscribeRooms?.();
+        unsubscribeSessions?.();
       },
     };
   }),
