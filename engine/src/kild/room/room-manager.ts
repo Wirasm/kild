@@ -192,7 +192,9 @@ class RoomManager {
       id: randomUUID(),
       roomId,
       from,
-      // System notices broadcast only (no turn). Otherwise: explicit `to`, else mentions.
+      // The one place "who is this addressed to?" is answered: a notice addresses no
+      // one, otherwise an explicit `to` wins, else the @mentions in the text. The router
+      // consumes this verbatim — it must never re-derive addressees from the text.
       to: opts.system ? [] : (opts.to ?? parseMentions(text)),
       text,
       ts: Date.now(),

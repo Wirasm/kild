@@ -28,6 +28,11 @@ function implicitReply(from: string, to: string[], text: string): RoomMessage {
   return { id: 'm1', roomId: 'r1', from, to, text, ts: 0, implicit: true };
 }
 
+/** An engine notice: shown to the operator, addressed to no one (`to: []`). */
+function notice(text: string): RoomMessage {
+  return { id: 'm1', roomId: 'r1', from: 'human', to: [], text, ts: 0, system: true };
+}
+
 test('delivers a mention to that participant as a turn AND broadcasts it', () => {
   const { room, delivered, broadcast, delivery } = fixture();
   routeRoomMessage(room, message('orchestrator', ['worker'], '@worker do X'), delivery);
@@ -37,10 +42,29 @@ test('delivers a mention to that participant as a turn AND broadcasts it', () =>
   ]);
 });
 
-test('falls back to parsing @mentions from the text when `to` is empty', () => {
+test('`to` is authoritative — text @mentions never re-address a post', () => {
   const { room, delivered, delivery } = fixture();
+  // The manager already answered "addressed to whom?" when it recorded the post.
+  // Re-parsing the text here would be a second, divergent answer.
   routeRoomMessage(room, message('orchestrator', [], '@worker do X'), delivery);
-  expect(delivered.map((d) => d.sessionId)).toEqual(['s-worker']);
+  expect(delivered).toEqual([]);
+});
+
+test('a notice broadcasts but NEVER delivers a turn, even when it names a participant', () => {
+  const { room, delivered, broadcast, delivery } = fixture();
+  // Regression: `to: []` (addressed to no one) was overridden by re-parsing the text,
+  // so joining a room prompted the joiner with "@worker joined the room.".
+  routeRoomMessage(room, notice('@worker joined the room.'), delivery);
+  expect(broadcast).toHaveLength(1);
+  expect(delivered).toEqual([]);
+});
+
+test('a notice in a SINGLE-participant room is not delivered by the 1:1 rule', () => {
+  const { room, delivered, broadcast, delivery } = fixture(['solo']);
+  // Regression: halting a 1:1 room prompted the agent with "Room halted by the operator."
+  routeRoomMessage(room, notice('Room halted by the operator.'), delivery);
+  expect(broadcast).toHaveLength(1);
+  expect(delivered).toEqual([]);
 });
 
 test('@human is broadcast only — never delivered as a turn', () => {

@@ -12,6 +12,7 @@ import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/
 import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
   ensureWorktree,
   listWorktrees,
@@ -209,8 +210,12 @@ async function room(goal: string): Promise<void> {
     .filter(Boolean);
   if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
   const lead = participantNames[0] as string;
-  // Address the lead participant unless the goal already @mentions someone.
-  const kickoff = /@[A-Za-z0-9_-]+/.test(goal) ? goal : `@${lead} ${goal}`;
+  // Address the lead unless the goal already addresses a PARTICIPANT. Testing for a
+  // bare @mention is not the same question: `@human` is never a participant, and it
+  // is exactly what a goal says when it names who to report back to — that would
+  // address no one and the room would sit idle.
+  const addressed = parseMentions(goal).some((h) => participantNames.includes(h));
+  const kickoff = addressed ? goal : `@${lead} ${goal}`;
   const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
