@@ -13,6 +13,7 @@ import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
+  forceRemoveWorktree,
   listWorktrees,
   pruneMergedWorktrees,
   removeWorktree,
@@ -28,6 +29,7 @@ const { values, positionals } = parseArgs({
     agent: { type: 'string' },
     model: { type: 'string' },
     worktree: { type: 'string' },
+    force: { type: 'boolean', default: false },
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
   },
 });
@@ -111,8 +113,9 @@ async function agent(action: string | undefined, args: string[]): Promise<void> 
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${ENGINE}${path}`, init);
   if (!r.ok) {
-    const body = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `${path} failed (${r.status})`);
+    const body = (await r.json().catch(() => ({}))) as { error?: string; files?: string[] };
+    const preview = body.files?.length ? `: ${body.files.join(', ')}` : '';
+    throw new Error(`${body.error ?? `${path} failed (${r.status})`}${preview}`);
   }
   return r.json() as Promise<T>;
 }
@@ -145,13 +148,16 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
       await engineFetch(`/api/worktrees`, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ project: repo, name }),
+        body: JSON.stringify({ project: repo, name, force: values.force }),
       });
     } else {
-      await removeWorktree(repo, worktreePath(name));
+      const result = values.force
+        ? await forceRemoveWorktree(repo, worktreePath(name))
+        : await removeWorktree(repo, worktreePath(name));
+      if (!result.ok) throw new Error(removeRefusalMessage(name, result));
     }
     if (json) console.log(JSON.stringify({ ok: true, name }, null, 2));
-    else console.log(`removed worktree ${name}`);
+    else console.log(`${values.force ? 'force-removed' : 'removed'} worktree ${name}`);
   } else if (action === 'prune') {
     const pruned = engineUp
       ? (
@@ -165,8 +171,20 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
     if (json) console.log(JSON.stringify({ pruned }, null, 2));
     else console.log(pruned.length ? `pruned: ${pruned.join(', ')}` : 'nothing to prune');
   } else {
-    throw new Error('usage: kild worktree <ls|rm|prune> --project <p>');
+    throw new Error('usage: kild worktree <ls|rm|prune> --project <p> [--force]');
   }
+}
+
+function removeRefusalMessage(
+  name: string,
+  refusal: { code: 'dirty' | 'in_use' | 'not_found'; files?: string[] },
+): string {
+  if (refusal.code === 'dirty') {
+    const files = refusal.files?.join(', ') || '(unknown files)';
+    return `worktree '${name}' has uncommitted or untracked files: ${files}. Re-run with --force to discard them.`;
+  }
+  if (refusal.code === 'in_use') return `worktree '${name}' is in use by a live session`;
+  return `worktree '${name}' was not found`;
 }
 
 async function engineRunning(): Promise<boolean> {
@@ -183,7 +201,10 @@ async function run(prompt: string): Promise<void> {
 }
 
 async function fleet(goal: string): Promise<void> {
-  if (!goal) throw new Error('usage: kild fleet <goal…> [--project <p>] [--worktree <n>]');
+  if (values.worktree) {
+    throw new Error('kild fleet does not support --worktree; use kild room or kild run instead');
+  }
+  if (!goal) throw new Error('usage: kild fleet <goal…> [--project <p>]');
   if (!(await engineRunning())) {
     throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
   }
