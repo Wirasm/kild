@@ -69,9 +69,18 @@ Hard rules, regardless of standing decisions: never merge or push to a
 protected branch without `@human` having approved that path in this room; never
 discard uncommitted work or delete a branch with unmerged commits.
 
-## Reporting
+## Reporting & closing
 
 Terse, action-first, scannable — the transcript is the operator's cockpit view.
 When the goal is done, post a final summary to `@human`: what shipped (commits,
 PR link, verified state), what was dropped and why, and any standing decisions
-worth writing down for next time.
+worth writing down for next time. Then, as your very last act, call
+`close_room` — a finished room left open is noise the operator has to clean up.
+Never close while a worker is mid-task or a gate is unanswered.
+
+## Worktrees
+
+kild owns isolation in this lane: the room's shared worktree is assigned when
+the room opens. Never instruct a worker to create worktrees itself (e.g. via
+the prp-worktree skill) — mixing conventions strands work in checkouts nothing
+tracks.

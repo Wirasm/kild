@@ -86,22 +86,24 @@ kild room, ~$0.20 total:
 
 ## Known gaps (ranked)
 
-1. **No `close_room`.** Rooms outlive their work — the pipeline finished in ~2 minutes and
-   the room ran until killed. Nothing maps "the orchestrator posted its final report" to
-   teardown. Fits kild's own philosophy as a **tool the lead holds** (symmetric with
-   `invite_agent`), so ending a room is an explicit agent act, not a heuristic.
+1. ~~**No `close_room`.**~~ **Done (2026-07-16).** The lead participant now holds a
+   `close_room` tool (symmetric with `invite_agent`): control line → engine posts a
+   system notice, stops every participant, archives the room; the `kild room` CLI
+   resolves on the archive broadcast. Engine-side lead-only enforcement (a control
+   line is just stdout — the engine, not the subprocess, is the authority). Live-proven:
+   a delegation+verify+report room self-terminated in 20s with no operator action.
 2. **A post addressing no deliverable recipient dies silently.** With the kickoff fixed
    this is no longer reachable by accident, but the room should surface "this addressed no
    one" rather than idle. (Decide: error, warn, or deliver to the lead?)
 3. **Personalities only resolve globally via `~/.claude/agents`.** A new project gets no
    team; I had to copy `orchestrator.md`/`worker.md` into the smoke project. Consider
    `~/.kild/agents` in `agentDirs()`, or ship defaults.
-4. **The Flue layer has no current caller.** A committed dependency with five modules and a
-   workflows dir, "not yet on the session hot path" — speculative coupling by your own
-   CLAUDE.md's standards (`no config key, feature flag, or "flexibility" without a current
-   caller`). Everything on today's hot path (sessions, rooms, worktrees, CLI) earned its
-   place; Flue was never touched. Park it behind one seam; stop growing it until something
-   real runs on it.
+4. **The Flue layer is off the hot path.** It does have callers (run/auth/observability/
+   brain demos and the worktree-sandbox — see the 2026-07-15 runtime-integration research
+   in the PRP repo), but nothing on the session hot path uses it and the dogfood never
+   touched it. Note `brain.ts` already exposes open-room/post-to-room tools — it is the
+   seed of the fleet layer. Decide deliberately: promote it when the fleet layer lands, or
+   park it; just don't let it grow ambiently.
 5. **Worktree convention overlap.** kild owns worktree policy (`$KILD_HOME/worktrees/`,
    `kild/<name>`); the PRP pack's `prp-worktree` skill uses in-repo `.worktrees/`. In the
    kild lane **kild's mechanism wins** — workers must not invoke `prp-worktree`. Worth one

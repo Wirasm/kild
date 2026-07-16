@@ -136,6 +136,7 @@ class RoomManager {
     if (spec.name === HUMAN) return false;
     if (room.participants.some((p) => p.name === spec.name)) return false;
     if (room.participants.length >= MAX_PARTICIPANTS) return false;
+    const isLead = room.participants.length === 0; // first participant leads the room
     const sessionId = randomUUID();
     room.participants.push({ name: spec.name, sessionId, agent: spec.agent });
     sessionManager.spawn(
@@ -148,13 +149,19 @@ class RoomManager {
         // Every participant attaches to the room's shared worktree, if any.
         worktree: room.worktree,
         // Opaque to the SessionManager; the worker reads these to register its room
-        // tools (`post_message`, `invite_agent`) and tag its outbound control lines.
-        env: { KILD_ROOM: room.id, KILD_PARTICIPANT: spec.name },
+        // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
+        // tag its outbound control lines.
+        env: {
+          KILD_ROOM: room.id,
+          KILD_PARTICIPANT: spec.name,
+          ...(isLead ? { KILD_ROOM_LEAD: '1' } : {}),
+        },
       },
       'cli',
       {
         onMessage: (m) => this.handleParticipantMessage(sessionId, m),
         onInvite: (i) => this.handleInvite(sessionId, i),
+        onCloseRoom: (c) => this.handleCloseRoom(sessionId, c.reason),
       },
     );
     return true;
@@ -177,6 +184,25 @@ class RoomManager {
   private handleInvite(sessionId: string, spec: ParticipantSpec): void {
     const located = this.registry.locateSession(sessionId);
     if (located) this.addParticipant(located.room.id, spec);
+  }
+
+  /** The room's lead called `close_room`: notice, then teardown. Only the lead holds
+   *  the tool (worker-side), but enforce it here too — a control line is just stdout,
+   *  so the engine, not the subprocess, is the authority on who may end a room. */
+  private handleCloseRoom(sessionId: string, reason?: string): void {
+    const located = this.registry.locateSession(sessionId);
+    if (!located) return;
+    const { room, participant } = located;
+    if (room.participants[0]?.sessionId !== sessionId) return; // not the lead — ignore
+    this.post(
+      room.id,
+      HUMAN,
+      `Room closed by @${participant.name}${reason ? `: ${reason}` : '.'}`,
+      {
+        system: true,
+      },
+    );
+    this.close(room.id);
   }
 
   /** Record + route one post from `from` (a participant name or {@link HUMAN}). */

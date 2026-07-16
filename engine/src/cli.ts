@@ -184,9 +184,10 @@ async function run(prompt: string): Promise<void> {
  * (`--participants orchestrator,worker,reviewer`; default `orchestrator,worker`),
  * posts the goal to the first one, and streams every message. With `--worktree
  * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
- * You can keep typing to post more messages (address participants with @name);
- * Ctrl-C is the kill switch — it closes the room (stopping all participants) and
- * exits. Requires the engine (it is multi-session).
+ * You can keep typing to post more messages (address participants with @name).
+ * The run ends when the room does: the lead closes it with its `close_room` tool
+ * after the final report, or Ctrl-C is the kill switch — it closes the room
+ * (stopping all participants) and exits. Requires the engine (it is multi-session).
  */
 async function room(goal: string): Promise<void> {
   if (!goal) {
@@ -271,10 +272,19 @@ async function room(goal: string): Promise<void> {
     ws.addEventListener('message', (e) => {
       let parsed: {
         roomMessage?: { roomId: string; from: string; to: string[]; text: string };
+        archivedRoom?: { id: string };
       };
       try {
         parsed = JSON.parse(String((e as { data: unknown }).data));
       } catch {
+        return;
+      }
+      // The engine archived our room (the lead called `close_room`, or another
+      // client closed it) — the run is over; resolve without re-closing.
+      if (parsed.archivedRoom?.id === roomId) {
+        if (!json) console.error('\x1b[2m— room closed —\x1b[0m');
+        ws.close();
+        resolve();
         return;
       }
       const m = parsed.roomMessage;
