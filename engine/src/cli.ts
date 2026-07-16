@@ -5,16 +5,14 @@
  * Thin: parse → call the engine lib → format. Reads → stdout, progress →
  * stderr, non-zero exit on failure.
  */
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
-
-import { listAgents, resolveAgentInstructions } from './kild/agents.ts';
-import { resolveModel, withRole } from './kild/models.ts';
+import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
-  ensureWorktree,
   listWorktrees,
   pruneMergedWorktrees,
   removeWorktree,
@@ -176,7 +174,7 @@ async function run(prompt: string): Promise<void> {
   const engineUp = await fetch(`${ENGINE}/api/health`)
     .then((r) => r.ok)
     .catch(() => false);
-  return engineUp ? runViaEngine(prompt) : runInProcess(prompt);
+  return engineUp ? runViaEngine(prompt) : runViaWorker(prompt);
 }
 
 /**
@@ -396,56 +394,105 @@ async function runViaEngine(prompt: string): Promise<void> {
   }
 }
 
-async function runInProcess(prompt: string): Promise<void> {
+/**
+ * Run through the same JSONL worker boundary as the engine. `server.ts` owns the
+ * worker role dispatch, so invoke that entry explicitly rather than re-invoking this
+ * CLI entry (which would otherwise start a second CLI process under `KILD_ROLE`).
+ */
+async function runViaWorker(prompt: string): Promise<void> {
   const projectPath = values.project ? (await findProject(values.project))?.path : undefined;
-  let cwd = projectPath ?? process.cwd();
-  // Engine-down fallback: replicate the worker's create-or-attach so `--worktree`
-  // isolates standalone runs too.
-  if (values.worktree) cwd = (await ensureWorktree(cwd, values.worktree)).path;
-
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
-  const model = resolveModel(registry, values.model);
-
-  const { session } = await createAgentSession({
-    model,
-    authStorage,
-    modelRegistry: registry,
-    cwd,
+  const workerEntry = fileURLToPath(new URL('./server.ts', import.meta.url));
+  const child = spawn(process.execPath, [workerEntry], {
+    env: {
+      ...process.env,
+      KILD_ROLE: 'worker',
+      KILD_CWD: projectPath ?? process.cwd(),
+      KILD_AGENT: values.agent ?? '',
+      KILD_MODEL: values.model ?? '',
+      KILD_WORKTREE: values.worktree ?? '',
+    },
+    stdio: ['pipe', 'pipe', 'inherit'],
   });
 
   let text = '';
-  session.subscribe(
-    (e: {
-      type: string;
-      assistantMessageEvent?: { type?: string; delta?: string };
-      toolName?: string;
-    }) => {
-      if (e.type === 'message_update' && e.assistantMessageEvent?.type === 'text_delta') {
-        text += e.assistantMessageEvent.delta ?? '';
-      } else if (e.type === 'tool_execution_start') {
-        process.stderr.write(`\x1b[2m🔧 ${e.toolName}\x1b[0m\n`);
+  let model = 'default';
+  let tokens = 0;
+  let cost = 0;
+  let buffer = '';
+  let agentEnded = false;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve();
+    };
+    const stop = () => {
+      child.stdin?.end(`${JSON.stringify({ type: 'stop' })}\n`);
+    };
+    const consume = (line: string) => {
+      let event: { kind?: string; [key: string]: unknown };
+      try {
+        event = JSON.parse(line) as { kind?: string; [key: string]: unknown };
+      } catch {
+        finish(new Error(`worker emitted invalid JSONL: ${line}`));
+        return;
       }
-    },
-  );
+      switch (event.kind) {
+        case 'model':
+          model = `${event.provider}/${event.id}`;
+          break;
+        case 'text': {
+          const delta = String(event.delta ?? '');
+          text += delta;
+          if (!json) process.stdout.write(delta);
+          break;
+        }
+        case 'tool_start':
+          process.stderr.write(`\x1b[2m🔧 ${event.name}\x1b[0m\n`);
+          break;
+        case 'stats':
+          tokens = Number(event.tokens ?? 0);
+          cost = Number(event.cost ?? 0);
+          break;
+        case 'error':
+          finish(new Error(String(event.message ?? 'worker error')));
+          break;
+        case 'agent_end':
+          agentEnded = true;
+          // The worker writes stats immediately after agent_end. Defer stopping until
+          // this stdout batch has been consumed so the final outcome includes them.
+          setTimeout(stop, 0);
+          break;
+      }
+    };
 
-  const instr = values.agent ? await resolveAgentInstructions(values.agent, projectPath) : null;
-  await session.prompt(withRole(prompt, instr));
-  const stats = session.getSessionStats();
-  session.dispose();
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (line) consume(line);
+      }
+    });
+    child.on('error', (err) => finish(new Error(`worker failed: ${err.message}`)));
+    child.on('close', (code) => {
+      if (buffer.trim()) consume(buffer.trim());
+      if (!agentEnded)
+        finish(new Error(`worker exited before completing (code ${code ?? 'unknown'})`));
+      else finish();
+    });
+    child.stdin?.write(`${JSON.stringify({ type: 'prompt', text: prompt })}\n`);
+  });
 
-  const outcome = {
-    model: model ? `${model.provider}/${model.id}` : 'default',
-    text,
-    tokens: stats.tokens.total,
-    cost: stats.cost,
-  };
+  const outcome = { model, text, tokens, cost };
   if (json) {
     console.log(JSON.stringify(outcome, null, 2));
   } else {
-    console.log(text);
-    console.error(
-      `\x1b[2m───── ${outcome.model}  tokens=${outcome.tokens}  cost=$${outcome.cost.toFixed(4)}\x1b[0m`,
-    );
+    if (!text.endsWith('\n')) console.log();
+    console.error(`\x1b[2m───── ${model}  tokens=${tokens}  cost=$${cost.toFixed(4)}\x1b[0m`);
   }
 }
