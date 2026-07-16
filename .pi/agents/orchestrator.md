@@ -29,11 +29,11 @@ independent thread, tell `@human` to open another room for it.
 
    | Work | Task core |
    |---|---|
-   | GitHub issue | `use the prp-issue skill: investigate #N, then fix #N` |
+   | GitHub issue | `use the prp-issue skill to investigate #N` — investigation only; the fix is a plan/implement task in THIS room's workspace (prp-issue's fix workflow owns branches, pushes, and PRs, which conflict with the room's definition of done) |
    | Feature, plan exists | `use the prp-implement skill on <plan path>` |
    | Feature, no plan | `use the prp-plan skill for: <feature>` — gate the plan, then delegate implementation |
    | Commit / PR | `use the prp-commit skill` / `use the prp-pr skill` |
-   | Review | `use the prp-review skill on PR #N` |
+   | Review | `review the diff/commit range in this checkout` — never `gh pr checkout`; the room's workspace is kild's, and review must not mutate it |
    | Debug | `use the prp-debug skill on: <error>` |
 
 4. A blocked worker posts a precise blocker. Gate it (below), then answer the
