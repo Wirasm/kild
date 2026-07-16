@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -129,8 +129,68 @@ export async function listWorktrees(repo: string): Promise<Worktree[]> {
   return trees;
 }
 
-export async function removeWorktree(repo: string, wtPath: string): Promise<void> {
+/** A refusal to remove a worktree without an explicit destructive request. */
+export type WorktreeRemoveRefusal = {
+  ok: false;
+  code: 'dirty' | 'in_use' | 'not_found';
+  files?: string[];
+};
+
+export type WorktreeRemoveResult = { ok: true } | WorktreeRemoveRefusal;
+
+/** Files whose uncommitted changes would be discarded by removing `wtPath`. */
+async function changedFiles(wtPath: string): Promise<string[]> {
+  const { stdout } = await execFile('git', [
+    '-C',
+    wtPath,
+    'status',
+    '--porcelain',
+    '--untracked-files=all',
+    '-z',
+  ]);
+  const files: string[] = [];
+  // Porcelain v1 -z records are `XY SP path NUL`; for renames/copies the following
+  // NUL-delimited original path has no status prefix, so only consume records with it.
+  for (const record of stdout.split('\0')) {
+    if (record.length >= 4 && /^[ MADRCU?!]{2} /.test(record)) files.push(record.slice(3));
+  }
+  return files;
+}
+
+async function registeredWorktree(repo: string, wtPath: string): Promise<boolean> {
+  if (!existsSync(wtPath)) return false;
+  // macOS commonly presents /var as a /private/var symlink; git reports the latter.
+  // Resolve both sides rather than comparing spellings of the same directory.
+  const target = realpathSync(wtPath);
+  const trees = await listWorktrees(repo);
+  return trees.some((tree) => existsSync(tree.path) && realpathSync(tree.path) === target);
+}
+
+/** Remove a worktree only when it is clean. Refusals are data so callers can give a
+ * useful preview instead of parsing git's prose. `inUse` is supplied by the engine,
+ * which alone knows about live sessions. */
+export async function removeWorktree(
+  repo: string,
+  wtPath: string,
+  inUse = false,
+): Promise<WorktreeRemoveResult> {
+  if (inUse) return { ok: false, code: 'in_use' };
+  if (!(await registeredWorktree(repo, wtPath))) return { ok: false, code: 'not_found' };
+  const files = await changedFiles(wtPath);
+  if (files.length > 0) return { ok: false, code: 'dirty', files };
+  await execFile('git', ['-C', repo, 'worktree', 'remove', wtPath]);
+  return { ok: true };
+}
+
+/** Explicitly destructive removal. Live-session protection remains the caller's
+ * responsibility; this verb exists so force is never implicit in ordinary removal. */
+export async function forceRemoveWorktree(
+  repo: string,
+  wtPath: string,
+): Promise<WorktreeRemoveResult> {
+  if (!(await registeredWorktree(repo, wtPath))) return { ok: false, code: 'not_found' };
   await execFile('git', ['-C', repo, 'worktree', 'remove', '--force', wtPath]);
+  return { ok: true };
 }
 
 /** The repo's default branch: `origin/HEAD` if set, else `main`/`master` if they

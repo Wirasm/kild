@@ -21,6 +21,7 @@ import { HUMAN, type ParticipantSpec } from './kild/room/room-types.ts';
 import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
+  forceRemoveWorktree,
   listWorktrees,
   pruneMergedWorktrees,
   removeWorktree,
@@ -136,15 +137,36 @@ app.get('/api/worktrees', async (c) => {
 });
 
 app.delete('/api/worktrees', async (c) => {
-  const { project, name } = await c.req.json<{ project: string; name: string }>();
+  const { project, name, force } = await c.req.json<{
+    project: string;
+    name: string;
+    force?: boolean;
+  }>();
   const repo = await resolveProjectPath(project);
   if (!repo) return c.json({ error: 'project required' }, 400);
+  if (force !== undefined && typeof force !== 'boolean') {
+    return c.json({ error: 'force must be a boolean' }, 400);
+  }
   try {
     assertSafeBranch(name); // allowlist before building a path under worktreesRoot()
-    if (worktreesInUse().has(name)) {
-      return c.json({ error: `worktree '${name}' is in use by a live session` }, 409);
+    const wtPath = worktreePath(name);
+    const result = worktreesInUse().has(name)
+      ? { ok: false as const, code: 'in_use' as const }
+      : force
+        ? await forceRemoveWorktree(repo, wtPath)
+        : await removeWorktree(repo, wtPath);
+    if (!result.ok) {
+      const error =
+        result.code === 'dirty'
+          ? `worktree '${name}' has uncommitted or untracked files; retry with force: true to discard them`
+          : result.code === 'in_use'
+            ? `worktree '${name}' is in use by a live session`
+            : `worktree '${name}' was not found`;
+      return c.json(
+        { error, code: result.code, ...(result.files ? { files: result.files } : {}) },
+        result.code === 'not_found' ? 404 : 409,
+      );
     }
-    await removeWorktree(repo, worktreePath(name));
     return c.json({ ok: true, name });
   } catch (err) {
     return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);

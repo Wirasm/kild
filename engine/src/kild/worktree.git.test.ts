@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { ensureWorktree, pruneMergedWorktrees, removeWorktree, worktreePath } from './worktree.ts';
+import {
+  ensureWorktree,
+  forceRemoveWorktree,
+  pruneMergedWorktrees,
+  removeWorktree,
+  worktreePath,
+} from './worktree.ts';
 
 // Real-git tests for the two data-loss/safety paths: merge-prune must never destroy
 // uncommitted work or in-use trees, and ensureWorktree must attach (never reset).
@@ -81,6 +87,42 @@ test('ensureWorktree attaches without resetting (uncommitted work survives)', as
   const again = await ensureWorktree(repo, 'attach');
   expect(again.path).toBe(wt.path);
   expect(existsSync(path.join(wt.path, 'WIP.txt'))).toBe(true);
+});
+
+test('safe removal removes a clean worktree', async () => {
+  const wt = await ensureWorktree(repo, 'clean');
+  await expect(removeWorktree(repo, wt.path)).resolves.toEqual({ ok: true });
+  expect(existsSync(wt.path)).toBe(false);
+});
+
+test('safe removal refuses dirty worktree and previews modified and untracked files', async () => {
+  const wt = await ensureWorktree(repo, 'dirty-remove');
+  writeFileSync(path.join(wt.path, 'tracked.txt'), 'base');
+  await gitIn(wt.path, 'add', 'tracked.txt');
+  await gitIn(wt.path, 'commit', '-q', '-m', 'tracked');
+  writeFileSync(path.join(wt.path, 'tracked.txt'), 'changed');
+  writeFileSync(path.join(wt.path, 'untracked.txt'), 'wip');
+
+  await expect(removeWorktree(repo, wt.path)).resolves.toEqual({
+    ok: false,
+    code: 'dirty',
+    files: expect.arrayContaining(['tracked.txt', 'untracked.txt']),
+  });
+  expect(existsSync(wt.path)).toBe(true);
+});
+
+test('force removal discards a dirty worktree', async () => {
+  const wt = await ensureWorktree(repo, 'force-dirty');
+  writeFileSync(path.join(wt.path, 'WIP.txt'), 'discard');
+  await expect(forceRemoveWorktree(repo, wt.path)).resolves.toEqual({ ok: true });
+  expect(existsSync(wt.path)).toBe(false);
+});
+
+test('safe removal reports a missing worktree', async () => {
+  await expect(removeWorktree(repo, worktreePath('missing'))).resolves.toEqual({
+    ok: false,
+    code: 'not_found',
+  });
 });
 
 test('ensureWorktree re-creating a removed worktree preserves the branch commits', async () => {
