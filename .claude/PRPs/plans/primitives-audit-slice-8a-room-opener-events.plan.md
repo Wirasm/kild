@@ -29,9 +29,9 @@ Pass the spawning session’s id to workers as manager-owned `KILD_SESSION_ID`; 
 ## Lifecycle (append-only)
 
 - **Created:** 2026-07-17T11:42:03Z
-- **Modified:** 2026-07-17T11:42:03Z
-- **Commits:** plan-only commit pending
-- **Agent / Session:** worker(openai-codex/gpt-5.2) / kild room session
+- **Modified:** 2026-07-17T11:42:03Z; 2026-07-17T12:03:00Z; 2026-07-17T12:35:24Z
+- **Commits:** `0d44720` — implementation
+- **Agent / Session:** worker(openai-codex/gpt-5.2) / kild room session; worker(openai-codex/gpt-5.2) / kild room implementation session
 - **Back refs:** `HANDOVER.md` — slice-8 requirements and live reproductions
 - **Forward refs:** none
 
@@ -227,7 +227,7 @@ test('delivers a mention to that participant as a turn AND broadcasts it', () =>
 
 Execute in order. Each task is atomic and independently verifiable.
 
-### `[ ]` Task 1: UPDATE `engine/src/kild/sessions.ts`
+### `[x]` Task 1: UPDATE `engine/src/kild/sessions.ts`
 
 - **ACTION**: Make the manager-issued session id available to each worker.
 - **IMPLEMENT**: Change `PiSession` construction to receive the `spawn()` id and set `KILD_SESSION_ID: id` after spreading `req.env`, alongside the existing manager-owned `KILD_*` values. Keep it unavailable for caller override.
@@ -235,7 +235,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: Do not put `KILD_SESSION_ID` in `SpawnRequest.env`; an untrusted WS caller can supply `env`, whereas the spawned id is the identity required by opener targeting.
 - **VALIDATE**: `cd engine && bun run typecheck`
 
-### `[ ]` Task 2: UPDATE fleet open request and tool
+### `[x]` Task 2: UPDATE fleet open request and tool
 
 - **ACTION**: Carry the current fleet session identity in the existing REST body.
 - **IMPLEMENT**: Add `openedBy?: string` to `OpenRoomRequest`; in `createOpenRoomTool.execute`, construct the current request with `from: 'brain'` and `openedBy: process.env.KILD_SESSION_ID` only when nonempty, preserving REST callers that omit it.
@@ -243,7 +243,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: Do not add `openedBy` to the tool’s TypeBox parameters: it is process identity, not model-controlled input.
 - **VALIDATE**: `cd engine && bun run typecheck && bun run lint`
 
-### `[ ]` Task 3: UPDATE `engine/src/server.ts` and `engine/src/kild/room/room-types.ts`
+### `[x]` Task 3: UPDATE `engine/src/server.ts` and `engine/src/kild/room/room-types.ts`
 
 - **ACTION**: Validate and retain optional opener ownership at the REST/domain boundary.
 - **IMPLEMENT**: Add `openedBy?: string` to `OpenRoomSpec` and `Room`; declare it as `unknown` in the `POST /api/rooms` body, reject a non-string supplied value with 400, and pass an omitted/optional string into `roomManager.open`. Initialize `Room.openedBy` from the spec. Do not alter `ClientMessage`, room WebSocket cases, or cockpit protocol.
@@ -251,7 +251,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: REST callers without a session must remain valid and get no notification target; use optional fields rather than an empty-string sentinel in domain state.
 - **VALIDATE**: `cd engine && bun run typecheck && bun run lint`
 
-### `[ ]` Task 4: CREATE `engine/src/kild/room/room-events.ts`
+### `[x]` Task 4: CREATE `engine/src/kild/room/room-events.ts`
 
 - **ACTION**: Isolate pure opener eligibility and operator-notification formatting.
 - **IMPLEMENT**: Export a formatter that produces clearly labeled operator prompts for three event variants: participant post addressed to `@human` (room name, sender, post text), halt (room name and final non-system post), and close/archive (room name and final non-system post). Export an eligibility function that returns `room.openedBy` only when it exists and is absent from `room.participants`; otherwise `undefined`. Define “final post” by scanning the room log from the end for `!message.system`, with an explicit stable fallback when none exists.
@@ -260,7 +260,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: The notification must be only a prompt string; never call `post`, `routeRoomMessage`, or emit `RoomOutbound`, or it could trigger self-repost/loop behavior.
 - **VALIDATE**: `cd engine && bun run typecheck`
 
-### `[ ]` Task 5: CREATE `engine/src/kild/room/room-events.test.ts`
+### `[x]` Task 5: CREATE `engine/src/kild/room/room-events.test.ts`
 
 - **ACTION**: Add existing-style unit coverage for the pure decisions.
 - **IMPLEMENT**: Use `bun:test` fixtures with room participants/session ids and messages to assert exact event strings for human-addressed participant post, halt, and close (including the last non-system message selection); assert targeting for no opener, eligible nonparticipant opener, and opener matching a participant session id. Include a room with only system messages to lock the fallback text.
@@ -268,7 +268,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: Do not unit-test `SessionManager` subprocess behavior or REST here; this slice explicitly asks for pure decision pieces and a missing target is already intentionally a no-op at `sessions.ts:227-229`.
 - **VALIDATE**: `cd engine && bun test src/kild/room/room-events.test.ts`
 
-### `[ ]` Task 6: UPDATE `engine/src/kild/room/room-manager.ts`
+### `[x]` Task 6: UPDATE `engine/src/kild/room/room-manager.ts`
 
 - **ACTION**: Deliver qualifying events directly to a live eligible opener.
 - **IMPLEMENT**: Add one private helper that obtains the pure opener target and calls `this.sessions.prompt(target, formattedText, 'kild')`. Invoke it after recording/routing a participant-originated post whose resolved `message.to` includes `HUMAN`; invoke it after halt’s system notice is appended; invoke it during close after transition/archive preparation while the original live `room` and its log are still available. Use the pure helper’s final non-system lookup so participant-close’s preceding system notice does not replace the final meaningful post. Do not invoke on messages from `human`/`brain`, system notices, implicit replies, or any room whose opener participates.
@@ -276,7 +276,7 @@ Execute in order. Each task is atomic and independently verifiable.
 - **GOTCHA**: Preserve normal stop/archive/broadcast behavior and never route the notification via `this.post`; direct `sessions.prompt` ensures it cannot become a room post or cause prompt/repost loops.
 - **VALIDATE**: `cd engine && bun test src/kild/room/room-events.test.ts src/kild/room/room-manager.test.ts src/kild/room/room-router.test.ts`
 
-### `[ ]` Task 7: UPDATE `.pi/agents/brain.md`
+### `[x]` Task 7: UPDATE `.pi/agents/brain.md`
 
 - **ACTION**: Replace monitor polling guidance with the new event contract.
 - **IMPLEMENT**: State that for every room the brain opens it is prompted on close/archive, participant `@human` gate posts, and halt; on every event it must reconcile relevant room/ledger state, act or surface a human decision, then atomically ledger-update. Retain startup/cold-resume `rooms_status` reconciliation, but explicitly forbid poll-after-gate-prone-stage loops as the normal liveness mechanism. Keep verify-before-believe and existing ledger ownership rules.
@@ -372,12 +372,12 @@ Not applicable — cockpit WebSocket protocol and UI are explicitly unchanged.
 
 ## Completion Checklist
 
-- [ ] `cd engine && bun install` completed before validation.
-- [ ] All tasks completed in dependency order.
-- [ ] Level 1 static analysis passes.
-- [ ] Level 2 unit tests pass.
-- [ ] Level 3 full engine suite passes.
-- [ ] Levels 4-5 correctly omitted as not applicable.
+- [x] `cd engine && bun install` completed before validation.
+- [x] All tasks completed in dependency order.
+- [x] Level 1 static analysis passes.
+- [x] Level 2 unit tests pass.
+- [x] Level 3 full engine suite passes.
+- [x] Levels 4-5 correctly omitted as not applicable.
 - [ ] Manual next-fleet-run acceptance recorded in its ledger.
 
 ---
@@ -399,7 +399,7 @@ Not applicable — cockpit WebSocket protocol and UI are explicitly unchanged.
 <details>
 <summary>What should the stable fallback say when a halted/closed room has no non-system post?</summary>
 
-Assumption: formatter emits a concise explicit sentinel such as “No non-system posts were recorded.” This meets the contract without inventing content and makes an empty room actionable. Confirm exact wording during implementation through focused exact-output tests.
+Resolved by binding decision: `NO_FINAL_POST` is exactly `(no non-system posts recorded)`, asserted as exact output in `engine/src/kild/room/room-events.test.ts`.
 
 </details>
 
@@ -427,7 +427,7 @@ Assumption: formatter emits a concise explicit sentinel such as “No non-system
 | No-loop delivery | `engine/src/kild/room/room-router.ts:43-60` | system/implicit broadcast but never turns | early return after broadcast |
 | Tests | `engine/src/kild/room/room-router.test.ts:11-70` | local fixtures + exact Bun assertions | `expect(...).toEqual` |
 
-**Confidence:** 9/10. The only implementation-level choice left is exact no-non-system fallback wording; it is isolated in the pure formatter and surfaced above.
+**Confidence:** 10/10. The exact no-non-system fallback was resolved as `NO_FINAL_POST` and covered by an exact-output unit test.
 
 ---
 
@@ -437,5 +437,12 @@ Assumption: formatter emits a concise explicit sentinel such as “No non-system
 <summary>2026-07-17T11:42:03Z — Initial plan</summary>
 
 Plan-only artifact for primitives-audit slice 8a. No implementation changes included.
+
+</details>
+
+<details>
+<summary>2026-07-17T12:03:00Z — Implemented opener lifecycle prompts</summary>
+
+Completed tasks 1–7 in `0d44720`: manager-owned session identity, existing REST opener propagation, pure event/target helpers, direct non-reentrant prompt delivery, focused regressions, and brain event-contract guidance. The next-fleet-run E2E acceptance remains pending by design.
 
 </details>
