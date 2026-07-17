@@ -72,7 +72,12 @@ class PiSession {
   private readonly child: ChildProcess;
   private buf = '';
 
-  constructor(req: SpawnRequest, onEvent: (event: UiEvent) => void, callbacks?: SessionCallbacks) {
+  constructor(
+    id: string,
+    req: SpawnRequest,
+    onEvent: (event: UiEvent) => void,
+    callbacks?: SessionCallbacks,
+  ) {
     const { KILD_SKILLS_PROFILE: _inheritedSkillsProfile, ...parentEnv } = process.env;
     const skillsProfile = skillsProfileForWorker(req.env?.KILD_ROOM, SKILLS_PROFILE);
     this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
@@ -83,6 +88,8 @@ class PiSession {
         KILD_MODEL: req.model ?? '',
         KILD_CWD: req.cwd ?? process.cwd(),
         KILD_AGENT: req.agent ?? '',
+        // Session identity is manager-owned: fleet tools use it to identify room openers.
+        KILD_SESSION_ID: id,
         // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
         KILD_WORKTREE: req.worktree ?? '',
         // A profile is a room capability assignment, not inherited worker state.
@@ -161,7 +168,7 @@ class PiSession {
  * process. Every client (cockpit WS connections, and the CLI) subscribes to the
  * same broadcast, so a session started anywhere is visible everywhere.
  */
-class SessionManager {
+export class SessionManager {
   private readonly sessions = new Map<string, { session: PiSession; info: SessionInfo }>();
   private readonly subscribers = new Set<(msg: Outbound) => void>();
 
@@ -210,6 +217,7 @@ class SessionManager {
       }
     }
     const session = new PiSession(
+      id,
       req,
       (event) => {
         this.broadcast({ session: id, event });
@@ -224,8 +232,12 @@ class SessionManager {
     this.broadcast({ sessions: this.list() });
   }
 
-  prompt(id: string, text: string, from?: string): void {
-    this.sessions.get(id)?.session.prompt(text, from);
+  /** Returns false for a dead/missing session so callers can silently drop best-effort signals. */
+  prompt(id: string, text: string, from?: string): boolean {
+    const entry = this.sessions.get(id);
+    if (!entry) return false;
+    entry.session.prompt(text, from);
+    return true;
   }
 
   stop(id: string): void {

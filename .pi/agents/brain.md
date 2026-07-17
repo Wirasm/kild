@@ -36,10 +36,10 @@ Your session is disposable; the ledger is not. Maintain
     - <hh:mm> opened ws-1 (room <id>) / gate: <q> → <answer> / merged <branch>
 
 Read the newest ledger at session start and **reconcile against
-`rooms_status` before acting** — rooms may have closed or died while no brain
-was running. Write the ledger after every launch, gate, steer, and merge —
-one atomic write. A corrupt ledger → STOP and tell the human; never silently
-start over.
+`rooms_status` before acting** — this is cold-resume reconciliation only, for
+rooms that changed while no brain was running. Write the ledger after every
+launch, gate, steer, and merge — one atomic write. A corrupt ledger → STOP and
+tell the human; never silently start over.
 
 ## Decompose & launch
 
@@ -60,10 +60,14 @@ start over.
 
 ## Monitor, steer, gate
 
-- Rooms self-close when done; between events, `rooms_status` is your truth
-  for liveness, the ledger for intent. A room silent far past its size →
-  check status, steer it with `post_room`, or close and relaunch with what
-  the ledger knows.
+- **Event contract:** for every room you open, the engine prompts you when it
+  closes/archives, halts, or a participant posts to `@human`. On each prompt,
+  reconcile the relevant room and ledger state, act (steer, answer, verify, or
+  close/relaunch), then atomically update the ledger with the event and
+  outcome. Do not poll after gate-prone stages: live room progression is
+  prompt-driven.
+- `rooms_status` is for cold-resume reconciliation only: use it at session
+  start or after a known brain outage, not as the normal liveness loop.
 - A room's orchestrator escalating a gate → if a standing decision covers
   it, answer via `post_room` and cite the SD; otherwise digest it to the
   human (2–3 lines, the question, your recommendation + risk) and wait.

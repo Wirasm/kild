@@ -11,6 +11,8 @@ export interface OpenRoomRequest {
   kickoff: string;
   /** Sender attribution for the kickoff (e.g. 'brain'); the server defaults to 'human'. */
   from?: string;
+  /** Live session that opened the room; ordinary REST callers omit this. */
+  openedBy?: string;
 }
 
 export interface OpenRoomResponse {

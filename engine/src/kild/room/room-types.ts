@@ -52,6 +52,8 @@ export interface Room {
   cwd: string;
   /** Optional shared worktree name — every participant attaches to `kild/<name>`. */
   worktree?: string;
+  /** Session that opened this room. It is notified only when it is not a participant. */
+  openedBy?: string;
   participants: RoomParticipant[];
   log: RoomMessage[];
   /** Canonical lifecycle state for this room. */
@@ -72,6 +74,8 @@ export interface OpenRoomSpec {
   participants: ParticipantSpec[];
   /** Optional shared worktree — every participant attaches to one `kild/<name>` tree. */
   worktree?: string;
+  /** Opener session identity from a session-aware REST caller; absent for ordinary REST callers. */
+  openedBy?: string;
 }
 
 /** Lightweight room descriptor for client lists. */

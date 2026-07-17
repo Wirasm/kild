@@ -26,6 +26,7 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
   const spawned: Array<{ id: string; agent?: string }> = [];
   const stopped: string[] = [];
   const callbacks = new Map<string, SessionCallbacks | undefined>();
+  const prompted: Array<{ id: string; text: string; from?: string }> = [];
   let spawnCount = 0;
   const ids = ['s-1', 's-2', 's-3', 'm-1', 'm-2', 'm-3'];
   let idIndex = 0;
@@ -40,7 +41,10 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
         callbacks.set(id, sessionCallbacks);
         spawned.push({ id, agent: req.agent });
       },
-      prompt: () => {},
+      prompt: (id, text, from) => {
+        prompted.push({ id, text, from });
+        return true;
+      },
       stop: (id) => stopped.push(id),
     },
     listAgents: async () =>
@@ -52,15 +56,16 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
     createId: options?.createId ?? (() => ids[idIndex++] ?? `id-${idIndex}`),
   });
 
-  return { manager, spawned, stopped, callbacks };
+  return { manager, spawned, stopped, callbacks, prompted };
 }
 
 async function openRoom(
   manager: RoomManager,
   participants: ParticipantSpec[],
   roomId: string = 'room-1',
+  openedBy?: string,
 ) {
-  return manager.open(roomId, { name: 'demo', cwd: '/tmp', participants });
+  return manager.open(roomId, { name: 'demo', cwd: '/tmp', participants, openedBy });
 }
 
 test('rejects a duplicate room id and preserves the existing room', async () => {
@@ -281,6 +286,57 @@ test('participant close_room returns invalid_state for halted rooms', async () =
     code: 'invalid_state',
     message: "room 'demo' is halted",
   });
+});
+
+test('notifies a live non-participant opener about a participant post to @human without re-entering the room', async () => {
+  const { manager, callbacks, prompted } = fixture();
+  await openRoom(manager, [{ name: 'worker' }], 'room-1', 'brain-session');
+
+  await callbacks
+    .get('s-1')
+    ?.onMessage?.({ kind: 'message_out', text: '@human approve the gate?' });
+
+  expect(prompted).toEqual([
+    {
+      id: 'brain-session',
+      from: 'kild',
+      text: "[kild operator notification] Room 'demo': @worker posted to @human: @human approve the gate?",
+    },
+  ]);
+  expect(manager.messages('room-1').map((message) => message.text)).toEqual([
+    '@human approve the gate?',
+  ]);
+});
+
+test('does not notify an opener that is a room participant', async () => {
+  const { manager, callbacks, prompted } = fixture();
+  await openRoom(manager, [{ name: 'worker' }], 'room-1', 's-1');
+
+  await callbacks.get('s-1')?.onMessage?.({ kind: 'message_out', text: '@human approve?' });
+
+  expect(prompted).toEqual([]);
+});
+
+test('notifies a live non-participant opener on halt and close with the final non-system post', async () => {
+  const { manager, prompted } = fixture();
+  await openRoom(manager, [{ name: 'worker' }], 'room-1', 'brain-session');
+  await manager.postFromHuman('room-1', '@worker implementation committed');
+  prompted.splice(0); // discard ordinary room delivery; assertions below are opener notifications only
+  await manager.halt('room-1');
+  await manager.close('room-1');
+
+  expect(prompted).toEqual([
+    {
+      id: 'brain-session',
+      from: 'kild',
+      text: "[kild operator notification] Room 'demo' was halted. Final non-system post: @worker implementation committed",
+    },
+    {
+      id: 'brain-session',
+      from: 'kild',
+      text: "[kild operator notification] Room 'demo' was closed and archived. Final non-system post: @worker implementation committed",
+    },
+  ]);
 });
 
 test('close transitions a halted room to archived closed state', async () => {

@@ -30,7 +30,12 @@ export function createOpenRoomTool(): ToolDefinition {
     async execute(_toolCallId, params) {
       // The fleet brain is the only holder of this tool: attribute its kickoff
       // honestly — the transcript must never claim the human spoke.
-      const req = { ...(params as Parameters<typeof openRoom>[0]), from: 'brain' };
+      const sessionId = process.env.KILD_SESSION_ID;
+      const req = {
+        ...(params as Parameters<typeof openRoom>[0]),
+        from: 'brain',
+        ...(sessionId ? { openedBy: sessionId } : {}),
+      };
       const { id, message } = await openRoom(req);
       return {
         content: [{ type: 'text' as const, text: `${message} id=${id}` }],

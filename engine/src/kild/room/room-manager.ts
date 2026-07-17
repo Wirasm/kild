@@ -4,6 +4,12 @@ import { listAgents } from '../agents.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { parseMentions } from './parse-mentions.ts';
 import {
+  finalNonSystemPost,
+  formatOperatorNotification,
+  humanPostEvent,
+  openerNotificationTarget,
+} from './room-events.ts';
+import {
   ensureRoomCanAddParticipant,
   ensureRoomCanCloseFromOperator,
   ensureRoomCanCloseFromParticipant,
@@ -38,7 +44,7 @@ interface SessionRuntime {
     fn: (msg: { session: string; event: unknown } | { sessions: unknown[] }) => void,
   ): () => void;
   spawn(id: string, req: SpawnRequest, origin?: 'ui' | 'cli', callbacks?: SessionCallbacks): void;
-  prompt(id: string, text: string, from?: string): void;
+  prompt(id: string, text: string, from?: string): boolean;
   stop(id: string): void;
 }
 
@@ -122,6 +128,7 @@ export class RoomManager {
       name: spec.name,
       cwd: spec.cwd,
       worktree: spec.worktree,
+      openedBy: spec.openedBy,
       participants: [],
       log: [],
       state: 'opening',
@@ -215,6 +222,10 @@ export class RoomManager {
     const transitioned = transitionRoomState(room, 'closed');
     if (!transitioned.ok) return transitioned;
     const archived = this.registry.remove(roomId);
+    this.notifyOpener(room, {
+      kind: 'closed',
+      finalPost: finalNonSystemPost(room),
+    });
     if (archived) this.broadcast({ archivedRoom: archived });
     this.broadcast({ rooms: this.registry.summaries() });
     return ok({ message: `Room '${room.name}' closed.` });
@@ -234,6 +245,10 @@ export class RoomManager {
     await this.post(roomId, HUMAN, 'Room halted by the operator.', {
       system: true,
       allowStopped: true,
+    });
+    this.notifyOpener(room, {
+      kind: 'halted',
+      finalPost: finalNonSystemPost(room),
     });
     this.broadcast({ rooms: this.registry.summaries() });
     return ok({ message: `Room '${room.name}' halted.` });
@@ -362,6 +377,14 @@ export class RoomManager {
     };
     this.registry.appendMessage(roomId, message);
     routeRoomMessage(room, message, this.delivery());
+    if (
+      !message.system &&
+      !message.implicit &&
+      message.to.includes(HUMAN) &&
+      room.participants.some((participant) => participant.name === message.from)
+    ) {
+      this.notifyOpener(room, humanPostEvent(message));
+    }
 
     const unknown = unknownRecipients(room, message);
     if (unknown.length > 0) {
@@ -412,6 +435,14 @@ export class RoomManager {
   private rollbackOpen(roomId: string, sessionIds: string[]): void {
     for (const sessionId of sessionIds) this.sessions.stop(sessionId);
     this.registry.remove(roomId);
+  }
+
+  /** Best-effort direct notification. It deliberately bypasses room posting/routing so an
+   *  operator prompt can never become a room message or trigger an agent reply loop. */
+  private notifyOpener(room: Room, event: Parameters<typeof formatOperatorNotification>[1]): void {
+    const target = openerNotificationTarget(room);
+    if (!target) return;
+    this.sessions.prompt(target, formatOperatorNotification(room.name, event), 'kild');
   }
 
   private delivery(): RoomDelivery {
