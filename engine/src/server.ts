@@ -395,6 +395,18 @@ app.get(
   upgradeWebSocket(() => {
     let unsubscribeRooms: (() => void) | undefined;
     let unsubscribeSessions: (() => void) | undefined;
+    // Room commands became async when open() gained validation, which broke the
+    // implicit frame ordering clients rely on (open immediately followed by the
+    // kickoff post raced, and the post was rejected with "no such room"). Frames
+    // on one connection execute strictly in arrival order.
+    let queue: Promise<void> = Promise.resolve();
+    const enqueue = (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
+      queue = queue.then(async () => {
+        const result = await task();
+        if (!result.ok) console.warn(`kild: ${label} rejected: ${result.message}`);
+      });
+      queue = queue.catch((err) => console.warn(`kild: ${label} failed: ${errText(err)}`));
+    };
     return {
       onOpen(_evt, ws) {
         unsubscribeRooms = roomManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
@@ -421,32 +433,22 @@ app.get(
         } else if (msg.type === 'stop') {
           sessionManager.stop(msg.id);
         } else if (msg.type === 'room_open') {
-          void roomManager
-            .open(msg.id, {
+          enqueue(`room_open ${msg.id}`, () =>
+            roomManager.open(msg.id, {
               name: msg.name,
               cwd: msg.cwd,
               participants: msg.participants,
               worktree: msg.worktree,
-            })
-            .then((result) => {
-              if (!result.ok) console.warn(`kild: room_open rejected ${msg.id}: ${result.message}`);
-            });
+            }),
+          );
         } else if (msg.type === 'room_post') {
-          void roomManager.postFromHuman(msg.id, msg.text).then((result) => {
-            if (!result.ok) console.warn(`kild: room_post rejected ${msg.id}: ${result.message}`);
-          });
+          enqueue(`room_post ${msg.id}`, () => roomManager.postFromHuman(msg.id, msg.text));
         } else if (msg.type === 'room_add') {
-          void roomManager.addParticipant(msg.id, msg.participant).then((result) => {
-            if (!result.ok) console.warn(`kild: room_add rejected ${msg.id}: ${result.message}`);
-          });
+          enqueue(`room_add ${msg.id}`, () => roomManager.addParticipant(msg.id, msg.participant));
         } else if (msg.type === 'room_halt') {
-          void roomManager.halt(msg.id).then((result) => {
-            if (!result.ok) console.warn(`kild: room_halt rejected ${msg.id}: ${result.message}`);
-          });
+          enqueue(`room_halt ${msg.id}`, () => roomManager.halt(msg.id));
         } else if (msg.type === 'room_close') {
-          void roomManager.close(msg.id).then((result) => {
-            if (!result.ok) console.warn(`kild: room_close rejected ${msg.id}: ${result.message}`);
-          });
+          enqueue(`room_close ${msg.id}`, () => roomManager.close(msg.id));
         }
       },
       onClose() {
