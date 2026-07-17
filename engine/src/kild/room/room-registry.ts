@@ -52,6 +52,7 @@ export class RoomRegistry {
       name: room.name,
       worktree: room.worktree,
       participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      state: 'closed',
       log: room.log,
     };
     this.archive.set(room.id, archived);
@@ -81,7 +82,8 @@ export class RoomRegistry {
       name: r.name,
       worktree: r.worktree,
       participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
-      stopped: r.stopped,
+      state: r.state,
+      stopped: r.state === 'halted',
     }));
   }
 
@@ -93,6 +95,7 @@ export class RoomRegistry {
       name: r.name,
       worktree: r.worktree,
       participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      state: r.state,
       log: r.log,
     }));
   }
@@ -113,6 +116,7 @@ export class RoomRegistry {
         name: room.name,
         worktree: room.worktree,
         participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+        state: room.state,
         log: room.log,
       };
       fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(data));
@@ -134,7 +138,7 @@ export class RoomRegistry {
       if (!file.endsWith('.json')) continue;
       try {
         const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedRoom;
-        if (data?.id) this.archive.set(data.id, data);
+        if (data?.id) this.archive.set(data.id, { ...data, state: data.state ?? 'closed' });
       } catch {
         // a corrupt/partial history file must not crash startup; skip it
       }
