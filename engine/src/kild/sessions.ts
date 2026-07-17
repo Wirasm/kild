@@ -9,6 +9,7 @@ import type {
   RoomActionSuccess,
   RoomCommandAck,
 } from './room/room-types.ts';
+import { readSkillsProfile, skillsProfileForWorker } from './skills-profile.ts';
 import { worktreePath, worktreeRef } from './worktree.ts';
 
 export interface SpawnRequest {
@@ -48,6 +49,11 @@ export type Outbound = { session: string; event: UiEvent } | { sessions: Session
 
 type MaybePromise<T> = T | Promise<T>;
 
+// Deliberately captured at engine startup rather than per spawn. A worker inherits the
+// engine environment, so PiSession removes it below and selectively restores it only
+// for room participants.
+const SKILLS_PROFILE = readSkillsProfile(process.env.KILD_SKILLS_PROFILE);
+
 /** Control-line callbacks for a session's worker — used by the RoomManager to route
  *  a participant's `post_message` / `invite_agent` back into its room. A bare
  *  (non-room) session passes none, so the control lines are simply never emitted. */
@@ -67,9 +73,11 @@ class PiSession {
   private buf = '';
 
   constructor(req: SpawnRequest, onEvent: (event: UiEvent) => void, callbacks?: SessionCallbacks) {
+    const { KILD_SKILLS_PROFILE: _inheritedSkillsProfile, ...parentEnv } = process.env;
+    const skillsProfile = skillsProfileForWorker(req.env?.KILD_ROOM, SKILLS_PROFILE);
     this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
       env: {
-        ...process.env,
+        ...parentEnv,
         ...req.env, // extra worker env (e.g. room membership); our KILD_* win below
         KILD_ROLE: 'worker',
         KILD_MODEL: req.model ?? '',
@@ -77,6 +85,8 @@ class PiSession {
         KILD_AGENT: req.agent ?? '',
         // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
         KILD_WORKTREE: req.worktree ?? '',
+        // A profile is a room capability assignment, not inherited worker state.
+        KILD_SKILLS_PROFILE: skillsProfile ?? '',
       },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

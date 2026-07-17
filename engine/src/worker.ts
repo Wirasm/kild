@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import { AuthStorage, createAgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import {
+  AuthStorage,
+  createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
+  ModelRegistry,
+} from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
@@ -35,6 +41,7 @@ export async function runWorker(): Promise<never> {
   const inRoom = !!process.env.KILD_ROOM;
   const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
   const fleetEnabled = process.env.KILD_FLEET === '1';
+  const skillsProfile = process.env.KILD_SKILLS_PROFILE || undefined;
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
   const pendingCommands = new Map<
@@ -101,12 +108,25 @@ export async function runWorker(): Promise<never> {
             createFleetCloseRoomTool(),
           ]
         : undefined;
+    // Preserve default discovery for extensions, prompt templates, and project context.
+    // `noSkills` disables every default skill source while the explicit absolute path
+    // supplies the room participant's assigned capability profile.
+    const resourceLoader = skillsProfile
+      ? new DefaultResourceLoader({
+          cwd,
+          agentDir: getAgentDir(),
+          noSkills: true,
+          additionalSkillPaths: [skillsProfile],
+        })
+      : undefined;
+    await resourceLoader?.reload();
     ({ session } = await createAgentSession({
       model,
       authStorage,
       modelRegistry: registry,
       cwd,
       customTools,
+      resourceLoader,
     }));
   } catch (err) {
     emit({ kind: 'error', message: errText(err) });
