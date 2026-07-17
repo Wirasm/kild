@@ -100,19 +100,10 @@ export class RoomRegistry {
     return [...this.archive.values()];
   }
 
-  /** Serialise a room's history. Best-effort: a write failure must never break a
-   *  live room, and a room with no messages is not worth persisting. */
+  /** Serialise a room's history. Rooms with no messages are not worth persisting. */
   private save(room: Room): void {
     if (room.log.length === 0) return;
-    try {
-      fs.mkdirSync(this.dir, { recursive: true });
-      const data = this.snapshot(room, room.state);
-      fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(data));
-    } catch (err) {
-      console.warn(
-        `kild: failed to persist room ${room.id}: ${err instanceof Error ? err.message : err}`,
-      );
-    }
+    this.persist(room.id, this.snapshot(room, room.state));
   }
 
   private snapshot(room: Room, state: ArchivedRoom['state']): ArchivedRoom {
@@ -127,12 +118,24 @@ export class RoomRegistry {
   }
 
   private saveArchived(room: ArchivedRoom): void {
+    this.persist(room.id, room);
+  }
+
+  private persist(roomId: string, data: ArchivedRoom): void {
+    fs.mkdirSync(this.dir, { recursive: true });
+    const target = path.join(this.dir, `${roomId}.json`);
+    const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
-      fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(room));
+      fs.writeFileSync(temp, JSON.stringify(data));
+      fs.renameSync(temp, target);
     } catch (err) {
-      console.warn(
-        `kild: failed to persist room ${room.id}: ${err instanceof Error ? err.message : err}`,
+      try {
+        if (fs.existsSync(temp)) fs.rmSync(temp);
+      } catch {
+        // Prefer the original persistence failure if temp cleanup also fails.
+      }
+      throw new Error(
+        `kild: failed to persist room ${roomId}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }

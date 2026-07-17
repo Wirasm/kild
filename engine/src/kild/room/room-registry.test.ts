@@ -94,3 +94,51 @@ test('remove() of an empty room archives nothing', () => {
   expect(reg.remove('room-c')).toBeUndefined();
   expect(reg.archived().some((a) => a.id === 'room-c')).toBe(false);
 });
+
+test('appendMessage persists atomically: rename failure keeps the previous file and surfaces the error', () => {
+  const reg = new RoomRegistry();
+  reg.create(room('room-e'));
+  reg.appendMessage('room-e', msg('room-e', 'first'));
+
+  const file = path.join(tmp, 'rooms', 'room-e.json');
+  const original = fs.readFileSync(file, 'utf8');
+  const renameSync = fs.renameSync;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === file) throw new Error('rename blocked');
+    return renameSync(from, to);
+  }) as typeof fs.renameSync;
+
+  try {
+    expect(() => reg.appendMessage('room-e', msg('room-e', 'second'))).toThrow(
+      'kild: failed to persist room room-e: rename blocked',
+    );
+  } finally {
+    fs.renameSync = renameSync;
+  }
+
+  expect(fs.readFileSync(file, 'utf8')).toBe(original);
+  expect(
+    fs
+      .readdirSync(path.join(tmp, 'rooms'))
+      .filter((name) => name.startsWith('room-e.json.') && name.endsWith('.tmp')),
+  ).toEqual([]);
+});
+
+test('remove() surfaces archive persistence failures', () => {
+  const reg = new RoomRegistry();
+  reg.create(room('room-f', 'closed'));
+  reg.appendMessage('room-f', msg('room-f', 'hi'));
+
+  const renameSync = fs.renameSync;
+  fs.renameSync = (() => {
+    throw new Error('rename blocked');
+  }) as typeof fs.renameSync;
+
+  try {
+    expect(() => reg.remove('room-f')).toThrow(
+      'kild: failed to persist room room-f: rename blocked',
+    );
+  } finally {
+    fs.renameSync = renameSync;
+  }
+});
