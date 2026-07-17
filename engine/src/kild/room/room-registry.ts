@@ -42,20 +42,15 @@ export class RoomRegistry {
 
   /** Drop the live room. If it had any history, move it into the in-memory archive
    *  immediately (and return the snapshot) so it shows as read-only history without
-   *  waiting for the next engine start. Its on-disk log already persists. */
+   *  waiting for the next engine start. Persist the final archived snapshot too, so a
+   *  halted→closed transition survives restart/reload. */
   remove(roomId: string): ArchivedRoom | undefined {
     const room = this.rooms.get(roomId);
     this.rooms.delete(roomId);
     if (!room || room.log.length === 0) return undefined;
-    const archived: ArchivedRoom = {
-      id: room.id,
-      name: room.name,
-      worktree: room.worktree,
-      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
-      state: 'closed',
-      log: room.log,
-    };
+    const archived = this.snapshot(room, room.state);
     this.archive.set(room.id, archived);
+    this.saveArchived(archived);
     return archived;
   }
 
@@ -111,15 +106,30 @@ export class RoomRegistry {
     if (room.log.length === 0) return;
     try {
       fs.mkdirSync(this.dir, { recursive: true });
-      const data: ArchivedRoom = {
-        id: room.id,
-        name: room.name,
-        worktree: room.worktree,
-        participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
-        state: room.state,
-        log: room.log,
-      };
+      const data = this.snapshot(room, room.state);
       fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(data));
+    } catch (err) {
+      console.warn(
+        `kild: failed to persist room ${room.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  private snapshot(room: Room, state: ArchivedRoom['state']): ArchivedRoom {
+    return {
+      id: room.id,
+      name: room.name,
+      worktree: room.worktree,
+      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      state,
+      log: room.log,
+    };
+  }
+
+  private saveArchived(room: ArchivedRoom): void {
+    try {
+      fs.mkdirSync(this.dir, { recursive: true });
+      fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(room));
     } catch (err) {
       console.warn(
         `kild: failed to persist room ${room.id}: ${err instanceof Error ? err.message : err}`,

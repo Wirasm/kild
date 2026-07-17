@@ -71,6 +71,23 @@ test('remove() archives a room with history immediately as closed and returns th
   expect(reg.archived().find((a) => a.id === 'room-b')?.state).toBe('closed'); // archived now, no restart
 });
 
+test('halted to closed archive state persists across reload', () => {
+  const reg = new RoomRegistry();
+  reg.create(room('room-d', 'halted'));
+  reg.appendMessage('room-d', msg('room-d', 'halted first'));
+  const live = reg.get('room-d');
+  expect(live).toBeDefined();
+  if (!live) throw new Error('expected room-d to be live before close');
+  live.state = 'closed';
+  expect(reg.remove('room-d')?.state).toBe('closed');
+
+  const reloaded = new RoomRegistry();
+  const found = reloaded.archived().find((room) => room.id === 'room-d');
+  expect(found).toBeDefined();
+  expect(found?.state).toBe('closed');
+  expect(found?.log.map((message) => message.text)).toEqual(['halted first']);
+});
+
 test('remove() of an empty room archives nothing', () => {
   const reg = new RoomRegistry();
   reg.create(room('room-c'));
