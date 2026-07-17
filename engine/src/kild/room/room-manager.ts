@@ -3,6 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { listAgents } from '../agents.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { parseMentions } from './parse-mentions.ts';
+import {
+  ensureRoomCanAddParticipant,
+  ensureRoomCanCloseFromOperator,
+  ensureRoomCanCloseFromParticipant,
+  ensureRoomCanHalt,
+  ensureRoomCanPost,
+  transitionRoomState,
+} from './room-lifecycle.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
 import {
@@ -116,6 +124,7 @@ export class RoomManager {
       worktree: spec.worktree,
       participants: [],
       log: [],
+      state: 'opening',
     };
     this.registry.create(room);
 
@@ -127,6 +136,12 @@ export class RoomManager {
         return result;
       }
       spawnedSessionIds.push(result.value.sessionId);
+    }
+
+    const transitioned = transitionRoomState(room, 'running');
+    if (!transitioned.ok) {
+      this.rollbackOpen(roomId, spawnedSessionIds);
+      return transitioned;
     }
 
     this.broadcast({ rooms: this.registry.summaries() });
@@ -172,7 +187,8 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
-    if (room.stopped) return fail('invalid_state', `room '${room.name}' is halted`);
+    const allowed = ensureRoomCanAddParticipant(room);
+    if (!allowed.ok) return allowed;
 
     const validated = await this.validateParticipants(room.cwd, [spec], room.participants);
     if (!validated.ok) return validated;
@@ -193,7 +209,11 @@ export class RoomManager {
   async close(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
+    const allowed = ensureRoomCanCloseFromOperator(room);
+    if (!allowed.ok) return allowed;
     for (const participant of room.participants) this.sessions.stop(participant.sessionId);
+    const transitioned = transitionRoomState(room, 'closed');
+    if (!transitioned.ok) return transitioned;
     const archived = this.registry.remove(roomId);
     if (archived) this.broadcast({ archivedRoom: archived });
     this.broadcast({ rooms: this.registry.summaries() });
@@ -206,9 +226,11 @@ export class RoomManager {
   async halt(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
-    if (room.stopped) return fail('invalid_state', `room '${room.name}' is already halted`);
+    const allowed = ensureRoomCanHalt(room);
+    if (!allowed.ok) return allowed;
     for (const participant of room.participants) this.sessions.stop(participant.sessionId);
-    room.stopped = true;
+    const transitioned = transitionRoomState(room, 'halted');
+    if (!transitioned.ok) return transitioned;
     await this.post(roomId, HUMAN, 'Room halted by the operator.', {
       system: true,
       allowStopped: true,
@@ -297,6 +319,8 @@ export class RoomManager {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
     const { room, participant } = located;
+    const allowed = ensureRoomCanCloseFromParticipant(room);
+    if (!allowed.ok) return allowed;
     if (room.participants[0]?.sessionId !== sessionId) {
       return fail('rejected', `only the lead may close room '${room.name}'`);
     }
@@ -321,9 +345,8 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
-    if (room.stopped && !opts.allowStopped) {
-      return fail('invalid_state', `room '${room.name}' is halted`);
-    }
+    const allowed = ensureRoomCanPost(room, { allowHalted: opts.allowStopped });
+    if (!allowed.ok) return allowed;
     const message: RoomMessage = {
       id: this.createId(),
       roomId,

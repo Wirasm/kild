@@ -42,19 +42,15 @@ export class RoomRegistry {
 
   /** Drop the live room. If it had any history, move it into the in-memory archive
    *  immediately (and return the snapshot) so it shows as read-only history without
-   *  waiting for the next engine start. Its on-disk log already persists. */
+   *  waiting for the next engine start. Persist the final archived snapshot too, so a
+   *  halted→closed transition survives restart/reload. */
   remove(roomId: string): ArchivedRoom | undefined {
     const room = this.rooms.get(roomId);
     this.rooms.delete(roomId);
     if (!room || room.log.length === 0) return undefined;
-    const archived: ArchivedRoom = {
-      id: room.id,
-      name: room.name,
-      worktree: room.worktree,
-      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
-      log: room.log,
-    };
+    const archived = this.snapshot(room, room.state);
     this.archive.set(room.id, archived);
+    this.saveArchived(archived);
     return archived;
   }
 
@@ -81,7 +77,8 @@ export class RoomRegistry {
       name: r.name,
       worktree: r.worktree,
       participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
-      stopped: r.stopped,
+      state: r.state,
+      stopped: r.state === 'halted',
     }));
   }
 
@@ -93,6 +90,7 @@ export class RoomRegistry {
       name: r.name,
       worktree: r.worktree,
       participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      state: r.state,
       log: r.log,
     }));
   }
@@ -102,23 +100,42 @@ export class RoomRegistry {
     return [...this.archive.values()];
   }
 
-  /** Serialise a room's history. Best-effort: a write failure must never break a
-   *  live room, and a room with no messages is not worth persisting. */
+  /** Serialise a room's history. Rooms with no messages are not worth persisting. */
   private save(room: Room): void {
     if (room.log.length === 0) return;
+    this.persist(room.id, this.snapshot(room, room.state));
+  }
+
+  private snapshot(room: Room, state: ArchivedRoom['state']): ArchivedRoom {
+    return {
+      id: room.id,
+      name: room.name,
+      worktree: room.worktree,
+      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      state,
+      log: room.log,
+    };
+  }
+
+  private saveArchived(room: ArchivedRoom): void {
+    this.persist(room.id, room);
+  }
+
+  private persist(roomId: string, data: ArchivedRoom): void {
+    fs.mkdirSync(this.dir, { recursive: true });
+    const target = path.join(this.dir, `${roomId}.json`);
+    const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
-      const data: ArchivedRoom = {
-        id: room.id,
-        name: room.name,
-        worktree: room.worktree,
-        participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
-        log: room.log,
-      };
-      fs.writeFileSync(path.join(this.dir, `${room.id}.json`), JSON.stringify(data));
+      fs.writeFileSync(temp, JSON.stringify(data));
+      fs.renameSync(temp, target);
     } catch (err) {
-      console.warn(
-        `kild: failed to persist room ${room.id}: ${err instanceof Error ? err.message : err}`,
+      try {
+        if (fs.existsSync(temp)) fs.rmSync(temp);
+      } catch {
+        // Prefer the original persistence failure if temp cleanup also fails.
+      }
+      throw new Error(
+        `kild: failed to persist room ${roomId}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }
@@ -134,7 +151,7 @@ export class RoomRegistry {
       if (!file.endsWith('.json')) continue;
       try {
         const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedRoom;
-        if (data?.id) this.archive.set(data.id, data);
+        if (data?.id) this.archive.set(data.id, { ...data, state: data.state ?? 'closed' });
       } catch {
         // a corrupt/partial history file must not crash startup; skip it
       }

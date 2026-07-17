@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { SessionCallbacks } from '../sessions.ts';
 import { RoomManager } from './room-manager.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { HUMAN, type ParticipantSpec } from './room-types.ts';
@@ -24,6 +25,7 @@ afterAll(() => {
 function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId?: () => string }) {
   const spawned: Array<{ id: string; agent?: string }> = [];
   const stopped: string[] = [];
+  const callbacks = new Map<string, SessionCallbacks | undefined>();
   let spawnCount = 0;
   const ids = ['s-1', 's-2', 's-3', 'm-1', 'm-2', 'm-3'];
   let idIndex = 0;
@@ -32,9 +34,10 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
     registry: new RoomRegistry(),
     sessions: {
       subscribe: () => () => {},
-      spawn: (id, req) => {
+      spawn: (id, req, _origin, sessionCallbacks) => {
         spawnCount += 1;
         if (options?.spawnThrowsAt === spawnCount) throw new Error(`spawn failed ${spawnCount}`);
+        callbacks.set(id, sessionCallbacks);
         spawned.push({ id, agent: req.agent });
       },
       prompt: () => {},
@@ -49,7 +52,7 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
     createId: options?.createId ?? (() => ids[idIndex++] ?? `id-${idIndex}`),
   });
 
-  return { manager, spawned, stopped };
+  return { manager, spawned, stopped, callbacks };
 }
 
 async function openRoom(
@@ -128,6 +131,20 @@ test("accepts explicit agent:'default' as the generic escape hatch", async () =>
   expect(spawned).toEqual([{ id: 's-1', agent: 'default' }]);
 });
 
+test('open transitions the room from opening to running', async () => {
+  const { manager } = fixture();
+  expect(await openRoom(manager, [{ name: 'worker' }])).toMatchObject({ ok: true });
+  const rooms = manager.liveRooms();
+  expect(rooms).toHaveLength(1);
+  expect(rooms[0]).toMatchObject({
+    id: 'room-1',
+    name: 'demo',
+    state: 'running',
+    participants: [{ name: 'worker' }],
+    log: [],
+  });
+});
+
 test('rolls back already spawned participants when a later spawn fails', async () => {
   const { manager, stopped } = fixture({ spawnThrowsAt: 2 });
   expect(await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }])).toEqual({
@@ -184,6 +201,28 @@ test('addParticipant returns invalid_state once a room is halted', async () => {
   });
 });
 
+test('halt transitions the room to halted in live room snapshots', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  expect(await manager.halt('room-1')).toMatchObject({ ok: true });
+  const rooms = manager.liveRooms();
+  expect(rooms).toHaveLength(1);
+  expect(rooms[0]).toMatchObject({
+    id: 'room-1',
+    name: 'demo',
+    state: 'halted',
+    participants: [{ name: 'worker' }],
+  });
+  expect(rooms[0]?.log).toHaveLength(1);
+  expect(rooms[0]?.log[0]).toMatchObject({
+    roomId: 'room-1',
+    from: 'human',
+    to: [],
+    text: 'Room halted by the operator.',
+    system: true,
+  });
+});
+
 test('close returns not_found for an unknown room', async () => {
   const { manager } = fixture();
   expect(await manager.close('missing')).toEqual({
@@ -201,5 +240,72 @@ test('post returns invalid_state for halted rooms', async () => {
     ok: false,
     code: 'invalid_state',
     message: "room 'demo' is halted",
+  });
+});
+
+test('participant message_out returns invalid_state for halted rooms', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.halt('room-1');
+  const result = await callbacks
+    .get('s-1')
+    ?.onMessage?.({ kind: 'message_out', text: '@human hi' });
+  expect(result).toEqual({
+    ok: false,
+    code: 'invalid_state',
+    message: "room 'demo' is halted",
+  });
+});
+
+test('participant invite returns invalid_state for halted rooms', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.halt('room-1');
+  const result = await callbacks
+    .get('s-1')
+    ?.onInvite?.({ kind: 'invite', name: 'reviewer', agent: 'reviewer' });
+  expect(result).toEqual({
+    ok: false,
+    code: 'invalid_state',
+    message: "room 'demo' is halted",
+  });
+});
+
+test('participant close_room returns invalid_state for halted rooms', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.halt('room-1');
+  const result = await callbacks.get('s-1')?.onCloseRoom?.({ kind: 'close_room' });
+  expect(result).toEqual({
+    ok: false,
+    code: 'invalid_state',
+    message: "room 'demo' is halted",
+  });
+});
+
+test('close transitions a halted room to archived closed state', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.halt('room-1');
+  expect(await manager.close('room-1')).toEqual({
+    ok: true,
+    value: { message: "Room 'demo' closed." },
+  });
+  expect(manager.liveRooms()).toEqual([]);
+  const archived = manager.archived();
+  expect(archived).toHaveLength(1);
+  expect(archived[0]).toMatchObject({
+    id: 'room-1',
+    name: 'demo',
+    state: 'closed',
+    participants: [{ name: 'worker' }],
+  });
+  expect(archived[0]?.log).toHaveLength(1);
+  expect(archived[0]?.log[0]).toMatchObject({
+    roomId: 'room-1',
+    from: 'human',
+    to: [],
+    text: 'Room halted by the operator.',
+    system: true,
   });
 });

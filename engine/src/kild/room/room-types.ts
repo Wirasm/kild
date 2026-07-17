@@ -40,6 +40,10 @@ export interface RoomMessage {
   system?: boolean;
 }
 
+/** The canonical room lifecycle — transitions are enforced centrally by the room
+ *  manager/lifecycle helper rather than inferred from booleans or registry presence. */
+export type RoomLifecycleState = 'opening' | 'running' | 'halted' | 'closed';
+
 /** A live room: participants + a shared message log + a workspace. */
 export interface Room {
   id: string;
@@ -50,9 +54,8 @@ export interface Room {
   worktree?: string;
   participants: RoomParticipant[];
   log: RoomMessage[];
-  /** True once the operator trips the manual circuit breaker (halt): every participant
-   *  session is stopped but the room is kept, read-only, so its transcript stays. */
-  stopped?: boolean;
+  /** Canonical lifecycle state for this room. */
+  state: RoomLifecycleState;
 }
 
 /** A participant to spawn into a room. */
@@ -77,7 +80,11 @@ export interface RoomSummary {
   name: string;
   worktree?: string;
   participants: Array<{ name: string; agent?: string }>;
-  /** True when the operator has halted the room (sessions stopped, kept read-only). */
+  /** Canonical lifecycle state when surfaced by room-owned producers. Optional so
+   *  out-of-scope fixtures/consumers do not need coordinated edits in this slice. */
+  state?: RoomLifecycleState;
+  /** True when the operator has halted the room (sessions stopped, kept read-only).
+   *  Derived compatibility field for existing non-room consumers. */
   stopped?: boolean;
 }
 
@@ -88,6 +95,9 @@ export interface ArchivedRoom {
   name: string;
   worktree?: string;
   participants: Array<{ name: string; agent?: string }>;
+  /** Canonical lifecycle state when persisted by room-owned producers. Optional so
+   *  older history files and out-of-scope fixtures continue to type-check. */
+  state?: RoomLifecycleState;
   log: RoomMessage[];
 }
 

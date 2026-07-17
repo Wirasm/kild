@@ -15,6 +15,7 @@ function fixture(participantNames: string[] = ['orchestrator', 'worker']) {
     cwd: '/tmp',
     participants: participantNames.map((name) => ({ name, sessionId: `s-${name}`, agent: name })),
     log: [],
+    state: 'running',
   };
   const delivered: Array<{ sessionId: string; from: string; text: string }> = [];
   const broadcast: RoomMessage[] = [];
