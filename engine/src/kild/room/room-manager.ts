@@ -18,7 +18,12 @@ import {
   transitionRoomState,
 } from './room-lifecycle.ts';
 import { RoomRegistry } from './room-registry.ts';
-import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
+import {
+  hasNoDeliverableRecipients,
+  type RoomDelivery,
+  routeRoomMessage,
+  unknownRecipients,
+} from './room-router.ts';
 import {
   type ArchivedRoom,
   type CloseRoomOut,
@@ -387,15 +392,17 @@ export class RoomManager {
     }
 
     const unknown = unknownRecipients(room, message);
+    const participants = room.participants.map((participant) => `@${participant.name}`).join(', ');
     if (unknown.length > 0) {
-      const participants = room.participants
-        .map((participant) => `@${participant.name}`)
-        .join(', ');
       const warning =
         `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
         `(in the room: ${participants || 'none'})`;
       await this.post(roomId, HUMAN, warning, { system: true, allowStopped: true });
       return fail('rejected', warning);
+    }
+    if (hasNoDeliverableRecipients(room, message)) {
+      const notice = `this post addressed no participant — no turn delivered (in the room: ${participants || 'none'})`;
+      await this.post(roomId, HUMAN, notice, { system: true, allowStopped: true });
     }
     return ok({ message: 'Posted to the room.' });
   }
