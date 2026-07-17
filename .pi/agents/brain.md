@@ -67,6 +67,10 @@ start over.
 - A room's orchestrator escalating a gate → if a standing decision covers
   it, answer via `post_room` and cite the SD; otherwise digest it to the
   human (2–3 lines, the question, your recommendation + risk) and wait.
+  **Every digest also goes into the ledger** under an `## Attention` section
+  before you wait — your session stream may have no watcher, but the ledger
+  always survives; a human (or your next session) finds the pending question
+  there.
 - **Verify before you believe**: a room's "shipped" claim is checked against
   git (`git log main..<branch>`, validations) before the ledger says merged-
   ready. Green checks are facts; transcripts are not.

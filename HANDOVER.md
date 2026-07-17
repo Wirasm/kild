@@ -92,12 +92,15 @@ kild room, ~$0.20 total:
    resolves on the archive broadcast. Engine-side lead-only enforcement (a control
    line is just stdout — the engine, not the subprocess, is the authority). Live-proven:
    a delegation+verify+report room self-terminated in 20s with no operator action.
-2. **A post addressing no deliverable recipient dies silently.** With the kickoff fixed
-   this is no longer reachable by accident, but the room should surface "this addressed no
-   one" rather than idle. (Decide: error, warn, or deliver to the lead?)
-3. **Personalities only resolve globally via `~/.claude/agents`.** A new project gets no
-   team; I had to copy `orchestrator.md`/`worker.md` into the smoke project. Consider
-   `~/.kild/agents` in `agentDirs()`, or ship defaults.
+2. ~~**A post addressing only unknown handles dies silently.**~~ **Done (2026-07-16,
+   ws-no-recipient):** unknown handles now get a system notice naming the room's actual
+   participants. **Still open — the sibling failure (live 2026-07-17):** an OPERATOR post
+   (human/brain) in a multi-participant room with zero participant mentions is broadcast-only
+   and gives no feedback — the brain's mention-less gate approval stalled a room for an hour.
+   Fix with the SAME primitive: extend the existing notice to cover the no-addressee case for
+   non-participant senders. Queued behind slice 8a (same file, room-manager).
+3. ~~**Personalities only resolve globally via `~/.claude/agents`.**~~ **Done (2026-07-16,
+   ws-global-agents):** `$KILD_HOME/agents` is discovered with tested precedence.
 4. **The Flue layer is off the hot path.** Its frozen, explicitly invoked experiments
    include run/auth/brain demos and the worktree-sandbox (see the 2026-07-15
    runtime-integration research in the PRP repo), but nothing on the session hot path uses
