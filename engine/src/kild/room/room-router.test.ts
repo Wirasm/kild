@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 import {
   formatDelivery,
+  hasNoDeliverableRecipients,
   type RoomDelivery,
   routeRoomMessage,
   unknownRecipients,
@@ -50,6 +51,26 @@ test('does not warn for system notices or implicit replies', () => {
   const { room } = fixture();
   expect(unknownRecipients(room, { ...notice('@revewer joined'), to: ['revewer'] })).toEqual([]);
   expect(unknownRecipients(room, implicitReply('worker', ['revewer'], '...'))).toEqual([]);
+});
+
+test('finds a non-participant post with no deliverable recipient in a multi-participant room', () => {
+  const { room } = fixture();
+  expect(hasNoDeliverableRecipients(room, message('human', [], 'approve the gate'))).toBe(true);
+  expect(hasNoDeliverableRecipients(room, message('brain', ['human'], 'approve the gate'))).toBe(
+    true,
+  );
+});
+
+test('does not flag bare posts from participants, single-participant rooms, notices, or narration', () => {
+  const { room } = fixture();
+  expect(hasNoDeliverableRecipients(room, message('worker', [], 'thinking out loud'))).toBe(false);
+  expect(hasNoDeliverableRecipients(room, notice('room update'))).toBe(false);
+  expect(hasNoDeliverableRecipients(room, implicitReply('worker', [], 'standing by'))).toBe(false);
+
+  const { room: singleParticipantRoom } = fixture(['worker']);
+  expect(
+    hasNoDeliverableRecipients(singleParticipantRoom, message('human', [], 'fix the bug')),
+  ).toBe(false);
 });
 
 test('delivers a mention to that participant as a turn AND broadcasts it', () => {

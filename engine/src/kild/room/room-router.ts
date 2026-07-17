@@ -23,6 +23,17 @@ export function unknownRecipients(room: Room, message: RoomMessage): string[] {
   return message.to.filter((recipient) => recipient !== HUMAN && !participants.has(recipient));
 }
 
+/** Whether an operator-side post in a multi-participant room can deliver no turn.
+ * Participant narration and single-participant rooms intentionally retain their bare-post
+ * behavior; engine notices and implicit replies never represent a user addressing a room. */
+export function hasNoDeliverableRecipients(room: Room, message: RoomMessage): boolean {
+  if (message.system || message.implicit || room.participants.length <= 1) return false;
+  if (room.participants.some((participant) => participant.name === message.from)) return false;
+  return !message.to.some((recipient) =>
+    room.participants.some((participant) => participant.name === recipient),
+  );
+}
+
 /**
  * Route one already-recorded post: show it to the human (broadcast), then deliver
  * it as a turn to each addressed participant.

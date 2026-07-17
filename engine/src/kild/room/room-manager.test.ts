@@ -184,6 +184,22 @@ test('post to an unknown recipient returns rejected and keeps the existing warni
   ]);
 });
 
+test('notifies a non-participant sender when a multi-participant post addresses nobody', async () => {
+  const { manager, prompted } = fixture();
+  await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }]);
+
+  expect(await manager.postAs('room-1', 'brain', 'gate approved')).toEqual({
+    ok: true,
+    value: { message: 'Posted to the room.' },
+  });
+  expect(prompted).toEqual([]);
+  expect(manager.messages('room-1').map((message) => message.text)).toEqual([
+    'gate approved',
+    'this post addressed no participant — no turn delivered (in the room: @worker, @reviewer)',
+  ]);
+  expect(manager.messages('room-1')[1]).toMatchObject({ from: HUMAN, to: [], system: true });
+});
+
 test('halt returns invalid_state when the room is already halted', async () => {
   const { manager } = fixture();
   await openRoom(manager, [{ name: 'worker' }]);
