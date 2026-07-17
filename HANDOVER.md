@@ -94,28 +94,26 @@ kild room, ~$0.20 total:
    a delegation+verify+report room self-terminated in 20s with no operator action.
 2. ~~**A post addressing only unknown handles dies silently.**~~ **Done (2026-07-16,
    ws-no-recipient):** unknown handles now get a system notice naming the room's actual
-   participants. **Still open — the sibling failure (live 2026-07-17):** an OPERATOR post
-   (human/brain) in a multi-participant room with zero participant mentions is broadcast-only
-   and gives no feedback — the brain's mention-less gate approval stalled a room for an hour.
-   Fix with the SAME primitive: extend the existing notice to cover the no-addressee case for
-   non-participant senders. Queued behind slice 8a (same file, room-manager).
+   participants. ~~**The sibling failure:** an OPERATOR post (human/brain) in a
+   multi-participant room with zero participant mentions was broadcast-only and gave no
+   feedback.~~ **Done (2026-07-17):** the same notice primitive now covers the no-addressee
+   case for non-participant senders.
 3. ~~**Personalities only resolve globally via `~/.claude/agents`.**~~ **Done (2026-07-16,
    ws-global-agents):** `$KILD_HOME/agents` is discovered with tested precedence.
-4. **The Flue layer is off the hot path.** Its frozen, explicitly invoked experiments
-   include run/auth/brain demos and the worktree-sandbox (see the 2026-07-15
-   runtime-integration research in the PRP repo), but nothing on the session hot path uses
-   them and the dogfood never touched them. Do not extend them until the fleet layer names
-   a real server or CLI endpoint. Note `brain.ts` already exposes open-room/post-to-room
-   tools — it is the seed of the fleet layer.
-5. **Worktree convention overlap.** kild owns worktree policy (`$KILD_HOME/worktrees/`,
-   `kild/<name>`); the PRP pack's `prp-worktree` skill uses in-repo `.worktrees/`. In the
-   kild lane **kild's mechanism wins** — workers must not invoke `prp-worktree`. Worth one
-   line in the orchestrator personality so the conventions never mix.
+4. ~~**Slice 8a: room lifecycle/gate events were not pushed to the opener.**~~ **Done
+   (2026-07-17):** rooms push close/halt/gate events to their opener session, and the brain
+   personality carries the event contract instead of relying on prompt-level polling loops.
+5. **Slice 5 — engine-derived actors.** Free-form `from` still lets callers label themselves;
+   actor identity should come from the engine, not prose or client-provided strings.
+6. **Slice 6 — one transport-neutral command API.** The cockpit, CLI, fleet tools, and any
+   future harness should drive one command surface instead of parallel transport-specific
+   shapes.
 
 ## Next moves
 
-**In kild** — (a) `close_room` as a lead-held tool; (b) decide the no-recipient policy;
-(c) `~/.kild/agents` discovery; (d) Flue: park or justify.
+**In kild** — the roadmap is now intentionally narrow: **slice 5** (engine-derived
+actors) and **slice 6** (one transport-neutral command API). Everything else below is
+history or context, not a pending work queue.
 
 **The fleet layer — SHIPPED and live-proven (2026-07-16).** The brain is a kild session
 (`kild fleet "<goal>"`, agent `brain`, `KILD_FLEET=1`) whose tools — `open_room`,
@@ -130,13 +128,13 @@ obvious next cleanup. **Fleet run 2 (2026-07-17, multi-workstream):** the brain 
 through two serialized rooms on one shared branch (its own overlap call, SD-2), surviving a
 three-round review with a human-escalated hard stop, and kept an exemplary ledger (SD-1..5,
 incidents, independent verifications). Merged: `2fd9938` (lifecycle states, durable closed-state,
-atomic history writes; 87 tests). **Slice 8 requirements, each with a live reproduction from this
-run:** (1) room gate/close events must PUSH to the room's opener — the brain is event-blind between
-turns and prompt-level polling loops do not survive turn economics (two stalls, two manual wakes);
-(2) an operator post addressing no participant needs the unknown-recipient treatment — a
-mention-less gate approval was broadcast-only and stalled a room for an hour; (3) the brain's
-digest-to-human channel must be durable — its session stream dies with the spectator CLI;
-(4) free-form `from` let the brain label itself `fleet-brain` (slice 5's actor model).
+atomic history writes; 87 tests). **Slice 8a has now shipped:** room gate/close/halt events push
+to the room's opener session, and the brain personality carries the event contract that makes
+those pushes load-bearing. The no-addressee operator notice also shipped: a human/brain post to a
+multi-participant room with zero participant mentions now gets the same explicit feedback as an
+unknown-recipient post, instead of silently becoming broadcast-only. What remains is not more room
+patching: slice 5 makes actors engine-derived, and slice 6 collapses command handling into one
+transport-neutral API.
 
 **In the PRP repo** — the Codex render (`.agents/skills/`, `.codex/agents/*.toml`,
 generated by `scripts/sync_plugin.py`, `--check` in CI) stays as-is: zero maintenance,
