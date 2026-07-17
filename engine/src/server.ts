@@ -252,6 +252,7 @@ app.post('/api/rooms', async (c) => {
     participants?: unknown;
     kickoff?: unknown;
     from?: unknown;
+    openedBy?: unknown;
   }>();
   if (typeof body.name !== 'string') return c.json({ error: 'name required' }, 400);
   if (typeof body.kickoff !== 'string' || !body.kickoff.trim()) {
@@ -264,6 +265,9 @@ app.post('/api/rooms', async (c) => {
   }
   if (body.worktree !== undefined && typeof body.worktree !== 'string') {
     return c.json({ error: 'worktree must be a string' }, 400);
+  }
+  if (body.openedBy !== undefined && typeof body.openedBy !== 'string') {
+    return c.json({ error: 'openedBy must be a string' }, 400);
   }
   const participants = participantSpecs(body.participants);
   if (!participants || participants.length === 0) {
@@ -280,6 +284,7 @@ app.post('/api/rooms', async (c) => {
     cwd,
     participants,
     worktree: body.worktree,
+    openedBy: body.openedBy,
   });
   if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
   // Honest attribution: a kickoff posted by an agent operator (e.g. the fleet
