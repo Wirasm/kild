@@ -64,3 +64,48 @@ export async function closeRoom(roomId: string, sessionId?: string): Promise<Roo
 export async function getLiveRooms(): Promise<LiveRoomStatus[]> {
   return engineFetch('/api/rooms/live');
 }
+
+export interface SpawnSessionRequest {
+  agent?: string;
+  model?: string;
+  cwd?: string;
+  worktree?: string;
+  projectName?: string;
+  /** Grant the fleet room-control tools (open/post/status/close rooms). */
+  fleet?: boolean;
+  /** Initial prompt delivered right after spawn (e.g. the fleet driver's goal). */
+  prompt?: string;
+}
+
+/** Spawn a detached session (e.g. a fleet driver) through the engine; returns its id. */
+export async function spawnSession(req: SpawnSessionRequest): Promise<{ ok: true; id: string }> {
+  return engineFetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function promptSession(id: string, text: string): Promise<{ ok: boolean }> {
+  return engineFetch(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function stopSession(id: string): Promise<{ ok: boolean }> {
+  return engineFetch(`/api/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+}
+
+export interface SessionSummary {
+  id: string;
+  agent?: string;
+  model?: string;
+  worktree?: string;
+  cwd?: string;
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+  return engineFetch('/api/sessions');
+}

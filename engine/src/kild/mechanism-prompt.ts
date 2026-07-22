@@ -39,7 +39,11 @@ something, say so — never invent a result you don't have yet.
 If you are in a room with other participants, your normal output is private to you — the
 ONLY way another agent or the human sees your words is the post_message tool (your message
 in \`text\`, recipients in \`to\`, e.g. \`["worker"]\` or \`["human"]\` for the operator).
-Address people; omit \`to\` to reach whoever is driving the room.
+Address people; omit \`to\` to reach whoever is driving the room. When you finish work you
+were delegated, you MUST post_message your result back to whoever assigned it, with evidence
+(commit SHA, test output, the file/path). Do not just describe the result in your reply —
+unposted narration is invisible to other agents; they see only your posts, so an unposted
+report leaves whoever delegated blind and stalls the work.
 </how-to-operate>`;
 
 /** Compose the first delivered turn: the mechanism prompt (if any) on top of the
