@@ -148,11 +148,16 @@ from an outside Claude Code session over bash. What works vs what's missing:
       `.claude/skills` (kild ships `kild-cli` there) — confirm prp-* skills load for the DRIVER
       (driver gets no skills profile; falls back to pi default discovery)
 
-**Config/setup gap (found): kild has NO config mechanism.** To plug agents + skills (a
-framework like prp-core) you currently hand-bridge symlinks. Needs a config that declares
-plugin/agent/skill sources, and lets the fleet driver load a process SKILL (e.g. the
-orchestrator is a SKILL in PRP, not an agent — the main/driver agent loads it and drives the
-room tools). See the design note below.
+**Config/plugin system — BUILT + verified.** `.kild/config.json` (project) and
+`$KILD_HOME/config.json` (global): a `plugins: ["./prp-core"]` entry contributes the
+plugin's `agents/` + `skills/`; `agentPaths`/`skillPaths` add explicit dirs. Absolute or
+`~/…` paths load from ANYWHERE on the system. Config skills are wired into EVERY session's
+resource loader (`worker.ts`), so an invited agent — not just the lead — can load
+`prp-implement` when the orchestrator asks. Verified live: a minimax session in the kild
+repo (config → prp-core) reported all prp-* skills available. `resolvePluginPaths` in
+`config.ts`; `agentDirs` is now config-aware. This is how the orchestrator-as-skill model
+works: the driver is a `default` agent that loads the `prp-orchestrate` skill and sequences
+fresh skill-loading agents by message. kild-cli skill updated with the room primitives.
 
 Note: the observability data layer (Phase 1) exists but is reachable only by an in-fleet
 agent (rooms_status tool) or HTTP — an EXTERNAL driver has no CLI window into it. These

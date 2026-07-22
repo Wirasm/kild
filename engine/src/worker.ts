@@ -9,6 +9,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
+import { resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
 import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
@@ -109,17 +110,29 @@ export async function runWorker(): Promise<never> {
             createFleetCloseRoomTool(),
           ]
         : undefined;
-    // Preserve default discovery for extensions, prompt templates, and project context.
-    // `noSkills` disables every default skill source while the explicit absolute path
-    // supplies the room participant's assigned capability profile.
-    const resourceLoader = skillsProfile
-      ? new DefaultResourceLoader({
-          cwd,
-          agentDir: getAgentDir(),
-          noSkills: true,
-          additionalSkillPaths: [skillsProfile],
-        })
-      : undefined;
+    // Skills: an explicit room capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
+    // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
+    // PLUS the config-declared skill dirs, so an invited agent can load `prp-implement` when
+    // the orchestrator tells it to. This is what makes a plugged-in framework's process
+    // reachable by whoever gets invited, not only the lead.
+    let resourceLoader: DefaultResourceLoader | undefined;
+    if (skillsProfile) {
+      resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir: getAgentDir(),
+        noSkills: true,
+        additionalSkillPaths: [skillsProfile],
+      });
+    } else {
+      const { skillDirs } = await resolvePluginPaths(cwd);
+      resourceLoader = skillDirs.length
+        ? new DefaultResourceLoader({
+            cwd,
+            agentDir: getAgentDir(),
+            additionalSkillPaths: skillDirs,
+          })
+        : undefined;
+    }
     await resourceLoader?.reload();
     ({ session } = await createAgentSession({
       model,
