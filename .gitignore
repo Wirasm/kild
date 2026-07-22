@@ -13,3 +13,4 @@ app/src-tauri/binaries/
 .kild/maintainer/state.json
 .kild/maintainer/reviews/
 .kild-impl/
+/prp-core/

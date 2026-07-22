@@ -109,14 +109,15 @@ out of the core (make kild framework-agnostic), then package as a pi extension (
 - [ ] S3: cockpit — per-room git badge + collision warnings (app/)
 
 ### Phase 2 — REMOVE the policy baked into the mechanism (framework-agnostic core)
-- [ ] De-hardcode CLI verbs: `kild fleet`→`brain`, `kild room`→`orchestrator,worker`
-      become flags/config, not baked-in names
+- [x] De-hardcode CLI verbs: `kild fleet` → `--agent ?? default` (no baked `brain`);
+      `kild room` → one general-purpose `default` participant when no `--participants`
 - [x] kild's system prompt: a generic mechanism prompt every session gets, on top of
       everything (`engine/src/kild/mechanism-prompt.ts`, wired in `worker.ts`) — outcome-first,
       verify-before-believe, scope discipline, blocked→escalate, use real tools. Teaches how
       to work, not who to be; room-comms part is conditional so a bare `kild run` is fine too.
-- [ ] Relocate `.pi/agents/*.md` role pack out of core → a PRP pack; ship one `default`
-      so bare kild still works (mechanism prompt above now makes bare sessions competent)
+- [x] Relocate `.pi/agents/*.md` role pack out of core → parked in `tmp/agents/`; kild ships
+      no roles, personas come from the project (`.claude/agents` / `.pi/agents`). Bare kild =
+      `default` (mechanism prompt only).
 - [ ] Disambiguate engine "worker" (subprocess runtime) vs role "worker" (persona) naming
 - [ ] Lifecycle collapse (4 states + 6 guards → running|stopped + visibility flag) — own branch
 

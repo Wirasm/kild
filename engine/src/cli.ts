@@ -257,8 +257,11 @@ async function fleet(goal: string): Promise<void> {
         JSON.stringify({
           type: 'spawn',
           id,
+          // The fleet driver's persona comes from the project (`--agent <name>`); with none,
+          // it's the `default` general-purpose session (kild's system prompt) plus the fleet
+          // room-control tools. kild ships no `brain` role of its own.
+          agent: values.agent ?? 'default',
           cwd,
-          agent: 'brain',
           model: values.model,
           worktree: values.worktree,
           projectName: values.project ?? 'fleet',
@@ -267,8 +270,9 @@ async function fleet(goal: string): Promise<void> {
       );
       ws.send(JSON.stringify({ type: 'prompt', id, text: goal }));
       if (!json) {
+        const persona = values.agent ? ` (${values.agent})` : '';
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
-        console.error(`\x1b[2m# fleet brain${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
+        console.error(`\x1b[2m# fleet${persona}${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
       }
     });
 
@@ -305,9 +309,9 @@ async function fleet(goal: string): Promise<void> {
 }
 
 /**
- * `kild room <goal>` — the room demo. Opens a room of predefined participants
- * (`--participants orchestrator,worker,reviewer`; default `orchestrator,worker`),
- * posts the goal to the first one, and streams every message. With `--worktree
+ * `kild room <goal>` — opens a room of participants (`--participants a,b,c`, each a
+ * persona from the project's own agents; with none, one general-purpose `default`
+ * participant), posts the goal to the lead, and streams every message. With `--worktree
  * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
  * You can keep typing to post more messages (address participants with @name).
  * The run ends when the room does: the lead closes it with its `close_room` tool
@@ -330,13 +334,20 @@ async function room(goal: string): Promise<void> {
     ? ((await findProject(values.project))?.path ?? values.project)
     : process.cwd();
   const name = values.project ?? 'room';
-  const participantNames = (values.participants ?? 'orchestrator,worker')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
-  // Addressing is structured now: the engine defaults an untargeted post to the room
-  // lead, so the goal reaches the lead (orchestrator) without munging the text.
+  // `--participants a,b` names personas from the project's own agents; each participant's
+  // agent defaults to its name. With none given, kild opens one general-purpose
+  // participant (the `default` persona = kild's system prompt, no role) — kild ships no
+  // roles of its own; personas come from the project (.claude/agents / .pi/agents).
+  const participants = values.participants
+    ? values.participants
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((n) => ({ name: n, agent: n }))
+    : [{ name: 'agent', agent: 'default' }];
+  if (participants.length === 0) throw new Error('--participants must name at least one agent');
+  // Addressing is structured: the engine defaults an untargeted post to the room lead,
+  // so the goal reaches the lead without munging the text.
   const kickoff = goal;
   const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
@@ -387,14 +398,14 @@ async function room(goal: string): Promise<void> {
           name,
           cwd,
           worktree: values.worktree,
-          participants: participantNames.map((n) => ({ name: n, agent: n, model: values.model })),
+          participants: participants.map((p) => ({ ...p, model: values.model })),
         }),
       );
       ws.send(JSON.stringify({ type: 'room_post', id: roomId, text: kickoff }));
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# room "${name}" — ${participantNames.join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# room "${name}" — ${participants.map((p) => p.name).join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
