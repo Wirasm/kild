@@ -111,12 +111,12 @@ out of the core (make kild framework-agnostic), then package as a pi extension (
 ### Phase 2 — REMOVE the policy baked into the mechanism (framework-agnostic core)
 - [ ] De-hardcode CLI verbs: `kild fleet`→`brain`, `kild room`→`orchestrator,worker`
       become flags/config, not baked-in names
-- [ ] Relocate `.pi/agents/*.md` role pack out of core → a PRP pack; ship a minimal
-      generic mechanism prompt + one `default` so bare kild still works
-  - The generic/`default` prompt should be **Claude Code inspired**: mechanism-level
-    "how to operate" guidance (outcome-first comms, verify-before-believe, scope
-    discipline, one relayable sentence) drawn from the mined CC discipline — MINUS
-    CC's task-list/tmux/role specifics. It teaches how to work, not who to be.
+- [x] kild's system prompt: a generic mechanism prompt every session gets, on top of
+      everything (`engine/src/kild/mechanism-prompt.ts`, wired in `worker.ts`) — outcome-first,
+      verify-before-believe, scope discipline, blocked→escalate, use real tools. Teaches how
+      to work, not who to be; room-comms part is conditional so a bare `kild run` is fine too.
+- [ ] Relocate `.pi/agents/*.md` role pack out of core → a PRP pack; ship one `default`
+      so bare kild still works (mechanism prompt above now makes bare sessions competent)
 - [ ] Disambiguate engine "worker" (subprocess runtime) vs role "worker" (persona) naming
 - [ ] Lifecycle collapse (4 states + 6 guards → running|stopped + visibility flag) — own branch
 
@@ -138,4 +138,4 @@ out of the core (make kild framework-agnostic), then package as a pi extension (
 - [x] Structured `to` addressing (killed regex bug) — merged to main (`4929e8a`)
 - [x] Busy-race verdict: pi queues, no watcher needed
 - [x] Live cross-vendor validation (gpt-5.6-sol + MiniMax-M3)
-- [x] CC coordination discipline mined; `never delegate understanding` added
+- [x] Coordination discipline mined; `never delegate understanding` added to orchestrator

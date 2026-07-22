@@ -14,6 +14,7 @@ import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
 import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
 import { createPostRoomTool } from './kild/fleet/post-room-tool.ts';
 import { createRoomsStatusTool } from './kild/fleet/rooms-status-tool.ts';
+import { composeSessionTurn, MECHANISM_PROMPT } from './kild/mechanism-prompt.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
@@ -161,6 +162,10 @@ export async function runWorker(): Promise<never> {
   });
 
   let preamble = agentName ? await resolveAgentInstructions(agentName, cwd) : null;
+  // Every session gets the generic mechanism guide (how to operate) on top of everything,
+  // above the persona — so even a bare `default` session is competent. One-shot: it rides
+  // only the first delivered turn. The room-comms part is conditional inside the prompt.
+  let sessionPrefix: string | null = MECHANISM_PROMPT;
 
   // pi runs one turn at a time. A room can deliver a message (prompt) to this
   // participant while it is still mid-turn, so we queue prompts and drain them
@@ -205,8 +210,12 @@ export async function runWorker(): Promise<never> {
         continue; // a malformed command line must not crash the worker; skip it
       }
       if (msg.type === 'prompt' && msg.text) {
-        promptQueue.push({ text: withRole(msg.text, preamble), from: msg.from ?? 'human' });
-        preamble = null; // the agent preamble rides only the first delivered turn
+        // First delivered turn carries the preamble: the mechanism guide (how to operate)
+        // on top of the persona (<role>). Both ride only the first turn.
+        const text = composeSessionTurn(withRole(msg.text, preamble), sessionPrefix);
+        promptQueue.push({ text, from: msg.from ?? 'human' });
+        preamble = null;
+        sessionPrefix = null;
         void drainPrompts();
       } else if (msg.type === 'stop') {
         for (const pending of pendingCommands.values()) pending.reject(new Error('worker stopped'));
