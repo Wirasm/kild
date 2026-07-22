@@ -143,7 +143,9 @@ from an outside Claude Code session over bash. What works vs what's missing:
 - [x] `kild room open … --detach` → prints a room id, returns immediately
 - [x] `kild room post <id> <text>` — steer an existing room from a separate call
 - [x] `kild room close <id>` — close a specific room by id
-- [ ] fleet-level equivalents (open/observe/steer many rooms non-interactively)
+- [x] fleet-level: `kild fleet <goal> --detach` (spawn a driver session), `kild fleet post/stop`,
+      `kild sessions` — REST session spawn/prompt/stop; observe rooms via `kild rooms`
+- [x] prompt tuning: workers MUST post_message their report back (not narrate) — mechanism prompt
 - [ ] Bridge prp SKILLS discovery: agents bridge via `.claude/agents` (works); skills need
       `.claude/skills` (kild ships `kild-cli` there) — confirm prp-* skills load for the DRIVER
       (driver gets no skills profile; falls back to pi default discovery)

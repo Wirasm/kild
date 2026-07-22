@@ -42,6 +42,10 @@ log` / `room post` / `room close`) — see "Driving rooms" below.
 | `kild room log <id>` | Read a room's full message thread (the pull view; `kild rooms` shows only the last posts) |
 | `kild room post <id> <text…>` | Post a message into a live room (steer it) |
 | `kild room close <id>` | Close a live room by id |
+| `kild fleet <goal> --detach` | Spawn a fleet-driver session (a driver that opens/steers many rooms), print its id |
+| `kild fleet post <id> <text…>` | Steer a running fleet driver |
+| `kild fleet stop <id>` | Stop a fleet driver |
+| `kild sessions` | List live sessions (fleet drivers + runs) |
 | `kild project ls` | List registered projects |
 | `kild project add <name> <path>` | Register a project directory (`~` is expanded) |
 | `kild project rm <name>` | Remove a project |

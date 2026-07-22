@@ -10,7 +10,16 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { listAgents } from './kild/agents.ts';
-import { closeRoom, getLiveRooms, openRoom, postRoom } from './kild/fleet/engine-client.ts';
+import {
+  closeRoom,
+  getLiveRooms,
+  listSessions,
+  openRoom,
+  postRoom,
+  promptSession,
+  spawnSession,
+  stopSession,
+} from './kild/fleet/engine-client.ts';
 import { compactLiveRooms } from './kild/fleet/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import {
@@ -63,9 +72,11 @@ async function dispatch(): Promise<void> {
     case 'rooms':
       return roomsList();
     case 'fleet':
-      return fleet([action, ...rest].filter(Boolean).join(' '));
+      return fleet(action, rest);
+    case 'sessions':
+      return sessionsList();
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|rooms|fleet> …');
+      console.error('usage: kild <project|agent|worktree|run|room|rooms|fleet|sessions> …');
       process.exit(2);
   }
 }
@@ -204,11 +215,55 @@ async function run(prompt: string): Promise<void> {
   return (await engineRunning()) ? runViaEngine(prompt) : runViaWorker(prompt);
 }
 
-async function fleet(goal: string): Promise<void> {
+/** `kild fleet <ls|post|stop>` + `kild fleet <goal> [--detach]` — a fleet driver is a
+ *  session with the room-control tools that opens and steers MANY rooms. `--detach` and the
+ *  subcommands make it drivable from scripts; a bare goal stays interactive. */
+async function fleet(action: string | undefined, args: string[]): Promise<void> {
+  if (action === 'ls') return sessionsList();
+  if (action === 'post') {
+    const [id, ...text] = args;
+    if (!id || text.length === 0) throw new Error('usage: kild fleet post <id> <text…>');
+    const res = await promptSession(id, text.join(' '));
+    return void (json ? console.log(JSON.stringify(res)) : console.error('posted'));
+  }
+  if (action === 'stop') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild fleet stop <id>');
+    await stopSession(id);
+    return void (json ? console.log('{"ok":true}') : console.error('stopped'));
+  }
+  return fleetInteractive([action, ...args].filter(Boolean).join(' '));
+}
+
+/** `kild sessions` / `kild fleet ls` — list live sessions (fleet drivers + runs). */
+async function sessionsList(): Promise<void> {
+  const sessions = await listSessions();
+  if (json) return void console.log(JSON.stringify(sessions, null, 2));
+  if (sessions.length === 0) return void console.error('no live sessions');
+  for (const s of sessions) {
+    console.log(`${s.id}\t${s.agent ?? 'default'}${s.model ? ` (${s.model})` : ''}`);
+  }
+}
+
+async function fleetInteractive(goal: string): Promise<void> {
   if (values.worktree) {
     throw new Error('kild fleet does not support --worktree; use kild room or kild run instead');
   }
-  if (!goal) throw new Error('usage: kild fleet <goal…> [--project <p>]');
+  if (!goal) throw new Error('usage: kild fleet <goal…> [--detach] [--project <p>]');
+  if (values.detach) {
+    const cwd = values.project
+      ? ((await findProject(values.project))?.path ?? values.project)
+      : process.cwd();
+    const res = await spawnSession({
+      agent: values.agent ?? 'default',
+      model: values.model,
+      cwd,
+      projectName: values.project ?? 'fleet',
+      fleet: true,
+      prompt: goal,
+    });
+    return void console.log(json ? JSON.stringify(res, null, 2) : res.id);
+  }
   if (!(await engineRunning())) {
     throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
   }

@@ -230,6 +230,47 @@ app.post('/api/open-url', async (c) => {
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
+// Spawn a detached session (e.g. a `kild fleet` driver) — the CLI/scripts drive this over
+// REST instead of holding a WS open. `fleet: true` grants the room-control tools.
+app.post('/api/sessions', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    agent?: string;
+    model?: string;
+    cwd?: string;
+    worktree?: string;
+    projectName?: string;
+    fleet?: boolean;
+    prompt?: string;
+  };
+  const id = randomUUID();
+  sessionManager.spawn(
+    id,
+    {
+      cwd: body.cwd,
+      agent: body.agent,
+      model: body.model,
+      worktree: body.worktree,
+      projectName: body.projectName,
+      env: body.fleet ? { KILD_FLEET: '1' } : undefined,
+    },
+    'cli',
+  );
+  if (body.prompt) sessionManager.prompt(id, body.prompt);
+  return c.json({ ok: true, id });
+});
+
+app.post('/api/sessions/:id/prompt', async (c) => {
+  const { text } = (await c.req.json().catch(() => ({}))) as { text?: string };
+  if (!text) return c.json({ error: 'text required' }, 400);
+  const delivered = sessionManager.prompt(c.req.param('id'), text);
+  return delivered ? c.json({ ok: true }) : c.json({ error: 'no such session' }, 404);
+});
+
+app.post('/api/sessions/:id/stop', (c) => {
+  sessionManager.stop(c.req.param('id'));
+  return c.json({ ok: true });
+});
+
 // ── Rooms ─────────────────────────────────────────────────────────────────────
 // Past rooms recovered from disk (read-only history). Live rooms flow over the WS
 // (`{rooms}` summaries + `{roomMessage}` posts); this is the conversation record of
