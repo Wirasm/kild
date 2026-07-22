@@ -1,6 +1,58 @@
 import { expect, test } from 'bun:test';
 
-import { compactLiveRooms } from './rooms-status.ts';
+import { compactLiveRooms, formatCompactGitSummary } from './rooms-status.ts';
+
+test('formatCompactGitSummary returns empty for absent status', () => {
+  expect(formatCompactGitSummary()).toEqual('');
+});
+
+test('formatCompactGitSummary preserves clean known-branch divergence', () => {
+  expect(
+    formatCompactGitSummary({
+      path: '/tmp/ws',
+      branch: 'feature-x',
+      base: 'main',
+      ahead: 2,
+      behind: 1,
+      dirty: false,
+      uncommittedFiles: 0,
+      changedFileCount: 0,
+      conflictsWithBase: null,
+    }),
+  ).toEqual(' · feature-x +2/-1');
+});
+
+test('formatCompactGitSummary renders a null branch as unknown', () => {
+  expect(
+    formatCompactGitSummary({
+      path: '/tmp/ws',
+      branch: null,
+      base: 'main',
+      ahead: 0,
+      behind: 0,
+      dirty: false,
+      uncommittedFiles: 0,
+      changedFileCount: 0,
+      conflictsWithBase: null,
+    }),
+  ).toEqual(' · ? +0/-0');
+});
+
+test('formatCompactGitSummary appends dirty and conflict markers', () => {
+  expect(
+    formatCompactGitSummary({
+      path: '/tmp/ws',
+      branch: 'feature-x',
+      base: 'main',
+      ahead: 2,
+      behind: 0,
+      dirty: true,
+      uncommittedFiles: 1,
+      changedFileCount: 1,
+      conflictsWithBase: true,
+    }),
+  ).toEqual(' · feature-x +2/-0 dirty CONFLICTS');
+});
 
 test('a live room with no log compacts to an empty post list', () => {
   expect(

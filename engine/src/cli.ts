@@ -20,7 +20,7 @@ import {
   spawnSession,
   stopSession,
 } from './kild/fleet/engine-client.ts';
-import { compactLiveRooms } from './kild/fleet/rooms-status.ts';
+import { compactLiveRooms, formatCompactGitSummary } from './kild/fleet/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import {
   forceRemoveWorktree,
@@ -405,6 +405,11 @@ async function room(action: string | undefined, args: string[]): Promise<void> {
     if (!id) throw new Error('usage: kild room log <id>');
     return roomLog(id);
   }
+  if (action === 'show') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild room show <id>');
+    return roomShow(id);
+  }
   if (action === 'post') {
     const [id, ...text] = args;
     if (!id || text.length === 0) throw new Error('usage: kild room post <id> <text…>');
@@ -430,6 +435,51 @@ async function roomLog(id: string): Promise<void> {
   }
 }
 
+/** `kild room show <id>` — one live room's complete coordination and code-state context. */
+async function roomShow(id: string): Promise<void> {
+  const liveRooms = await getLiveRooms();
+  const room = liveRooms.find((candidate) => candidate.id === id);
+  if (!room) throw new Error(`no such live room: ${id}`);
+  const compact = compactLiveRooms(liveRooms).find((candidate) => candidate.id === id);
+  if (!compact) throw new Error(`no such live room: ${id}`);
+
+  const detail = {
+    id: compact.id,
+    name: compact.name,
+    participants: compact.participants,
+    ...(compact.git ? { git: compact.git } : {}),
+    ...(compact.collidesWith ? { collidesWith: compact.collidesWith } : {}),
+    worktree: room.worktree,
+    state: room.state,
+    log: room.log,
+  };
+  if (json) return void console.log(JSON.stringify(detail, null, 2));
+
+  console.log(`${room.id}\t${room.name}`);
+  console.log(`state: ${room.state ?? 'unknown'}`);
+  console.log(`worktree: ${room.worktree ?? '(none)'}`);
+  console.log('participants:');
+  for (const participant of compact.participants) {
+    console.log(`  ${participant.name}${participant.agent ? ` (${participant.agent})` : ''}`);
+  }
+  if (compact.git) {
+    console.log(
+      `git${formatCompactGitSummary(compact.git)} · changed files: ${compact.git.changedFileCount}${compact.git.error ? ` · error: ${compact.git.error}` : ''}`,
+    );
+  }
+  if (compact.collidesWith?.length) {
+    console.log('collisions:');
+    for (const collision of compact.collidesWith) {
+      console.log(`  ${collision.room}: ${collision.files.join(', ')}`);
+    }
+  }
+  console.log('log:');
+  for (const message of room.log) {
+    const tag = message.system ? ' [sys]' : message.implicit ? ' [narration]' : '';
+    console.log(`${message.from} → [${message.to.join(', ')}]${tag}: ${message.text}`);
+  }
+}
+
 /** `kild rooms` / `kild room ls` — live rooms with their code-state observability. */
 async function roomsList(): Promise<void> {
   const rooms = compactLiveRooms(await getLiveRooms());
@@ -437,14 +487,10 @@ async function roomsList(): Promise<void> {
   if (rooms.length === 0) return void console.error('no live rooms');
   for (const r of rooms) {
     const parts = r.participants.map((p) => p.name).join(', ');
-    const g = r.git;
-    const git = g
-      ? ` · ${g.branch ?? '?'} +${g.ahead}/-${g.behind}${g.dirty ? ' dirty' : ''}${g.conflictsWithBase ? ' CONFLICTS' : ''}`
-      : '';
     const col = r.collidesWith?.length
       ? ` · collides: ${r.collidesWith.map((c) => `${c.room}(${c.files.length})`).join(', ')}`
       : '';
-    console.log(`${r.id}\t${r.name} [${parts}]${git}${col}`);
+    console.log(`${r.id}\t${r.name} [${parts}]${formatCompactGitSummary(r.git)}${col}`);
   }
 }
 
