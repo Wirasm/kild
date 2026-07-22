@@ -345,6 +345,11 @@ async function roomCwd(): Promise<string> {
 async function room(action: string | undefined, args: string[]): Promise<void> {
   if (action === 'ls') return roomsList();
   if (action === 'open') return roomOpen(args.join(' '));
+  if (action === 'log') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild room log <id>');
+    return roomLog(id);
+  }
   if (action === 'post') {
     const [id, ...text] = args;
     if (!id || text.length === 0) throw new Error('usage: kild room post <id> <text…>');
@@ -356,6 +361,18 @@ async function room(action: string | undefined, args: string[]): Promise<void> {
     return roomClose(id);
   }
   return roomInteractive([action, ...args].filter(Boolean).join(' '));
+}
+
+/** `kild room log <id>` — read a live room's full thread (the pull view; `kild rooms`
+ *  shows only the last couple posts). Pull the whole conversation on demand. */
+async function roomLog(id: string): Promise<void> {
+  const room = (await getLiveRooms()).find((r) => r.id === id);
+  if (!room) throw new Error(`no such live room: ${id}`);
+  if (json) return void console.log(JSON.stringify(room.log, null, 2));
+  for (const m of room.log) {
+    const tag = m.system ? ' [sys]' : m.implicit ? ' [narration]' : '';
+    console.log(`${m.from} → [${m.to.join(', ')}]${tag}: ${m.text}`);
+  }
 }
 
 /** `kild rooms` / `kild room ls` — live rooms with their code-state observability. */
