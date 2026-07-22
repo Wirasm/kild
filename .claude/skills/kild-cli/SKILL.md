@@ -27,25 +27,50 @@ description: |
 
 `kild` runs **pi** coding agents in your projects. It is the scriptable interface
 an agent can drive over the Bash tool — the engine CLI (`engine/src/cli.ts`, run
-with `bun run cli -- <args>`). The CLI's `run` is **one-shot**: it starts an agent,
-lets it work to completion, and prints the result. (Live, steerable sessions are
-driven from the cockpit UI over the engine's WebSocket, not the CLI.)
+with `bun run cli -- <args>`). `kild run` is **one-shot**: it starts an agent, lets it
+work to completion, and prints the result. For **live, multi-agent, steerable**
+workstreams, drive **rooms** from the CLI (`kild room open --detach` / `rooms` / `room
+log` / `room post` / `room close`) — see "Driving rooms" below.
 
 ## Command reference
 
 | Command | What it does |
 |---|---|
 | `kild run [opts] <prompt…>` | Run an agent on a prompt to completion, print the result |
+| `kild rooms` | List live rooms with their code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-room collisions) |
+| `kild room open <goal> --detach [opts]` | Open a room, print its id, return (no streaming). Omit `--detach` for an interactive session |
+| `kild room log <id>` | Read a room's full message thread (the pull view; `kild rooms` shows only the last posts) |
+| `kild room post <id> <text…>` | Post a message into a live room (steer it) |
+| `kild room close <id>` | Close a live room by id |
 | `kild project ls` | List registered projects |
 | `kild project add <name> <path>` | Register a project directory (`~` is expanded) |
 | `kild project rm <name>` | Remove a project |
-| `kild agent ls [--project <dir>]` | List available agents (built-in `default` + convention dirs) |
+| `kild agent ls [--project <dir>]` | List available agents (built-in `default` + convention dirs + config plugins) |
 | `kild agent show <name> [--project <dir>]` | Print an agent's resolved system prompt |
 | `kild worktree ls --project <p>` | List the project's `kild/*` worktrees |
 | `kild worktree rm <name> --project <p>` | Remove a worktree (frees disk; the `kild/<name>` branch persists) |
 | `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only; dirty/in-use ones are kept) |
 
 Add `--json` to any command for machine-readable output on stdout.
+
+## Driving rooms (multi-agent workstreams) from the CLI
+
+A **room** is a shared workspace where one or more agents collaborate. Unlike `run`
+(one-shot, single agent), a room is steerable and multi-agent — and it is now fully
+CLI-drivable (no cockpit required):
+
+```bash
+ID=$(kild room open "Build feature X" --detach --project myproj)  # → prints room id
+kild rooms                        # live rooms + git/collision state (the glance)
+kild room log "$ID"               # the full conversation
+kild room post "$ID" "use the prp-implement skill to implement plan Y"  # steer / delegate
+kild room close "$ID"             # end it
+```
+
+Participants come from the project's own agents (`--participants a,b,c`; default: one
+general-purpose `default` agent). Each gets kild's system prompt plus any skills the
+project's config plugs in — so you can post `use the prp-X skill to …` and the agent
+loads it. `--worktree <name>` runs the room in an isolated `kild/<name>` tree.
 
 ## The output contract
 

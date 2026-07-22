@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { listAgents } from '../agents.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
+import { worktreePath } from '../worktree.ts';
+import { workstreamGitStatus } from '../worktree-status.ts';
 import {
   finalNonSystemPost,
   formatOperatorNotification,
@@ -24,6 +26,7 @@ import {
   type CommandResult,
   HUMAN,
   type InviteOut,
+  type LiveRoomStatus,
   type MessageOut,
   type OpenRoomSpec,
   type OpenRoomSuccess,
@@ -209,6 +212,24 @@ export class RoomManager {
    *  reloading), so it can render the conversation so far. */
   liveRooms(): ArchivedRoom[] {
     return this.registry.liveWithLogs();
+  }
+
+  /** Live rooms enriched with each workstream's git/worktree state — the code-state
+   *  half of observability, so a driving agent can land work and spot collisions.
+   *  Effective dir = the room's worktree if set, else its cwd. Git failures are
+   *  captured per-room (never thrown), so status stays available even mid-conflict. */
+  async liveRoomsStatus(): Promise<LiveRoomStatus[]> {
+    return Promise.all(
+      this.registry.liveRoomObjects().map(async (room) => ({
+        id: room.id,
+        name: room.name,
+        worktree: room.worktree,
+        participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+        state: room.state,
+        log: room.log,
+        git: await workstreamGitStatus(room.worktree ? worktreePath(room.worktree) : room.cwd),
+      })),
+    );
   }
 
   /** Add a participant to a live room (the human "invite"). */

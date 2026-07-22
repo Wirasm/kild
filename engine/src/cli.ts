@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { listAgents } from './kild/agents.ts';
+import { closeRoom, getLiveRooms, openRoom, postRoom } from './kild/fleet/engine-client.ts';
+import { compactLiveRooms } from './kild/fleet/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import {
   forceRemoveWorktree,
@@ -30,6 +32,7 @@ const { values, positionals } = parseArgs({
     worktree: { type: 'string' },
     force: { type: 'boolean', default: false },
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
+    detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
   },
 });
 
@@ -56,11 +59,13 @@ async function dispatch(): Promise<void> {
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
     case 'room':
-      return room([action, ...rest].filter(Boolean).join(' '));
+      return room(action, rest);
+    case 'rooms':
+      return roomsList();
     case 'fleet':
       return fleet([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|fleet> …');
+      console.error('usage: kild <project|agent|worktree|run|room|rooms|fleet> …');
       process.exit(2);
   }
 }
@@ -257,8 +262,11 @@ async function fleet(goal: string): Promise<void> {
         JSON.stringify({
           type: 'spawn',
           id,
+          // The fleet driver's persona comes from the project (`--agent <name>`); with none,
+          // it's the `default` general-purpose session (kild's system prompt) plus the fleet
+          // room-control tools. kild ships no `brain` role of its own.
+          agent: values.agent ?? 'default',
           cwd,
-          agent: 'brain',
           model: values.model,
           worktree: values.worktree,
           projectName: values.project ?? 'fleet',
@@ -267,8 +275,9 @@ async function fleet(goal: string): Promise<void> {
       );
       ws.send(JSON.stringify({ type: 'prompt', id, text: goal }));
       if (!json) {
+        const persona = values.agent ? ` (${values.agent})` : '';
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
-        console.error(`\x1b[2m# fleet brain${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
+        console.error(`\x1b[2m# fleet${persona}${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
       }
     });
 
@@ -305,16 +314,114 @@ async function fleet(goal: string): Promise<void> {
 }
 
 /**
- * `kild room <goal>` — the room demo. Opens a room of predefined participants
- * (`--participants orchestrator,worker,reviewer`; default `orchestrator,worker`),
- * posts the goal to the first one, and streams every message. With `--worktree
+ * `kild room <goal>` — opens a room of participants (`--participants a,b,c`, each a
+ * persona from the project's own agents; with none, one general-purpose `default`
+ * participant), posts the goal to the lead, and streams every message. With `--worktree
  * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
  * You can keep typing to post more messages (address participants with @name).
  * The run ends when the room does: the lead closes it with its `close_room` tool
  * after the final report, or Ctrl-C is the kill switch — it closes the room
  * (stopping all participants) and exits. Requires the engine (it is multi-session).
  */
-async function room(goal: string): Promise<void> {
+/** Shared spec for opening a room from either the interactive or `--detach` path. */
+function roomParticipants(): Array<{ name: string; agent: string; model?: string }> {
+  return values.participants
+    ? values.participants
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((n) => ({ name: n, agent: n, model: values.model }))
+    : [{ name: 'agent', agent: 'default', model: values.model }];
+}
+
+async function roomCwd(): Promise<string> {
+  return values.project
+    ? ((await findProject(values.project))?.path ?? values.project)
+    : process.cwd();
+}
+
+/** `kild room <ls|open|post|close>` — the scriptable, non-interactive room primitives an
+ *  external driver (agent or human over bash) needs. A bare goal stays interactive. */
+async function room(action: string | undefined, args: string[]): Promise<void> {
+  if (action === 'ls') return roomsList();
+  if (action === 'open') return roomOpen(args.join(' '));
+  if (action === 'log') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild room log <id>');
+    return roomLog(id);
+  }
+  if (action === 'post') {
+    const [id, ...text] = args;
+    if (!id || text.length === 0) throw new Error('usage: kild room post <id> <text…>');
+    return roomPost(id, text.join(' '));
+  }
+  if (action === 'close') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild room close <id>');
+    return roomClose(id);
+  }
+  return roomInteractive([action, ...args].filter(Boolean).join(' '));
+}
+
+/** `kild room log <id>` — read a live room's full thread (the pull view; `kild rooms`
+ *  shows only the last couple posts). Pull the whole conversation on demand. */
+async function roomLog(id: string): Promise<void> {
+  const room = (await getLiveRooms()).find((r) => r.id === id);
+  if (!room) throw new Error(`no such live room: ${id}`);
+  if (json) return void console.log(JSON.stringify(room.log, null, 2));
+  for (const m of room.log) {
+    const tag = m.system ? ' [sys]' : m.implicit ? ' [narration]' : '';
+    console.log(`${m.from} → [${m.to.join(', ')}]${tag}: ${m.text}`);
+  }
+}
+
+/** `kild rooms` / `kild room ls` — live rooms with their code-state observability. */
+async function roomsList(): Promise<void> {
+  const rooms = compactLiveRooms(await getLiveRooms());
+  if (json) return void console.log(JSON.stringify(rooms, null, 2));
+  if (rooms.length === 0) return void console.error('no live rooms');
+  for (const r of rooms) {
+    const parts = r.participants.map((p) => p.name).join(', ');
+    const g = r.git;
+    const git = g
+      ? ` · ${g.branch ?? '?'} +${g.ahead}/-${g.behind}${g.dirty ? ' dirty' : ''}${g.conflictsWithBase ? ' CONFLICTS' : ''}`
+      : '';
+    const col = r.collidesWith?.length
+      ? ` · collides: ${r.collidesWith.map((c) => `${c.room}(${c.files.length})`).join(', ')}`
+      : '';
+    console.log(`${r.id}\t${r.name} [${parts}]${git}${col}`);
+  }
+}
+
+/** `kild room open <goal> --detach` — open a room, print its id, return (no streaming). */
+async function roomOpen(goal: string): Promise<void> {
+  if (!goal) throw new Error('usage: kild room open <goal…> [--participants a,b] [--detach]');
+  if (!values.detach) return roomInteractive(goal);
+  const res = await openRoom({
+    name: values.project ?? 'room',
+    cwd: await roomCwd(),
+    participants: roomParticipants(),
+    worktree: values.worktree,
+    kickoff: goal,
+  });
+  console.log(json ? JSON.stringify(res, null, 2) : res.id);
+}
+
+/** `kild room post <id> <text>` — steer an existing room from a separate call. */
+async function roomPost(id: string, text: string): Promise<void> {
+  const res = await postRoom(id, text);
+  if (json) console.log(JSON.stringify(res, null, 2));
+  else console.error(res.message);
+}
+
+/** `kild room close <id>` — close a specific room by id. */
+async function roomClose(id: string): Promise<void> {
+  const res = await closeRoom(id);
+  if (json) console.log(JSON.stringify(res, null, 2));
+  else console.error(res.message);
+}
+
+async function roomInteractive(goal: string): Promise<void> {
   if (!goal) {
     throw new Error(
       'usage: kild room <goal…> [--participants a,b,c] [--worktree <n>] [--project <p>]',
@@ -330,13 +437,20 @@ async function room(goal: string): Promise<void> {
     ? ((await findProject(values.project))?.path ?? values.project)
     : process.cwd();
   const name = values.project ?? 'room';
-  const participantNames = (values.participants ?? 'orchestrator,worker')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
-  // Addressing is structured now: the engine defaults an untargeted post to the room
-  // lead, so the goal reaches the lead (orchestrator) without munging the text.
+  // `--participants a,b` names personas from the project's own agents; each participant's
+  // agent defaults to its name. With none given, kild opens one general-purpose
+  // participant (the `default` persona = kild's system prompt, no role) — kild ships no
+  // roles of its own; personas come from the project (.claude/agents / .pi/agents).
+  const participants = values.participants
+    ? values.participants
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((n) => ({ name: n, agent: n }))
+    : [{ name: 'agent', agent: 'default' }];
+  if (participants.length === 0) throw new Error('--participants must name at least one agent');
+  // Addressing is structured: the engine defaults an untargeted post to the room lead,
+  // so the goal reaches the lead without munging the text.
   const kickoff = goal;
   const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
@@ -387,14 +501,14 @@ async function room(goal: string): Promise<void> {
           name,
           cwd,
           worktree: values.worktree,
-          participants: participantNames.map((n) => ({ name: n, agent: n, model: values.model })),
+          participants: participants.map((p) => ({ ...p, model: values.model })),
         }),
       );
       ws.send(JSON.stringify({ type: 'room_post', id: roomId, text: kickoff }));
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# room "${name}" — ${participantNames.join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# room "${name}" — ${participants.map((p) => p.name).join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });

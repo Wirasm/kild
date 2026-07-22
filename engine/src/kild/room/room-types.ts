@@ -1,4 +1,5 @@
 import type { UiEvent } from '../events.ts';
+import type { WorkstreamGitStatus } from '../worktree-status.ts';
 
 /**
  * Room domain — the operator-facing primitive: a set of participants (agent
@@ -103,6 +104,13 @@ export interface ArchivedRoom {
    *  older history files and out-of-scope fixtures continue to type-check. */
   state?: RoomLifecycleState;
   log: RoomMessage[];
+}
+
+/** A live room enriched with its workstream's git/worktree state — the code-state
+ *  half of observability, so a driving agent can land work and avoid collisions. Git is
+ *  live-only (never persisted); computed on demand when serving live-room status. */
+export interface LiveRoomStatus extends ArchivedRoom {
+  git?: WorkstreamGitStatus;
 }
 
 /** Typed room-domain result: every command either succeeds with a value or fails with

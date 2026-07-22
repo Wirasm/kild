@@ -9,11 +9,13 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
+import { resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
 import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
 import { createPostRoomTool } from './kild/fleet/post-room-tool.ts';
 import { createRoomsStatusTool } from './kild/fleet/rooms-status-tool.ts';
+import { composeSessionTurn, MECHANISM_PROMPT } from './kild/mechanism-prompt.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
@@ -108,17 +110,29 @@ export async function runWorker(): Promise<never> {
             createFleetCloseRoomTool(),
           ]
         : undefined;
-    // Preserve default discovery for extensions, prompt templates, and project context.
-    // `noSkills` disables every default skill source while the explicit absolute path
-    // supplies the room participant's assigned capability profile.
-    const resourceLoader = skillsProfile
-      ? new DefaultResourceLoader({
-          cwd,
-          agentDir: getAgentDir(),
-          noSkills: true,
-          additionalSkillPaths: [skillsProfile],
-        })
-      : undefined;
+    // Skills: an explicit room capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
+    // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
+    // PLUS the config-declared skill dirs, so an invited agent can load `prp-implement` when
+    // the orchestrator tells it to. This is what makes a plugged-in framework's process
+    // reachable by whoever gets invited, not only the lead.
+    let resourceLoader: DefaultResourceLoader | undefined;
+    if (skillsProfile) {
+      resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir: getAgentDir(),
+        noSkills: true,
+        additionalSkillPaths: [skillsProfile],
+      });
+    } else {
+      const { skillDirs } = await resolvePluginPaths(cwd);
+      resourceLoader = skillDirs.length
+        ? new DefaultResourceLoader({
+            cwd,
+            agentDir: getAgentDir(),
+            additionalSkillPaths: skillDirs,
+          })
+        : undefined;
+    }
     await resourceLoader?.reload();
     ({ session } = await createAgentSession({
       model,
@@ -161,6 +175,10 @@ export async function runWorker(): Promise<never> {
   });
 
   let preamble = agentName ? await resolveAgentInstructions(agentName, cwd) : null;
+  // Every session gets the generic mechanism guide (how to operate) on top of everything,
+  // above the persona — so even a bare `default` session is competent. One-shot: it rides
+  // only the first delivered turn. The room-comms part is conditional inside the prompt.
+  let sessionPrefix: string | null = MECHANISM_PROMPT;
 
   // pi runs one turn at a time. A room can deliver a message (prompt) to this
   // participant while it is still mid-turn, so we queue prompts and drain them
@@ -205,8 +223,12 @@ export async function runWorker(): Promise<never> {
         continue; // a malformed command line must not crash the worker; skip it
       }
       if (msg.type === 'prompt' && msg.text) {
-        promptQueue.push({ text: withRole(msg.text, preamble), from: msg.from ?? 'human' });
-        preamble = null; // the agent preamble rides only the first delivered turn
+        // First delivered turn carries the preamble: the mechanism guide (how to operate)
+        // on top of the persona (<role>). Both ride only the first turn.
+        const text = composeSessionTurn(withRole(msg.text, preamble), sessionPrefix);
+        promptQueue.push({ text, from: msg.from ?? 'human' });
+        preamble = null;
+        sessionPrefix = null;
         void drainPrompts();
       } else if (msg.type === 'stop') {
         for (const pending of pendingCommands.values()) pending.reject(new Error('worker stopped'));

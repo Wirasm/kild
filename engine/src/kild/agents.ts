@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { kildHome } from './config.ts';
+import { kildHome, resolvePluginPaths } from './config.ts';
 
 /** A reusable role: a name + system prompt, read from convention dirs.
  *  Mirror of kild-core::agent (same .kild/.claude/.pi discovery). */
@@ -15,12 +15,14 @@ export interface Agent {
 
 export const DEFAULT_AGENT = 'default';
 
-function agentDirs(projectRoot?: string): string[] {
+async function agentDirs(projectRoot?: string): Promise<string[]> {
   const dirs: string[] = [];
   if (projectRoot) {
     dirs.push(path.join(projectRoot, '.kild/agents'));
     dirs.push(path.join(projectRoot, '.claude/agents'));
     dirs.push(path.join(projectRoot, '.pi/agents'));
+    // Config-declared plugins/agentPaths — how the project brings its own personas.
+    dirs.push(...(await resolvePluginPaths(projectRoot)).agentDirs);
   }
   dirs.push(path.join(kildHome(), 'agents'));
   const home = process.env.HOME;
@@ -65,7 +67,7 @@ export async function listAgents(projectRoot?: string): Promise<Agent[]> {
   const agents: Agent[] = [{ name: DEFAULT_AGENT, description: '', systemPrompt: '' }];
   const seen = new Set<string>([DEFAULT_AGENT]);
 
-  for (const dir of agentDirs(projectRoot)) {
+  for (const dir of await agentDirs(projectRoot)) {
     let entries: string[];
     try {
       entries = await fs.readdir(dir);

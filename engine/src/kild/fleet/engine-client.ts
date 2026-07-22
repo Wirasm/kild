@@ -1,4 +1,4 @@
-import type { ArchivedRoom, ParticipantSpec } from '../room/room-types.ts';
+import type { LiveRoomStatus, ParticipantSpec } from '../room/room-types.ts';
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
 
@@ -61,6 +61,6 @@ export async function closeRoom(roomId: string, sessionId?: string): Promise<Roo
   });
 }
 
-export async function getLiveRooms(): Promise<ArchivedRoom[]> {
+export async function getLiveRooms(): Promise<LiveRoomStatus[]> {
   return engineFetch('/api/rooms/live');
 }
