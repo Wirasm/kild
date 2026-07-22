@@ -22,7 +22,7 @@ export interface WorkstreamGitStatus {
   dirty: boolean; // uncommitted changes present
   uncommittedFiles: number;
   changedFiles: string[]; // files changed vs base (committed): git diff --name-only <base>...HEAD
-  conflictsWithBase: boolean | null; // leave null for now (a later slice fills it)
+  conflictsWithBase: boolean | null; // would HEAD merge into base cleanly? null = undetermined
   error?: string; // any git failure captured here, NEVER thrown
 }
 
@@ -126,6 +126,23 @@ export async function workstreamGitStatus(
     status.changedFiles = diff.stdout.split('\n').filter((file) => file.length > 0);
   } else {
     status.error = diff.error;
+  }
+
+  // Would merging HEAD into base conflict? `merge-tree --write-tree` exits 0 (clean) /
+  // 1 (conflicts) / 128 (error); a git too old to support --write-tree also fails. The
+  // exit code rides err.code on the rejection, so this call bypasses runGit (which drops
+  // it). Anything other than a clean 0 or a conflicting 1 stays null (undetermined) —
+  // never thrown. Nothing to merge when the branch isn't ahead → no conflict.
+  if (status.ahead === 0) {
+    status.conflictsWithBase = false;
+  } else {
+    try {
+      await execFile('git', ['-C', dir, 'merge-tree', '--write-tree', resolvedBase, 'HEAD']);
+      status.conflictsWithBase = false;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      status.conflictsWithBase = code === 1 ? true : null;
+    }
   }
 
   return status;

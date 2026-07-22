@@ -21,6 +21,25 @@ layer (`.pi/agents/*.md`), not core — see [room-mailbox-notes.md](./room-mailb
 - Hard-enforced gates (agent *cannot* act without approval) → permission/isolation layer.
 - Live-context resume (restore an in-flight session's warm context) → pi/runtime layer.
 
+## Observability is PULL, not push (token discipline)
+
+Two consumers, two modes — this governs every status/log surface:
+
+- **Director agent → compact, pull-based status.** `rooms_status` = participants + last
+  posts + a git *summary* + collisions. NEVER stream a sub-agent's transcript or
+  token-level detail into the director's context. Trust the agent is working in the
+  right place; burning the director's context to *watch* it is the anti-pattern. The
+  director pulls a summary when it wants to check, and pulls full logs only to debug.
+- **Human (cockpit) → full live stream.** The WS broadcast carries every session's
+  events to the human in real time — no token cost, rich view. The human can always
+  check live; the agent should not have to.
+- **Logs/transcripts** (persisted room log + session transcript) are for after-the-fact
+  debugging and the occasional live check — pulled on demand, never auto-injected.
+
+Concretely: the compact status shows a changed-file **count** (not the list) plus the
+**actionable collision** (the specific overlapping files) — the full changed-file list
+stays in the pull/human layer.
+
 ## The one in-scope gap: observability of code state
 
 Agent-driven landing and collision-avoidance are only as good as what the driving
@@ -80,11 +99,13 @@ Ordered: build the missing mechanism first (immediate value), then strip the pol
 out of the core (make kild framework-agnostic), then package as a pi extension (last).
 
 ### Phase 1 — BUILD the missing primitive: code-state observability
-- [ ] S1: `worktree-status.ts` helper + test (the contract above)
-- [ ] S1: extend `CompactRoomStatus`; compute git in `/api/rooms/live`; update rooms-status test
-- [ ] S1: `rooms_status` tool surfaces the git block
-- [ ] S2: cross-workstream collision (changedFiles overlap) in the status payload
-- [ ] S2: `conflictsWithBase` via `git merge-tree --write-tree`
+- [x] S1: `worktree-status.ts` helper + test (the contract above)
+- [x] S1: extend `CompactRoomStatus`; compute git in `/api/rooms/live`; update rooms-status test
+- [x] S1: `rooms_status` tool surfaces the git block (rides the JSON; no tool change needed)
+- [x] S2: cross-workstream collision (changedFiles overlap) — `computeCollisions`, surfaced
+      as compact `collidesWith` (the overlapping files only)
+- [x] S2: `conflictsWithBase` via `git merge-tree --write-tree` (exit 0/1/other → false/true/null)
+- [x] S2: compact git trims changed-file list to a COUNT (pull-not-push discipline)
 - [ ] S3: cockpit — per-room git badge + collision warnings (app/)
 
 ### Phase 2 — REMOVE the policy baked into the mechanism (framework-agnostic core)

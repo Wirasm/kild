@@ -63,7 +63,7 @@ test('clean repo on the base branch reports no divergence and no changes', async
   expect(status.dirty).toBe(false);
   expect(status.uncommittedFiles).toBe(0);
   expect(status.changedFiles).toEqual([]);
-  expect(status.conflictsWithBase).toBeNull();
+  expect(status.conflictsWithBase).toBe(false); // nothing ahead to merge
 });
 
 test('a branch one commit ahead reports ahead 1 and the changed file', async () => {
@@ -110,6 +110,40 @@ test('a non-git directory returns an error object without throwing', async () =>
   expect(status.dirty).toBe(false);
   expect(status.uncommittedFiles).toBe(0);
   expect(status.changedFiles).toEqual([]);
+});
+
+test('a branch that merges cleanly into base reports conflictsWithBase false', async () => {
+  const dir = await initRepo();
+  await git(dir, ['checkout', '-b', 'feature']);
+  fs.writeFileSync(path.join(dir, 'feature.txt'), 'x\n');
+  await git(dir, ['add', '.']);
+  await commit(dir, 'add feature'); // new file, no overlap with base
+
+  const status = await workstreamGitStatus(dir, 'main');
+
+  expect(status.error).toBeUndefined();
+  expect(status.ahead).toBe(1);
+  expect(status.conflictsWithBase).toBe(false);
+});
+
+test('a branch that edits the same line as base reports conflictsWithBase true', async () => {
+  const dir = await initRepo(); // README.md = 'hello\n' on main
+  await git(dir, ['checkout', '-b', 'feature']);
+  fs.writeFileSync(path.join(dir, 'README.md'), 'feature change\n');
+  await git(dir, ['add', '.']);
+  await commit(dir, 'feature edit');
+  // Advance main on the same line so the two histories conflict on merge.
+  await git(dir, ['checkout', 'main']);
+  fs.writeFileSync(path.join(dir, 'README.md'), 'main change\n');
+  await git(dir, ['add', '.']);
+  await commit(dir, 'main edit');
+  await git(dir, ['checkout', 'feature']);
+
+  const status = await workstreamGitStatus(dir, 'main');
+
+  expect(status.ahead).toBe(1);
+  expect(status.behind).toBe(1);
+  expect(status.conflictsWithBase).toBe(true);
 });
 
 test('a missing base ref is reported as an error, not a crash', async () => {
