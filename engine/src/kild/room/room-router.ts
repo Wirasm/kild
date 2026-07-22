@@ -23,26 +23,17 @@ export function unknownRecipients(room: Room, message: RoomMessage): string[] {
   return message.to.filter((recipient) => recipient !== HUMAN && !participants.has(recipient));
 }
 
-/** Whether an operator-side post in a multi-participant room can deliver no turn.
- * Participant narration and single-participant rooms intentionally retain their bare-post
- * behavior; engine notices and implicit replies never represent a user addressing a room. */
-export function hasNoDeliverableRecipients(room: Room, message: RoomMessage): boolean {
-  if (message.system || message.implicit || room.participants.length <= 1) return false;
-  if (room.participants.some((participant) => participant.name === message.from)) return false;
-  return !message.to.some((recipient) =>
-    room.participants.some((participant) => participant.name === recipient),
-  );
-}
-
 /**
  * Route one already-recorded post: show it to the human (broadcast), then deliver
  * it as a turn to each addressed participant.
  *
  * **`message.to` is authoritative.** The room manager resolved it when it recorded the
- * post — that is the one place that answers "who is this addressed to?" (explicit `to`,
- * else the `@mentions` in the text, else nobody). Re-deriving it here would be a second,
- * divergent answer to the same question: it silently overrode a deliberate empty `to`,
- * so a system notice like "@worker joined the room." prompted @worker with a turn.
+ * post — that is the one place that answers "who is this addressed to?" (a system notice
+ * → nobody, else an explicit `to`, else the room lead). Addressing is a structured list,
+ * never parsed from the message text — the router must never re-derive addressees from
+ * prose. Re-deriving would be a second, divergent answer: it once silently overrode a
+ * deliberate empty `to`, so a system notice like "@worker joined the room." prompted
+ * @worker with a turn.
  *
  * This function owns only *delivery* policy — who actually gets prompted:
  * - `@human` is never delivered as a turn (the broadcast is how the operator receives);

@@ -15,7 +15,6 @@ import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
-import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
   resolveCloseRoomActor,
   resolveOpenRoomActor,
@@ -110,15 +109,6 @@ function envRecord(input: unknown): Record<string, string> | undefined {
     env[key] = value;
   }
   return env;
-}
-
-function addressKickoff(kickoff: string, participants: ParticipantSpec[]): string {
-  const lead = participants[0]?.name;
-  if (!lead) return kickoff;
-  const addressed = parseMentions(kickoff).some((handle) =>
-    participants.some((p) => p.name === handle),
-  );
-  return addressed ? kickoff : `@${lead} ${kickoff}`;
 }
 
 function roomResultStatus(result: Extract<CommandResult<unknown>, { ok: false }>): 404 | 409 {
@@ -304,10 +294,11 @@ app.post('/api/rooms', async (c) => {
     openedBy: body.openedBy,
   });
   if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
-  const kickoff = addressKickoff(body.kickoff, participants);
+  // Addressing is structured now: the manager defaults an untargeted post to the room
+  // lead, so the kickoff reaches the orchestrator without munging the text.
   const posted = attribution.value.human
-    ? await roomManager.postFromHuman(id, kickoff)
-    : await roomManager.postAs(id, attribution.value.actor, kickoff);
+    ? await roomManager.postFromHuman(id, body.kickoff)
+    : await roomManager.postAs(id, attribution.value.actor, body.kickoff);
   if (!posted.ok) {
     await roomManager.close(id);
     return c.json({ error: posted.message }, roomResultStatus(posted));

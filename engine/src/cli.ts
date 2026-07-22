@@ -11,7 +11,6 @@ import { parseArgs } from 'node:util';
 
 import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
-import { parseMentions } from './kild/room/parse-mentions.ts';
 import {
   forceRemoveWorktree,
   listWorktrees,
@@ -336,13 +335,9 @@ async function room(goal: string): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
   if (participantNames.length === 0) throw new Error('--participants must name at least one agent');
-  const lead = participantNames[0] as string;
-  // Address the lead unless the goal already addresses a PARTICIPANT. Testing for a
-  // bare @mention is not the same question: `@human` is never a participant, and it
-  // is exactly what a goal says when it names who to report back to — that would
-  // address no one and the room would sit idle.
-  const addressed = parseMentions(goal).some((h) => participantNames.includes(h));
-  const kickoff = addressed ? goal : `@${lead} ${goal}`;
+  // Addressing is structured now: the engine defaults an untargeted post to the room
+  // lead, so the goal reaches the lead (orchestrator) without munging the text.
+  const kickoff = goal;
   const roomId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
