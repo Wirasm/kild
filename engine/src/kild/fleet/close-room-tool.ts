@@ -16,7 +16,7 @@ export function createFleetCloseRoomTool(): ToolDefinition {
     }),
     async execute(_toolCallId, params) {
       const { roomId } = params as { roomId: string };
-      const { message } = await closeRoom(roomId);
+      const { message } = await closeRoom(roomId, process.env.KILD_SESSION_ID);
       return {
         content: [{ type: 'text' as const, text: message }],
         details: null,

@@ -184,6 +184,19 @@ export class SessionManager {
     return [...this.sessions.values()].map((s) => s.info);
   }
 
+  resolveActor(id: string): CommandResult<string> {
+    const info = this.sessions.get(id)?.info;
+    if (!info) return { ok: false, code: 'rejected', message: `unknown session: ${id}` };
+    if (!info.agent) {
+      return {
+        ok: false,
+        code: 'rejected',
+        message: `session '${id}' has no actor identity`,
+      };
+    }
+    return { ok: true, value: info.agent };
+  }
+
   spawn(
     id: string,
     req: SpawnRequest,
