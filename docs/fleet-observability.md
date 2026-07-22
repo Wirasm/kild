@@ -121,6 +121,43 @@ out of the core (make kild framework-agnostic), then package as a pi extension (
 - [ ] Disambiguate engine "worker" (subprocess runtime) vs role "worker" (persona) naming
 - [ ] Lifecycle collapse (4 states + 6 guards → running|stopped + visibility flag) — own branch
 
+### Phase 2.5 — BUILD missing CLI primitives (found by test-driving kild from an external agent)
+
+Test-drive (2026-07-22): parked kild's roles, bridged prp-core into the project, drove kild
+from an outside Claude Code session over bash. What works vs what's missing:
+
+- ✅ `kild run` (one-shot: spawn a pi agent to completion, `--json` result) — fully drivable.
+- ✅ `kild project` / `kild agent ls|show` / `kild worktree` — drivable.
+- ✅ prp-core AGENTS load once symlinked into the project's `.claude/agents` (kild discovers
+      project `.claude/agents`/`.pi/agents`). **Gap: the plugin layout (`prp-core/agents`,
+      `prp-core/skills`) is NOT auto-discovered — kild has no plugin-awareness; you bridge
+      via the standard `.claude/agents` path.**
+- ❌ **The FLEET is not drivable from the CLI.** Per kild's own `kild-cli` skill: "live,
+      steerable sessions are driven from the cockpit UI over the WebSocket, not the CLI." The
+      `room`/`fleet` CLI verbs are INTERACTIVE (open a WebSocket, stream, read stdin) — not
+      scriptable primitives. An external agent (or a human over bash) cannot launch-detached,
+      observe, or steer a room. This blocks the whole "agent drives the fleet" goal.
+
+**CLI primitives — built + verified by driving kild from an external session:**
+- [x] `kild rooms [--json]` — live rooms + git/collision status (surfaces `/api/rooms/live`)
+- [x] `kild room open … --detach` → prints a room id, returns immediately
+- [x] `kild room post <id> <text>` — steer an existing room from a separate call
+- [x] `kild room close <id>` — close a specific room by id
+- [ ] fleet-level equivalents (open/observe/steer many rooms non-interactively)
+- [ ] Bridge prp SKILLS discovery: agents bridge via `.claude/agents` (works); skills need
+      `.claude/skills` (kild ships `kild-cli` there) — confirm prp-* skills load for the DRIVER
+      (driver gets no skills profile; falls back to pi default discovery)
+
+**Config/setup gap (found): kild has NO config mechanism.** To plug agents + skills (a
+framework like prp-core) you currently hand-bridge symlinks. Needs a config that declares
+plugin/agent/skill sources, and lets the fleet driver load a process SKILL (e.g. the
+orchestrator is a SKILL in PRP, not an agent — the main/driver agent loads it and drives the
+room tools). See the design note below.
+
+Note: the observability data layer (Phase 1) exists but is reachable only by an in-fleet
+agent (rooms_status tool) or HTTP — an EXTERNAL driver has no CLI window into it. These
+primitives are what make "me or an agent drives the fleet" real over bash.
+
 ### Phase 3 — BUILD the pi extension (final)
 - [ ] Extract the coordination core (router + types + events + lifecycle + addressing rule)
       behind the existing `RoomDelivery` seam — one core, not a fork

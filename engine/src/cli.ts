@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { listAgents } from './kild/agents.ts';
+import { closeRoom, getLiveRooms, openRoom, postRoom } from './kild/fleet/engine-client.ts';
+import { compactLiveRooms } from './kild/fleet/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import {
   forceRemoveWorktree,
@@ -30,6 +32,7 @@ const { values, positionals } = parseArgs({
     worktree: { type: 'string' },
     force: { type: 'boolean', default: false },
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
+    detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
   },
 });
 
@@ -56,11 +59,13 @@ async function dispatch(): Promise<void> {
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
     case 'room':
-      return room([action, ...rest].filter(Boolean).join(' '));
+      return room(action, rest);
+    case 'rooms':
+      return roomsList();
     case 'fleet':
       return fleet([action, ...rest].filter(Boolean).join(' '));
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|fleet> …');
+      console.error('usage: kild <project|agent|worktree|run|room|rooms|fleet> …');
       process.exit(2);
   }
 }
@@ -318,7 +323,88 @@ async function fleet(goal: string): Promise<void> {
  * after the final report, or Ctrl-C is the kill switch — it closes the room
  * (stopping all participants) and exits. Requires the engine (it is multi-session).
  */
-async function room(goal: string): Promise<void> {
+/** Shared spec for opening a room from either the interactive or `--detach` path. */
+function roomParticipants(): Array<{ name: string; agent: string; model?: string }> {
+  return values.participants
+    ? values.participants
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((n) => ({ name: n, agent: n, model: values.model }))
+    : [{ name: 'agent', agent: 'default', model: values.model }];
+}
+
+async function roomCwd(): Promise<string> {
+  return values.project
+    ? ((await findProject(values.project))?.path ?? values.project)
+    : process.cwd();
+}
+
+/** `kild room <ls|open|post|close>` — the scriptable, non-interactive room primitives an
+ *  external driver (agent or human over bash) needs. A bare goal stays interactive. */
+async function room(action: string | undefined, args: string[]): Promise<void> {
+  if (action === 'ls') return roomsList();
+  if (action === 'open') return roomOpen(args.join(' '));
+  if (action === 'post') {
+    const [id, ...text] = args;
+    if (!id || text.length === 0) throw new Error('usage: kild room post <id> <text…>');
+    return roomPost(id, text.join(' '));
+  }
+  if (action === 'close') {
+    const [id] = args;
+    if (!id) throw new Error('usage: kild room close <id>');
+    return roomClose(id);
+  }
+  return roomInteractive([action, ...args].filter(Boolean).join(' '));
+}
+
+/** `kild rooms` / `kild room ls` — live rooms with their code-state observability. */
+async function roomsList(): Promise<void> {
+  const rooms = compactLiveRooms(await getLiveRooms());
+  if (json) return void console.log(JSON.stringify(rooms, null, 2));
+  if (rooms.length === 0) return void console.error('no live rooms');
+  for (const r of rooms) {
+    const parts = r.participants.map((p) => p.name).join(', ');
+    const g = r.git;
+    const git = g
+      ? ` · ${g.branch ?? '?'} +${g.ahead}/-${g.behind}${g.dirty ? ' dirty' : ''}${g.conflictsWithBase ? ' CONFLICTS' : ''}`
+      : '';
+    const col = r.collidesWith?.length
+      ? ` · collides: ${r.collidesWith.map((c) => `${c.room}(${c.files.length})`).join(', ')}`
+      : '';
+    console.log(`${r.id}\t${r.name} [${parts}]${git}${col}`);
+  }
+}
+
+/** `kild room open <goal> --detach` — open a room, print its id, return (no streaming). */
+async function roomOpen(goal: string): Promise<void> {
+  if (!goal) throw new Error('usage: kild room open <goal…> [--participants a,b] [--detach]');
+  if (!values.detach) return roomInteractive(goal);
+  const res = await openRoom({
+    name: values.project ?? 'room',
+    cwd: await roomCwd(),
+    participants: roomParticipants(),
+    worktree: values.worktree,
+    kickoff: goal,
+  });
+  console.log(json ? JSON.stringify(res, null, 2) : res.id);
+}
+
+/** `kild room post <id> <text>` — steer an existing room from a separate call. */
+async function roomPost(id: string, text: string): Promise<void> {
+  const res = await postRoom(id, text);
+  if (json) console.log(JSON.stringify(res, null, 2));
+  else console.error(res.message);
+}
+
+/** `kild room close <id>` — close a specific room by id. */
+async function roomClose(id: string): Promise<void> {
+  const res = await closeRoom(id);
+  if (json) console.log(JSON.stringify(res, null, 2));
+  else console.error(res.message);
+}
+
+async function roomInteractive(goal: string): Promise<void> {
   if (!goal) {
     throw new Error(
       'usage: kild room <goal…> [--participants a,b,c] [--worktree <n>] [--project <p>]',
