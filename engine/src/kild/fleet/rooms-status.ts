@@ -18,6 +18,12 @@ export interface CompactGitStatus {
   error?: string;
 }
 
+/** One-line git summary shared by room list and detail displays. */
+export function formatCompactGitSummary(git?: CompactGitStatus): string {
+  if (!git) return '';
+  return ` · ${git.branch ?? '?'} +${git.ahead}/-${git.behind}${git.dirty ? ' dirty' : ''}${git.conflictsWithBase ? ' CONFLICTS' : ''}`;
+}
+
 /** One overlap: `room` also changed `files`. The specific overlapping files ARE the
  *  actionable signal (which is why they're surfaced compactly, unlike the full list). */
 export interface WorkstreamCollision {
