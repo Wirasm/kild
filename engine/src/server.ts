@@ -16,8 +16,13 @@ import { cors } from 'hono/cors';
 import { listAgents } from './kild/agents.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import { parseMentions } from './kild/room/parse-mentions.ts';
+import {
+  resolveCloseRoomActor,
+  resolveOpenRoomActor,
+  resolvePostRoomActor,
+} from './kild/room/rest-room-attribution.ts';
 import { roomManager } from './kild/room/room-manager.ts';
-import { type CommandResult, HUMAN, type ParticipantSpec } from './kild/room/room-types.ts';
+import type { CommandResult, ParticipantSpec } from './kild/room/room-types.ts';
 import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
@@ -266,6 +271,9 @@ app.post('/api/rooms', async (c) => {
   if (body.worktree !== undefined && typeof body.worktree !== 'string') {
     return c.json({ error: 'worktree must be a string' }, 400);
   }
+  if (body.from !== undefined && typeof body.from !== 'string') {
+    return c.json({ error: 'from must be a string' }, 400);
+  }
   if (body.openedBy !== undefined && typeof body.openedBy !== 'string') {
     return c.json({ error: 'openedBy must be a string' }, 400);
   }
@@ -278,6 +286,15 @@ app.post('/api/rooms', async (c) => {
     typeof body.project === 'string' ? await resolveProjectPath(body.project) : (body.cwd ?? null);
   if (!cwd) return c.json({ error: 'cwd or project required' }, 400);
 
+  const attribution = resolveOpenRoomActor(
+    {
+      from: typeof body.from === 'string' ? body.from : undefined,
+      openedBy: body.openedBy,
+    },
+    sessionManager,
+  );
+  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
+
   const id = randomUUID();
   const opened = await roomManager.open(id, {
     name: body.name,
@@ -287,13 +304,10 @@ app.post('/api/rooms', async (c) => {
     openedBy: body.openedBy,
   });
   if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
-  // Honest attribution: a kickoff posted by an agent operator (e.g. the fleet
-  // brain) carries its name; the transcript must never claim the human spoke.
   const kickoff = addressKickoff(body.kickoff, participants);
-  const posted =
-    typeof body.from === 'string' && body.from.trim()
-      ? await roomManager.postAs(id, body.from.trim(), kickoff)
-      : await roomManager.postFromHuman(id, kickoff);
+  const posted = attribution.value.human
+    ? await roomManager.postFromHuman(id, kickoff)
+    : await roomManager.postAs(id, attribution.value.actor, kickoff);
   if (!posted.ok) {
     await roomManager.close(id);
     return c.json({ error: posted.message }, roomResultStatus(posted));
@@ -301,19 +315,39 @@ app.post('/api/rooms', async (c) => {
   return c.json({ ok: true, id: opened.value.roomId, message: opened.value.message });
 });
 app.post('/api/rooms/:id/post', async (c) => {
-  const { text, from } = await c.req.json<{ text?: unknown; from?: unknown }>();
+  const { text, from, sessionId } = await c.req.json<{
+    text?: unknown;
+    from?: unknown;
+    sessionId?: unknown;
+  }>();
   if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
+  if (sessionId !== undefined && typeof sessionId !== 'string')
+    return c.json({ error: 'sessionId must be a string' }, 400);
   const id = c.req.param('id');
-  const result =
-    (from ?? HUMAN) === HUMAN
-      ? await roomManager.postFromHuman(id, text)
-      : await roomManager.postAs(id, from as string, text);
+  const attribution = resolvePostRoomActor(
+    { from: typeof from === 'string' ? from : undefined, sessionId },
+    sessionManager,
+  );
+  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
+  const result = attribution.value.human
+    ? await roomManager.postFromHuman(id, text)
+    : await roomManager.postAs(id, attribution.value.actor, text);
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
 app.post('/api/rooms/:id/close', async (c) => {
+  const { from, sessionId } = await c.req.json<{ from?: unknown; sessionId?: unknown }>();
+  if (from !== undefined && typeof from !== 'string')
+    return c.json({ error: 'from must be a string' }, 400);
+  if (sessionId !== undefined && typeof sessionId !== 'string')
+    return c.json({ error: 'sessionId must be a string' }, 400);
+  const attribution = resolveCloseRoomActor(
+    { from: typeof from === 'string' ? from : undefined, sessionId },
+    sessionManager,
+  );
+  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
   const result = await roomManager.close(c.req.param('id'));
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });

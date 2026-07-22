@@ -11,6 +11,37 @@ test('prompt silently drops a dead or missing session', () => {
   expect(sessions.prompt('missing', 'room closed', 'kild')).toBe(false);
 });
 
+test('resolveActor returns the configured agent for a live session', () => {
+  const sessions = new SessionManager();
+  (sessions as { sessions: Map<string, unknown> }).sessions.set('brain-session', {
+    session: {},
+    info: { id: 'brain-session', agent: 'brain', origin: 'cli' },
+  });
+  expect(sessions.resolveActor('brain-session')).toEqual({ ok: true, value: 'brain' });
+});
+
+test('resolveActor rejects an unknown session id', () => {
+  const sessions = new SessionManager();
+  expect(sessions.resolveActor('missing')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'unknown session: missing',
+  });
+});
+
+test('resolveActor rejects a live session with no actor identity', () => {
+  const sessions = new SessionManager();
+  (sessions as { sessions: Map<string, unknown> }).sessions.set('anon-session', {
+    session: {},
+    info: { id: 'anon-session', origin: 'cli' },
+  });
+  expect(sessions.resolveActor('anon-session')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: "session 'anon-session' has no actor identity",
+  });
+});
+
 test('a worktree name maps to its kild/ branch and on-disk path', () => {
   const name = 'fix-auth';
   expect(worktreeRef(name)).toBe('kild/fix-auth');

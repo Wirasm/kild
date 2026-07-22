@@ -9,8 +9,6 @@ export interface OpenRoomRequest {
   worktree?: string;
   participants: ParticipantSpec[];
   kickoff: string;
-  /** Sender attribution for the kickoff (e.g. 'brain'); the server defaults to 'human'. */
-  from?: string;
   /** Live session that opened the room; ordinary REST callers omit this. */
   openedBy?: string;
 }
@@ -46,20 +44,20 @@ export async function openRoom(req: OpenRoomRequest): Promise<OpenRoomResponse> 
 export async function postRoom(
   roomId: string,
   text: string,
-  from?: string,
+  sessionId?: string,
 ): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/post`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, from }),
+    body: JSON.stringify({ text, ...(sessionId ? { sessionId } : {}) }),
   });
 }
 
-export async function closeRoom(roomId: string): Promise<RoomActionResponse> {
+export async function closeRoom(roomId: string, sessionId?: string): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/close`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(sessionId ? { sessionId } : {}),
   });
 }
 
