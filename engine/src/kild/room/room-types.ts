@@ -138,8 +138,9 @@ export interface MessageOut {
   kind: 'message_out';
   requestId?: string;
   text: string;
-  /** Explicit addressees. The implicit-reply path sets this; the tool path omits it
-   *  and the router falls back to parsing `@mentions` from the text. */
+  /** Explicit addressees (structured, never parsed from the text). Omitted by the tool
+   *  path when the agent didn't address anyone — the manager then defaults to the room
+   *  lead. The implicit-reply path sets it to the turn's sender. */
   to?: string[];
   implicit?: boolean;
 }

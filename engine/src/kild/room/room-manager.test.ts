@@ -170,34 +170,30 @@ test('post returns not_found for an unknown room', async () => {
   });
 });
 
-test('post to an unknown recipient returns rejected and keeps the existing warning behavior', async () => {
+test('post to an unknown recipient returns rejected and is not recorded (no room spam)', async () => {
   const { manager } = fixture();
   await openRoom(manager, [{ name: 'worker' }]);
-  expect(await manager.postFromHuman('room-1', '@planner hello')).toEqual({
+  // Addressing is structured: a typo'd handle is a clean error to the caller...
+  expect(await manager.postFromHuman('room-1', 'hello', ['planner'])).toEqual({
     ok: false,
     code: 'rejected',
     message: 'no such participant: @planner (in the room: @worker)',
   });
-  expect(manager.messages('room-1').map((message) => message.text)).toEqual([
-    '@planner hello',
-    'no such participant: @planner (in the room: @worker)',
-  ]);
+  // ...never recorded or turned into a room warning.
+  expect(manager.messages('room-1')).toEqual([]);
 });
 
-test('notifies a non-participant sender when a multi-participant post addresses nobody', async () => {
+test('an untargeted post defaults to the room lead', async () => {
   const { manager, prompted } = fixture();
   await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }]);
 
+  // No explicit `to` → delivered to the lead (worker = s-1), not dropped as "addressed nobody".
   expect(await manager.postAs('room-1', 'brain', 'gate approved')).toEqual({
     ok: true,
     value: { message: 'Posted to the room.' },
   });
-  expect(prompted).toEqual([]);
-  expect(manager.messages('room-1').map((message) => message.text)).toEqual([
-    'gate approved',
-    'this post addressed no participant — no turn delivered (in the room: @worker, @reviewer)',
-  ]);
-  expect(manager.messages('room-1')[1]).toMatchObject({ from: HUMAN, to: [], system: true });
+  expect(prompted).toEqual([{ id: 's-1', text: '[#demo] @brain: gate approved', from: 'brain' }]);
+  expect(manager.messages('room-1').map((message) => message.text)).toEqual(['gate approved']);
 });
 
 test('halt returns invalid_state when the room is already halted', async () => {
@@ -310,18 +306,16 @@ test('notifies a live non-participant opener about a participant post to @human 
 
   await callbacks
     .get('s-1')
-    ?.onMessage?.({ kind: 'message_out', text: '@human approve the gate?' });
+    ?.onMessage?.({ kind: 'message_out', text: 'approve the gate?', to: ['human'] });
 
   expect(prompted).toEqual([
     {
       id: 'brain-session',
       from: 'kild',
-      text: "[kild operator notification] Room 'demo': @worker posted to @human: @human approve the gate?",
+      text: "[kild operator notification] Room 'demo': @worker posted to @human: approve the gate?",
     },
   ]);
-  expect(manager.messages('room-1').map((message) => message.text)).toEqual([
-    '@human approve the gate?',
-  ]);
+  expect(manager.messages('room-1').map((message) => message.text)).toEqual(['approve the gate?']);
 });
 
 test('does not notify an opener that is a room participant', async () => {

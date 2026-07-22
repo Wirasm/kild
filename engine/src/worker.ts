@@ -91,9 +91,9 @@ export async function runWorker(): Promise<never> {
     // non-room session instead gets the engine REST room-control tools.
     const customTools = inRoom
       ? [
-          createPostMessageTool(async (text) => {
+          createPostMessageTool(async (text, to) => {
             postedThisTurn = true;
-            return emitRoomCommand({ kind: 'message_out', text });
+            return emitRoomCommand({ kind: 'message_out', text, to });
           }),
           createInviteAgentTool((spec) => emitRoomCommand({ kind: 'invite', ...spec })),
           ...(isRoomLead

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { listAgents } from '../agents.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
-import { parseMentions } from './parse-mentions.ts';
 import {
   finalNonSystemPost,
   formatOperatorNotification,
@@ -18,12 +17,7 @@ import {
   transitionRoomState,
 } from './room-lifecycle.ts';
 import { RoomRegistry } from './room-registry.ts';
-import {
-  hasNoDeliverableRecipients,
-  type RoomDelivery,
-  routeRoomMessage,
-  unknownRecipients,
-} from './room-router.ts';
+import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
 import {
   type ArchivedRoom,
   type CloseRoomOut,
@@ -43,6 +37,24 @@ import {
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
  *  just the human kill switch). */
 const MAX_PARTICIPANTS = 8;
+
+/** The single chokepoint every room post flows through: one structured trace line so a
+ *  whole room reads back as an ordered log (grep `room.post`). Kept dead simple — swap
+ *  the body for a real logger later without touching call sites. Programmatic tracers
+ *  should instead subscribe to the manager (every post is broadcast as a `roomMessage`). */
+function traceRoomPost(roomName: string, message: RoomMessage): void {
+  console.error(
+    JSON.stringify({
+      t: 'room.post',
+      room: roomName,
+      from: message.from,
+      to: message.to,
+      system: message.system ?? false,
+      implicit: message.implicit ?? false,
+      chars: message.text.length,
+    }),
+  );
+}
 
 interface SessionRuntime {
   subscribe(
@@ -160,20 +172,27 @@ export class RoomManager {
     return ok({ roomId, message: `Room '${spec.name}' opened.` });
   }
 
-  /** The human posts into the room (kick-off and steering). */
-  async postFromHuman(roomId: string, text: string): Promise<CommandResult<RoomActionSuccess>> {
-    return this.post(roomId, HUMAN, text);
+  /** The human posts into the room (kick-off and steering). `to` is optional — omit it
+   *  to address the room lead by default. */
+  async postFromHuman(
+    roomId: string,
+    text: string,
+    to?: string[],
+  ): Promise<CommandResult<RoomActionSuccess>> {
+    return this.post(roomId, HUMAN, text, { to });
   }
 
   /** An operator-side author (e.g. the brain) posts into a room — the agent-driven
    *  mirror of {@link postFromHuman}, routed identically. This is how the brain
-   *  speaks into the real Room primitive instead of a separate bus. */
+   *  speaks into the real Room primitive instead of a separate bus. `to` is optional —
+   *  omit it to address the room lead by default. */
   async postAs(
     roomId: string,
     from: string,
     text: string,
+    to?: string[],
   ): Promise<CommandResult<RoomActionSuccess>> {
-    return this.post(roomId, from, text);
+    return this.post(roomId, from, text, { to });
   }
 
   /** A room's shared log (empty if the room is unknown) — for demos / inspection. */
@@ -356,7 +375,13 @@ export class RoomManager {
     return this.close(room.id);
   }
 
-  /** Record + route one post from `from` (a participant name or {@link HUMAN}). */
+  /** Record + route one post from `from` (a participant name or {@link HUMAN}).
+   *
+   * Addressing is structured, never parsed from prose — the ONE rule: a system notice
+   * targets no one; otherwise an explicit `to` wins; otherwise the post goes to the room
+   * lead (the orchestrator). A typo'd handle is returned as a clean error to the caller
+   * (the calling agent's tool result), so it can correct itself — it is never recorded,
+   * routed, or turned into room spam. */
   private async post(
     roomId: string,
     from: string,
@@ -367,19 +392,31 @@ export class RoomManager {
     if (!room) return fail('not_found', `no such room: ${roomId}`);
     const allowed = ensureRoomCanPost(room, { allowHalted: opts.allowStopped });
     if (!allowed.ok) return allowed;
+
+    const lead = room.participants[0]?.name;
+    const to = opts.system ? [] : opts.to?.length ? opts.to : lead ? [lead] : [];
     const message: RoomMessage = {
       id: this.createId(),
       roomId,
       from,
-      // The one place "who is this addressed to?" is answered: a notice addresses no
-      // one, otherwise an explicit `to` wins, else the @mentions in the text. The router
-      // consumes this verbatim — it must never re-derive addressees from the text.
-      to: opts.system ? [] : (opts.to ?? parseMentions(text)),
+      to,
       text,
       ts: Date.now(),
       implicit: opts.implicit,
       system: opts.system,
     };
+
+    const unknown = unknownRecipients(room, message);
+    if (unknown.length > 0) {
+      const known = room.participants.map((participant) => `@${participant.name}`).join(', ');
+      return fail(
+        'rejected',
+        `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
+          `(in the room: ${known || 'none'})`,
+      );
+    }
+
+    traceRoomPost(room.name, message);
     this.registry.appendMessage(roomId, message);
     routeRoomMessage(room, message, this.delivery());
     if (
@@ -389,20 +426,6 @@ export class RoomManager {
       room.participants.some((participant) => participant.name === message.from)
     ) {
       this.notifyOpener(room, humanPostEvent(message));
-    }
-
-    const unknown = unknownRecipients(room, message);
-    const participants = room.participants.map((participant) => `@${participant.name}`).join(', ');
-    if (unknown.length > 0) {
-      const warning =
-        `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
-        `(in the room: ${participants || 'none'})`;
-      await this.post(roomId, HUMAN, warning, { system: true, allowStopped: true });
-      return fail('rejected', warning);
-    }
-    if (hasNoDeliverableRecipients(room, message)) {
-      const notice = `this post addressed no participant — no turn delivered (in the room: ${participants || 'none'})`;
-      await this.post(roomId, HUMAN, notice, { system: true, allowStopped: true });
     }
     return ok({ message: 'Posted to the room.' });
   }
