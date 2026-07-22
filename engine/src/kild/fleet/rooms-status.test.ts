@@ -40,6 +40,31 @@ test('a live room keeps only the last two posts and preserves order', () => {
   expect(compact[0]?.posts.map((message) => message.id)).toEqual(['m2', 'm3']);
 });
 
+test('a live room with git status passes the git block through', () => {
+  const git = {
+    path: '/tmp/ws',
+    branch: 'feature-x',
+    base: 'main',
+    ahead: 2,
+    behind: 0,
+    dirty: true,
+    uncommittedFiles: 1,
+    changedFiles: ['src/a.ts'],
+    conflictsWithBase: null,
+  };
+  const compact = compactLiveRooms([
+    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', agent: 'brain' }], log: [], git },
+  ]);
+  expect(compact[0]?.git).toEqual(git);
+});
+
+test('a live room without git status has no git key', () => {
+  const compact = compactLiveRooms([
+    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', agent: 'brain' }], log: [] },
+  ]);
+  expect(compact[0]).not.toHaveProperty('git');
+});
+
 test('compaction copies participant and post arrays without mutating the source room', () => {
   const rooms = [
     {

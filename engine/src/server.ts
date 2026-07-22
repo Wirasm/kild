@@ -237,7 +237,7 @@ app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
 // Live rooms WITH their logs — so a cockpit joining a room it didn't open (or after a
 // refresh) can load the conversation so far. The WS only streams *new* messages.
-app.get('/api/rooms/live', (c) => c.json(roomManager.liveRooms()));
+app.get('/api/rooms/live', async (c) => c.json(await roomManager.liveRoomsStatus()));
 app.post('/api/rooms', async (c) => {
   const body = await c.req.json<{
     name?: unknown;
