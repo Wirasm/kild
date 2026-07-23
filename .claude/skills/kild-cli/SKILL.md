@@ -1,25 +1,17 @@
 ---
 name: kild-cli
 description: |
-  Drive the kild CLI to run pi coding agents as one-shot tasks and to manage the
-  projects and agents they use. `kild run` spawns an AI coding agent (pi), drives
-  it to completion in a directory, and returns its result — text, tools used, and
-  token/cost stats — as JSON.
+  Drive the kild CLI: one-shot pi coding agents (`kild run`), multi-agent room
+  workstreams (`kild room open/post/log/close`, `kild rooms`), fleet drivers, and
+  project/agent/worktree management.
 
-  USE THIS SKILL when you need to:
-  - Delegate a self-contained task to a sub-agent: "use kild to ...", "spawn an
-    agent to ...", "run a kild agent", "have a kild agent do ..."
-  - Run a task with a specialized agent (a planner, reviewer, ...) in a project
-  - Manage kild projects: "list/add/remove kild projects"
-  - List or inspect kild agents (named system prompts)
+  USE THIS SKILL to: delegate a task to a sub-agent ("use kild to…", "spawn an
+  agent to…"), run/steer/observe multi-agent rooms, or manage kild projects,
+  agents, and worktrees.
 
-  kild is CLI-first and scriptable. Read commands print to stdout (pass `--json`
-  for machine-readable output); progress and errors go to stderr; a non-zero exit
-  code means failure. Parse stdout, check the exit code.
-
-  Prerequisite: `pi` must be on PATH and authenticated. The CLI is installed
-  globally as `kild` (via `bun link` in `engine/`); run `kild <args>` from any
-  directory. Fallback if not linked: from `engine/`, `bun run cli -- <args>`.
+  Scriptable: results on stdout (`--json` for machine-readable), progress/errors
+  on stderr, non-zero exit = failure. Installed globally as `kild` (bun link in
+  engine/); run from any directory. Needs `pi` on PATH and authenticated.
 ---
 
 # kild CLI
