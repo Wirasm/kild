@@ -1,0 +1,12 @@
+{
+  "name": "kild-pi-extension",
+  "version": "0.1.0",
+  "description": "Drive kild rooms and fleets from the pi CLI — thin client over the kild engine's REST API.",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {
+    "typebox": "1.1.38"
+  }
+}

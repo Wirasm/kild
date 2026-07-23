@@ -16,3 +16,4 @@ app/src-tauri/binaries/
 /prp-core/
 /.kild/config.json
 /.kild/fleet/
+pi-extension/node_modules/
