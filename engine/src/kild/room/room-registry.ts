@@ -76,7 +76,7 @@ export class RoomRegistry {
       id: r.id,
       name: r.name,
       worktree: r.worktree,
-      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent, model: p.model })),
       state: r.state,
       stopped: r.state === 'halted',
     }));
@@ -95,7 +95,7 @@ export class RoomRegistry {
       id: r.id,
       name: r.name,
       worktree: r.worktree,
-      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent, model: p.model })),
       state: r.state,
       log: r.log,
     }));
@@ -117,7 +117,11 @@ export class RoomRegistry {
       id: room.id,
       name: room.name,
       worktree: room.worktree,
-      participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+      participants: room.participants.map((p) => ({
+        name: p.name,
+        agent: p.agent,
+        model: p.model,
+      })),
       state,
       log: room.log,
     };

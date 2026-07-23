@@ -42,6 +42,7 @@ const { values, positionals } = parseArgs({
     force: { type: 'boolean', default: false },
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
     detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
+    base: { type: 'string' }, // base branch for the worktree + git-status baseline
   },
 });
 
@@ -460,7 +461,9 @@ async function roomShow(id: string): Promise<void> {
   console.log(`worktree: ${room.worktree ?? '(none)'}`);
   console.log('participants:');
   for (const participant of compact.participants) {
-    console.log(`  ${participant.name}${participant.agent ? ` (${participant.agent})` : ''}`);
+    const agent = participant.agent ? ` (${participant.agent})` : '';
+    const model = participant.model ? ` — ${participant.model}` : '';
+    console.log(`  ${participant.name}${agent}${model}`);
   }
   if (compact.git) {
     console.log(
@@ -486,7 +489,7 @@ async function roomsList(): Promise<void> {
   if (json) return void console.log(JSON.stringify(rooms, null, 2));
   if (rooms.length === 0) return void console.error('no live rooms');
   for (const r of rooms) {
-    const parts = r.participants.map((p) => p.name).join(', ');
+    const parts = r.participants.map((p) => (p.model ? `${p.name}:${p.model}` : p.name)).join(', ');
     const col = r.collidesWith?.length
       ? ` · collides: ${r.collidesWith.map((c) => `${c.room}(${c.files.length})`).join(', ')}`
       : '';
@@ -503,6 +506,7 @@ async function roomOpen(goal: string): Promise<void> {
     cwd: await roomCwd(),
     participants: roomParticipants(),
     worktree: values.worktree,
+    base: values.base,
     kickoff: goal,
   });
   console.log(json ? JSON.stringify(res, null, 2) : res.id);
@@ -550,6 +554,7 @@ async function roomInteractive(goal: string): Promise<void> {
         .map((n) => ({ name: n, agent: n }))
     : [{ name: 'agent', agent: 'default' }];
   if (participants.length === 0) throw new Error('--participants must name at least one agent');
+  const base = values.base;
   // Addressing is structured: the engine defaults an untargeted post to the room lead,
   // so the goal reaches the lead without munging the text.
   const kickoff = goal;
@@ -602,6 +607,7 @@ async function roomInteractive(goal: string): Promise<void> {
           name,
           cwd,
           worktree: values.worktree,
+          base,
           participants: participants.map((p) => ({ ...p, model: values.model })),
         }),
       );

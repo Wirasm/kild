@@ -238,6 +238,7 @@ app.post('/api/sessions', async (c) => {
     model?: string;
     cwd?: string;
     worktree?: string;
+    base?: string;
     projectName?: string;
     fleet?: boolean;
     prompt?: string;
@@ -250,6 +251,7 @@ app.post('/api/sessions', async (c) => {
       agent: body.agent,
       model: body.model,
       worktree: body.worktree,
+      base: body.base,
       projectName: body.projectName,
       env: body.fleet ? { KILD_FLEET: '1' } : undefined,
     },
@@ -285,6 +287,7 @@ app.post('/api/rooms', async (c) => {
     cwd?: unknown;
     project?: unknown;
     worktree?: unknown;
+    base?: unknown;
     participants?: unknown;
     kickoff?: unknown;
     from?: unknown;
@@ -301,6 +304,9 @@ app.post('/api/rooms', async (c) => {
   }
   if (body.worktree !== undefined && typeof body.worktree !== 'string') {
     return c.json({ error: 'worktree must be a string' }, 400);
+  }
+  if (body.base !== undefined && typeof body.base !== 'string') {
+    return c.json({ error: 'base must be a string' }, 400);
   }
   if (body.from !== undefined && typeof body.from !== 'string') {
     return c.json({ error: 'from must be a string' }, 400);
@@ -332,6 +338,7 @@ app.post('/api/rooms', async (c) => {
     cwd,
     participants,
     worktree: body.worktree,
+    base: typeof body.base === 'string' ? body.base : undefined,
     openedBy: body.openedBy,
   });
   if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
@@ -397,6 +404,7 @@ type ClientMessage =
       agent?: string;
       model?: string;
       worktree?: string;
+      base?: string;
       projectName?: string;
       env?: Record<string, string>;
     }
@@ -409,6 +417,7 @@ type ClientMessage =
       cwd: string;
       participants: Array<{ name: string; agent?: string; model?: string }>;
       worktree?: string;
+      base?: string;
     }
   | { type: 'room_post'; id: string; text: string }
   | { type: 'room_add'; id: string; participant: { name: string; agent?: string; model?: string } }
@@ -494,6 +503,7 @@ app.get(
               agent: msg.agent,
               model: msg.model,
               worktree: msg.worktree,
+              base: msg.base,
               projectName: msg.projectName,
               env: msg.env,
             },
@@ -510,6 +520,7 @@ app.get(
               cwd: msg.cwd,
               participants: msg.participants,
               worktree: msg.worktree,
+              base: msg.base,
             }),
           );
         } else if (msg.type === 'room_post') {

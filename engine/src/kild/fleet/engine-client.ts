@@ -9,6 +9,8 @@ export interface OpenRoomRequest {
   worktree?: string;
   participants: ParticipantSpec[];
   kickoff: string;
+  /** Base branch for the worktree + git-status baseline (default: checkout's branch). */
+  base?: string;
   /** Live session that opened the room; ordinary REST callers omit this. */
   openedBy?: string;
 }
@@ -70,6 +72,7 @@ export interface SpawnSessionRequest {
   model?: string;
   cwd?: string;
   worktree?: string;
+  base?: string;
   projectName?: string;
   /** Grant the fleet room-control tools (open/post/status/close rooms). */
   fleet?: boolean;

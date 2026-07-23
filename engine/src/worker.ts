@@ -38,6 +38,7 @@ import { ensureWorktree } from './kild/worktree.ts';
 export async function runWorker(): Promise<never> {
   let cwd = process.env.KILD_CWD || process.cwd();
   const worktreeName = process.env.KILD_WORKTREE || undefined;
+  const worktreeBase = process.env.KILD_BASE || undefined;
   const agentName = process.env.KILD_AGENT || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inRoom = !!process.env.KILD_ROOM;
@@ -66,7 +67,7 @@ export async function runWorker(): Promise<never> {
   // prompts sent before this resolves are OS-buffered on stdin, so none are lost.
   if (worktreeName) {
     try {
-      cwd = (await ensureWorktree(cwd, worktreeName)).path;
+      cwd = (await ensureWorktree(cwd, worktreeName, worktreeBase)).path;
     } catch (err) {
       emit({ kind: 'error', message: `worktree: ${errText(err)}` });
       process.exit(1);

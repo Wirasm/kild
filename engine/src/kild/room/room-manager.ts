@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { listAgents } from '../agents.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
-import { worktreePath } from '../worktree.ts';
+import { resolveBaseBranch, worktreePath } from '../worktree.ts';
 import { workstreamGitStatus } from '../worktree-status.ts';
 import {
   finalNonSystemPost,
@@ -118,6 +118,12 @@ export class RoomManager {
       if (!('session' in msg)) return;
       const located = this.registry.locateSession(msg.session);
       if (located) {
+        // Capture the provider-resolved model so observers see what each agent actually
+        // ran on (not just the requested ref — which may have been a default/alias).
+        const event = msg.event as { kind?: string; provider?: string; id?: string };
+        if (event.kind === 'model' && event.provider && event.id) {
+          located.participant.model = `${event.provider}/${event.id}`;
+        }
         this.broadcast({
           room: located.room.id,
           participant: located.participant.name,
@@ -148,6 +154,10 @@ export class RoomManager {
       name: spec.name,
       cwd: spec.cwd,
       worktree: spec.worktree,
+      // Resolve the base once here — the single chokepoint every opener (CLI, REST, WS,
+      // fleet tool) flows through: explicit `base` wins, else the cwd's configured
+      // `baseBranch`, else its current branch, else `main`.
+      base: await resolveBaseBranch(spec.cwd, spec.base),
       openedBy: spec.openedBy,
       participants: [],
       log: [],
@@ -224,10 +234,17 @@ export class RoomManager {
         id: room.id,
         name: room.name,
         worktree: room.worktree,
-        participants: room.participants.map((p) => ({ name: p.name, agent: p.agent })),
+        participants: room.participants.map((p) => ({
+          name: p.name,
+          agent: p.agent,
+          model: p.model,
+        })),
         state: room.state,
         log: room.log,
-        git: await workstreamGitStatus(room.worktree ? worktreePath(room.worktree) : room.cwd),
+        git: await workstreamGitStatus(
+          room.worktree ? worktreePath(room.worktree) : room.cwd,
+          room.base,
+        ),
       })),
     );
   }
@@ -306,7 +323,9 @@ export class RoomManager {
   ): CommandResult<{ sessionId: string }> {
     const isLead = room.participants.length === 0; // first participant leads the room
     const sessionId = this.createId();
-    room.participants.push({ name: spec.name, sessionId, agent: spec.agent });
+    // Record the requested model now (visible immediately); the session's `model` event
+    // upgrades it to the provider-resolved ref once it starts.
+    room.participants.push({ name: spec.name, sessionId, agent: spec.agent, model: spec.model });
     try {
       this.sessions.spawn(
         sessionId,
@@ -317,6 +336,8 @@ export class RoomManager {
           projectName: room.name,
           // Every participant attaches to the room's shared worktree, if any.
           worktree: room.worktree,
+          // Base branch a brand-new worktree forks from (the first participant creates it).
+          base: room.base,
           // Opaque to the SessionManager; the worker reads these to register its room
           // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
           // tag its outbound control lines.

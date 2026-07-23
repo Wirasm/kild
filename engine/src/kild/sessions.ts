@@ -22,6 +22,9 @@ export interface SpawnRequest {
    *  sessions naming the same worktree share its tree (attach); different names
    *  split. The worker creates-or-attaches from `cwd` (the repo). */
   worktree?: string;
+  /** Base branch a brand-new worktree forks from (e.g. `dev`). Ignored when attaching to
+   *  an existing tree. Absent → the checkout's current HEAD. */
+  base?: string;
   /** Extra environment for the worker — opaque to the manager. Room participants use
    *  it to carry `KILD_ROOM` / `KILD_PARTICIPANT`; it never overrides the `KILD_*`
    *  vars the manager itself sets. */
@@ -92,6 +95,8 @@ class PiSession {
         KILD_SESSION_ID: id,
         // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
         KILD_WORKTREE: req.worktree ?? '',
+        // Base branch a brand-new worktree forks from (empty → current HEAD).
+        KILD_BASE: req.base ?? '',
         // A profile is a room capability assignment, not inherited worker state.
         KILD_SKILLS_PROFILE: skillsProfile ?? '',
       },

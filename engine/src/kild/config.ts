@@ -26,6 +26,10 @@ export interface KildConfig {
   agentPaths?: string[];
   /** Extra skill dirs, discoverable by every session (driver + all participants). */
   skillPaths?: string[];
+  /** Base branch new worktrees are created from and that git status/collisions are
+   *  measured against (e.g. `dev`). Overridable per-invocation with `--base`; if unset,
+   *  the checkout's current branch is used. */
+  baseBranch?: string;
 }
 
 export interface ResolvedPluginPaths {
@@ -76,4 +80,14 @@ export async function resolvePluginPaths(cwd: string): Promise<ResolvedPluginPat
     for (const p of cfg.skillPaths ?? []) skillDirs.push(path.resolve(base, expandHome(p)));
   }
   return { agentDirs, skillDirs };
+}
+
+/** The configured base branch for `cwd`: project (`<cwd>/.kild/config.json`) over global
+ *  (`$KILD_HOME/config.json`). Undefined when neither sets `baseBranch` — the caller then
+ *  falls back to the checkout's current branch. Never throws. */
+export async function configuredBaseBranch(cwd: string): Promise<string | undefined> {
+  const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
+  if (project?.baseBranch) return project.baseBranch;
+  const global = await readConfigFile(path.join(kildHome(), 'config.json'));
+  return global?.baseBranch;
 }

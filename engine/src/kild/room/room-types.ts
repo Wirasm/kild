@@ -21,6 +21,18 @@ export interface RoomParticipant {
   sessionId: string;
   /** The agent definition (`.pi/agents/<agent>.md`) it runs as. */
   agent?: string;
+  /** The model this participant runs on — the requested ref at spawn, upgraded to the
+   *  provider-resolved `provider/id` once the session reports it. Lets an observer see
+   *  which model each agent used in a run. */
+  model?: string;
+}
+
+/** A participant as surfaced to observers (room lists, status, archive) — identity plus
+ *  the model it ran on. No sessionId (that's an internal handle). */
+export interface ParticipantView {
+  name: string;
+  agent?: string;
+  model?: string;
 }
 
 /** A single post on a room's shared log — the conversation unit. */
@@ -53,6 +65,10 @@ export interface Room {
   cwd: string;
   /** Optional shared worktree name — every participant attaches to `kild/<name>`. */
   worktree?: string;
+  /** Base branch the worktree was created from and that git status/collisions are
+   *  measured against (so ahead/behind and changed files reflect this workstream's own
+   *  work, not everything the base is ahead of `main`). */
+  base?: string;
   /** Session that opened this room. It is notified only when it is not a participant. */
   openedBy?: string;
   participants: RoomParticipant[];
@@ -75,6 +91,9 @@ export interface OpenRoomSpec {
   participants: ParticipantSpec[];
   /** Optional shared worktree — every participant attaches to one `kild/<name>` tree. */
   worktree?: string;
+  /** Base branch for the worktree + git-status baseline (default: the checkout's current
+   *  branch). Editable via `.kild/config.json` `baseBranch` or the `--base` CLI flag. */
+  base?: string;
   /** Opener session identity from a session-aware REST caller; absent for ordinary REST callers. */
   openedBy?: string;
 }
@@ -84,7 +103,7 @@ export interface RoomSummary {
   id: string;
   name: string;
   worktree?: string;
-  participants: Array<{ name: string; agent?: string }>;
+  participants: ParticipantView[];
   /** Canonical lifecycle state when surfaced by room-owned producers. Optional so
    *  out-of-scope fixtures/consumers do not need coordinated edits in this slice. */
   state?: RoomLifecycleState;
@@ -99,7 +118,7 @@ export interface ArchivedRoom {
   id: string;
   name: string;
   worktree?: string;
-  participants: Array<{ name: string; agent?: string }>;
+  participants: ParticipantView[];
   /** Canonical lifecycle state when persisted by room-owned producers. Optional so
    *  older history files and out-of-scope fixtures continue to type-check. */
   state?: RoomLifecycleState;

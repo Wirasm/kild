@@ -1,4 +1,4 @@
-import type { LiveRoomStatus, RoomMessage } from '../room/room-types.ts';
+import type { LiveRoomStatus, ParticipantView, RoomMessage } from '../room/room-types.ts';
 import type { WorkstreamGitStatus } from '../worktree-status.ts';
 
 /** The director's compact view of a workstream's git state: a summary, not the full
@@ -34,7 +34,7 @@ export interface WorkstreamCollision {
 export interface CompactRoomStatus {
   id: string;
   name: string;
-  participants: Array<{ name: string; agent?: string }>;
+  participants: ParticipantView[];
   posts: RoomMessage[];
   /** The workstream's git/worktree summary — code state, not just conversation. */
   git?: CompactGitStatus;
@@ -76,6 +76,7 @@ export function compactLiveRooms(liveRooms: LiveRoomStatus[]): CompactRoomStatus
     participants: room.participants.map((participant) => ({
       name: participant.name,
       agent: participant.agent,
+      model: participant.model,
     })),
     posts: room.log.slice(-2),
     ...(room.git ? { git: toCompactGit(room.git) } : {}),

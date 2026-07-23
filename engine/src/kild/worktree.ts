@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { kildHome } from './config.ts';
+import { configuredBaseBranch, kildHome } from './config.ts';
 
 // execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
 // and the cockpit's worktree selector feed a (possibly LLM-generated) name in here,
@@ -53,17 +53,39 @@ export function worktreePath(name: string): string {
   return path.join(worktreesRoot(), name.replace(/\//g, '-'));
 }
 
+/** The checkout's current branch (e.g. `dev`), or undefined if detached/unavailable. */
+export async function currentBranch(repo: string): Promise<string | undefined> {
+  const branch = await execFile('git', ['-C', repo, 'symbolic-ref', '--short', 'HEAD'])
+    .then((r) => r.stdout.trim())
+    .catch(() => '');
+  return branch || undefined;
+}
+
+/** Resolve the base branch for a worktree/room in `cwd`: explicit `flag` wins, else the
+ *  configured `baseBranch` (project over global), else the checkout's current branch, else
+ *  `main`. This is the branch new worktrees fork from and that git status is measured
+ *  against, so ahead/behind + collisions reflect this workstream's own work. */
+export async function resolveBaseBranch(cwd: string, flag?: string): Promise<string> {
+  return flag ?? (await configuredBaseBranch(cwd)) ?? (await currentBranch(cwd)) ?? 'main';
+}
+
 /** Create a fresh isolated worktree on a `kild/<branch>` branch, force-resetting any
  *  pre-existing one. For the brain's explicit "new worktree" — NOT the session path
- *  (which must never reset a shared tree; use {@link ensureWorktree}). */
-export async function createWorktree(repo: string, branch: string): Promise<Worktree> {
+ *  (which must never reset a shared tree; use {@link ensureWorktree}). `base` is the
+ *  start-point ref (default: current HEAD). */
+export async function createWorktree(
+  repo: string,
+  branch: string,
+  base?: string,
+): Promise<Worktree> {
   assertSafeBranch(branch);
   const wtPath = worktreePath(branch);
   const ref = worktreeRef(branch);
   // Best-effort pre-clean of a same-named worktree before the force re-create.
   // Force is intentional here ("new worktree" is destructive-by-request).
   await execFile('git', ['-C', repo, 'worktree', 'remove', '--force', wtPath]).catch(() => {});
-  await execFile('git', ['-C', repo, 'worktree', 'add', '-B', ref, wtPath]);
+  const add = ['-C', repo, 'worktree', 'add', '-B', ref, wtPath, ...(base ? [base] : [])];
+  await execFile('git', add);
   return { branch: ref, path: wtPath, name: branch };
 }
 
@@ -72,7 +94,7 @@ export async function createWorktree(repo: string, branch: string): Promise<Work
  *  its tree, never reset it (which would blow away a coder's work when a reviewer
  *  joins). Never resets: an existing dir attaches; an existing *branch* (worktree
  *  removed but branch kept) is checked out, preserving its commits. */
-export async function ensureWorktree(repo: string, name: string): Promise<Worktree> {
+export async function ensureWorktree(repo: string, name: string, base?: string): Promise<Worktree> {
   const wtPath = worktreePath(name);
   const ref = worktreeRef(name);
   const attached = { branch: ref, path: wtPath, name };
@@ -84,14 +106,24 @@ export async function ensureWorktree(repo: string, name: string): Promise<Worktr
   }
   try {
     // The branch may already exist (the worktree was removed but the branch kept).
-    // Check it out — never `-B` (which would reset and lose its commits).
+    // Check it out — never `-B` (which would reset and lose its commits). A brand-new
+    // branch forks from `base` (e.g. `dev`) so it isn't accidentally based on `main`.
     const branchExists = await execFile('git', ['-C', repo, 'rev-parse', '--verify', ref])
       .then(() => true)
       .catch(() => false);
     if (branchExists) {
       await execFile('git', ['-C', repo, 'worktree', 'add', wtPath, ref]);
     } else {
-      await execFile('git', ['-C', repo, 'worktree', 'add', '-b', ref, wtPath]);
+      await execFile('git', [
+        '-C',
+        repo,
+        'worktree',
+        'add',
+        '-b',
+        ref,
+        wtPath,
+        ...(base ? [base] : []),
+      ]);
     }
   } catch (err) {
     // Cold-start race: a concurrent session creating the *same* new worktree between
