@@ -76,6 +76,12 @@ UI → banner). Document a fallback only when it is intentional and safe.
 output. When kild itself is consumed by an agent (the CLI as a skill), emit
 structured output (`--json`), not prose to regex.
 
+**Deliver Signals, Not Sights** — Assume the operator is an agent (a pi driver,
+another orchestrator); the cockpit human is the special case. Anything that matters
+must arrive as an explicit deliverable — a post with recipients, an event to the
+opener, a nudge, a ledger entry. UI visibility is a courtesy for whoever happens to
+be watching, never the contract. Narration is diagnostic exhaust, never a signal.
+
 **CLI-First** — Every capability is reachable and testable via the `kild` CLI. The
 CLI is a first-class secondary interface: it gives a kild runtime to any
 command-line agent (via the kild-cli skill), independent of the UI.

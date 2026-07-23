@@ -392,13 +392,17 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    // An explicit post_message (not the turn-final implicit narration) counts as reporting —
-    // so the idle failsafe knows this participant didn't finish silently.
-    if (!m.implicit) located.participant.posted = true;
-    return this.post(located.room.id, located.participant.name, m.text, {
+    const result = await this.post(located.room.id, located.participant.name, m.text, {
       to: m.to,
       implicit: m.implicit,
     });
+    // An explicit post counts as reporting ONLY if it actually reached someone else —
+    // a rejected post (unknown recipient) or a self-addressed one leaves whoever is
+    // waiting just as blind as silence, so the idle failsafe must still fire.
+    if (!m.implicit && result.ok && (result.value.deliveredTo?.length ?? 0) > 0) {
+      located.participant.posted = true;
+    }
+    return result;
   }
 
   /** A participant called `invite_agent`: add the named agent to its room. */
@@ -496,7 +500,7 @@ export class RoomManager {
     ) {
       this.notifyOpener(room, humanPostEvent(message));
     }
-    return ok({ message: 'Posted to the room.' });
+    return ok({ message: 'Posted to the room.', deliveredTo: to.filter((t) => t !== from) });
   }
 
   private async validateParticipants(
@@ -544,23 +548,29 @@ export class RoomManager {
     this.sessions.prompt(target, formatOperatorNotification(room.name, event), 'kild');
   }
 
-  /** Failsafe (NOT the default path): a delegate that finishes a turn without an explicit
-   *  post has left its inviter blind — an actual post would have woken the inviter via
-   *  routing. Nudge the delegate ONCE per active→idle transition to report. Delivered as a
-   *  direct session prompt (bypasses room routing, so it can't become a post or loop). A
-   *  top-level participant (invited by the human) is left alone — the human watches the
-   *  roster; a delegate that DID post gets nothing (its post is the signal). */
+  /** Failsafe (NOT the default path): a participant that finishes a turn without a
+   *  DELIVERED explicit post has left whoever is waiting blind — an actual post would have
+   *  woken them via routing (or reached the operator channel for @human). Nudge it ONCE
+   *  per active→idle transition to report: delegates toward their inviter, top-level
+   *  participants toward @human — no one is assumed to be watching the roster (the
+   *  operator is an agent by default; the cockpit human is the special case). Delivered
+   *  as a direct session prompt (bypasses room routing, so it can't become a post or
+   *  loop); a participant whose post DELIVERED gets nothing (its post is the signal). */
   private nudgeIfIdleWithoutReport(participant: RoomParticipant): void {
     if (participant.idle) return; // dedup: already handled this transition
     participant.idle = true;
-    if (participant.posted) return; // it reported — its post already reached the inviter
+    if (participant.posted) return; // it reported — a delivered post is the signal
+    // Deliver signals, not sights: assume NO ONE is watching the roster — the operator is
+    // an agent (a pi driver, another orchestrator) by default, and the cockpit human is
+    // the special case. So top-level participants are nudged too, toward @human: unposted
+    // work is invisible to every operator kind except a human who happens to be looking.
     const inviter = participant.invitedBy;
-    if (!inviter || inviter === HUMAN) return; // top-level: no delegator waiting on a post
+    const target = !inviter || inviter === HUMAN ? HUMAN : inviter;
     this.sessions.prompt(
       participant.sessionId,
-      `[kild] You finished your turn without posting. If you have a result for @${inviter}, ` +
+      `[kild] You finished your turn without posting. If you have a result for @${target}, ` +
         `post_message it to them now (with evidence). If you are done with nothing to add, post ` +
-        `a one-line status so @${inviter} isn't left waiting.`,
+        `a one-line status so @${target} isn't left waiting.`,
       'kild',
     );
   }

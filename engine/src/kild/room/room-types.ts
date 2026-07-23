@@ -155,6 +155,10 @@ export type RoomErrorCode = 'not_found' | 'invalid_state' | 'rejected';
 
 export interface RoomActionSuccess {
   message: string;
+  /** For posts: the resolved recipients other than the sender (the human counts — it is
+   *  the operator channel). Empty = the post reached no one, e.g. a self-addressed post;
+   *  the idle failsafe treats such a post as not-a-report. */
+  deliveredTo?: string[];
 }
 
 export interface OpenRoomSuccess extends RoomActionSuccess {

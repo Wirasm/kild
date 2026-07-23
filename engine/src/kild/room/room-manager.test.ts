@@ -195,7 +195,7 @@ test('an untargeted post defaults to the room lead', async () => {
   // No explicit `to` → delivered to the lead (worker = s-1), not dropped as "addressed nobody".
   expect(await manager.postAs('room-1', 'brain', 'gate approved')).toEqual({
     ok: true,
-    value: { message: 'Posted to the room.' },
+    value: { message: 'Posted to the room.', deliveredTo: ['worker'] },
   });
   expect(prompted).toEqual([{ id: 's-1', text: '[#demo] @brain: gate approved', from: 'brain' }]);
   expect(manager.messages('room-1').map((message) => message.text)).toEqual(['gate approved']);
@@ -422,10 +422,41 @@ test('default: a delegate that POSTED before going idle is NOT nudged (its post 
   expect(prompted.filter(isNudge)).toHaveLength(0);
 });
 
-test('the human-invited lead going idle without posting is never nudged', async () => {
+test('the human-invited lead going idle without posting IS nudged — toward @human (no one watches the roster)', async () => {
   const { manager, prompted, emitSession } = fixture({ agents: ['default', 'agent', 'worker'] });
   await openRoom(manager, [{ name: 'agent' }]);
   prompted.length = 0;
+  emitSession('s-1', { kind: 'agent_end' });
+  const nudges = prompted.filter(isNudge);
+  expect(nudges).toHaveLength(1);
+  expect(nudges[0]).toMatchObject({ id: 's-1' });
+  expect(nudges[0]?.text).toContain('@human'); // the operator is an agent by default — signal it
+});
+
+test('a self-addressed post is not a report — the failsafe still nudges', async () => {
+  const { manager, callbacks, prompted, emitSession } = fixture({
+    agents: ['default', 'agent', 'worker'],
+  });
+  await openRoom(manager, [{ name: 'agent' }]);
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  prompted.length = 0;
+
+  // The #1141 misroute: the worker "reports" to itself. Delivered to no one → still blind.
+  await callbacks.get(WORKER)?.onMessage?.({ kind: 'message_out', text: 'done', to: ['worker'] });
+  emitSession(WORKER, { kind: 'agent_end' });
+  expect(prompted.filter(isNudge)).toHaveLength(1);
+});
+
+test('a post to @human counts as a report — the human is a real recipient (the operator channel)', async () => {
+  const { manager, callbacks, prompted, emitSession } = fixture({
+    agents: ['default', 'agent', 'worker'],
+  });
+  await openRoom(manager, [{ name: 'agent' }]);
+  prompted.length = 0;
+
+  await callbacks
+    .get('s-1')
+    ?.onMessage?.({ kind: 'message_out', text: 'KILD_NOTIFY_OK', to: ['human'] });
   emitSession('s-1', { kind: 'agent_end' });
   expect(prompted.filter(isNudge)).toHaveLength(0);
 });
