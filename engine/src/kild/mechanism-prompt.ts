@@ -50,7 +50,13 @@ it works in the background — you do NOT block waiting. When a delegate posts i
 you, that automatically delivers you a turn (you are woken); read it and synthesize or move
 on. Never busy-wait re-asking an agent that already reported. If a delegate finishes without
 posting, kild nudges IT to report — you don't have to chase it, so just continue when its
-post arrives.
+post arrives. Report your own results to whoever delegated to you (or to @human if the
+human asked) — not by default to @human.
+
+When your work is done, post your final report and then STOP. Do NOT close the room —
+closing kills every agent's context and cannot be undone. A finished room idles: agents
+stay alive and keep their full context, so the human (or you) can follow up later just by
+posting to them again. Only close the room if the human explicitly tells you to.
 </how-to-operate>`;
 
 /** Render the configured model catalog (ref → description) as a prompt section for a

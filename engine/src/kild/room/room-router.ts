@@ -36,7 +36,10 @@ export function unknownRecipients(room: Room, message: RoomMessage): string[] {
  * @worker with a turn.
  *
  * This function owns only *delivery* policy — who actually gets prompted:
- * - `@human` is never delivered as a turn (the broadcast is how the operator receives);
+ * - `@human` is not a session, so it's never delivered a turn — the broadcast is how the
+ *   operator receives. BUT a `@human` post from a non-lead ALSO wakes the room lead (the
+ *   human's in-room proxy/coordinator), so a sub-agent "reporting to the human" never
+ *   leaves the lead blind. The lead's own posts to `@human` stay terminal (wake no one).
  * - a participant is never delivered its own post;
  * - **no addressee + exactly one participant → that participant** — so a bare post in
  *   a single-agent room reaches the agent, and it chats like a 1:1 session;
@@ -61,10 +64,23 @@ export function routeRoomMessage(room: Room, message: RoomMessage, delivery: Roo
   // Narration and engine notices are shown to the human, never delivered as a turn.
   if (message.implicit || message.system) return;
 
-  let targets = message.to.filter((t) => t !== HUMAN && t !== message.from);
+  const targets = message.to.filter((t) => t !== HUMAN && t !== message.from);
   if (targets.length === 0 && room.participants.length === 1) {
     const sole = room.participants[0];
-    if (sole && sole.name !== message.from) targets = [sole.name];
+    if (sole && sole.name !== message.from) targets.push(sole.name);
+  }
+
+  // A `@human` report from a non-lead also wakes the room lead — so an agent that reports
+  // "to the human" keeps the coordinator in the loop instead of leaving it blind. The lead
+  // itself reporting to the human stays terminal (it's the sender, so it's not re-woken).
+  const lead = room.participants[0];
+  if (
+    message.to.includes(HUMAN) &&
+    lead &&
+    lead.name !== message.from &&
+    !targets.includes(lead.name)
+  ) {
+    targets.push(lead.name);
   }
 
   for (const name of targets) {

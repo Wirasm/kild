@@ -86,11 +86,32 @@ test('a notice in a SINGLE-participant room is not delivered by the 1:1 rule', (
   expect(delivered).toEqual([]);
 });
 
-test('@human is broadcast only — never delivered as a turn', () => {
-  const { room, delivered, broadcast, delivery } = fixture();
+test('@human is not delivered a turn, but a non-lead @human post ALSO wakes the lead', () => {
+  const { room, delivered, broadcast, delivery } = fixture(); // lead = orchestrator
   routeRoomMessage(room, message('worker', ['human'], '@human done'), delivery);
   expect(broadcast).toHaveLength(1);
-  expect(delivered).toEqual([]);
+  // @human gets no turn (not a session), but the lead is woken so it isn't left blind.
+  expect(delivered).toEqual([
+    { sessionId: 's-orchestrator', from: 'worker', text: '[#demo] @worker: @human done' },
+  ]);
+});
+
+test("the lead's own @human post is terminal — wakes no one", () => {
+  const { room, delivered, broadcast, delivery } = fixture(); // lead = orchestrator
+  routeRoomMessage(room, message('orchestrator', ['human'], 'final report'), delivery);
+  expect(broadcast).toHaveLength(1);
+  expect(delivered).toEqual([]); // the lead is the sender, so it isn't re-woken
+});
+
+test('a non-lead @human post does not double-deliver when the lead is already addressed', () => {
+  const { room, delivered } = fixture();
+  const d = {
+    deliverAsTurn: (sessionId: string, from: string, text: string) =>
+      delivered.push({ sessionId, from, text }),
+    broadcast: () => {},
+  };
+  routeRoomMessage(room, message('worker', ['orchestrator', 'human'], '...'), d);
+  expect(delivered.map((x) => x.sessionId)).toEqual(['s-orchestrator']); // once, not twice
 });
 
 test('delivers to other addressed participants but never the sender or @human', () => {
