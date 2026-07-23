@@ -151,6 +151,9 @@ are the operator/driver: rooms do the work; you open, delegate, observe, and lan
   with full context — follow up anytime with kild_room_post.
 - NEVER call kild_room_close unless the human explicitly tells you to close — closing kills
   every agent's context irrecoverably. Finished rooms stay open for follow-up.
+- For a long campaign you won't drive yourself, hand off to a detached driver with
+  kild_fleet_start (steer with kild_fleet_post, list with kild_sessions); its rooms outlive it.
+- kild_agents lists the personas valid for participants; "default" always works.
 ${modelCatalog()}
 </kild-fleet-driver>`;
 }
@@ -291,6 +294,107 @@ export default function (pi: PiExtensionAPI) {
         body: JSON.stringify({}),
       });
       return { content: [{ type: 'text', text: res.message }] };
+    },
+  });
+
+  pi.registerTool({
+    name: 'kild_agents',
+    label: 'kild: list agent personas',
+    description:
+      'List the agent personas available in a project (its .claude/agents, .pi/agents, and ' +
+      'config-plugged packs like prp-core) — the valid `agent` values for kild_open_room ' +
+      'participants. "default" is always available (general-purpose, no persona).',
+    parameters: Type.Object({
+      project: Type.Optional(Type.String({ description: 'Absolute project path. Omit for global-only personas.' })),
+    }),
+    async execute(_id, params) {
+      const p = params as { project?: string };
+      const q = p.project ? `?project=${encodeURIComponent(p.project)}` : '';
+      const agents = await engineFetch<Array<{ name: string; description: string }>>(`/api/agents${q}`);
+      const lines = agents.map((a) => (a.description ? `${a.name} — ${a.description}` : a.name));
+      return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: agents.length } };
+    },
+  });
+
+  pi.registerTool({
+    name: 'kild_fleet_start',
+    label: 'kild: start fleet driver',
+    description:
+      'Spawn a DETACHED, persistent fleet-driver session that keeps orchestrating rooms after ' +
+      'you disconnect: it gets the room-control tools and your goal as its first prompt. ' +
+      'Returns its session id. Use for long campaigns you want to hand off; for work you are ' +
+      'driving yourself, just use the kild_room_* tools directly.',
+    parameters: Type.Object({
+      goal: Type.String({ description: 'The campaign goal, delivered as the driver’s first prompt.' }),
+      project: Type.Optional(Type.String({ description: 'Absolute project path the driver works in. Defaults to the current directory.' })),
+      agent: Type.Optional(Type.String({ description: 'Persona for the driver (default: the general-purpose "default").' })),
+      model: Type.Optional(Type.String({ description: 'provider/model ref for the driver (pick a strong orchestration model).' })),
+    }),
+    async execute(_id, params) {
+      const p = params as { goal: string; project?: string; agent?: string; model?: string };
+      const res = await engineFetch<{ id: string }>('/api/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cwd: p.project ?? process.cwd(),
+          agent: p.agent ?? 'default',
+          model: p.model,
+          projectName: 'fleet',
+          fleet: true,
+          prompt: p.goal,
+        }),
+      });
+      return { content: [{ type: 'text', text: `fleet driver started: ${res.id}` }], details: { sessionId: res.id } };
+    },
+  });
+
+  pi.registerTool({
+    name: 'kild_fleet_post',
+    label: 'kild: post to fleet driver',
+    description: 'Send a steering message to a running fleet-driver session (by session id).',
+    parameters: Type.Object({
+      id: Type.String({ description: 'Fleet-driver session id.' }),
+      text: Type.String({ description: 'The steering message.' }),
+    }),
+    async execute(_id, params) {
+      const p = params as { id: string; text: string };
+      await engineFetch(`/api/sessions/${encodeURIComponent(p.id)}/prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: p.text }),
+      });
+      return { content: [{ type: 'text', text: 'posted' }] };
+    },
+  });
+
+  pi.registerTool({
+    name: 'kild_fleet_stop',
+    label: 'kild: stop fleet driver',
+    description:
+      'Stop a fleet-driver session by id. Its rooms keep running (close those separately, ' +
+      'and only on the human’s explicit order).',
+    parameters: Type.Object({
+      id: Type.String({ description: 'Fleet-driver session id.' }),
+    }),
+    async execute(_id, params) {
+      const p = params as { id: string };
+      await engineFetch(`/api/sessions/${encodeURIComponent(p.id)}/stop`, { method: 'POST' });
+      return { content: [{ type: 'text', text: 'stopped' }] };
+    },
+  });
+
+  pi.registerTool({
+    name: 'kild_sessions',
+    label: 'kild: list sessions',
+    description: 'List live kild sessions (fleet drivers and one-shot runs) with their models.',
+    parameters: Type.Object({}),
+    async execute() {
+      const sessions = await engineFetch<Array<{ id: string; agent?: string; model?: string; projectName?: string }>>('/api/sessions');
+      if (sessions.length === 0) return { content: [{ type: 'text', text: 'no live sessions' }] };
+      const lines = sessions.map(
+        (s) => `${s.id}\t${s.agent ?? 'default'}${s.model ? ` (${s.model})` : ''}${s.projectName ? ` · ${s.projectName}` : ''}`,
+      );
+      return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: sessions.length } };
     },
   });
 
