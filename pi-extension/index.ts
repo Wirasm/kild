@@ -35,6 +35,8 @@ interface PiToolDefinition {
 interface PiExtensionAPI {
   registerTool(tool: PiToolDefinition): void;
   on(event: string, handler: (event: never, ctx: never) => unknown): void;
+  /** Inject a user-role message; `followUp` queues it as the next turn (immediate when idle). */
+  sendUserMessage(content: string, options?: { deliverAs?: 'steer' | 'followUp' }): void;
 }
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
@@ -145,10 +147,12 @@ are the operator/driver: rooms do the work; you open, delegate, observe, and lan
   (e.g. fix-2247). Participants run concurrently, each a real agent session.
 - Open with kild_open_room (participants: name + agent persona + model; kickoff = the goal,
   delivered to the room lead). Steer or delegate more work with kild_room_post.
-- Observe with kild_rooms (compact status: per-agent models, git state, collisions) and
-  kild_room_log (one room's full thread). Pull when you need state — don't poll hot.
-- Delegation inside rooms is asynchronous; leads report when done and rooms then sit IDLE
-  with full context — follow up anytime with kild_room_post.
+- Delegation is asynchronous and you are NOT blocked. When a room reports to @human, kild
+  pushes that report to you automatically as a new message — you do not poll for completion.
+  React when it arrives; otherwise keep working. Use kild_rooms / kild_room_log to pull
+  status on demand (per-agent models, git state, collisions, full thread).
+- Rooms you open or post to sit IDLE with full context after finishing — follow up anytime
+  with kild_room_post.
 - NEVER call kild_room_close unless the human explicitly tells you to close — closing kills
   every agent's context irrecoverably. Finished rooms stay open for follow-up.
 - For a long campaign you won't drive yourself, hand off to a detached driver with
@@ -158,8 +162,108 @@ ${modelCatalog()}
 </kild-fleet-driver>`;
 }
 
+// ── completion push: engine WS → injected turns ─────────────────────────────────────
+// The pi driver is an EXTERNAL client — kild's in-engine wake machinery (post routing,
+// idle nudges) never reaches it. This bridge subscribes to the engine's WS and injects a
+// room's report-to-human as a follow-up user message, so the driver is woken instead of
+// having to poll. Scoped to rooms this session engaged (opened or posted to) so an
+// unrelated fleet's traffic never spams the session. Started lazily on first engagement.
+//
+// Robustness: pi's extension handle goes STALE on session replacement/reload (the factory
+// re-runs with a fresh `pi`). So we (1) keep a mutable ref to the latest `pi`, refreshed
+// each factory run, (2) queue reports and drain them whenever a live handle is available,
+// and (3) NEVER let a delivery error escape — a stale/failed push must not crash the host.
+const engagedRooms = new Set<string>();
+const roomNames = new Map<string, string>();
+const seenReports = new Set<string>();
+const pendingReports: string[] = [];
+let currentPi: PiExtensionAPI | undefined;
+let watching = false;
+
+/** Deliver queued reports via the latest live handle; requeue (stop) on the stale boundary. */
+function drainReports(): void {
+  while (pendingReports.length > 0 && currentPi) {
+    const text = pendingReports[0];
+    try {
+      currentPi.sendUserMessage(text, { deliverAs: 'followUp' });
+    } catch {
+      return; // handle went stale — leave it queued; the next factory run drains it
+    }
+    pendingReports.shift();
+  }
+}
+
+function pushReport(text: string): void {
+  pendingReports.push(text);
+  drainReports();
+}
+
+/** One WS subscription to the engine, reading the latest `currentPi` at delivery time. */
+function watchEngine(): void {
+  if (watching || typeof WebSocket === 'undefined') return;
+  watching = true;
+  const connect = () => {
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+    } catch {
+      setTimeout(connect, 5000);
+      return;
+    }
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as {
+          rooms?: Array<{ id: string; name: string }>;
+          roomMessage?: {
+            id: string;
+            roomId: string;
+            from: string;
+            to: string[];
+            text: string;
+            system?: boolean;
+            implicit?: boolean;
+          };
+        };
+        if (msg.rooms) for (const r of msg.rooms) roomNames.set(r.id, r.name);
+        const m = msg.roomMessage;
+        if (!m || m.system || m.implicit) return;
+        if (!engagedRooms.has(m.roomId) || !m.to?.includes('human')) return;
+        if (seenReports.has(m.id)) return;
+        seenReports.add(m.id);
+        const name = roomNames.get(m.roomId) ?? m.roomId.slice(0, 8);
+        pushReport(
+          `[kild] room "${name}" (${m.roomId}) — @${m.from} reports:\n${m.text}\n\n` +
+            `(React if action is needed; the room stays open and idle for follow-up.)`,
+        );
+      } catch {
+        // A malformed frame or a delivery hiccup must never crash the pi host.
+      }
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch {
+        /* already closing */
+      }
+    };
+  };
+  connect();
+}
+
+/** Mark a room's reports-to-human as something this session wants pushed to it. */
+function engage(roomId: string): void {
+  engagedRooms.add(roomId);
+  watchEngine();
+}
+
 // ── extension entrypoint ──────────────────────────────────────────────────────────────
 export default function (pi: PiExtensionAPI) {
+  // Refresh the live handle (the factory re-runs on session replacement) and flush any
+  // reports that queued while the previous handle was stale.
+  currentPi = pi;
+  drainReports();
+
   pi.registerTool({
     name: 'kild_open_room',
     label: 'kild: open room',
@@ -204,6 +308,7 @@ export default function (pi: PiExtensionAPI) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
+      engage(res.id); // push this room's reports-to-human into the session
       return {
         content: [{ type: 'text', text: `${res.message} id=${res.id}` }],
         details: { roomId: res.id },
@@ -272,6 +377,7 @@ export default function (pi: PiExtensionAPI) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: p.text }),
       });
+      engage(p.id); // posting into a room engages it: its reports now push here
       return { content: [{ type: 'text', text: res.message }] };
     },
   });
