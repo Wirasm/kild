@@ -15,3 +15,4 @@ app/src-tauri/binaries/
 .kild-impl/
 /prp-core/
 /.kild/config.json
+/.kild/fleet/

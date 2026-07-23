@@ -61,8 +61,10 @@ export function formatModelsSection(models: Record<string, string>): string {
   if (entries.length === 0) return '';
   const lines = entries.map(([ref, desc]) => `- ${ref} — ${desc}`).join('\n');
   return `<available-models>
-When you delegate with invite_agent, pass a \`model\` chosen to fit the task — a stronger
-model for hard reasoning/synthesis, a cheaper one for mechanical/bulk work:
+When you delegate with invite_agent, pass a \`model\` that FITS the task — match capability
+to the work (optimize for fit, not cost; cost is not a constraint here). Use the strong
+models freely for hard reasoning, planning, and real coding; use the light/fast ones for
+routine, well-defined, or bulk work:
 ${lines}
 </available-models>`;
 }
