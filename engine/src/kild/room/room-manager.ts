@@ -35,6 +35,7 @@ import {
   type RoomActionSuccess,
   type RoomMessage,
   type RoomOutbound,
+  type RoomParticipant,
 } from './room-types.ts';
 
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
@@ -124,6 +125,12 @@ export class RoomManager {
         if (event.kind === 'model' && event.provider && event.id) {
           located.participant.model = `${event.provider}/${event.id}`;
         }
+        // Failsafe on a finished turn: if a delegate went idle WITHOUT posting, its inviter
+        // is blind (an explicit post would have woken the inviter via routing). Nudge the
+        // delegate to report. A delegate that DID post needs nothing — the post is the signal.
+        if (event.kind === 'agent_end') {
+          this.nudgeIfIdleWithoutReport(located.participant);
+        }
         this.broadcast({
           room: located.room.id,
           participant: located.participant.name,
@@ -167,7 +174,7 @@ export class RoomManager {
 
     const spawnedSessionIds: string[] = [];
     for (const participant of validated.value) {
-      const result = this.spawnParticipant(room, participant);
+      const result = this.spawnParticipant(room, participant, HUMAN);
       if (!result.ok) {
         this.rollbackOpen(roomId, spawnedSessionIds);
         return result;
@@ -249,10 +256,12 @@ export class RoomManager {
     );
   }
 
-  /** Add a participant to a live room (the human "invite"). */
+  /** Add a participant to a live room. `invitedBy` is the inviter's name (default
+   *  {@link HUMAN} for the operator's manual invite). */
   async addParticipant(
     roomId: string,
     spec: ParticipantSpec,
+    invitedBy: string = HUMAN,
   ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
@@ -262,7 +271,11 @@ export class RoomManager {
     const validated = await this.validateParticipants(room.cwd, [spec], room.participants);
     if (!validated.ok) return validated;
 
-    const result = this.spawnParticipant(room, validated.value[0] as ValidatedParticipantSpec);
+    const result = this.spawnParticipant(
+      room,
+      validated.value[0] as ValidatedParticipantSpec,
+      invitedBy,
+    );
     if (!result.ok) return result;
     this.broadcast({ rooms: this.registry.summaries() });
     await this.post(roomId, HUMAN, `@${spec.name} joined the room.`, {
@@ -316,16 +329,25 @@ export class RoomManager {
     return ok({ message: `Room '${room.name}' halted.` });
   }
 
-  /** Spawn one participant session, wired so its control lines route back here. */
+  /** Spawn one participant session, wired so its control lines route back here.
+   *  `invitedBy` is the inviter's name (a live participant) or {@link HUMAN} for the
+   *  opener's initial roster — the ground-truth spawn edge + idle-notice target. */
   private spawnParticipant(
     room: Room,
     spec: ValidatedParticipantSpec,
+    invitedBy: string,
   ): CommandResult<{ sessionId: string }> {
     const isLead = room.participants.length === 0; // first participant leads the room
     const sessionId = this.createId();
     // Record the requested model now (visible immediately); the session's `model` event
     // upgrades it to the provider-resolved ref once it starts.
-    room.participants.push({ name: spec.name, sessionId, agent: spec.agent, model: spec.model });
+    room.participants.push({
+      name: spec.name,
+      sessionId,
+      agent: spec.agent,
+      model: spec.model,
+      invitedBy,
+    });
     try {
       this.sessions.spawn(
         sessionId,
@@ -370,6 +392,9 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
+    // An explicit post_message (not the turn-final implicit narration) counts as reporting —
+    // so the idle failsafe knows this participant didn't finish silently.
+    if (!m.implicit) located.participant.posted = true;
     return this.post(located.room.id, located.participant.name, m.text, {
       to: m.to,
       implicit: m.implicit,
@@ -383,11 +408,13 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    return this.addParticipant(located.room.id, {
-      name: spec.name,
-      agent: spec.agent,
-      model: spec.model,
-    });
+    // The inviter is the calling participant — recorded as the new agent's `invitedBy`,
+    // so its idle/done notice routes back here (hierarchical delegation signalling).
+    return this.addParticipant(
+      located.room.id,
+      { name: spec.name, agent: spec.agent, model: spec.model },
+      located.participant.name,
+    );
   }
 
   /** The room's lead called `close_room`: notice, then teardown. Only the lead holds
@@ -517,9 +544,39 @@ export class RoomManager {
     this.sessions.prompt(target, formatOperatorNotification(room.name, event), 'kild');
   }
 
+  /** Failsafe (NOT the default path): a delegate that finishes a turn without an explicit
+   *  post has left its inviter blind — an actual post would have woken the inviter via
+   *  routing. Nudge the delegate ONCE per active→idle transition to report. Delivered as a
+   *  direct session prompt (bypasses room routing, so it can't become a post or loop). A
+   *  top-level participant (invited by the human) is left alone — the human watches the
+   *  roster; a delegate that DID post gets nothing (its post is the signal). */
+  private nudgeIfIdleWithoutReport(participant: RoomParticipant): void {
+    if (participant.idle) return; // dedup: already handled this transition
+    participant.idle = true;
+    if (participant.posted) return; // it reported — its post already reached the inviter
+    const inviter = participant.invitedBy;
+    if (!inviter || inviter === HUMAN) return; // top-level: no delegator waiting on a post
+    this.sessions.prompt(
+      participant.sessionId,
+      `[kild] You finished your turn without posting. If you have a result for @${inviter}, ` +
+        `post_message it to them now (with evidence). If you are done with nothing to add, post ` +
+        `a one-line status so @${inviter} isn't left waiting.`,
+      'kild',
+    );
+  }
+
   private delivery(): RoomDelivery {
     return {
-      deliverAsTurn: (sessionId, from, text) => this.sessions.prompt(sessionId, text, from),
+      deliverAsTurn: (sessionId, from, text) => {
+        // A delivered turn reactivates the participant: clear idle + posted so its next
+        // active→idle transition is judged fresh (did it report THIS turn?).
+        const located = this.registry.locateSession(sessionId);
+        if (located) {
+          located.participant.idle = false;
+          located.participant.posted = false;
+        }
+        this.sessions.prompt(sessionId, text, from);
+      },
       broadcast: (message) => this.broadcast({ roomMessage: message }),
     };
   }

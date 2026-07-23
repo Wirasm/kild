@@ -76,6 +76,36 @@ general-purpose `default` agent). Each gets kild's system prompt plus any skills
 project's config plugs in — so you can post `use the prp-X skill to …` and the agent
 loads it.
 
+## Config — plug in skills/agents, base branch, and a model catalog
+
+`.kild/config.json` (project) and `$KILD_HOME/config.json` (global, merged; project wins):
+
+```json
+{
+  "plugins": ["./prp-core"],
+  "baseBranch": "dev",
+  "models": {
+    "openai-codex/gpt-5.6-sol": "Strongest model. Hard reasoning, orchestration, synthesis. ($$$)",
+    "openai-codex/gpt-5.6-terra": "Workhorse. Research, exploration, implementation. ($$)",
+    "minimax/MiniMax-M3": "Cheap/fast. Mechanical/bulk work. ($)"
+  }
+}
+```
+
+- `plugins` — dirs laid out like a Claude Code plugin (`agents/` + `skills/`); absolute or
+  `~/…` paths load from anywhere. Also `agentPaths` / `skillPaths` for explicit dirs.
+- `baseBranch` — default base for worktrees + git status (see below).
+- `models` — a `provider/model` → description catalog. It's appended to a **delegating**
+  session's system prompt, so an orchestrator knows which model to pass to `invite_agent`
+  for each fan-out agent (strong model for hard reasoning, cheap for bulk).
+
+## Delegation is asynchronous (idle failsafe)
+
+Inside a room, `invite_agent` + `post_message` is fire-and-forget: you delegate and keep
+going; a delegate's posted result wakes you automatically. Don't busy-wait re-asking. If a
+delegate finishes a turn **without** posting, kild nudges *it* to report — so a forgotten
+post can't silently stall the run.
+
 ## Worktrees — isolate every workstream (you name them)
 
 `--worktree <name>` runs the room (or `kild run`) in an isolated git worktree on branch

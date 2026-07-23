@@ -25,6 +25,18 @@ export interface RoomParticipant {
    *  provider-resolved `provider/id` once the session reports it. Lets an observer see
    *  which model each agent used in a run. */
   model?: string;
+  /** Who invited this participant — the inviting participant's name, or {@link HUMAN} for
+   *  the opener's initial roster. Ground-truth spawn edge (vs inferring it from the log)
+   *  and the routing target for its idle/done notice. */
+  invitedBy?: string;
+  /** Runtime-only: true when the session has finished a turn and is waiting. Set on
+   *  `agent_end`, cleared when a new prompt is delivered. Dedups the idle failsafe to
+   *  one check per active→idle transition; never serialized. */
+  idle?: boolean;
+  /** Runtime-only: true once this participant made an EXPLICIT post_message since its last
+   *  activation. If it goes idle with this still false, it finished without reporting — the
+   *  failsafe nudges it to post. Reset when a new turn is delivered; never serialized. */
+  posted?: boolean;
 }
 
 /** A participant as surfaced to observers (room lists, status, archive) — identity plus

@@ -9,13 +9,17 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
-import { resolvePluginPaths } from './kild/config.ts';
+import { configuredModels, resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
 import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
 import { createPostRoomTool } from './kild/fleet/post-room-tool.ts';
 import { createRoomsStatusTool } from './kild/fleet/rooms-status-tool.ts';
-import { composeSessionTurn, MECHANISM_PROMPT } from './kild/mechanism-prompt.ts';
+import {
+  composeSessionTurn,
+  formatModelsSection,
+  MECHANISM_PROMPT,
+} from './kild/mechanism-prompt.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
@@ -179,7 +183,13 @@ export async function runWorker(): Promise<never> {
   // Every session gets the generic mechanism guide (how to operate) on top of everything,
   // above the persona — so even a bare `default` session is competent. One-shot: it rides
   // only the first delivered turn. The room-comms part is conditional inside the prompt.
-  let sessionPrefix: string | null = MECHANISM_PROMPT;
+  // A delegating session (room or fleet) also gets the configured model catalog so it can
+  // pick a model per fan-out agent.
+  const modelsSection =
+    inRoom || fleetEnabled ? formatModelsSection(await configuredModels(cwd)) : '';
+  let sessionPrefix: string | null = modelsSection
+    ? `${MECHANISM_PROMPT}\n\n${modelsSection}`
+    : MECHANISM_PROMPT;
 
   // pi runs one turn at a time. A room can deliver a message (prompt) to this
   // participant while it is still mid-turn, so we queue prompts and drain them

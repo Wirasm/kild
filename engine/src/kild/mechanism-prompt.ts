@@ -44,7 +44,28 @@ were delegated, you MUST post_message your result back to whoever assigned it, w
 (commit SHA, test output, the file/path). Do not just describe the result in your reply —
 unposted narration is invisible to other agents; they see only your posts, so an unposted
 report leaves whoever delegated blind and stalls the work.
+
+Delegation is asynchronous. invite_agent brings in an agent; task it with post_message and
+it works in the background — you do NOT block waiting. When a delegate posts its result to
+you, that automatically delivers you a turn (you are woken); read it and synthesize or move
+on. Never busy-wait re-asking an agent that already reported. If a delegate finishes without
+posting, kild nudges IT to report — you don't have to chase it, so just continue when its
+post arrives.
 </how-to-operate>`;
+
+/** Render the configured model catalog (ref → description) as a prompt section for a
+ *  delegating session, so the orchestrator can pick a model per fan-out agent. Empty
+ *  string when nothing is configured. */
+export function formatModelsSection(models: Record<string, string>): string {
+  const entries = Object.entries(models);
+  if (entries.length === 0) return '';
+  const lines = entries.map(([ref, desc]) => `- ${ref} — ${desc}`).join('\n');
+  return `<available-models>
+When you delegate with invite_agent, pass a \`model\` chosen to fit the task — a stronger
+model for hard reasoning/synthesis, a cheaper one for mechanical/bulk work:
+${lines}
+</available-models>`;
+}
 
 /** Compose the first delivered turn: the mechanism prompt (if any) on top of the
  *  already-role-wrapped user turn (persona `<role>` + text, from `withRole`). The prefix

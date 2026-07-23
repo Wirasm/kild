@@ -30,11 +30,15 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
   let spawnCount = 0;
   const ids = ['s-1', 's-2', 's-3', 'm-1', 'm-2', 'm-3'];
   let idIndex = 0;
+  let sessionBus: ((msg: { session: string; event: unknown }) => void) | undefined;
 
   const manager = new RoomManager({
     registry: new RoomRegistry(),
     sessions: {
-      subscribe: () => () => {},
+      subscribe: (fn) => {
+        sessionBus = fn as typeof sessionBus;
+        return () => {};
+      },
       spawn: (id, req, _origin, sessionCallbacks) => {
         spawnCount += 1;
         if (options?.spawnThrowsAt === spawnCount) throw new Error(`spawn failed ${spawnCount}`);
@@ -56,7 +60,8 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
     createId: options?.createId ?? (() => ids[idIndex++] ?? `id-${idIndex}`),
   });
 
-  return { manager, spawned, stopped, callbacks, prompted };
+  const emitSession = (session: string, event: unknown) => sessionBus?.({ session, event });
+  return { manager, spawned, stopped, callbacks, prompted, emitSession };
 }
 
 async function openRoom(
@@ -374,4 +379,67 @@ test('close transitions a halted room to archived closed state', async () => {
     text: 'Room halted by the operator.',
     system: true,
   });
+});
+
+const isNudge = (p: { from?: string; text: string }) =>
+  p.from === 'kild' && p.text.includes('finished your turn without posting');
+
+// createId order: lead 'agent' session = s-1, invited worker session = s-2.
+const WORKER = 's-2';
+
+test('failsafe: a delegate that goes idle WITHOUT posting is nudged to report (once)', async () => {
+  const { manager, callbacks, prompted, emitSession } = fixture({
+    agents: ['default', 'agent', 'worker'],
+  });
+  // Lead (s-1) opens; lead invites a worker → worker.invitedBy = 'agent' (the lead).
+  await openRoom(manager, [{ name: 'agent' }]);
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  prompted.length = 0;
+
+  // Worker finishes a turn having posted nothing → nudged (the delegate itself).
+  emitSession(WORKER, { kind: 'agent_end' });
+  const nudges = prompted.filter(isNudge);
+  expect(nudges).toHaveLength(1);
+  expect(nudges[0]).toMatchObject({ id: WORKER });
+  expect(nudges[0]?.text).toContain('@agent'); // told to post to its inviter
+
+  // A second agent_end without an intervening turn does NOT re-nudge (dedup).
+  emitSession(WORKER, { kind: 'agent_end' });
+  expect(prompted.filter(isNudge)).toHaveLength(1);
+});
+
+test('default: a delegate that POSTED before going idle is NOT nudged (its post is the signal)', async () => {
+  const { manager, callbacks, prompted, emitSession } = fixture({
+    agents: ['default', 'agent', 'worker'],
+  });
+  await openRoom(manager, [{ name: 'agent' }]);
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  prompted.length = 0;
+
+  // Worker reports via an explicit post_message, then its turn ends.
+  await callbacks.get(WORKER)?.onMessage?.({ kind: 'message_out', text: 'done', to: ['agent'] });
+  emitSession(WORKER, { kind: 'agent_end' });
+  expect(prompted.filter(isNudge)).toHaveLength(0);
+});
+
+test('the human-invited lead going idle without posting is never nudged', async () => {
+  const { manager, prompted, emitSession } = fixture({ agents: ['default', 'agent', 'worker'] });
+  await openRoom(manager, [{ name: 'agent' }]);
+  prompted.length = 0;
+  emitSession('s-1', { kind: 'agent_end' });
+  expect(prompted.filter(isNudge)).toHaveLength(0);
+});
+
+test('a delivered turn re-arms the failsafe (idle-without-post next turn nudges again)', async () => {
+  const { manager, callbacks, prompted, emitSession } = fixture({
+    agents: ['default', 'agent', 'worker'],
+  });
+  await openRoom(manager, [{ name: 'agent' }]);
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+
+  emitSession(WORKER, { kind: 'agent_end' }); // idle without post → nudge 1
+  await manager.postAs('room-1', 'agent', 'do more', ['worker']); // deliver a turn → re-arm
+  emitSession(WORKER, { kind: 'agent_end' }); // idle without post again → nudge 2
+
+  expect(prompted.filter(isNudge)).toHaveLength(2);
 });

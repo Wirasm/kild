@@ -30,6 +30,10 @@ export interface KildConfig {
    *  measured against (e.g. `dev`). Overridable per-invocation with `--base`; if unset,
    *  the checkout's current branch is used. */
   baseBranch?: string;
+  /** Preferred models for delegation: `provider/model` ref → a short description (what
+   *  it's good at, cost). Appended to a delegating session's system prompt so the user
+   *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
+  models?: Record<string, string>;
 }
 
 export interface ResolvedPluginPaths {
@@ -90,4 +94,12 @@ export async function configuredBaseBranch(cwd: string): Promise<string | undefi
   if (project?.baseBranch) return project.baseBranch;
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   return global?.baseBranch;
+}
+
+/** The configured model catalog for `cwd` (`provider/model` → description), merged
+ *  global < project (project wins per key). Empty when none configured. Never throws. */
+export async function configuredModels(cwd: string): Promise<Record<string, string>> {
+  const global = await readConfigFile(path.join(kildHome(), 'config.json'));
+  const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
+  return { ...(global?.models ?? {}), ...(project?.models ?? {}) };
 }
