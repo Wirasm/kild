@@ -13,7 +13,6 @@ app/src-tauri/binaries/
 .kild/maintainer/state.json
 .kild/maintainer/reviews/
 .kild-impl/
-/prp-core/
 /.kild/config.json
 /.kild/fleet/
 pi-extension/node_modules/

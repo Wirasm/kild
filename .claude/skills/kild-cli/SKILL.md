@@ -17,20 +17,20 @@ description: |
   for machine-readable output); progress and errors go to stderr; a non-zero exit
   code means failure. Parse stdout, check the exit code.
 
-  Prerequisite: `pi` must be on PATH and authenticated. This skill drives the
-  kild engine CLI: from `engine/`, run `bun run cli -- <args>` (or the linked
-  `kild` bin). It does NOT manage the older worktree/session `kild` — that is the
-  separate `kild` skill.
+  Prerequisite: `pi` must be on PATH and authenticated. The CLI is installed
+  globally as `kild` (via `bun link` in `engine/`); run `kild <args>` from any
+  directory. Fallback if not linked: from `engine/`, `bun run cli -- <args>`.
 ---
 
 # kild CLI
 
 `kild` runs **pi** coding agents in your projects. It is the scriptable interface
-an agent can drive over the Bash tool — the engine CLI (`engine/src/cli.ts`, run
-with `bun run cli -- <args>`). `kild run` is **one-shot**: it starts an agent, lets it
-work to completion, and prints the result. For **live, multi-agent, steerable**
-workstreams, drive **rooms** from the CLI (`kild room open --detach` / `rooms` / `room
-log` / `room post` / `room close`) — see "Driving rooms" below.
+an agent can drive over the Bash tool. It is installed globally: run `kild <args>`
+from anywhere (installed with `bun link` from `engine/`; source `engine/src/cli.ts`).
+`kild run` is **one-shot**: it starts an agent, lets it work to completion, and
+prints the result. For **live, multi-agent, steerable** workstreams, drive **rooms**
+from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
+`room close`) — see "Driving rooms" below.
 
 ## Command reference
 
