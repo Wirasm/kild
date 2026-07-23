@@ -74,7 +74,32 @@ kild room close "$ID"             # end it
 Participants come from the project's own agents (`--participants a,b,c`; default: one
 general-purpose `default` agent). Each gets kild's system prompt plus any skills the
 project's config plugs in — so you can post `use the prp-X skill to …` and the agent
-loads it. `--worktree <name>` runs the room in an isolated `kild/<name>` tree.
+loads it.
+
+## Worktrees — isolate every workstream (you name them)
+
+`--worktree <name>` runs the room (or `kild run`) in an isolated git worktree on branch
+`kild/<name>`; kild adds the `kild/` prefix, **you choose the suffix**. There is no
+auto-naming — if you omit `--worktree`, the work happens in the project's **main
+checkout** with no isolation.
+
+Conventions when you drive kild:
+
+- **One workstream = one worktree.** Give every room/run its own `--worktree`, named for
+  the task: `--worktree fix-2247`, `--worktree feat-dark-mode`. Never run two independent
+  workstreams in the same tree — their edits collide.
+- **Reuse the name to share a tree.** Two sessions naming the SAME `--worktree` attach to
+  the one tree (e.g. a reviewer joining a coder's workstream). Different names split.
+- **Base branch.** New worktrees fork from — and git status/collisions are measured
+  against — the base branch: `--base <branch>` wins, else `.kild/config.json` `baseBranch`,
+  else the checkout's current branch. On a repo whose trunk is `dev`, set
+  `{"baseBranch":"dev"}` (or pass `--base dev`) so ahead/behind and collisions reflect
+  only this workstream's work.
+- **Observe & land.** `kild rooms` shows each workstream's branch, ahead/behind, dirty,
+  conflicts, and cross-workstream file collisions; the agent lands the work with normal
+  git/gh (commit, push, PR) inside its worktree.
+- **Clean up.** After merging, `kild worktree rm <name> --project <p>` frees the tree;
+  `kild worktree prune --project <p>` removes trees whose branch merged into base.
 
 ## The output contract
 
