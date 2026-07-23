@@ -58,7 +58,11 @@ const { upgradeWebSocket, websocket } = createBunWebSocket();
 const app = new Hono();
 app.use('/*', cors({ origin: (origin) => (origin && ALLOWED_ORIGINS.has(origin) ? origin : '') }));
 
-app.get('/api/health', (c) => c.json({ ok: true, name: 'kild-engine' }));
+// `bootId` is unique per engine process — external WS clients (e.g. the pi extension)
+// compare it to detect a restart and force-reconnect their socket, since a killed engine
+// doesn't reliably surface a WS close to a read-only client.
+const BOOT_ID = randomUUID();
+app.get('/api/health', (c) => c.json({ ok: true, name: 'kild-engine', bootId: BOOT_ID }));
 
 // ── Projects ────────────────────────────────────────────────────────────────
 app.get('/api/projects', async (c) => c.json(await loadProjects()));

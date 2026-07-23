@@ -180,13 +180,30 @@ const pendingReports: string[] = [];
 let currentPi: PiExtensionAPI | undefined;
 let watching = false;
 
+// Optional diagnostics: set KILD_EXT_DEBUG=1 to trace the bridge to a log file (default
+// /tmp/kild-ext.log). The bridge runs inside the pi process with no visible output, so this
+// is the only window into why a completion push did or didn't fire.
+const DEBUG = process.env.KILD_EXT_DEBUG === '1';
+const DEBUG_LOG = process.env.KILD_EXT_LOG ?? '/tmp/kild-ext.log';
+function dbg(msg: string): void {
+  if (!DEBUG) return;
+  try {
+    fs.appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    /* diagnostics must never affect behavior */
+  }
+}
+
 /** Deliver queued reports via the latest live handle; requeue (stop) on the stale boundary. */
 function drainReports(): void {
+  if (pendingReports.length && !currentPi) dbg(`drain: ${pendingReports.length} queued but no live handle`);
   while (pendingReports.length > 0 && currentPi) {
     const text = pendingReports[0];
     try {
       currentPi.sendUserMessage(text, { deliverAs: 'followUp' });
-    } catch {
+      dbg(`drain: delivered (${text.slice(0, 40).replace(/\n/g, ' ')}…)`);
+    } catch (e) {
+      dbg(`drain: send threw (stale?) — requeued; ${(e as Error).message}`);
       return; // handle went stale — leave it queued; the next factory run drains it
     }
     pendingReports.shift();
@@ -198,19 +215,35 @@ function pushReport(text: string): void {
   drainReports();
 }
 
-/** One WS subscription to the engine, reading the latest `currentPi` at delivery time. */
-function watchEngine(): void {
-  if (watching || typeof WebSocket === 'undefined') return;
-  watching = true;
-  const connect = () => {
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
-    } catch {
-      setTimeout(connect, 5000);
-      return;
-    }
-    ws.onmessage = (ev) => {
+let ws: WebSocket | undefined;
+let lastBootId: string | undefined;
+
+/** Force a fresh WS, dropping any existing one (used on restart detection / reconnect). */
+function reconnect(): void {
+  if (typeof WebSocket === 'undefined') return;
+  const old = ws;
+  ws = undefined;
+  try {
+    old?.close();
+  } catch {
+    /* already closing */
+  }
+  connectWs();
+}
+
+function connectWs(): void {
+  if (typeof WebSocket === 'undefined') return;
+  let sock: WebSocket;
+  try {
+    sock = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+  } catch (e) {
+    dbg(`ws: construct threw, retry 5s — ${(e as Error).message}`);
+    setTimeout(connectWs, 5000);
+    return;
+  }
+  ws = sock;
+  sock.onopen = () => dbg(`ws: open (${engagedRooms.size} engaged rooms)`);
+  sock.onmessage = (ev) => {
       try {
         const msg = JSON.parse(String(ev.data)) as {
           rooms?: Array<{ id: string; name: string }>;
@@ -226,34 +259,80 @@ function watchEngine(): void {
         };
         if (msg.rooms) for (const r of msg.rooms) roomNames.set(r.id, r.name);
         const m = msg.roomMessage;
-        if (!m || m.system || m.implicit) return;
-        if (!engagedRooms.has(m.roomId) || !m.to?.includes('human')) return;
+        if (!m) return;
+        if (m.system || m.implicit) return;
+        if (!engagedRooms.has(m.roomId)) {
+          dbg(`msg: ${m.from}→${JSON.stringify(m.to)} in ${m.roomId.slice(0, 8)} — NOT engaged, skip`);
+          return;
+        }
+        if (!m.to?.includes('human')) {
+          dbg(`msg: ${m.from}→${JSON.stringify(m.to)} in ${m.roomId.slice(0, 8)} — not to @human, skip`);
+          return;
+        }
         if (seenReports.has(m.id)) return;
         seenReports.add(m.id);
         const name = roomNames.get(m.roomId) ?? m.roomId.slice(0, 8);
+        dbg(`msg: ${m.from}→@human in "${name}" — PUSHING`);
         pushReport(
           `[kild] room "${name}" (${m.roomId}) — @${m.from} reports:\n${m.text}\n\n` +
             `(React if action is needed; the room stays open and idle for follow-up.)`,
         );
-      } catch {
-        // A malformed frame or a delivery hiccup must never crash the pi host.
+      } catch (e) {
+        dbg(`ws: onmessage threw — ${(e as Error).message}`);
       }
     };
-    ws.onclose = () => setTimeout(connect, 3000);
-    ws.onerror = () => {
-      try {
-        ws.close();
-      } catch {
-        /* already closing */
-      }
-    };
+  sock.onclose = () => {
+    if (ws !== sock) return; // superseded by a newer socket (restart reconnect)
+    ws = undefined;
+    dbg('ws: closed, reconnect in 3s');
+    setTimeout(connectWs, 3000);
   };
-  connect();
+  sock.onerror = () => {
+    dbg('ws: error');
+    try {
+      sock.close();
+    } catch {
+      /* already closing */
+    }
+  };
+}
+
+/** Heartbeat: a read-only WS client doesn't reliably see the engine die, so poll health and
+ *  force-reconnect when the engine's bootId changes (a restart) or the socket isn't OPEN. */
+function heartbeat(): void {
+  void engineUp().catch(() => false);
+  fetch(`${ENGINE}/api/health`, { signal: AbortSignal.timeout(2000) })
+    .then((r) => (r.ok ? (r.json() as Promise<{ bootId?: string }>) : Promise.reject()))
+    .then((h) => {
+      if (h.bootId && lastBootId && h.bootId !== lastBootId) {
+        dbg(`heartbeat: engine restarted (${lastBootId.slice(0, 8)}→${h.bootId.slice(0, 8)}) — reconnecting`);
+        lastBootId = h.bootId;
+        reconnect();
+      } else if (h.bootId && !lastBootId) {
+        lastBootId = h.bootId;
+        if (ws?.readyState !== 1) reconnect(); // OPEN === 1
+      } else if (ws?.readyState !== 1) {
+        dbg('heartbeat: socket not open — reconnecting');
+        reconnect();
+      }
+    })
+    .catch(() => {
+      /* engine unreachable — the next successful beat with a new bootId reconnects */
+    });
+}
+
+/** One WS subscription to the engine, reading the latest `currentPi` at delivery time. */
+function watchEngine(): void {
+  if (watching || typeof WebSocket === 'undefined') return;
+  watching = true;
+  connectWs();
+  setInterval(heartbeat, 8000);
 }
 
 /** Mark a room's reports-to-human as something this session wants pushed to it. */
 function engage(roomId: string): void {
   engagedRooms.add(roomId);
+  dbg(`engage ${roomId.slice(0, 8)} (${engagedRooms.size} total)`);
   watchEngine();
 }
 
