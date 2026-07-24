@@ -39,8 +39,9 @@ async function runGit(dir: string, args: string[]): Promise<GitResult> {
 }
 
 /** The base branch to compare against when the caller doesn't name one: the remote's
- *  default (`origin/HEAD`, minus the `origin/` prefix) if set, else `main`. */
-async function resolveDefaultBase(dir: string): Promise<string> {
+ *  default (`origin/HEAD`, minus the `origin/` prefix) if set, else `main`. Shared
+ *  with git-review so summary status and review drill-down agree on the baseline. */
+export async function resolveDefaultBase(dir: string): Promise<string> {
   const head = await runGit(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
   if (head.ok) {
     const branch = head.stdout.trim().replace(/^origin\//, '');

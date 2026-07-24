@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionCallbacks } from '../sessions.ts';
+import { worktreePath } from '../worktree.ts';
 import { RoomManager } from './room-manager.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { HUMAN, type ParticipantSpec } from './room-types.ts';
@@ -691,4 +692,54 @@ test('without memory.synthesis config, close spawns nothing extra', async () => 
   const before = spawned.length;
   await manager.close('room-1');
   expect(spawned.length).toBe(before);
+});
+
+// ── workstreamDir (the review endpoints' room→dir resolution) ─────────────────
+
+test('workstreamDir resolves a live room without a worktree to its cwd', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  // base falls all the way through to 'main' (tmp is no git checkout, no config).
+  expect(manager.workstreamDir('room-1')).toEqual({
+    ok: true,
+    value: { dir: tmp, base: 'main' },
+  });
+});
+
+test('workstreamDir resolves a worktree room to the worktree path, with its base', async () => {
+  const { manager } = fixture();
+  await manager.open('room-1', {
+    name: 'demo',
+    cwd: tmp,
+    participants: [{ name: 'worker' }],
+    worktree: 'slice-x',
+    base: 'develop',
+  });
+  const result = manager.workstreamDir('room-1');
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.dir).toBe(worktreePath('slice-x'));
+    expect(result.value.base).toBe('develop');
+  }
+});
+
+test('workstreamDir on an unknown room is not_found', () => {
+  const { manager } = fixture();
+  expect(manager.workstreamDir('nope')).toEqual({
+    ok: false,
+    code: 'not_found',
+    message: 'no such live room: nope',
+  });
+});
+
+test('workstreamDir on a closed (archived) room is invalid_state', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.postFromHuman('room-1', 'hello'); // history → the close archives it
+  await manager.close('room-1');
+  expect(manager.workstreamDir('room-1')).toEqual({
+    ok: false,
+    code: 'invalid_state',
+    message: 'room room-1 is archived; its workstream is gone',
+  });
 });
