@@ -30,9 +30,9 @@ Two consumers, two modes — this governs every status/log surface:
   token-level detail into the director's context. Trust the agent is working in the
   right place; burning the director's context to *watch* it is the anti-pattern. The
   director pulls a summary when it wants to check, and pulls full logs only to debug.
-- **Human (cockpit) → full live stream.** The WS broadcast carries every session's
-  events to the human in real time — no token cost, rich view. The human can always
-  check live; the agent should not have to.
+- **Human (UI client, e.g. helm — external to kild) → full live stream.** The WS
+  broadcast carries every session's events to the human in real time — no token
+  cost, rich view. The human can always check live; the agent should not have to.
 - **Logs/transcripts** (persisted room log + session transcript) are for after-the-fact
   debugging and the occasional live check — pulled on demand, never auto-injected.
 
@@ -91,7 +91,8 @@ observability must never crash the status call):
 1. Per-workstream git status (branch/ahead/behind/dirty/changedFiles) in `rooms_status`.
 2. Cross-workstream **collision detection**: pairwise `changedFiles` overlap → "A and B
    both touch src/x.ts" warning; plus `conflictsWithBase` via `merge-tree --write-tree`.
-3. Cockpit rendering: per-room git badge + collision warnings (app/).
+3. UI rendering: per-room git badge + collision warnings — a client concern
+   (helm, outside kild); the data already rides `GET /api/rooms/live`.
 
 ## Roadmap — build / remove / extension
 
@@ -106,7 +107,8 @@ out of the core (make kild framework-agnostic), then package as a pi extension (
       as compact `collidesWith` (the overlapping files only)
 - [x] S2: `conflictsWithBase` via `git merge-tree --write-tree` (exit 0/1/other → false/true/null)
 - [x] S2: compact git trims changed-file list to a COUNT (pull-not-push discipline)
-- [ ] S3: cockpit — per-room git badge + collision warnings (app/)
+- [x] S3: UI rendering moved out of kild — per-room git badge + collision warnings
+      are a client concern (helm); the engine serves the data on `/api/rooms/live`
 
 ### Phase 2 — REMOVE the policy baked into the mechanism (framework-agnostic core)
 - [x] De-hardcode CLI verbs: `kild fleet` → `--agent ?? default` (no baked `brain`);

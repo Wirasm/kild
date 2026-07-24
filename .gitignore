@@ -5,7 +5,6 @@
 node_modules
 dist
 target/
-app/src-tauri/binaries/
 .claude/PRPs/
 
 # Maintainer agents: direction.md is committed; runtime state + drafts + the

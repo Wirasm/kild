@@ -47,7 +47,7 @@ before they happen, work landed in order.
 
 ## The operator
 
-**The Tōryō** — one director, many agents. Today a human at the cockpit.
+**The Tōryō** — one director, many agents. Today a human at the helm.
 Increasingly, an orchestrator agent the human supervises. The director directs;
 the fleet builds; kild keeps it sane.
 

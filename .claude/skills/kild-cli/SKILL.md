@@ -53,7 +53,7 @@ Add `--json` to any command for machine-readable output on stdout.
 
 A **room** is a shared workspace where one or more agents collaborate. Unlike `run`
 (one-shot, single agent), a room is steerable and multi-agent — and it is now fully
-CLI-drivable (no cockpit required):
+CLI-drivable (no UI required):
 
 ```bash
 ID=$(kild room open "Build feature X" --detach --project myproj)  # → prints room id

@@ -1,5 +1,10 @@
 # kild on Flue vs kild in Rust — a grounded comparison
 
+> **Historical decision record.** Since this was written, the cockpit UI moved out
+> of kild into its own project ([helm](https://github.com/Wirasm/helm)); kild is
+> engine + CLI + pi-extension, and its REST/WS API is the contract any UI consumes.
+> Cockpit/frontend mentions below reflect the state at decision time.
+
 This spike rebuilds kild's current capabilities **and** the three batteries kild
 doesn't have yet, on Flue, and runs all of them against a real model. Everything
 below was executed end-to-end (see `README.md` for the exact commands and their
