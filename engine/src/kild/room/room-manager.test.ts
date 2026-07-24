@@ -743,3 +743,12 @@ test('workstreamDir on a closed (archived) room is invalid_state', async () => {
     message: 'room room-1 is archived; its workstream is gone',
   });
 });
+
+test('archived snapshots keep cwd and base so history stays project-attributable', async () => {
+  const { manager } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'attrproj-'));
+  await manager.open('room-1', { name: 'demo', cwd: project, participants: [{ name: 'worker' }] });
+  await manager.postFromHuman('room-1', 'work');
+  await manager.close('room-1');
+  expect(manager.archived()[0]).toMatchObject({ cwd: project });
+});
