@@ -37,14 +37,21 @@ export interface RoomParticipant {
   piSessionId?: string;
   /** Absolute pi session file path (resume works from any cwd). */
   piSessionFile?: string;
-  /** Runtime-only: true when the session has finished a turn and is waiting. Set on
-   *  `agent_end`, cleared when a new prompt is delivered. Dedups the idle failsafe to
-   *  one check per active→idle transition; never serialized. */
+  /** True when the session has finished a turn and is waiting. Set on `agent_end`,
+   *  cleared when a new prompt is delivered. Dedups the idle failsafe to one check per
+   *  active→idle transition, and rides {@link ParticipantView} so observers can rank
+   *  finished-and-waiting rooms without parsing logs. */
   idle?: boolean;
-  /** Runtime-only: true once this participant made an EXPLICIT post_message since its last
-   *  activation. If it goes idle with this still false, it finished without reporting — the
-   *  failsafe nudges it to post. Reset when a new turn is delivered; never serialized. */
+  /** True once this participant made an EXPLICIT post_message since its last activation.
+   *  If it goes idle with this still false, it finished without reporting — the failsafe
+   *  nudges it to post. Reset when a new turn is delivered. Rides {@link ParticipantView}
+   *  with `idle` (idle+posted = finished AND reported). */
   posted?: boolean;
+  /** Latest cumulative token count for this participant's session, captured from its
+   *  `stats` UiEvents (emitted at each turn end). */
+  tokens?: number;
+  /** Latest cumulative cost (USD) for this participant's session, from `stats` UiEvents. */
+  cost?: number;
 }
 
 /** A participant as surfaced to observers (room lists, status, archive) — identity plus
@@ -56,6 +63,14 @@ export interface ParticipantView {
   model?: string;
   piSessionId?: string;
   piSessionFile?: string;
+  /** Attention state: finished a turn and waiting for input (see {@link RoomParticipant.idle}). */
+  idle?: boolean;
+  /** Attention state: reported via an explicit delivered post this activation. */
+  posted?: boolean;
+  /** Latest cumulative session token count (from `stats` UiEvents). */
+  tokens?: number;
+  /** Latest cumulative session cost in USD (from `stats` UiEvents). */
+  cost?: number;
 }
 
 /** The one mapping from a live participant to its observer view — every list/status/
@@ -67,6 +82,29 @@ export function participantView(participant: RoomParticipant): ParticipantView {
     model: participant.model,
     piSessionId: participant.piSessionId,
     piSessionFile: participant.piSessionFile,
+    idle: participant.idle,
+    posted: participant.posted,
+    tokens: participant.tokens,
+    cost: participant.cost,
+  };
+}
+
+/** A room's cost rollup, summed over the participants that have reported `stats`. */
+export interface RoomCostTotals {
+  tokens: number;
+  cost: number;
+}
+
+/** Sum participant costs into a room total — undefined until at least one participant
+ *  has reported stats, so payloads without cost data stay clean of zero-noise. */
+export function roomCostTotals(
+  participants: Array<Pick<ParticipantView, 'tokens' | 'cost'>>,
+): RoomCostTotals | undefined {
+  const reported = participants.filter((p) => p.tokens !== undefined || p.cost !== undefined);
+  if (reported.length === 0) return undefined;
+  return {
+    tokens: reported.reduce((sum, p) => sum + (p.tokens ?? 0), 0),
+    cost: reported.reduce((sum, p) => sum + (p.cost ?? 0), 0),
   };
 }
 
@@ -170,6 +208,8 @@ export interface ArchivedRoom {
  *  live-only (never persisted); computed on demand when serving live-room status. */
 export interface LiveRoomStatus extends ArchivedRoom {
   git?: WorkstreamGitStatus;
+  /** Room cost rollup summed over participants — absent until stats have arrived. */
+  totals?: RoomCostTotals;
 }
 
 /** Typed room-domain result: every command either succeeds with a value or fails with

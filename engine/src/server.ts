@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
@@ -23,6 +23,7 @@ import {
 } from './kild/room/rest-room-attribution.ts';
 import { roomManager } from './kild/room/room-manager.ts';
 import type { CommandResult, ParticipantSpec } from './kild/room/room-types.ts';
+import { readSessionTranscript } from './kild/session-transcript.ts';
 import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
@@ -230,6 +231,52 @@ app.post('/api/open-url', async (c) => {
   } catch (err) {
     return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
   }
+});
+
+// ── Transcripts ───────────────────────────────────────────────────────────────
+// Compact conversation readback from a pi session file (see session-transcript.ts).
+// `tail` bounds the entry count; invalid values are a client error, not a default.
+async function serveTranscript(
+  c: Context,
+  piSessionFile: string | undefined,
+  who: string,
+): Promise<Response> {
+  if (!piSessionFile) {
+    return c.json({ error: `${who} has no pi session file (yet)` }, 404);
+  }
+  const rawTail = c.req.query('tail');
+  const tail = rawTail === undefined ? undefined : Number(rawTail);
+  if (tail !== undefined && (!Number.isInteger(tail) || tail < 1)) {
+    return c.json({ error: 'tail must be a positive integer' }, 400);
+  }
+  try {
+    return c.json(await readSessionTranscript(piSessionFile, tail));
+  } catch (err) {
+    // The handle is persisted but the file may be gone (pi's dir cleaned up).
+    return c.json({ error: `transcript unreadable: ${errText(err)}` }, 404);
+  }
+}
+
+// A room participant's transcript — works for LIVE and ARCHIVED rooms alike: the
+// piSessionFile handle persists in $KILD_HOME/rooms/<id>.json past the session's death.
+app.get('/api/rooms/:id/participants/:name/transcript', async (c) => {
+  const id = c.req.param('id');
+  const name = c.req.param('name');
+  const room =
+    roomManager.liveRooms().find((r) => r.id === id) ??
+    roomManager.archived().find((r) => r.id === id);
+  if (!room) return c.json({ error: `no such room: ${id}` }, 404);
+  const participant = room.participants.find((p) => p.name === name);
+  if (!participant) return c.json({ error: `no such participant: @${name}` }, 404);
+  return serveTranscript(c, participant.piSessionFile, `participant @${name}`);
+});
+
+// A live session's transcript (fleet drivers, one-shot runs) via SessionInfo.
+app.get('/api/sessions/:id/transcript', async (c) => {
+  const id = c.req.param('id');
+  const info = sessionManager.list().find((s) => s.id === id);
+  if (!info) return c.json({ error: `no such session: ${id}` }, 404);
+  return serveTranscript(c, info.piSessionFile, `session ${id}`);
 });
 
 // ── Sessions ──────────────────────────────────────────────────────────────────

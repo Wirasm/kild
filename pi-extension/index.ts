@@ -110,7 +110,9 @@ interface LiveRoom {
     model?: string;
     piSessionId?: string;
     piSessionFile?: string;
+    idle?: boolean;
   }>;
+  totals?: { tokens: number; cost: number };
   log: Array<{
     id?: string;
     from: string;
@@ -138,8 +140,16 @@ function gitLine(g?: GitStatus): string {
 
 function participantLine(room: LiveRoom): string {
   return room.participants
-    .map((p) => (p.model ? `${p.name}:${p.model}` : p.name))
+    .map((p) => `${p.model ? `${p.name}:${p.model}` : p.name}${p.idle ? ' (idle)' : ''}`)
     .join(', ');
+}
+
+/** Room cost rollup suffix, e.g. ` · $0.43 (128k tok)` — empty until stats arrive. */
+function costLine(room: LiveRoom): string {
+  const t = room.totals;
+  if (!t) return '';
+  const tokens = t.tokens >= 1000 ? `${Math.round(t.tokens / 1000)}k` : `${t.tokens}`;
+  return ` · $${t.cost.toFixed(2)} (${tokens} tok)`;
 }
 
 /** Terminal-resume handles for a room's agents — any agent session can be reopened in a
@@ -516,7 +526,7 @@ export default function (pi: PiExtensionAPI) {
       const lines = rooms.map((r) => {
         const last = r.log.filter((m) => !m.system).at(-1);
         const lastLine = last ? `\n    last: ${last.from} → [${last.to.join(', ')}]: ${last.text.replace(/\s+/g, ' ').slice(0, 120)}` : '';
-        return `${r.id}\n    ${r.name} [${participantLine(r)}]${gitLine(r.git)}${openDecisionsLine(r)}${resumeLines(r)}${lastLine}`;
+        return `${r.id}\n    ${r.name} [${participantLine(r)}]${gitLine(r.git)}${costLine(r)}${openDecisionsLine(r)}${resumeLines(r)}${lastLine}`;
       });
       return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: rooms.length } };
     },
