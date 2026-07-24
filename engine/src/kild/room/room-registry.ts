@@ -107,6 +107,8 @@ export class RoomRegistry {
       state: r.state,
       log: r.log,
       decisions: r.decisions,
+      cwd: r.cwd,
+      base: r.base,
     }));
   }
 
@@ -130,6 +132,8 @@ export class RoomRegistry {
       state,
       log: room.log,
       decisions: room.decisions,
+      cwd: room.cwd,
+      base: room.base,
     };
   }
 

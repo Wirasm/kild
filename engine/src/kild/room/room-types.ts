@@ -201,6 +201,11 @@ export interface ArchivedRoom {
   log: RoomMessage[];
   /** Keyed decision ledger (see room-decisions). Optional: older history files predate it. */
   decisions?: RoomDecision[];
+  /** Project directory the room ran in — persisted so archived rooms stay attributable
+   *  to their project after the worktree is pruned. Optional: older files predate it. */
+  cwd?: string;
+  /** Base branch the workstream measured against. Optional: older files predate it. */
+  base?: string;
 }
 
 /** A live room enriched with its workstream's git/worktree state — the code-state
