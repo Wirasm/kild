@@ -53,6 +53,13 @@ posting, kild nudges IT to report — you don't have to chase it, so just contin
 post arrives. Report your own results to whoever delegated to you (or to @human if the
 human asked) — not by default to @human.
 
+When a blocker in a room needs a call from the human or the driver, mark it as a keyed
+decision so it cannot be lost: put \`needs-decision[<key>]: <one-line question>\` on its own
+line in your post (key = a short slug like \`api-shape\`). It stays open — visible in room
+status and blocking room close — until someone explicitly posts \`resolved[<key>]: <how>\`.
+When you receive a call on a decision you raised, act on it and post the \`resolved[<key>]\`
+line with the outcome. Never mark a decision resolved that wasn't actually decided.
+
 When your work is done, post your final report and then STOP. Do NOT close the room —
 closing kills every agent's context and cannot be undone. A finished room idles: agents
 stay alive and keep their full context, so the human (or you) can follow up later just by

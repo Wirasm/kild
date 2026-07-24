@@ -7,6 +7,9 @@
  */
 export type UiEvent =
   | { kind: 'model'; provider: string; id: string }
+  /** The underlying pi session's durable identity — the terminal-resume handle
+   *  (`pi --session <file|id>`). Emitted once by the worker after session creation. */
+  | { kind: 'pi_session'; id: string; file?: string }
   | { kind: 'text'; delta: string }
   | { kind: 'tool_start'; id: string; name: string; args: string }
   | { kind: 'tool_end'; id: string; name: string; ok: boolean }

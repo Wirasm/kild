@@ -45,6 +45,11 @@ export interface SessionInfo {
   branch?: string;
   /** Deterministic on-disk worktree path, when the session runs in a worktree. */
   worktreePath?: string;
+  /** The underlying pi session id — reopen this agent in a terminal with
+   *  `pi --session <piSessionFile ?? piSessionId>`. */
+  piSessionId?: string;
+  /** Absolute pi session file path (the robust resume handle; works from any cwd). */
+  piSessionFile?: string;
 }
 
 /** A message broadcast to every connected client. */
@@ -238,6 +243,13 @@ export class SessionManager {
       id,
       req,
       (event) => {
+        // Capture the pi session's durable identity so any client can offer a
+        // terminal resume (`pi --session …`) for this agent.
+        if (event.kind === 'pi_session') {
+          info.piSessionId = event.id;
+          info.piSessionFile = event.file;
+          this.broadcast({ sessions: this.list() });
+        }
         this.broadcast({ session: id, event });
         if (event.kind === 'session_end') {
           this.sessions.delete(id);

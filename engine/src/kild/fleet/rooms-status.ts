@@ -1,3 +1,4 @@
+import { openDecisions, type RoomDecision } from '../room/room-decisions.ts';
 import type { LiveRoomStatus, ParticipantView, RoomMessage } from '../room/room-types.ts';
 import type { WorkstreamGitStatus } from '../worktree-status.ts';
 
@@ -41,6 +42,9 @@ export interface CompactRoomStatus {
   /** Other live workstreams that touch the same files — a merge collision waiting to
    *  happen. Empty/absent when this workstream collides with none. */
   collidesWith?: WorkstreamCollision[];
+  /** Unresolved keyed decisions — each needs an operator call before this room can close.
+   *  Absent when none are open (the normal case). */
+  openDecisions?: RoomDecision[];
 }
 
 /** Full changed-file list → a count for the compact view. `path` and the rest ride
@@ -70,16 +74,16 @@ export function computeCollisions(rooms: LiveRoomStatus[]): Map<string, Workstre
 
 export function compactLiveRooms(liveRooms: LiveRoomStatus[]): CompactRoomStatus[] {
   const collisions = computeCollisions(liveRooms);
-  return liveRooms.map((room) => ({
-    id: room.id,
-    name: room.name,
-    participants: room.participants.map((participant) => ({
-      name: participant.name,
-      agent: participant.agent,
-      model: participant.model,
-    })),
-    posts: room.log.slice(-2),
-    ...(room.git ? { git: toCompactGit(room.git) } : {}),
-    ...(collisions.has(room.id) ? { collidesWith: collisions.get(room.id) } : {}),
-  }));
+  return liveRooms.map((room) => {
+    const open = openDecisions(room);
+    return {
+      id: room.id,
+      name: room.name,
+      participants: room.participants.map((participant) => ({ ...participant })),
+      posts: room.log.slice(-2),
+      ...(room.git ? { git: toCompactGit(room.git) } : {}),
+      ...(collisions.has(room.id) ? { collidesWith: collisions.get(room.id) } : {}),
+      ...(open.length > 0 ? { openDecisions: open } : {}),
+    };
+  });
 }

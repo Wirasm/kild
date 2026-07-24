@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { kildHome } from '../config.ts';
-import type {
-  ArchivedRoom,
-  Room,
-  RoomMessage,
-  RoomParticipant,
-  RoomSummary,
+import {
+  type ArchivedRoom,
+  participantView,
+  type Room,
+  type RoomMessage,
+  type RoomParticipant,
+  type RoomSummary,
 } from './room-types.ts';
 
 /**
@@ -71,12 +72,19 @@ export class RoomRegistry {
     this.save(room); // write-through: the log (and current participant snapshot) to disk
   }
 
+  /** Re-persist a room's snapshot after out-of-band metadata changes (e.g. a participant's
+   *  pi session identity arriving after the last post). No-op for message-less rooms. */
+  persistNow(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (room) this.save(room);
+  }
+
   summaries(): RoomSummary[] {
     return [...this.rooms.values()].map((r) => ({
       id: r.id,
       name: r.name,
       worktree: r.worktree,
-      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent, model: p.model })),
+      participants: r.participants.map(participantView),
       state: r.state,
       stopped: r.state === 'halted',
     }));
@@ -95,9 +103,10 @@ export class RoomRegistry {
       id: r.id,
       name: r.name,
       worktree: r.worktree,
-      participants: r.participants.map((p) => ({ name: p.name, agent: p.agent, model: p.model })),
+      participants: r.participants.map(participantView),
       state: r.state,
       log: r.log,
+      decisions: r.decisions,
     }));
   }
 
@@ -117,13 +126,10 @@ export class RoomRegistry {
       id: room.id,
       name: room.name,
       worktree: room.worktree,
-      participants: room.participants.map((p) => ({
-        name: p.name,
-        agent: p.agent,
-        model: p.model,
-      })),
+      participants: room.participants.map(participantView),
       state,
       log: room.log,
+      decisions: room.decisions,
     };
   }
 

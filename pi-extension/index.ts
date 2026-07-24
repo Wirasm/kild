@@ -93,14 +93,41 @@ interface GitStatus {
   conflictsWithBase: boolean | null;
   error?: string;
 }
+interface RoomDecision {
+  key: string;
+  summary: string;
+  openedBy: string;
+  resolvedAt?: number;
+}
 interface LiveRoom {
   id: string;
   name: string;
   worktree?: string;
   state?: string;
-  participants: Array<{ name: string; agent?: string; model?: string }>;
-  log: Array<{ from: string; to: string[]; text: string; system?: boolean; implicit?: boolean }>;
+  participants: Array<{
+    name: string;
+    agent?: string;
+    model?: string;
+    piSessionId?: string;
+    piSessionFile?: string;
+  }>;
+  log: Array<{
+    id?: string;
+    from: string;
+    to: string[];
+    text: string;
+    system?: boolean;
+    implicit?: boolean;
+  }>;
   git?: GitStatus;
+  decisions?: RoomDecision[];
+}
+
+function openDecisionsLine(room: LiveRoom): string {
+  const open = (room.decisions ?? []).filter((d) => d.resolvedAt === undefined);
+  if (open.length === 0) return '';
+  const rendered = open.map((d) => `${d.key} (${d.summary}, raised by @${d.openedBy})`).join('; ');
+  return `\n    OPEN DECISIONS: ${rendered}`;
 }
 
 function gitLine(g?: GitStatus): string {
@@ -113,6 +140,16 @@ function participantLine(room: LiveRoom): string {
   return room.participants
     .map((p) => (p.model ? `${p.name}:${p.model}` : p.name))
     .join(', ');
+}
+
+/** Terminal-resume handles for a room's agents — any agent session can be reopened in a
+ *  normal pi CLI with `pi --session <file>` (full context, works from any cwd). */
+function resumeLines(room: LiveRoom): string {
+  const withHandles = room.participants.filter((p) => p.piSessionFile ?? p.piSessionId);
+  if (withHandles.length === 0) return '';
+  return withHandles
+    .map((p) => `\n    resume @${p.name}: pi --session ${p.piSessionFile ?? p.piSessionId}`)
+    .join('');
 }
 
 function truncate(text: string): string {
@@ -138,6 +175,21 @@ function modelCatalog(): string {
   return lines.length ? `\nParticipant models (pick per task — fit over cost):\n${lines.join('\n')}` : '';
 }
 
+/** The operator's cross-project memory ($KILD_HOME/MAIN_MEMORY.md), capped — the pi
+ *  driver is a fleet operator, so it gets the same fleet memory an engine-spawned driver
+ *  gets. Empty string when absent. */
+function fleetMemory(): string {
+  const home = process.env.KILD_HOME ?? path.join(os.homedir(), '.config', 'kild');
+  try {
+    const content = fs.readFileSync(path.join(home, 'MAIN_MEMORY.md'), 'utf8').trim();
+    if (!content) return '';
+    const capped = content.length > 6000 ? `${content.slice(0, 6000)}…` : content;
+    return `\n\n<fleet-memory>\nYour cross-project fleet memory ($KILD_HOME/MAIN_MEMORY.md):\n${capped}\n</fleet-memory>`;
+  } catch {
+    return '';
+  }
+}
+
 function driverGuide(): string {
   return `<kild-fleet-driver>
 You can orchestrate CONCURRENT multi-agent workstreams ("rooms") via the kild_* tools. You
@@ -155,11 +207,15 @@ are the operator/driver: rooms do the work; you open, delegate, observe, and lan
   with kild_room_post.
 - NEVER call kild_room_close unless the human explicitly tells you to close — closing kills
   every agent's context irrecoverably. Finished rooms stay open for follow-up.
+- Rooms carry keyed decisions: a participant's \`needs-decision[<key>]: <question>\` post
+  opens one; it stays visible in kild_rooms and BLOCKS close until someone posts
+  \`resolved[<key>]: <how>\`. When you make the call, post the resolved line into the room.
+  Never force-close past open decisions without the human's explicit say-so.
 - For a long campaign you won't drive yourself, hand off to a detached driver with
   kild_fleet_start (steer with kild_fleet_post, list with kild_sessions); its rooms outlive it.
 - kild_agents lists the personas valid for participants; "default" always works.
 ${modelCatalog()}
-</kild-fleet-driver>`;
+</kild-fleet-driver>${fleetMemory()}`;
 }
 
 // ── completion push: engine WS → injected turns ─────────────────────────────────────
@@ -217,6 +273,54 @@ function pushReport(text: string): void {
 
 let ws: WebSocket | undefined;
 let lastBootId: string | undefined;
+let everConnected = false;
+const notifiedGone = new Set<string>();
+
+/** Catch up after a WS gap: events pushed while the socket was down are gone, so on every
+ *  RE-connect pull `/api/rooms/live` once and reconcile the engaged rooms — push any
+ *  missed report-to-human (deduped via seenReports) and say so once for an engaged room
+ *  that is no longer live (closed, or died with an engine restart). Pull-based on
+ *  purpose: no engine-side outbox/ack machinery for a gap this rare. */
+async function reconcileAfterReconnect(): Promise<void> {
+  if (engagedRooms.size === 0) return;
+  let rooms: LiveRoom[];
+  try {
+    const r = await fetch(`${ENGINE}/api/rooms/live`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error(String(r.status));
+    rooms = (await r.json()) as LiveRoom[];
+  } catch (e) {
+    dbg(`reconcile: fetch failed — ${(e as Error).message}`);
+    return;
+  }
+  const liveById = new Map(rooms.map((r) => [r.id, r]));
+  for (const roomId of engagedRooms) {
+    const room = liveById.get(roomId);
+    if (!room) {
+      if (notifiedGone.has(roomId)) continue;
+      notifiedGone.add(roomId);
+      const name = roomNames.get(roomId) ?? roomId.slice(0, 8);
+      dbg(`reconcile: engaged room "${name}" no longer live — notifying`);
+      pushReport(
+        `[kild] room "${name}" (${roomId}) is no longer live — it was closed, or its agents ` +
+          `died with an engine restart, while the report bridge was down. Use kild_rooms for ` +
+          `current state and re-open a room if the workstream is unfinished.`,
+      );
+      continue;
+    }
+    roomNames.set(room.id, room.name);
+    for (const m of room.log) {
+      if (!m.id || m.system || m.implicit || !m.to?.includes('human')) continue;
+      if (seenReports.has(m.id)) continue;
+      seenReports.add(m.id);
+      dbg(`reconcile: missed report in "${room.name}" from ${m.from} — pushing`);
+      pushReport(
+        `[kild] room "${room.name}" (${room.id}) — @${m.from} reports (delivered late; the ` +
+          `report bridge was down):\n${m.text}\n\n` +
+          `(React if action is needed; the room stays open and idle for follow-up.)`,
+      );
+    }
+  }
+}
 
 /** Force a fresh WS, dropping any existing one (used on restart detection / reconnect). */
 function reconnect(): void {
@@ -242,7 +346,11 @@ function connectWs(): void {
     return;
   }
   ws = sock;
-  sock.onopen = () => dbg(`ws: open (${engagedRooms.size} engaged rooms)`);
+  sock.onopen = () => {
+    dbg(`ws: open (${engagedRooms.size} engaged rooms)`);
+    if (everConnected) void reconcileAfterReconnect();
+    everConnected = true;
+  };
   sock.onmessage = (ev) => {
       try {
         const msg = JSON.parse(String(ev.data)) as {
@@ -408,7 +516,7 @@ export default function (pi: PiExtensionAPI) {
       const lines = rooms.map((r) => {
         const last = r.log.filter((m) => !m.system).at(-1);
         const lastLine = last ? `\n    last: ${last.from} → [${last.to.join(', ')}]: ${last.text.replace(/\s+/g, ' ').slice(0, 120)}` : '';
-        return `${r.id}\n    ${r.name} [${participantLine(r)}]${gitLine(r.git)}${lastLine}`;
+        return `${r.id}\n    ${r.name} [${participantLine(r)}]${gitLine(r.git)}${openDecisionsLine(r)}${resumeLines(r)}${lastLine}`;
       });
       return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: rooms.length } };
     },
@@ -467,16 +575,25 @@ export default function (pi: PiExtensionAPI) {
     description:
       'Close a kild room: stops every agent and archives the transcript. DESTRUCTIVE — all ' +
       "agent context is lost forever. Call ONLY when the human explicitly says to close. " +
-      'Finished rooms should stay open (idle) for follow-up.',
+      'Finished rooms should stay open (idle) for follow-up. A room with open decisions ' +
+      'refuses to close: get each resolved (a "resolved[<key>]: <how>" post), or pass ' +
+      'force ONLY when the human explicitly says to abandon them.',
     parameters: Type.Object({
       id: Type.String({ description: 'Room id.' }),
+      force: Type.Optional(
+        Type.Boolean({
+          description:
+            'Close past open decisions. Only on an explicit human instruction — this buries ' +
+            'unresolved decisions.',
+        }),
+      ),
     }),
     async execute(_id, params) {
-      const p = params as { id: string };
+      const p = params as { id: string; force?: boolean };
       const res = await engineFetch<{ message: string }>(`/api/rooms/${encodeURIComponent(p.id)}/close`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(p.force ? { force: true } : {}),
       });
       return { content: [{ type: 'text', text: res.message }] };
     },
