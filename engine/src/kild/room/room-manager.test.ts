@@ -589,6 +589,65 @@ test('pi session handles survive into the archived snapshot', async () => {
   });
 });
 
+// ── attention state: idle/posted ride the observer views ─────────────────────────────
+
+test('idle and posted ride the live view — finished-and-waiting without parsing logs', async () => {
+  const { manager, callbacks, emitSession } = fixture();
+  await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }]);
+
+  // worker finishes its turn having reported; reviewer is still working.
+  await callbacks.get('s-1')?.onMessage?.({ kind: 'message_out', text: 'done', to: ['human'] });
+  emitSession('s-1', { kind: 'agent_end' });
+
+  const [worker, reviewer] = manager.liveRooms()[0]?.participants ?? [];
+  expect(worker).toMatchObject({ name: 'worker', idle: true, posted: true });
+  expect(reviewer?.idle).toBeUndefined();
+  expect(reviewer?.posted).toBeUndefined();
+
+  // A delivered turn reactivates: idle/posted reset in the view too.
+  await manager.postFromHuman('room-1', 'one more thing', ['worker']);
+  expect(manager.liveRooms()[0]?.participants[0]).toMatchObject({
+    name: 'worker',
+    idle: false,
+    posted: false,
+  });
+});
+
+// ── cost rollup: stats events land on the participant and sum per room ───────────────
+
+test('stats events land on the participant and rooms carry a cost total', async () => {
+  const { manager, emitSession } = fixture();
+  await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }]);
+
+  emitSession('s-1', { kind: 'stats', tokens: 1200, cost: 0.5, context_pct: 10 });
+  emitSession('s-1', { kind: 'stats', tokens: 3400, cost: 1.25, context_pct: 20 }); // latest wins
+  emitSession('s-2', { kind: 'stats', tokens: 600, cost: 0.25, context_pct: 5 });
+
+  const [worker, reviewer] = manager.liveRooms()[0]?.participants ?? [];
+  expect(worker).toMatchObject({ name: 'worker', tokens: 3400, cost: 1.25 });
+  expect(reviewer).toMatchObject({ name: 'reviewer', tokens: 600, cost: 0.25 });
+
+  const status = await manager.liveRoomsStatus();
+  expect(status[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
+});
+
+test('a room with no stats yet carries no totals (no zero-noise)', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  const status = await manager.liveRoomsStatus();
+  expect(status[0]?.totals).toBeUndefined();
+});
+
+test('participant costs survive into the archived snapshot', async () => {
+  const { manager, emitSession } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.postFromHuman('room-1', 'kick off'); // history so close archives it
+  emitSession('s-1', { kind: 'stats', tokens: 900, cost: 0.33, context_pct: null });
+  await manager.close('room-1');
+
+  expect(manager.archived()[0]?.participants[0]).toMatchObject({ tokens: 900, cost: 0.33 });
+});
+
 // ── memory hook: engine-written log on close, optional synthesis spawn ────────────────
 
 test('closing a room with history appends its engine-written entry to .kild/LOG.md', async () => {

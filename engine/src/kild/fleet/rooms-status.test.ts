@@ -182,6 +182,45 @@ test('compact view surfaces only OPEN decisions and omits the field when none', 
   expect(without).not.toHaveProperty('openDecisions');
 });
 
+test('per-participant attention + cost ride the compact view, with a room totals rollup', () => {
+  const compact = compactLiveRooms([
+    {
+      id: 'room-1',
+      name: 'ops',
+      participants: [
+        { name: 'worker', idle: true, posted: true, tokens: 3400, cost: 1.25 },
+        { name: 'reviewer', tokens: 600, cost: 0.25 },
+      ],
+      log: [],
+    },
+  ]);
+  expect(compact[0]?.participants).toEqual([
+    { name: 'worker', idle: true, posted: true, tokens: 3400, cost: 1.25 },
+    { name: 'reviewer', tokens: 600, cost: 0.25 },
+  ]);
+  expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
+});
+
+test('a room whose participants have no stats gets no totals key', () => {
+  const compact = compactLiveRooms([
+    { id: 'room-1', name: 'ops', participants: [{ name: 'worker' }], log: [] },
+  ]);
+  expect(compact[0]).not.toHaveProperty('totals');
+});
+
+test('server-computed totals on the live status are preferred over recomputing', () => {
+  const compact = compactLiveRooms([
+    {
+      id: 'room-1',
+      name: 'ops',
+      participants: [{ name: 'worker', tokens: 100, cost: 0.1 }],
+      log: [],
+      totals: { tokens: 4000, cost: 1.5 },
+    },
+  ]);
+  expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
+});
+
 test('compaction copies participant and post arrays without mutating the source room', () => {
   const rooms = [
     {

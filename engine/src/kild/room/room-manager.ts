@@ -40,6 +40,7 @@ import {
   type RoomMessage,
   type RoomOutbound,
   type RoomParticipant,
+  roomCostTotals,
 } from './room-types.ts';
 
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
@@ -130,9 +131,22 @@ export class RoomManager {
           provider?: string;
           id?: string;
           file?: string;
+          tokens?: number;
+          cost?: number;
         };
         if (event.kind === 'model' && event.provider && event.id) {
           located.participant.model = `${event.provider}/${event.id}`;
+        }
+        // Capture the latest cumulative cost snapshot (emitted at every turn end) so
+        // observers can rank rooms by spend without parsing transcripts. No persistNow:
+        // the next post's write-through snapshot — or close() — carries it to disk.
+        if (
+          event.kind === 'stats' &&
+          typeof event.tokens === 'number' &&
+          typeof event.cost === 'number'
+        ) {
+          located.participant.tokens = event.tokens;
+          located.participant.cost = event.cost;
         }
         // The pi session identity is the participant's durable terminal-resume handle;
         // persist it so archived rooms keep it too (there may be no later post to piggyback
@@ -262,6 +276,7 @@ export class RoomManager {
         state: room.state,
         log: room.log,
         decisions: room.decisions,
+        totals: roomCostTotals(room.participants),
         git: await workstreamGitStatus(
           room.worktree ? worktreePath(room.worktree) : room.cwd,
           room.base,
