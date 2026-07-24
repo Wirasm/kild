@@ -80,6 +80,9 @@ export interface SpawnSessionRequest {
   projectName?: string;
   /** Grant the fleet room-control tools (open/post/status/close rooms). */
   fleet?: boolean;
+  /** Absolute pi session file to fork from — the spawned session starts from a frozen
+   *  copy of its history (a new session file; the source is never written). */
+  forkFrom?: string;
   /** Initial prompt delivered right after spawn (e.g. the fleet driver's goal). */
   prompt?: string;
 }

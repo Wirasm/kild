@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { SessionManager } from './sessions.ts';
+import { SessionManager, workerEnv } from './sessions.ts';
 import { worktreePath, worktreeRef } from './worktree.ts';
 
 // The session path derives SessionInfo.branch/worktreePath from the worktree name
@@ -40,6 +40,21 @@ test('resolveActor rejects a live session with no actor identity', () => {
     code: 'rejected',
     message: "session 'anon-session' has no actor identity",
   });
+});
+
+test('workerEnv carries the fork source to the worker as KILD_FORK_SESSION', () => {
+  const env = workerEnv(
+    's-1',
+    { cwd: '/proj', forkFrom: '/sessions/2026-07-24_abc.jsonl' },
+    undefined,
+  );
+  expect(env.KILD_FORK_SESSION).toBe('/sessions/2026-07-24_abc.jsonl');
+  expect(env.KILD_CWD).toBe('/proj');
+  expect(env.KILD_SESSION_ID).toBe('s-1');
+});
+
+test('workerEnv leaves KILD_FORK_SESSION empty for an ordinary (fresh) spawn', () => {
+  expect(workerEnv('s-2', { cwd: '/proj' }, undefined).KILD_FORK_SESSION).toBe('');
 });
 
 test('a worktree name maps to its kild/ branch and on-disk path', () => {

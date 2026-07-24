@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { listAgents } from '../agents.ts';
-import { configuredMemorySynthesis } from '../config.ts';
+import { configuredMemoryDir, configuredMemorySynthesis } from '../config.ts';
 import { appendRoomLog, roomTranscriptPath, synthesisPrompt } from '../memory.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { resolveBaseBranch, worktreePath } from '../worktree.ts';
@@ -360,11 +360,14 @@ export class RoomManager {
 
   /** Post-close memory hook: append the engine-written log entry (always), then spawn
    *  the optional synthesis session (config `memory.synthesis`) to distill the transcript
-   *  into `.kild/MEMORY.md`. Memory must never break a close — failures are logged loud
-   *  and swallowed here, at the one boundary where that is the right call. */
+   *  into the memory dir's `MEMORY.md` (config `memory.dir`, default `.kild/`). Memory
+   *  must never break a close — failures are logged loud and swallowed here, at the one
+   *  boundary where that is the right call. */
   private async recordMemory(room: Room): Promise<void> {
+    let memoryDir: string;
     try {
-      appendRoomLog(room);
+      memoryDir = await configuredMemoryDir(room.cwd);
+      appendRoomLog(room, memoryDir);
     } catch (err) {
       console.error(
         `kild: room log append failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
@@ -381,7 +384,11 @@ export class RoomManager {
         agent: synthesis.agent ?? 'default',
         projectName: `memory:${room.name}`,
       });
-      this.sessions.prompt(id, synthesisPrompt(room, roomTranscriptPath(room.id)), 'kild');
+      this.sessions.prompt(
+        id,
+        synthesisPrompt(room, roomTranscriptPath(room.id), memoryDir),
+        'kild',
+      );
     } catch (err) {
       console.error(
         `kild: memory synthesis spawn failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
