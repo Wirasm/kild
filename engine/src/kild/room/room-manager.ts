@@ -270,6 +270,23 @@ export class RoomManager {
     );
   }
 
+  /** The effective workstream dir (the room's worktree if set, else its cwd) + base of
+   *  ONE live room — the same resolution {@link liveRoomsStatus} uses per room, exposed
+   *  so the review endpoints can drill into a single room without probing every room's
+   *  git state. Live rooms only: an archived room's participants are gone and its
+   *  worktree may be pruned, so there is no workstream to inspect (`invalid_state`);
+   *  an id that was never a room is `not_found`. */
+  workstreamDir(roomId: string): CommandResult<{ dir: string; base?: string }> {
+    const room = this.registry.get(roomId);
+    if (room) {
+      return ok({ dir: room.worktree ? worktreePath(room.worktree) : room.cwd, base: room.base });
+    }
+    if (this.registry.archived().some((archived) => archived.id === roomId)) {
+      return fail('invalid_state', `room ${roomId} is archived; its workstream is gone`);
+    }
+    return fail('not_found', `no such live room: ${roomId}`);
+  }
+
   /** Add a participant to a live room. `invitedBy` is the inviter's name (default
    *  {@link HUMAN} for the operator's manual invite). */
   async addParticipant(

@@ -15,6 +15,7 @@ import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 
 import { listAgents } from './kild/agents.ts';
+import { reviewCommits, reviewDiff, reviewFiles } from './kild/git-review.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import {
   resolveCloseRoomActor,
@@ -414,6 +415,39 @@ app.post('/api/rooms/:id/close', async (c) => {
   const result = await roomManager.close(c.req.param('id'), { force: force === true });
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
+});
+
+// ── Review intelligence ───────────────────────────────────────────────────────
+// Git drill-down for a live room's workstream (worktree if set, else cwd — the same
+// resolution live-room status uses): commits vs the room's base, per-file diff stats
+// (committed + uncommitted), and one file's unified patch. Live rooms only — an
+// archived room's workstream dir is gone (409); unknown ids 404. Git failures inside
+// a resolved room are data ({error} in the body, per workstream-git-status), never a 500.
+app.get('/api/rooms/:id/git/commits', async (c) => {
+  const located = roomManager.workstreamDir(c.req.param('id'));
+  if (!located.ok) {
+    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+  }
+  return c.json(await reviewCommits(located.value.dir, located.value.base));
+});
+app.get('/api/rooms/:id/git/files', async (c) => {
+  const located = roomManager.workstreamDir(c.req.param('id'));
+  if (!located.ok) {
+    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+  }
+  return c.json(await reviewFiles(located.value.dir, located.value.base));
+});
+app.get('/api/rooms/:id/git/diff', async (c) => {
+  const file = c.req.query('path');
+  if (!file) return c.json({ error: 'path query parameter required' }, 400);
+  const located = roomManager.workstreamDir(c.req.param('id'));
+  if (!located.ok) {
+    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+  }
+  const diff = await reviewDiff(located.value.dir, located.value.base, file);
+  // The traversal guard: only a path git itself reported may be diffed.
+  if (diff.unknownPath) return c.json({ error: diff.error }, 404);
+  return c.json(diff);
 });
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
