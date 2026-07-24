@@ -34,10 +34,15 @@ export interface KildConfig {
    *  it's good at, cost). Appended to a delegating session's system prompt so the user
    *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
   models?: Record<string, string>;
-  /** Project memory behavior. The engine-written room log (`.kild/LOG.md`) is always on;
+  /** Project memory behavior. The engine-written room log (`<dir>/LOG.md`) is always on;
    *  `synthesis` opts in to the LLM half: on room close, a session is spawned to distill
-   *  the transcript into `.kild/MEMORY.md`. Absent → no synthesis session is spawned. */
+   *  the transcript into `<dir>/MEMORY.md`. Absent → no synthesis session is spawned. */
   memory?: {
+    /** Directory holding the project's memory files (LOG.md, MEMORY.md, direction.md).
+     *  `~` expands to $HOME; a relative path resolves against the project cwd.
+     *  Default: `.kild` — the project-local store. Any intelligence layer can point
+     *  this anywhere; to kild it is just a directory path. */
+    dir?: string;
     synthesis?: {
       /** provider/model ref for the synthesis session (pick a strong reasoning model). */
       model?: string;
@@ -113,6 +118,16 @@ export async function configuredModels(cwd: string): Promise<Record<string, stri
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
   return { ...(global?.models ?? {}), ...(project?.models ?? {}) };
+}
+
+/** The resolved memory directory for `cwd`: config `memory.dir`, project over global,
+ *  default `.kild`. `~` expands to $HOME; a relative value resolves against `cwd`.
+ *  Always returns an absolute path. Never throws. */
+export async function configuredMemoryDir(cwd: string): Promise<string> {
+  const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
+  const global = await readConfigFile(path.join(kildHome(), 'config.json'));
+  const dir = project?.memory?.dir ?? global?.memory?.dir ?? '.kild';
+  return path.resolve(cwd, expandHome(dir));
 }
 
 /** Merged memory-synthesis config (project wins over global); undefined = synthesis off. */
