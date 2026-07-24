@@ -91,7 +91,7 @@ later without touching call sites.
 
 - **Lifecycle collapse** (4 states + 6 guards → running|stopped + visibility flag).
   Kept off this branch to keep the `structured-to` change atomic/reviewable. Blast
-  radius verified engine-internal: the frontend reads `RoomSummary.stopped` (boolean),
+  radius verified engine-internal: clients read `RoomSummary.stopped` (boolean),
   not the raw state string, so it can be done as its own change safely. Note the
   halted↔closed distinction is load-bearing (halt = stopped-but-visible; close =
   archive+remove), not pure cruft — collapse them via a flag, don't erase the behavior.

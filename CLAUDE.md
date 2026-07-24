@@ -12,21 +12,24 @@ is not special infrastructure — just an agent holding kild's orchestration too
 It is a single-developer tool — no multi-tenant complexity. Optimize for one
 operator directing many agents. See [`VISION.md`](./VISION.md).
 
-**Two halves, one boundary:**
+**What kild is — engine, CLI, pi extension. No UI:**
 
 - **Engine** (`engine/`, TypeScript on bun) — the agent runtime, daemon, and CLI.
   Runs `pi` coding-agent sessions in-process via the **coding-agent SDK**, exposes
   them over an HTTP + WebSocket server (Hono), and gives any command-line agent a
   kild runtime through the `kild` CLI.
-- **Cockpit** (`app/`, Tauri shell + SvelteKit) — a native window hosting the web
-  UI. The frontend talks to the engine over HTTP + WebSocket. The Rust in the shell
-  is the irreducible Tauri bootstrap only — no logic lives there.
+- **pi extension** (`pi-extension/`) — drives kild rooms/fleets from inside a pi
+  session; a thin client over the engine's REST API.
+- **The API is the UI contract.** kild ships no UI. The engine's REST + WebSocket
+  surface is the contract; external clients — e.g.
+  [helm](https://github.com/Wirasm/helm), a separate native UI project — consume
+  it. Never add UI code to this repo; evolve the API and let clients follow.
 
 **pi owns cognition** — LLM providers, sessions, context compaction, tool calling,
 agent status, and **auth** (it reads `~/.pi/agent/auth.json`, so the user's Claude
 Max / ChatGPT OAuth subscriptions work natively). **kild owns orchestration** — who
 runs where, how agents hand off, and how work lands: projects, agents, sessions,
-worktrees, the cockpit. We do not reimplement what pi already does.
+worktrees, rooms. We do not reimplement what pi already does.
 
 **Prompts are data, not code.** Agent personalities — including the orchestrator's
 own — live in `.pi/agents` / `.claude/agents`, authored and edited by humans *and*
@@ -39,12 +42,11 @@ it never bakes an agent personality into the codebase.
 - **Lint + format:** biome (matches the Flue project's own toolchain).
 - **Web framework:** hono (the engine's HTTP + WS server; also Flue's framework).
 - **Agent kernel:** `@earendil-works/pi-coding-agent` (the in-process SDK) +
-  `@earendil-works/pi-ai`. The cockpit/CLI use the **coding-agent SDK** directly.
+  `@earendil-works/pi-ai`. Engine sessions run on the **coding-agent SDK** directly.
 - **Flue** (`@flue/runtime`) is a **committed dependency** for sandbox experiments,
   deploy targets, and the upstream we contribute back to. Its workflows are frozen,
   explicitly invoked experiments—not on the session hot path—and must not grow until
   the fleet layer names a real server or CLI endpoint.
-- **UI:** SvelteKit (Svelte 5 runes) + adapter-static, in a Tauri 2 shell.
 
 ## Core Principles
 
@@ -56,8 +58,8 @@ interpretations exist, present them — don't pick silently.
 **Lego — Vertical Slices** — Small, composable parts. Each slice owns its types and
 logic. Extend by adding a slice, never by editing a god-module. The single most
 important boundary: **only the engine knows pi exists** — keep that narrow so pi's
-shapes are translated into kild domain types in one place and the cockpit/CLI never
-couple to them.
+shapes are translated into kild domain types in one place and API/CLI consumers
+never couple to them.
 
 **KISS + YAGNI** — Minimum code that solves the problem, nothing speculative. No
 config key, feature flag, or "flexibility" without a current caller. Rule of three
@@ -69,25 +71,25 @@ boundaries into kild domain types. Narrow loose external shapes (pi events) once
 the boundary, then pass typed data.
 
 **Fail Fast + Explicit Errors** — Never silently swallow an error or broaden a
-capability. Surface failures (server → error response, CLI → stderr + non-zero exit,
-UI → banner). Document a fallback only when it is intentional and safe.
+capability. Surface failures (server → error response, CLI → stderr + non-zero
+exit). Document a fallback only when it is intentional and safe.
 
 **Agent-First** — Don't parse pi's prose to infer intent. Give pi tools / structured
 output. When kild itself is consumed by an agent (the CLI as a skill), emit
 structured output (`--json`), not prose to regex.
 
 **Deliver Signals, Not Sights** — Assume the operator is an agent (a pi driver,
-another orchestrator); the cockpit human is the special case. Anything that matters
+another orchestrator); a human watching a UI client is the special case. Anything that matters
 must arrive as an explicit deliverable — a post with recipients, an event to the
 opener, a nudge, a ledger entry. UI visibility is a courtesy for whoever happens to
 be watching, never the contract. Narration is diagnostic exhaust, never a signal.
 
 **CLI-First** — Every capability is reachable and testable via the `kild` CLI. The
-CLI is a first-class secondary interface: it gives a kild runtime to any
-command-line agent (via the kild-cli skill), independent of the UI.
+CLI is a first-class interface: it gives a kild runtime to any command-line agent
+(via the kild-cli skill), independent of any UI client.
 
-**Green Checks = Done** — `bun run typecheck`, `bun run lint` (biome), and the FE's
-`bun run check` (svelte-check) all pass. Iterate until green.
+**Green Checks = Done** — `bun run typecheck`, `bun run lint` (biome), and
+`bun test` all pass. Iterate until green.
 
 **No Shims, No Backwards Compat** — Greenfield, single dev, no external consumers.
 Rename everywhere; never add aliases or wrapper types for compatibility. One name,
@@ -102,21 +104,10 @@ bun run serve          # start the HTTP+WS engine on :4517 (KILD_PORT to overrid
 bun run dev            # serve with --watch
 bun run cli -- <args>  # the kild CLI, e.g. `bun run cli -- project ls --json`
 bun run typecheck      # tsc --noEmit
+bun test               # bun's test runner
 bun run lint           # biome check src
 bun run format         # biome format --write src
-
-# Cockpit (cd app)
-bun run tauri dev      # ONE command: builds the engine sidecar, starts engine + frontend, opens the window
-bun run dev            # frontend-only vite dev server on :1420
-bun run check          # svelte-check
-bun run tauri build    # release .app — bundles the engine as a sidecar the shell spawns
 ```
-
-Dev loop: `cd app && bun run tauri dev`. Its `beforeDevCommand` compiles the engine
-to a binary (Tauri's `externalBin` requires it present) and runs the live engine +
-frontend concurrently; the shell opens the window. In a **release** build the shell
-spawns the bundled engine sidecar (`#[cfg(not(debug_assertions))]` in `lib.rs`); in
-dev the engine is the live `bun run dev` process instead.
 
 `pi` must be on `PATH` and authenticated (`~/.pi/agent/auth.json`).
 
@@ -126,13 +117,12 @@ dev the engine is the live `bun run dev` process instead.
 kild/
 ├── CLAUDE.md
 ├── .claude/
-│   ├── skills/kild-cli/        # the kild CLI as an Agent Skill (for command-line agents)
-│   └── PRPs/branding/          # brand + vision + Tallinn Night design system
+│   └── skills/kild-cli/        # the kild CLI as an Agent Skill (for command-line agents)
 ├── engine/                     # the kild engine — TypeScript on bun
 │   ├── package.json            #   bin: kild → src/cli.ts
 │   ├── biome.jsonc
 │   ├── src/
-│   │   ├── server.ts           #   Hono HTTP (projects/agents/worktrees/open) + WS (sessions) — cockpit backend + daemon
+│   │   ├── server.ts           #   Hono HTTP (projects/agents/worktrees/open) + WS (sessions) — API server + daemon
 │   │   ├── cli.ts              #   the `kild` CLI (project/agent/worktree/run); thin, delegates to the lib
 │   │   ├── worker.ts           #   per-session subprocess; ensures the worktree, then createAgentSession({cwd})
 │   │   ├── kild/               #   shared library
@@ -148,45 +138,38 @@ kild/
 │   │   └── flue/               #   [Flue layer] Flue-promotable mechanisms
 │   │       └── worktree-sandbox.ts #  worktree() SandboxFactory (self-contained; upstream contribution)
 │   └── src/workflows/          #   [Flue layer] runnable Flue workflows (brain/merge/run demos)
-└── app/                        # the cockpit — Tauri 2 + SvelteKit
-    ├── src/
-    │   ├── lib/api.ts          #   engine client (REST + EngineSocket over WS)
-    │   ├── lib/types.ts        #   shared FE types (Project, Agent, Session, UiEvent, Item)
-    │   ├── lib/components/      #   Sidebar, Topbar, Ledger, ToolCard, Composer, ProjectModal, Dropdown
-    │   ├── lib/theme/tokens.css #   Tallinn Night design tokens
-    │   └── routes/+page.svelte #   sidebar (projects/sessions/new) + per-session transcript
-    └── src-tauri/              #   thin Rust shell (webview host only; no logic)
+└── pi-extension/               # drive kild rooms/fleets from a pi session (thin REST client)
 ```
 
 ### Architectural boundaries
 
 - **The pi boundary.** pi is touched only in the engine, through the coding-agent
   SDK. pi event shapes are translated to kild domain types (`UiEvent`, `RunOutcome`)
-  at that boundary — they never reach the cockpit. This keeps the backbone swappable.
-- **SDK substrate, Flue layer.** Interactive cockpit/CLI sessions run on the
+  at that boundary — they never cross the API. This keeps the backbone swappable.
+- **SDK substrate, Flue layer.** Interactive sessions run on the
   coding-agent SDK (`createAgentSession`, native auth, `AgentSession.subscribe`
   events). Flue is used for the sandbox abstraction, deploy, and the orchestration
   workflows (brain, merge team) — and is the upstream we contribute to.
-- **The cockpit is a web client.** The frontend reaches the engine over HTTP + WS
-  only; the Tauri shell hosts the webview and nothing else.
+- **UI clients are web clients.** Any UI (e.g. helm) reaches the engine over the
+  HTTP + WS API only — no privileged path, no shared code with the engine.
 - **The worktree boundary.** kild owns worktree *policy* — the `kild/<name>` naming,
-  the `$KILD_HOME/worktrees/<name>` path, validation, create-or-attach, merge-prune,
-  the cockpit UI. That logic lives in `engine/src/kild/worktree.ts` and is on the
+  the `$KILD_HOME/worktrees/<name>` path, validation, create-or-attach, merge-prune.
+  That logic lives in `engine/src/kild/worktree.ts` and is on the
   session hot path, so it has **no `@flue` import**. The general *mechanism* — a
   `worktree()` SandboxFactory — lives in `engine/src/flue/worktree-sandbox.ts`,
   self-contained (no `kild/*` imports) so it can be lifted into Flue verbatim.
   Worktrees **persist**: a session closing never removes one; only an explicit
-  `kild worktree rm` / UI action or the automatic merge-prune does.
+  `kild worktree rm` / API delete or the automatic merge-prune does.
 
 ### Naming conventions
 
 - Files: `kebab-case.ts` or `snake_case` per surrounding code; one clear name each.
 - TypeScript casing: types/interfaces `PascalCase`, functions/vars `camelCase`,
   consts `SCREAMING_SNAKE_CASE`.
-- Domain identifiers stay camelCase across the wire (engine ↔ cockpit), e.g.
+- Domain identifiers stay camelCase across the wire (engine ↔ clients), e.g.
   `systemPrompt`, `context_pct` (match the existing `UiEvent` shape exactly).
 
-## The cockpit ↔ engine protocol
+## The engine API — the contract UI clients consume
 
 - **REST:** `GET /api/projects`, `POST /api/projects`, `GET /api/agents?project=…`,
   `GET /api/worktrees?project=…`, `DELETE /api/worktrees` (`{project,name}`),
@@ -199,11 +182,9 @@ kild/
   run the agent in an isolated `kild/<name>` worktree; `SessionInfo` then carries
   `branch` + `worktreePath`.
 
-## Brand / Design
-
-Brand, vision, personas, and the **Tallinn Night** design system live in
-`.claude/PRPs/branding/`. `app/src/lib/theme/tokens.css` is the palette source of
-truth for the UI.
+This REST + WS surface is kild's public contract: external UI clients (e.g.
+[helm](https://github.com/Wirasm/helm)) build against it. Treat changes to it as
+contract changes.
 
 ## Git
 

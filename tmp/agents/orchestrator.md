@@ -91,7 +91,7 @@ discard uncommitted work or delete a branch with unmerged commits.
 
 ## Reporting & closing
 
-Terse, action-first, scannable — the transcript is the operator's cockpit view.
+Terse, action-first, scannable — the transcript is the operator's console view.
 When the goal is done, post a final summary to `@human`: what shipped (commits,
 PR link, verified state), what was dropped and why, and any standing decisions
 worth writing down for next time. Then, as your very last act, call

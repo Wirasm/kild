@@ -105,9 +105,9 @@ kild room, ~$0.20 total:
    personality carries the event contract instead of relying on prompt-level polling loops.
 5. **Slice 5 — engine-derived actors.** Free-form `from` still lets callers label themselves;
    actor identity should come from the engine, not prose or client-provided strings.
-6. **Slice 6 — one transport-neutral command API.** The cockpit, CLI, fleet tools, and any
-   future harness should drive one command surface instead of parallel transport-specific
-   shapes.
+6. **Slice 6 — one transport-neutral command API.** UI clients, the CLI, fleet tools, and
+   any future harness should drive one command surface instead of parallel
+   transport-specific shapes.
 
 ## Next moves
 
@@ -118,7 +118,7 @@ history or context, not a pending work queue.
 **The fleet layer — SHIPPED and live-proven (2026-07-16).** The brain is a kild session
 (`kild fleet "<goal>"`, agent `brain`, `KILD_FLEET=1`) whose tools — `open_room`,
 `post_room`, `rooms_status`, `close_room` — are HTTP clients of the same engine REST
-surface the cockpit drives (new: `POST /api/rooms[,/:id/post,/:id/close]`, participant-
+surface any UI client drives (new: `POST /api/rooms[,/:id/post,/:id/close]`, participant-
 aware kickoff addressing, non-room WS `spawn/prompt/stop` restored). Memory is a durable
 run ledger (`.kild/fleet/`, maintainer-style atomic writes). First run: the brain opened
 a room, the room's orchestrator/worker did the PRP work and self-closed, the brain caught
