@@ -6,6 +6,7 @@ if (process.env.KILD_ROLE === 'worker') {
 
 import { execFile as execFileCb } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -236,6 +237,8 @@ app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
 // Spawn a detached session (e.g. a `kild fleet` driver) — the CLI/scripts drive this over
 // REST instead of holding a WS open. `fleet: true` grants the room-control tools.
+// `forkFrom` spawns the session from a frozen copy of an existing pi session file: the
+// fork gets a NEW session file and never writes the source.
 app.post('/api/sessions', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     agent?: string;
@@ -246,7 +249,17 @@ app.post('/api/sessions', async (c) => {
     projectName?: string;
     fleet?: boolean;
     prompt?: string;
+    forkFrom?: unknown;
   };
+  if (body.forkFrom !== undefined) {
+    if (typeof body.forkFrom !== 'string' || !body.forkFrom.trim()) {
+      return c.json({ error: 'forkFrom must be a session file path' }, 400);
+    }
+    const stat = await fs.stat(body.forkFrom).catch(() => null);
+    if (!stat?.isFile()) {
+      return c.json({ error: `forkFrom is not an existing session file: ${body.forkFrom}` }, 400);
+    }
+  }
   const id = randomUUID();
   sessionManager.spawn(
     id,
@@ -257,6 +270,7 @@ app.post('/api/sessions', async (c) => {
       worktree: body.worktree,
       base: body.base,
       projectName: body.projectName,
+      forkFrom: body.forkFrom,
       env: body.fleet ? { KILD_FLEET: '1' } : undefined,
     },
     'cli',

@@ -25,6 +25,10 @@ export interface SpawnRequest {
   /** Base branch a brand-new worktree forks from (e.g. `dev`). Ignored when attaching to
    *  an existing tree. Absent → the checkout's current HEAD. */
   base?: string;
+  /** Absolute path of an existing pi session file to fork from. The worker copies its
+   *  full history into a brand-new session file (frozen snapshot) — the source file is
+   *  never written, so the original session cannot be polluted or corrupted. */
+  forkFrom?: string;
   /** Extra environment for the worker — opaque to the manager. Room participants use
    *  it to carry `KILD_ROOM` / `KILD_PARTICIPANT`; it never overrides the `KILD_*`
    *  vars the manager itself sets. */
@@ -62,6 +66,32 @@ type MaybePromise<T> = T | Promise<T>;
 // for room participants.
 const SKILLS_PROFILE = readSkillsProfile(process.env.KILD_SKILLS_PROFILE);
 
+/** The manager-owned `KILD_*` worker environment for a spawn request. Layered on top
+ *  of `req.env`, so a request can never override the manager's own vars. Pure —
+ *  exported for tests (the request→env plumbing without spawning a worker). */
+export function workerEnv(
+  id: string,
+  req: SpawnRequest,
+  skillsProfile: string | undefined,
+): Record<string, string> {
+  return {
+    KILD_ROLE: 'worker',
+    KILD_MODEL: req.model ?? '',
+    KILD_CWD: req.cwd ?? process.cwd(),
+    KILD_AGENT: req.agent ?? '',
+    // Session identity is manager-owned: fleet tools use it to identify room openers.
+    KILD_SESSION_ID: id,
+    // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
+    KILD_WORKTREE: req.worktree ?? '',
+    // Base branch a brand-new worktree forks from (empty → current HEAD).
+    KILD_BASE: req.base ?? '',
+    // pi session file to fork this session from (empty → fresh session).
+    KILD_FORK_SESSION: req.forkFrom ?? '',
+    // A profile is a room capability assignment, not inherited worker state.
+    KILD_SKILLS_PROFILE: skillsProfile ?? '',
+  };
+}
+
 /** Control-line callbacks for a session's worker — used by the RoomManager to route
  *  a participant's `post_message` / `invite_agent` back into its room. A bare
  *  (non-room) session passes none, so the control lines are simply never emitted. */
@@ -92,18 +122,7 @@ class PiSession {
       env: {
         ...parentEnv,
         ...req.env, // extra worker env (e.g. room membership); our KILD_* win below
-        KILD_ROLE: 'worker',
-        KILD_MODEL: req.model ?? '',
-        KILD_CWD: req.cwd ?? process.cwd(),
-        KILD_AGENT: req.agent ?? '',
-        // Session identity is manager-owned: fleet tools use it to identify room openers.
-        KILD_SESSION_ID: id,
-        // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
-        KILD_WORKTREE: req.worktree ?? '',
-        // Base branch a brand-new worktree forks from (empty → current HEAD).
-        KILD_BASE: req.base ?? '',
-        // A profile is a room capability assignment, not inherited worker state.
-        KILD_SKILLS_PROFILE: skillsProfile ?? '',
+        ...workerEnv(id, req, skillsProfile),
       },
       stdio: ['pipe', 'pipe', 'inherit'],
     });

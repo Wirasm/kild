@@ -6,10 +6,11 @@ import {
   DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
+  SessionManager as PiSessionManager,
 } from '@earendil-works/pi-coding-agent';
 
 import { resolveAgentInstructions } from './kild/agents.ts';
-import { configuredModels, resolvePluginPaths } from './kild/config.ts';
+import { configuredMemoryDir, configuredModels, resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import { createFleetCloseRoomTool } from './kild/fleet/close-room-tool.ts';
 import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
@@ -50,6 +51,7 @@ export async function runWorker(): Promise<never> {
   const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
   const fleetEnabled = process.env.KILD_FLEET === '1';
   const skillsProfile = process.env.KILD_SKILLS_PROFILE || undefined;
+  const forkFrom = process.env.KILD_FORK_SESSION || undefined;
 
   const emit = (event: UiEvent) => process.stdout.write(`${JSON.stringify(event)}\n`);
   const pendingCommands = new Map<
@@ -140,6 +142,11 @@ export async function runWorker(): Promise<never> {
         : undefined;
     }
     await resourceLoader?.reload();
+    // Fork-spawn: seed this session with the full history of an existing pi session
+    // file (KILD_FORK_SESSION), frozen at fork time. `forkFrom` COPIES the source
+    // into a brand-new session file (same semantics as pi's own `--fork`), so the
+    // source is never written — two writers on one file are impossible.
+    const piSessionManager = forkFrom ? PiSessionManager.forkFrom(forkFrom, cwd) : undefined;
     ({ session } = await createAgentSession({
       model,
       authStorage,
@@ -147,6 +154,7 @@ export async function runWorker(): Promise<never> {
       cwd,
       customTools,
       resourceLoader,
+      sessionManager: piSessionManager,
     }));
   } catch (err) {
     emit({ kind: 'error', message: errText(err) });
@@ -196,9 +204,13 @@ export async function runWorker(): Promise<never> {
   const modelsSection =
     inRoom || fleetEnabled ? formatModelsSection(await configuredModels(cwd)) : '';
   // Persistent memory rides the first turn: fleet drivers get the operator's cross-project
-  // memory; every session gets the project's curated memory + direction (read from the
-  // MAIN checkout — the files are gitignored, so worktree checkouts never carry them).
-  const memorySections = [fleetEnabled ? fleetMemorySection() : '', projectMemorySection(cwd)]
+  // memory; every session gets the project's curated memory + direction, read from the
+  // resolved memory dir (config `memory.dir`, default `.kild/` — gitignored, so worktree
+  // checkouts never carry the default-dir files).
+  const memorySections = [
+    fleetEnabled ? fleetMemorySection() : '',
+    projectMemorySection(cwd, await configuredMemoryDir(cwd)),
+  ]
     .filter(Boolean)
     .join('\n\n');
   let sessionPrefix: string | null = [MECHANISM_PROMPT, modelsSection, memorySections]
