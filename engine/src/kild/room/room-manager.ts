@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import { listAgents } from '../agents.ts';
+import { configuredMemorySynthesis } from '../config.ts';
+import { appendRoomLog, roomTranscriptPath, synthesisPrompt } from '../memory.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { resolveBaseBranch, worktreePath } from '../worktree.ts';
 import { workstreamGitStatus } from '../worktree-status.ts';
+import { applyDecisionMarkers, formatOpenDecisions, openDecisions } from './room-decisions.ts';
 import {
   finalNonSystemPost,
   formatOperatorNotification,
@@ -31,6 +34,7 @@ import {
   type OpenRoomSpec,
   type OpenRoomSuccess,
   type ParticipantSpec,
+  participantView,
   type Room,
   type RoomActionSuccess,
   type RoomMessage,
@@ -121,9 +125,22 @@ export class RoomManager {
       if (located) {
         // Capture the provider-resolved model so observers see what each agent actually
         // ran on (not just the requested ref — which may have been a default/alias).
-        const event = msg.event as { kind?: string; provider?: string; id?: string };
+        const event = msg.event as {
+          kind?: string;
+          provider?: string;
+          id?: string;
+          file?: string;
+        };
         if (event.kind === 'model' && event.provider && event.id) {
           located.participant.model = `${event.provider}/${event.id}`;
+        }
+        // The pi session identity is the participant's durable terminal-resume handle;
+        // persist it so archived rooms keep it too (there may be no later post to piggyback
+        // the snapshot on).
+        if (event.kind === 'pi_session' && event.id) {
+          located.participant.piSessionId = event.id;
+          located.participant.piSessionFile = event.file;
+          this.registry.persistNow(located.room.id);
         }
         // Failsafe on a finished turn: if a delegate went idle WITHOUT posting, its inviter
         // is blind (an explicit post would have woken the inviter via routing). Nudge the
@@ -241,13 +258,10 @@ export class RoomManager {
         id: room.id,
         name: room.name,
         worktree: room.worktree,
-        participants: room.participants.map((p) => ({
-          name: p.name,
-          agent: p.agent,
-          model: p.model,
-        })),
+        participants: room.participants.map(participantView),
         state: room.state,
         log: room.log,
+        decisions: room.decisions,
         git: await workstreamGitStatus(
           room.worktree ? worktreePath(room.worktree) : room.cwd,
           room.base,
@@ -287,12 +301,26 @@ export class RoomManager {
 
   /** Stop every participant session — the human kill switch / room teardown. A room
    *  with history moves straight into the archive and is pushed to clients, so it stays
-   *  visible as a read-only transcript without an engine restart. */
-  async close(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
+   *  visible as a read-only transcript without an engine restart.
+   *
+   *  Open decisions block the close (the fold's whole guarantee: a raised decision
+   *  cannot leave the system silently). `force` is the operator's escape hatch — it is
+   *  never offered to the in-room lead path ({@link handleCloseRoom}). */
+  async close(
+    roomId: string,
+    opts: { force?: boolean } = {},
+  ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
     const allowed = ensureRoomCanCloseFromOperator(room);
     if (!allowed.ok) return allowed;
+    if (!opts.force && openDecisions(room).length > 0) {
+      return fail(
+        'rejected',
+        `room '${room.name}' has open decisions: ${formatOpenDecisions(room)}. ` +
+          `Resolve each (post 'resolved[<key>]: <how>') or close with force.`,
+      );
+    }
     for (const participant of room.participants) this.sessions.stop(participant.sessionId);
     const transitioned = transitionRoomState(room, 'closed');
     if (!transitioned.ok) return transitioned;
@@ -303,6 +331,7 @@ export class RoomManager {
     });
     if (archived) this.broadcast({ archivedRoom: archived });
     this.broadcast({ rooms: this.registry.summaries() });
+    if (archived) await this.recordMemory(room);
     return ok({ message: `Room '${room.name}' closed.` });
   }
 
@@ -327,6 +356,37 @@ export class RoomManager {
     });
     this.broadcast({ rooms: this.registry.summaries() });
     return ok({ message: `Room '${room.name}' halted.` });
+  }
+
+  /** Post-close memory hook: append the engine-written log entry (always), then spawn
+   *  the optional synthesis session (config `memory.synthesis`) to distill the transcript
+   *  into `.kild/MEMORY.md`. Memory must never break a close — failures are logged loud
+   *  and swallowed here, at the one boundary where that is the right call. */
+  private async recordMemory(room: Room): Promise<void> {
+    try {
+      appendRoomLog(room);
+    } catch (err) {
+      console.error(
+        `kild: room log append failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
+      );
+      return; // no log entry → don't synthesize against a missing input
+    }
+    try {
+      const synthesis = await configuredMemorySynthesis(room.cwd);
+      if (!synthesis) return;
+      const id = this.createId();
+      this.sessions.spawn(id, {
+        model: synthesis.model,
+        cwd: room.cwd, // the MAIN checkout — memory files are gitignored, so worktrees never see them
+        agent: synthesis.agent ?? 'default',
+        projectName: `memory:${room.name}`,
+      });
+      this.sessions.prompt(id, synthesisPrompt(room, roomTranscriptPath(room.id)), 'kild');
+    } catch (err) {
+      console.error(
+        `kild: memory synthesis spawn failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   /** Spawn one participant session, wired so its control lines route back here.
@@ -436,6 +496,16 @@ export class RoomManager {
     if (room.participants[0]?.sessionId !== sessionId) {
       return fail('rejected', `only the lead may close room '${room.name}'`);
     }
+    // No force on the participant path: an agent may not bury a raised decision. Only
+    // the operator (human/brain) can force-close past open decisions.
+    if (openDecisions(room).length > 0) {
+      return fail(
+        'rejected',
+        `room '${room.name}' has open decisions: ${formatOpenDecisions(room)}. ` +
+          `Get each resolved (a 'resolved[<key>]: <how>' post) before closing; ` +
+          `only the operator may force-close past them.`,
+      );
+    }
     await this.post(
       room.id,
       HUMAN,
@@ -489,6 +559,9 @@ export class RoomManager {
       );
     }
 
+    // Fold decision markers BEFORE the append — appendMessage's write-through snapshot
+    // then persists the updated ledger together with the post that changed it.
+    applyDecisionMarkers(room, message);
     traceRoomPost(room.name, message);
     this.registry.appendMessage(roomId, message);
     routeRoomMessage(room, message, this.delivery());

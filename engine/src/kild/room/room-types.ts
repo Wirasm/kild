@@ -1,5 +1,6 @@
 import type { UiEvent } from '../events.ts';
 import type { WorkstreamGitStatus } from '../worktree-status.ts';
+import type { RoomDecision } from './room-decisions.ts';
 
 /**
  * Room domain — the operator-facing primitive: a set of participants (agent
@@ -29,6 +30,13 @@ export interface RoomParticipant {
    *  the opener's initial roster. Ground-truth spawn edge (vs inferring it from the log)
    *  and the routing target for its idle/done notice. */
   invitedBy?: string;
+  /** The underlying pi session id — the durable terminal-resume handle
+   *  (`pi --session <piSessionFile ?? piSessionId>`). Captured from the worker's
+   *  `pi_session` event and persisted with the room, so any agent in any room —
+   *  live or archived — can be reopened in the pi CLI. */
+  piSessionId?: string;
+  /** Absolute pi session file path (resume works from any cwd). */
+  piSessionFile?: string;
   /** Runtime-only: true when the session has finished a turn and is waiting. Set on
    *  `agent_end`, cleared when a new prompt is delivered. Dedups the idle failsafe to
    *  one check per active→idle transition; never serialized. */
@@ -40,11 +48,26 @@ export interface RoomParticipant {
 }
 
 /** A participant as surfaced to observers (room lists, status, archive) — identity plus
- *  the model it ran on. No sessionId (that's an internal handle). */
+ *  the model it ran on. No kild sessionId (that's an internal handle); the PI session
+ *  identity IS exposed — it's the durable handle for reopening the agent in a terminal. */
 export interface ParticipantView {
   name: string;
   agent?: string;
   model?: string;
+  piSessionId?: string;
+  piSessionFile?: string;
+}
+
+/** The one mapping from a live participant to its observer view — every list/status/
+ *  archive producer uses this so new view fields appear everywhere at once. */
+export function participantView(participant: RoomParticipant): ParticipantView {
+  return {
+    name: participant.name,
+    agent: participant.agent,
+    model: participant.model,
+    piSessionId: participant.piSessionId,
+    piSessionFile: participant.piSessionFile,
+  };
 }
 
 /** A single post on a room's shared log — the conversation unit. */
@@ -87,6 +110,9 @@ export interface Room {
   log: RoomMessage[];
   /** Canonical lifecycle state for this room. */
   state: RoomLifecycleState;
+  /** Keyed decision ledger folded from `needs-decision[key]:` / `resolved[key]` post
+   *  markers (see room-decisions). Optional so out-of-scope fixtures stay untouched. */
+  decisions?: RoomDecision[];
 }
 
 /** A participant to spawn into a room. */
@@ -135,6 +161,8 @@ export interface ArchivedRoom {
    *  older history files and out-of-scope fixtures continue to type-check. */
   state?: RoomLifecycleState;
   log: RoomMessage[];
+  /** Keyed decision ledger (see room-decisions). Optional: older history files predate it. */
+  decisions?: RoomDecision[];
 }
 
 /** A live room enriched with its workstream's git/worktree state — the code-state

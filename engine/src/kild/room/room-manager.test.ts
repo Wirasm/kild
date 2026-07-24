@@ -70,7 +70,7 @@ async function openRoom(
   roomId: string = 'room-1',
   openedBy?: string,
 ) {
-  return manager.open(roomId, { name: 'demo', cwd: '/tmp', participants, openedBy });
+  return manager.open(roomId, { name: 'demo', cwd: tmp, participants, openedBy });
 }
 
 test('rejects a duplicate room id and preserves the existing room', async () => {
@@ -473,4 +473,163 @@ test('a delivered turn re-arms the failsafe (idle-without-post next turn nudges 
   emitSession(WORKER, { kind: 'agent_end' }); // idle without post again → nudge 2
 
   expect(prompted.filter(isNudge)).toHaveLength(2);
+});
+
+// ── keyed decisions: no decision leaves the system silently ──────────────────────────
+
+test('a needs-decision post opens a keyed decision and blocks close until force', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'Two options here.\nneeds-decision[api-shape]: REST or RPC?',
+    to: ['human'],
+  });
+
+  const refused = await manager.close('room-1');
+  expect(refused).toMatchObject({ ok: false, code: 'rejected' });
+  expect((refused as { message: string }).message).toContain('api-shape');
+  expect((refused as { message: string }).message).toContain('force');
+
+  expect(await manager.close('room-1', { force: true })).toEqual({
+    ok: true,
+    value: { message: "Room 'demo' closed." },
+  });
+});
+
+test('a resolved post closes the decision and unblocks an ordinary close', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'needs-decision[api-shape]: REST or RPC?',
+    to: ['human'],
+  });
+  await manager.postFromHuman('room-1', 'resolved[api-shape]: REST — matches the existing API');
+
+  expect(await manager.close('room-1')).toMatchObject({ ok: true });
+});
+
+test('a later done post never masks an open decision (the fold invariant)', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'needs-decision[auth]: token or session?',
+    to: ['human'],
+  });
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'done: shipped it, all handled',
+    to: ['human'],
+  });
+  expect(await manager.close('room-1')).toMatchObject({ ok: false, code: 'rejected' });
+});
+
+test('the lead cannot close (or force) past an open decision — operator only', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'needs-decision[auth]: token or session?',
+    to: ['human'],
+  });
+  const result = await callbacks.get('s-1')?.onCloseRoom?.({ kind: 'close_room' });
+  expect(result).toMatchObject({ ok: false, code: 'rejected' });
+  expect((result as { message: string }).message).toContain('operator');
+  expect(manager.liveRooms()).toHaveLength(1); // the room survived
+});
+
+test('decisions ride the live view and the archived snapshot', async () => {
+  const { manager, callbacks } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await callbacks.get('s-1')?.onMessage?.({
+    kind: 'message_out',
+    text: 'needs-decision[auth]: token or session?',
+    to: ['human'],
+  });
+
+  expect(manager.liveRooms()[0]?.decisions).toMatchObject([
+    { key: 'auth', summary: 'token or session?', openedBy: 'worker' },
+  ]);
+
+  await manager.close('room-1', { force: true });
+  expect(manager.archived()[0]?.decisions).toMatchObject([{ key: 'auth', openedBy: 'worker' }]);
+});
+
+// ── pi session identity: the terminal-resume handle ──────────────────────────────────
+
+test('a pi_session event lands on the participant and rides the live view', async () => {
+  const { manager, emitSession } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.postFromHuman('room-1', 'kick off'); // give the room history to persist
+  emitSession('s-1', {
+    kind: 'pi_session',
+    id: 'aaaa-bbbb',
+    file: '/home/u/.pi/agent/sessions/x/aaaa-bbbb.jsonl',
+  });
+
+  expect(manager.liveRooms()[0]?.participants[0]).toMatchObject({
+    name: 'worker',
+    piSessionId: 'aaaa-bbbb',
+    piSessionFile: '/home/u/.pi/agent/sessions/x/aaaa-bbbb.jsonl',
+  });
+});
+
+test('pi session handles survive into the archived snapshot', async () => {
+  const { manager, emitSession } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.postFromHuman('room-1', 'kick off');
+  emitSession('s-1', { kind: 'pi_session', id: 'aaaa-bbbb', file: '/tmp/s.jsonl' });
+  await manager.close('room-1');
+
+  expect(manager.archived()[0]?.participants[0]).toMatchObject({
+    piSessionId: 'aaaa-bbbb',
+    piSessionFile: '/tmp/s.jsonl',
+  });
+});
+
+// ── memory hook: engine-written log on close, optional synthesis spawn ────────────────
+
+test('closing a room with history appends its engine-written entry to .kild/LOG.md', async () => {
+  const { manager } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
+  await manager.open('room-1', { name: 'demo', cwd: project, participants: [{ name: 'worker' }] });
+  await manager.postFromHuman('room-1', 'ship the fix');
+  await manager.close('room-1');
+
+  const log = fs.readFileSync(path.join(project, '.kild', 'LOG.md'), 'utf8');
+  expect(log).toContain('demo (room-1)');
+  expect(log).toContain('- goal: ship the fix');
+});
+
+test('memory.synthesis config spawns a synthesis session in the MAIN checkout after close', async () => {
+  const { manager, spawned, prompted } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
+  fs.mkdirSync(path.join(project, '.kild'), { recursive: true });
+  fs.writeFileSync(
+    path.join(project, '.kild', 'config.json'),
+    JSON.stringify({
+      memory: { synthesis: { model: 'openai-codex/gpt-5.6-sol', agent: 'default' } },
+    }),
+  );
+  await manager.open('room-1', { name: 'demo', cwd: project, participants: [{ name: 'worker' }] });
+  await manager.postFromHuman('room-1', 'ship the fix');
+  const before = spawned.length;
+  await manager.close('room-1');
+
+  expect(spawned.length).toBe(before + 1);
+  const synthesisPromptDelivered = prompted.find((p) => p.text.includes('[kild memory synthesis]'));
+  expect(synthesisPromptDelivered?.from).toBe('kild');
+  expect(synthesisPromptDelivered?.text).toContain('.kild/MEMORY.md');
+});
+
+test('without memory.synthesis config, close spawns nothing extra', async () => {
+  const { manager, spawned } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
+  await manager.open('room-1', { name: 'demo', cwd: project, participants: [{ name: 'worker' }] });
+  await manager.postFromHuman('room-1', 'ship the fix');
+  const before = spawned.length;
+  await manager.close('room-1');
+  expect(spawned.length).toBe(before);
 });

@@ -34,6 +34,17 @@ export interface KildConfig {
    *  it's good at, cost). Appended to a delegating session's system prompt so the user
    *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
   models?: Record<string, string>;
+  /** Project memory behavior. The engine-written room log (`.kild/LOG.md`) is always on;
+   *  `synthesis` opts in to the LLM half: on room close, a session is spawned to distill
+   *  the transcript into `.kild/MEMORY.md`. Absent → no synthesis session is spawned. */
+  memory?: {
+    synthesis?: {
+      /** provider/model ref for the synthesis session (pick a strong reasoning model). */
+      model?: string;
+      /** Persona for the synthesis session (default: the general-purpose `default`). */
+      agent?: string;
+    };
+  };
 }
 
 export interface ResolvedPluginPaths {
@@ -102,4 +113,13 @@ export async function configuredModels(cwd: string): Promise<Record<string, stri
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
   return { ...(global?.models ?? {}), ...(project?.models ?? {}) };
+}
+
+/** Merged memory-synthesis config (project wins over global); undefined = synthesis off. */
+export async function configuredMemorySynthesis(
+  cwd: string,
+): Promise<{ model?: string; agent?: string } | undefined> {
+  const global = await readConfigFile(path.join(kildHome(), 'config.json'));
+  const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
+  return project?.memory?.synthesis ?? global?.memory?.synthesis;
 }

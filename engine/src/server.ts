@@ -381,17 +381,23 @@ app.post('/api/rooms/:id/post', async (c) => {
   return c.json({ ok: true, message: result.value.message });
 });
 app.post('/api/rooms/:id/close', async (c) => {
-  const { from, sessionId } = await c.req.json<{ from?: unknown; sessionId?: unknown }>();
+  const { from, sessionId, force } = await c.req.json<{
+    from?: unknown;
+    sessionId?: unknown;
+    force?: unknown;
+  }>();
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
+  if (force !== undefined && typeof force !== 'boolean')
+    return c.json({ error: 'force must be a boolean' }, 400);
   const attribution = resolveCloseRoomActor(
     { from: typeof from === 'string' ? from : undefined, sessionId },
     sessionManager,
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
-  const result = await roomManager.close(c.req.param('id'));
+  const result = await roomManager.close(c.req.param('id'), { force: force === true });
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });

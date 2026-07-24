@@ -9,8 +9,9 @@ export function createRoomsStatusTool(): ToolDefinition {
     name: 'rooms_status',
     label: 'Rooms Status',
     description:
-      'List live kild rooms as compact status summaries with participants and the last ' +
-      'one or two posts.',
+      'List live kild rooms as compact status summaries with participants, the last ' +
+      'one or two posts, and any openDecisions (unresolved keyed decisions that need an ' +
+      'operator call and block room close until resolved).',
     promptSnippet: 'rooms_status — summarize live rooms and their latest posts',
     parameters: Type.Object({}),
     async execute() {

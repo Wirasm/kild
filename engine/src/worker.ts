@@ -20,6 +20,7 @@ import {
   formatModelsSection,
   MECHANISM_PROMPT,
 } from './kild/mechanism-prompt.ts';
+import { fleetMemorySection, projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withRole } from './kild/models.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
@@ -152,6 +153,13 @@ export async function runWorker(): Promise<never> {
     process.exit(1);
   }
   if (model) emit({ kind: 'model', provider: model.provider, id: model.id });
+  // The pi session's durable identity — lets an operator reopen this exact agent in the
+  // terminal with `pi --session <file|id>` (the file path works from any cwd).
+  emit({
+    kind: 'pi_session',
+    id: session.sessionManager.getSessionId(),
+    file: session.sessionManager.getSessionFile(),
+  });
 
   session.subscribe((e: RawAgentEvent) => {
     const ui = translate(e);
@@ -187,9 +195,15 @@ export async function runWorker(): Promise<never> {
   // pick a model per fan-out agent.
   const modelsSection =
     inRoom || fleetEnabled ? formatModelsSection(await configuredModels(cwd)) : '';
-  let sessionPrefix: string | null = modelsSection
-    ? `${MECHANISM_PROMPT}\n\n${modelsSection}`
-    : MECHANISM_PROMPT;
+  // Persistent memory rides the first turn: fleet drivers get the operator's cross-project
+  // memory; every session gets the project's curated memory + direction (read from the
+  // MAIN checkout — the files are gitignored, so worktree checkouts never carry them).
+  const memorySections = [fleetEnabled ? fleetMemorySection() : '', projectMemorySection(cwd)]
+    .filter(Boolean)
+    .join('\n\n');
+  let sessionPrefix: string | null = [MECHANISM_PROMPT, modelsSection, memorySections]
+    .filter(Boolean)
+    .join('\n\n');
 
   // pi runs one turn at a time. A room can deliver a message (prompt) to this
   // participant while it is still mid-turn, so we queue prompts and drain them
