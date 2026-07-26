@@ -14,7 +14,7 @@ function room(overrides: Partial<Room> = {}): Room {
     name: 'ops',
     cwd: '/tmp',
     openedBy: 'brain-session',
-    participants: [{ name: 'worker', sessionId: 'worker-session', agent: 'worker' }],
+    participants: [{ name: 'worker', sessionId: 'worker-session', persona: 'worker' }],
     log: [],
     state: 'running',
     ...overrides,

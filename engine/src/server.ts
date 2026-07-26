@@ -44,7 +44,7 @@ const PORT = Number(process.env.KILD_PORT ?? 4517);
 // repos, so it must never be reachable from the LAN.
 const HOST = process.env.KILD_HOST ?? '127.0.0.1';
 
-// Only the cockpit's own origins may drive the engine from a browser context.
+// Only the known UI clients' own origins may drive the engine from a browser context.
 // A request with no Origin is a non-browser client (the CLI / curl); browsers
 // always send one, so an unexpected Origin is a hostile web page — rejected.
 const ALLOWED_ORIGINS = new Set([
@@ -78,16 +78,54 @@ app.post('/api/projects', async (c) => {
   }
 });
 
-// ── Agents ────────────────────────────────────────────────────────────────────
-app.get('/api/agents', async (c) => c.json(await listAgents(c.req.query('project'))));
+// ── Project references ────────────────────────────────────────────────────────
+// Endpoints that need a project directory take an EXPLICIT reference: `project` is a
+// registered project name, `path` an absolute directory. Exactly one of the two — the
+// old polymorphic name-or-path guessing is gone.
+type ProjectRef = { ok: true; dir: string } | { ok: false; error: string; status: 400 | 404 };
+
+async function resolveProjectRef(
+  project: string | undefined,
+  dirPath: string | undefined,
+): Promise<ProjectRef> {
+  if (project !== undefined && dirPath !== undefined) {
+    return {
+      ok: false,
+      error: 'pass either project (registered name) or path, not both',
+      status: 400,
+    };
+  }
+  if (project !== undefined) {
+    const found = await findProject(project);
+    if (!found) return { ok: false, error: `unknown project: ${project}`, status: 404 };
+    return { ok: true, dir: found.path };
+  }
+  if (dirPath !== undefined) {
+    if (!path.isAbsolute(dirPath)) {
+      return { ok: false, error: `path must be absolute: ${dirPath}`, status: 400 };
+    }
+    return { ok: true, dir: dirPath };
+  }
+  return { ok: false, error: 'project (registered name) or path (absolute) required', status: 400 };
+}
+
+const optionalString = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : undefined;
+
+// ── Personas ──────────────────────────────────────────────────────────────────
+// Reusable role definitions, read from the convention dirs (`.pi/agents` etc. — the
+// on-disk dir names are upstream pi convention and unrelated to this route's name).
+app.get('/api/personas', async (c) => {
+  const ref = await resolveProjectRef(c.req.query('project'), c.req.query('path'));
+  // Personas without a project are valid (global-only discovery) — only a BAD ref errors.
+  if (!ref.ok && (c.req.query('project') !== undefined || c.req.query('path') !== undefined)) {
+    return c.json({ error: ref.error }, ref.status);
+  }
+  return c.json(await listAgents(ref.ok ? ref.dir : undefined));
+});
 
 // ── Worktrees ─────────────────────────────────────────────────────────────────
-// A project query may be a registered name or a raw path (the cockpit passes the
-// path; the CLI a name). Worktree names a live session is using are never pruned.
-async function resolveProjectPath(q: string | undefined): Promise<string | null> {
-  if (!q) return null;
-  return (await findProject(q))?.path ?? q;
-}
+// Worktree names a live session is using are never pruned.
 
 function participantSpecs(input: unknown): ParticipantSpec[] | null {
   if (!Array.isArray(input)) return null;
@@ -96,11 +134,11 @@ function participantSpecs(input: unknown): ParticipantSpec[] | null {
     if (typeof item !== 'object' || item === null) return null;
     const participant = item as Record<string, unknown>;
     if (typeof participant.name !== 'string') return null;
-    if (participant.agent !== undefined && typeof participant.agent !== 'string') return null;
+    if (participant.persona !== undefined && typeof participant.persona !== 'string') return null;
     if (participant.model !== undefined && typeof participant.model !== 'string') return null;
     participants.push({
       name: participant.name,
-      agent: typeof participant.agent === 'string' ? participant.agent : undefined,
+      persona: typeof participant.persona === 'string' ? participant.persona : undefined,
       model: typeof participant.model === 'string' ? participant.model : undefined,
     });
   }
@@ -131,8 +169,9 @@ const worktreesInUse = (): Set<string> =>
   );
 
 app.get('/api/worktrees', async (c) => {
-  const repo = await resolveProjectPath(c.req.query('project'));
-  if (!repo) return c.json({ error: 'project required' }, 400);
+  const ref = await resolveProjectRef(c.req.query('project'), c.req.query('path'));
+  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
+  const repo = ref.dir;
   try {
     await pruneMergedWorktrees(repo, worktreesInUse()); // prune-merged on every list
     const trees = (await listWorktrees(repo)).filter((t) => t.branch.startsWith('kild/'));
@@ -143,13 +182,16 @@ app.get('/api/worktrees', async (c) => {
 });
 
 app.delete('/api/worktrees', async (c) => {
-  const { project, name, force } = await c.req.json<{
-    project: string;
+  const body = await c.req.json<{
+    project?: string;
+    path?: string;
     name: string;
     force?: boolean;
   }>();
-  const repo = await resolveProjectPath(project);
-  if (!repo) return c.json({ error: 'project required' }, 400);
+  const { name, force } = body;
+  const ref = await resolveProjectRef(optionalString(body.project), optionalString(body.path));
+  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
+  const repo = ref.dir;
   if (force !== undefined && typeof force !== 'boolean') {
     return c.json({ error: 'force must be a boolean' }, 400);
   }
@@ -180,9 +222,10 @@ app.delete('/api/worktrees', async (c) => {
 });
 
 app.post('/api/worktrees/prune', async (c) => {
-  const { project } = await c.req.json<{ project: string }>();
-  const repo = await resolveProjectPath(project);
-  if (!repo) return c.json({ error: 'project required' }, 400);
+  const body = await c.req.json<{ project?: string; path?: string }>();
+  const ref = await resolveProjectRef(optionalString(body.project), optionalString(body.path));
+  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
+  const repo = ref.dir;
   try {
     const pruned = await pruneMergedWorktrees(repo, worktreesInUse());
     return c.json({ pruned });
@@ -194,7 +237,7 @@ app.post('/api/worktrees/prune', async (c) => {
 // ── Open in OS ────────────────────────────────────────────────────────────────
 // Reveal a worktree path in the OS file browser. Only paths under the worktree root
 // are allowed — the engine is loopback-only but must never shell `open` on an
-// arbitrary path. Keeps the cockpit pure-web (no Tauri opener API needed).
+// arbitrary path. Keeps UI clients pure-web (no Tauri opener API needed).
 app.post('/api/open', async (c) => {
   const { path: target } = await c.req.json<{ path: string }>();
   const root = worktreesRoot();
@@ -211,8 +254,8 @@ app.post('/api/open', async (c) => {
   }
 });
 
-// Open an external http(s) URL in the OS browser. The cockpit routes rendered links
-// here so a click never navigates the Tauri webview away from the app. Restricted to
+// Open an external http(s) URL in the OS browser. UI clients route rendered links
+// here so a click never navigates their webview away from the app. Restricted to
 // http/https — never file://, app schemes, etc. execFile (no shell) → no injection.
 app.post('/api/open-url', async (c) => {
   const { url } = await c.req.json<{ url: string }>();
@@ -272,7 +315,7 @@ app.get('/api/rooms/:id/participants/:name/transcript', async (c) => {
   return serveTranscript(c, participant.piSessionFile, `participant @${name}`);
 });
 
-// A live session's transcript (fleet drivers, one-shot runs) via SessionInfo.
+// A live session's transcript (operator sessions, one-shot runs) via SessionInfo.
 app.get('/api/sessions/:id/transcript', async (c) => {
   const id = c.req.param('id');
   const info = sessionManager.list().find((s) => s.id === id);
@@ -283,18 +326,18 @@ app.get('/api/sessions/:id/transcript', async (c) => {
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
-// Spawn a detached session (e.g. a `kild fleet` driver) — the CLI/scripts drive this over
-// REST instead of holding a WS open. `operator: true` grants the room-control tools.
+// Spawn a detached session (e.g. a `kild operator` session) — the CLI/scripts drive this
+// over REST instead of holding a WS open. `operator: true` grants the room-control tools.
 // `forkFrom` spawns the session from a frozen copy of an existing pi session file: the
 // fork gets a NEW session file and never writes the source.
 app.post('/api/sessions', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
-    agent?: string;
+    persona?: string;
     model?: string;
     cwd?: string;
     worktree?: string;
     base?: string;
-    projectName?: string;
+    label?: string;
     operator?: boolean;
     prompt?: string;
     forkFrom?: unknown;
@@ -313,11 +356,11 @@ app.post('/api/sessions', async (c) => {
     id,
     {
       cwd: body.cwd,
-      agent: body.agent,
+      persona: body.persona,
       model: body.model,
       worktree: body.worktree,
       base: body.base,
-      projectName: body.projectName,
+      label: body.label,
       forkFrom: body.forkFrom,
       env: body.operator ? { KILD_OPERATOR: '1' } : undefined,
     },
@@ -344,7 +387,7 @@ app.post('/api/sessions/:id/stop', (c) => {
 // (`{rooms}` summaries + `{roomMessage}` posts); this is the conversation record of
 // rooms from previous engine runs — their participant subprocesses are long gone.
 app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
-// Live rooms WITH their logs — so a cockpit joining a room it didn't open (or after a
+// Live rooms WITH their logs — so a UI client joining a room it didn't open (or after a
 // refresh) can load the conversation so far. The WS only streams *new* messages.
 app.get('/api/rooms/live', async (c) => c.json(await roomManager.liveRoomsStatus()));
 app.post('/api/rooms', async (c) => {
@@ -382,12 +425,27 @@ app.post('/api/rooms', async (c) => {
   }
   const participants = participantSpecs(body.participants);
   if (!participants || participants.length === 0) {
-    return c.json({ error: 'participants must name at least one agent' }, 400);
+    return c.json({ error: 'participants must name at least one participant' }, 400);
   }
 
-  const cwd =
-    typeof body.project === 'string' ? await resolveProjectPath(body.project) : (body.cwd ?? null);
-  if (!cwd) return c.json({ error: 'cwd or project required' }, 400);
+  // Where the room runs: `project` is a registered name, `cwd` an absolute path —
+  // explicit, exactly one (same contract as the worktree/persona endpoints).
+  let cwd: string;
+  if (typeof body.project === 'string') {
+    if (typeof body.cwd === 'string') {
+      return c.json({ error: 'pass either project (registered name) or cwd, not both' }, 400);
+    }
+    const found = await findProject(body.project);
+    if (!found) return c.json({ error: `unknown project: ${body.project}` }, 404);
+    cwd = found.path;
+  } else if (typeof body.cwd === 'string') {
+    if (!path.isAbsolute(body.cwd)) {
+      return c.json({ error: `cwd must be absolute: ${body.cwd}` }, 400);
+    }
+    cwd = body.cwd;
+  } else {
+    return c.json({ error: 'cwd (absolute path) or project (registered name) required' }, 400);
+  }
 
   const attribution = resolveOpenRoomActor(
     {
@@ -465,20 +523,20 @@ app.post('/api/rooms/:id/close', async (c) => {
 });
 
 // ── Review intelligence ───────────────────────────────────────────────────────
-// Git drill-down for a live room's workstream (worktree if set, else cwd — the same
-// resolution live-room status uses): commits vs the room's base, per-file diff stats
+// Git drill-down for a live room (worktree if set, else cwd — the same resolution
+// live-room status uses): commits vs the room's base, per-file diff stats
 // (committed + uncommitted), and one file's unified patch. Live rooms only — an
-// archived room's workstream dir is gone (409); unknown ids 404. Git failures inside
-// a resolved room are data ({error} in the body, per workstream-git-status), never a 500.
+// archived room's working dir is gone (409); unknown ids 404. Git failures inside
+// a resolved room are data ({error} in the body, per room-git-status), never a 500.
 app.get('/api/rooms/:id/git/commits', async (c) => {
-  const located = roomManager.workstreamDir(c.req.param('id'));
+  const located = roomManager.roomDir(c.req.param('id'));
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
   }
   return c.json(await reviewCommits(located.value.dir, located.value.base));
 });
 app.get('/api/rooms/:id/git/files', async (c) => {
-  const located = roomManager.workstreamDir(c.req.param('id'));
+  const located = roomManager.roomDir(c.req.param('id'));
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
   }
@@ -487,7 +545,7 @@ app.get('/api/rooms/:id/git/files', async (c) => {
 app.get('/api/rooms/:id/git/diff', async (c) => {
   const file = c.req.query('path');
   if (!file) return c.json({ error: 'path query parameter required' }, 400);
-  const located = roomManager.workstreamDir(c.req.param('id'));
+  const located = roomManager.roomDir(c.req.param('id'));
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
   }
@@ -499,18 +557,18 @@ app.get('/api/rooms/:id/git/diff', async (c) => {
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the room broadcast — so rooms opened by any client
-// (cockpit or CLI) are visible to all. Rooms are engine-owned and survive a drop.
+// (UI client or CLI) are visible to all. Rooms are engine-owned and survive a drop.
 // Frames carry the room id as `id`; sessions are the internal substrate, not on the wire.
 type ClientMessage =
   | {
       type: 'spawn';
       id: string;
       cwd?: string;
-      agent?: string;
+      persona?: string;
       model?: string;
       worktree?: string;
       base?: string;
-      projectName?: string;
+      label?: string;
       env?: Record<string, string>;
     }
   | { type: 'prompt'; id: string; text: string; from?: string }
@@ -520,12 +578,16 @@ type ClientMessage =
       id: string;
       name: string;
       cwd: string;
-      participants: Array<{ name: string; agent?: string; model?: string }>;
+      participants: Array<{ name: string; persona?: string; model?: string }>;
       worktree?: string;
       base?: string;
     }
   | { type: 'room_post'; id: string; text: string }
-  | { type: 'room_add'; id: string; participant: { name: string; agent?: string; model?: string } }
+  | {
+      type: 'room_add';
+      id: string;
+      participant: { name: string; persona?: string; model?: string };
+    }
   | { type: 'room_halt'; id: string }
   | { type: 'room_close'; id: string };
 
@@ -541,10 +603,10 @@ function parseClientMessage(data: string): ClientMessage | null {
   if (typeof m.id !== 'string') return null;
   if (m.type === 'spawn') {
     if (m.cwd !== undefined && typeof m.cwd !== 'string') return null;
-    if (m.agent !== undefined && typeof m.agent !== 'string') return null;
+    if (m.persona !== undefined && typeof m.persona !== 'string') return null;
     if (m.model !== undefined && typeof m.model !== 'string') return null;
     if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
-    if (m.projectName !== undefined && typeof m.projectName !== 'string') return null;
+    if (m.label !== undefined && typeof m.label !== 'string') return null;
     const env = envRecord(m.env);
     if (m.env !== undefined && env === undefined) return null;
     return { ...(m as Omit<Extract<ClientMessage, { type: 'spawn' }>, 'env'>), env };
@@ -605,11 +667,11 @@ app.get(
             msg.id,
             {
               cwd: msg.cwd,
-              agent: msg.agent,
+              persona: msg.persona,
               model: msg.model,
               worktree: msg.worktree,
               base: msg.base,
-              projectName: msg.projectName,
+              label: msg.label,
               env: msg.env,
             },
             'cli',

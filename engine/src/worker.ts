@@ -12,10 +12,6 @@ import {
 import { resolveAgentInstructions } from './kild/agents.ts';
 import { configuredMemoryDir, configuredModels, resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
-import { createOperatorCloseRoomTool } from './kild/fleet/close-room-tool.ts';
-import { createOpenRoomTool } from './kild/fleet/open-room-tool.ts';
-import { createPostRoomTool } from './kild/fleet/post-room-tool.ts';
-import { createRoomsStatusTool } from './kild/fleet/rooms-status-tool.ts';
 import {
   composeSessionTurn,
   formatModelsSection,
@@ -23,6 +19,10 @@ import {
 } from './kild/mechanism-prompt.ts';
 import { fleetMemorySection, projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withRole } from './kild/models.ts';
+import { createOperatorCloseRoomTool } from './kild/operator/close-room-tool.ts';
+import { createOpenRoomTool } from './kild/operator/open-room-tool.ts';
+import { createPostRoomTool } from './kild/operator/post-room-tool.ts';
+import { createRoomsStatusTool } from './kild/operator/rooms-status-tool.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
 import { createPostMessageTool } from './kild/room/post-message-tool.ts';
@@ -45,7 +45,7 @@ export async function runWorker(): Promise<never> {
   let cwd = process.env.KILD_CWD || process.cwd();
   const worktreeName = process.env.KILD_WORKTREE || undefined;
   const worktreeBase = process.env.KILD_BASE || undefined;
-  const agentName = process.env.KILD_AGENT || undefined;
+  const personaName = process.env.KILD_PERSONA || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inRoom = !!process.env.KILD_ROOM;
   const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
@@ -195,7 +195,7 @@ export async function runWorker(): Promise<never> {
     }
   });
 
-  let preamble = agentName ? await resolveAgentInstructions(agentName, cwd) : null;
+  let preamble = personaName ? await resolveAgentInstructions(personaName, cwd) : null;
   // Every session gets the generic mechanism guide (how to operate) on top of everything,
   // above the persona — so even a bare `default` session is competent. One-shot: it rides
   // only the first delivered turn. The room-comms part is conditional inside the prompt.

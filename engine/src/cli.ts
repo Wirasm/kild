@@ -6,6 +6,7 @@
  * stderr, non-zero exit on failure.
  */
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -19,8 +20,8 @@ import {
   promptSession,
   spawnSession,
   stopSession,
-} from './kild/fleet/engine-client.ts';
-import { compactLiveRooms, formatCompactGitSummary } from './kild/fleet/rooms-status.ts';
+} from './kild/operator/engine-client.ts';
+import { compactLiveRooms, formatCompactGitSummary } from './kild/operator/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import {
   forceRemoveWorktree,
@@ -40,7 +41,7 @@ const { values, positionals } = parseArgs({
     model: { type: 'string' },
     worktree: { type: 'string' },
     force: { type: 'boolean', default: false },
-    participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,worker,reviewer
+    participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,coder,reviewer
     detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
     base: { type: 'string' }, // base branch for the worktree + git-status baseline
   },
@@ -72,12 +73,12 @@ async function dispatch(): Promise<void> {
       return room(action, rest);
     case 'rooms':
       return roomsList();
-    case 'fleet':
-      return fleet(action, rest);
+    case 'operator':
+      return operator(action, rest);
     case 'sessions':
       return sessionsList();
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|rooms|fleet|sessions> …');
+      console.error('usage: kild <project|agent|worktree|run|room|rooms|operator|sessions> …');
       process.exit(2);
   }
 }
@@ -103,10 +104,15 @@ async function project(action: string | undefined, args: string[]): Promise<void
   }
 }
 
+/** Resolve the `--project` flag: a registered name wins, else treat it as a path
+ *  (made absolute — the engine's REST `path` params only accept absolute paths). */
+async function resolveProjectFlag(): Promise<string | undefined> {
+  if (!values.project) return undefined;
+  return (await findProject(values.project))?.path ?? path.resolve(values.project);
+}
+
 async function agent(action: string | undefined, args: string[]): Promise<void> {
-  const projectPath = values.project
-    ? ((await findProject(values.project))?.path ?? values.project)
-    : undefined;
+  const projectPath = await resolveProjectFlag();
   if (action === 'ls') {
     const agents = await listAgents(projectPath);
     if (json) return void console.log(JSON.stringify(agents, null, 2));
@@ -115,10 +121,10 @@ async function agent(action: string | undefined, args: string[]): Promise<void> 
     const [name] = args;
     if (!name) throw new Error('usage: kild agent show <name>');
     const found = (await listAgents(projectPath)).find((a) => a.name === name);
-    if (!found) throw new Error(`no such agent: ${name}`);
+    if (!found) throw new Error(`no such persona: ${name}`);
     if (json) console.log(JSON.stringify(found, null, 2));
     else if (found.systemPrompt) console.log(found.systemPrompt);
-    else console.error(`(agent '${name}' uses pi's default prompt)`);
+    else console.error(`(persona '${name}' uses pi's default prompt)`);
   } else {
     throw new Error('usage: kild agent <ls|show>');
   }
@@ -137,11 +143,11 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function worktree(action: string | undefined, args: string[]): Promise<void> {
-  const repo = values.project
-    ? ((await findProject(values.project))?.path ?? values.project)
-    : undefined;
+  const repo = await resolveProjectFlag();
   if (!repo) throw new Error('--project <name|path> is required');
-  const q = `project=${encodeURIComponent(repo)}`;
+  // The flag is resolved to an absolute dir above, so the engine gets the explicit
+  // `path` variant of its project-or-path contract.
+  const q = `path=${encodeURIComponent(repo)}`;
 
   // When the engine is up it owns the live sessions, so route mutations through it —
   // its endpoints skip worktrees a running session is using. When it's down, no live
@@ -164,7 +170,7 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
       await engineFetch(`/api/worktrees`, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ project: repo, name, force: values.force }),
+        body: JSON.stringify({ path: repo, name, force: values.force }),
       });
     } else {
       const result = values.force
@@ -180,7 +186,7 @@ async function worktree(action: string | undefined, args: string[]): Promise<voi
           await engineFetch<{ pruned: string[] }>(`/api/worktrees/prune`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ project: repo }),
+            body: JSON.stringify({ path: repo }),
           })
         ).pruned
       : await pruneMergedWorktrees(repo);
@@ -211,55 +217,53 @@ async function engineRunning(): Promise<boolean> {
 
 async function run(prompt: string): Promise<void> {
   if (!prompt) throw new Error('usage: kild run <prompt…>');
-  // If the engine is up, run THROUGH it so the session shows up in the cockpit;
+  // If the engine is up, run THROUGH it so the session shows up in UI clients;
   // otherwise run the agent in-process so the CLI works standalone.
   return (await engineRunning()) ? runViaEngine(prompt) : runViaWorker(prompt);
 }
 
-/** `kild fleet <ls|post|stop>` + `kild fleet <goal> [--detach]` — a fleet driver is a
- *  session with the room-control tools that opens and steers MANY rooms. `--detach` and the
+/** `kild operator <ls|post|stop>` + `kild operator <goal> [--detach]` — an operator
+ *  session holds the room-control tools and opens and steers MANY rooms. `--detach` and the
  *  subcommands make it drivable from scripts; a bare goal stays interactive. */
-async function fleet(action: string | undefined, args: string[]): Promise<void> {
+async function operator(action: string | undefined, args: string[]): Promise<void> {
   if (action === 'ls') return sessionsList();
   if (action === 'post') {
     const [id, ...text] = args;
-    if (!id || text.length === 0) throw new Error('usage: kild fleet post <id> <text…>');
+    if (!id || text.length === 0) throw new Error('usage: kild operator post <id> <text…>');
     const res = await promptSession(id, text.join(' '));
     return void (json ? console.log(JSON.stringify(res)) : console.error('posted'));
   }
   if (action === 'stop') {
     const [id] = args;
-    if (!id) throw new Error('usage: kild fleet stop <id>');
+    if (!id) throw new Error('usage: kild operator stop <id>');
     await stopSession(id);
     return void (json ? console.log('{"ok":true}') : console.error('stopped'));
   }
-  return fleetInteractive([action, ...args].filter(Boolean).join(' '));
+  return operatorInteractive([action, ...args].filter(Boolean).join(' '));
 }
 
-/** `kild sessions` / `kild fleet ls` — list live sessions (fleet drivers + runs). */
+/** `kild sessions` / `kild operator ls` — list live sessions (operator sessions + runs). */
 async function sessionsList(): Promise<void> {
   const sessions = await listSessions();
   if (json) return void console.log(JSON.stringify(sessions, null, 2));
   if (sessions.length === 0) return void console.error('no live sessions');
   for (const s of sessions) {
-    console.log(`${s.id}\t${s.agent ?? 'default'}${s.model ? ` (${s.model})` : ''}`);
+    console.log(`${s.id}\t${s.persona ?? 'default'}${s.model ? ` (${s.model})` : ''}`);
   }
 }
 
-async function fleetInteractive(goal: string): Promise<void> {
+async function operatorInteractive(goal: string): Promise<void> {
   if (values.worktree) {
-    throw new Error('kild fleet does not support --worktree; use kild room or kild run instead');
+    throw new Error('kild operator does not support --worktree; use kild room or kild run instead');
   }
-  if (!goal) throw new Error('usage: kild fleet <goal…> [--detach] [--project <p>]');
+  if (!goal) throw new Error('usage: kild operator <goal…> [--detach] [--project <p>]');
   if (values.detach) {
-    const cwd = values.project
-      ? ((await findProject(values.project))?.path ?? values.project)
-      : process.cwd();
+    const cwd = (await resolveProjectFlag()) ?? process.cwd();
     const res = await spawnSession({
-      agent: values.agent ?? 'default',
+      persona: values.agent ?? 'default',
       model: values.model,
       cwd,
-      projectName: values.project ?? 'fleet',
+      label: values.project ?? 'operator',
       operator: true,
       prompt: goal,
     });
@@ -269,9 +273,7 @@ async function fleetInteractive(goal: string): Promise<void> {
     throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
   }
 
-  const cwd = values.project
-    ? ((await findProject(values.project))?.path ?? values.project)
-    : process.cwd();
+  const cwd = (await resolveProjectFlag()) ?? process.cwd();
   const id = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
@@ -298,7 +300,7 @@ async function fleetInteractive(goal: string): Promise<void> {
     };
 
     process.on('SIGINT', () => {
-      if (!json) console.error('\n\x1b[2m— stopping fleet session —\x1b[0m');
+      if (!json) console.error('\n\x1b[2m— stopping operator session —\x1b[0m');
       stop();
     });
 
@@ -318,14 +320,14 @@ async function fleetInteractive(goal: string): Promise<void> {
         JSON.stringify({
           type: 'spawn',
           id,
-          // The fleet driver's persona comes from the project (`--agent <name>`); with none,
-          // it's the `default` general-purpose session (kild's system prompt) plus the
+          // The operator session's persona comes from the project (`--agent <name>`); with
+          // none, it's the `default` general-purpose session (kild's system prompt) plus the
           // operator room-control tools. kild ships no `brain` role of its own.
-          agent: values.agent ?? 'default',
+          persona: values.agent ?? 'default',
           cwd,
           model: values.model,
           worktree: values.worktree,
-          projectName: values.project ?? 'fleet',
+          label: values.project ?? 'operator',
           env: { KILD_OPERATOR: '1' },
         }),
       );
@@ -333,7 +335,9 @@ async function fleetInteractive(goal: string): Promise<void> {
       if (!json) {
         const persona = values.agent ? ` (${values.agent})` : '';
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
-        console.error(`\x1b[2m# fleet${persona}${where} · type to prompt · Ctrl-C to stop\x1b[0m`);
+        console.error(
+          `\x1b[2m# operator${persona}${where} · type to prompt · Ctrl-C to stop\x1b[0m`,
+        );
       }
     });
 
@@ -362,7 +366,7 @@ async function fleetInteractive(goal: string): Promise<void> {
     });
     ws.addEventListener('close', () => {
       if (!settled && !stopping) {
-        finish(new Error('connection to the engine closed before the fleet session completed'));
+        finish(new Error('connection to the engine closed before the operator session completed'));
       }
     });
     ws.addEventListener('error', () => finish(new Error('engine socket error')));
@@ -380,24 +384,22 @@ async function fleetInteractive(goal: string): Promise<void> {
  * (stopping all participants) and exits. Requires the engine (it is multi-session).
  */
 /** Shared spec for opening a room from either the interactive or `--detach` path. */
-function roomParticipants(): Array<{ name: string; agent: string; model?: string }> {
+function roomParticipants(): Array<{ name: string; persona: string; model?: string }> {
   return values.participants
     ? values.participants
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-        .map((n) => ({ name: n, agent: n, model: values.model }))
-    : [{ name: 'agent', agent: 'default', model: values.model }];
+        .map((n) => ({ name: n, persona: n, model: values.model }))
+    : [{ name: 'agent', persona: 'default', model: values.model }];
 }
 
 async function roomCwd(): Promise<string> {
-  return values.project
-    ? ((await findProject(values.project))?.path ?? values.project)
-    : process.cwd();
+  return (await resolveProjectFlag()) ?? process.cwd();
 }
 
 /** `kild room <ls|open|post|close>` — the scriptable, non-interactive room primitives an
- *  external driver (agent or human over bash) needs. A bare goal stays interactive. */
+ *  external operator (agent or human over bash) needs. A bare goal stays interactive. */
 async function room(action: string | undefined, args: string[]): Promise<void> {
   if (action === 'ls') return roomsList();
   if (action === 'open') return roomOpen(args.join(' '));
@@ -461,9 +463,9 @@ async function roomShow(id: string): Promise<void> {
   console.log(`worktree: ${room.worktree ?? '(none)'}`);
   console.log('participants:');
   for (const participant of compact.participants) {
-    const agent = participant.agent ? ` (${participant.agent})` : '';
+    const persona = participant.persona ? ` (${participant.persona})` : '';
     const model = participant.model ? ` — ${participant.model}` : '';
-    console.log(`  ${participant.name}${agent}${model}`);
+    console.log(`  ${participant.name}${persona}${model}`);
   }
   if (compact.git) {
     console.log(
@@ -538,22 +540,22 @@ async function roomInteractive(goal: string): Promise<void> {
   if (!engineUp) {
     throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
   }
-  const cwd = values.project
-    ? ((await findProject(values.project))?.path ?? values.project)
-    : process.cwd();
+  const cwd = (await resolveProjectFlag()) ?? process.cwd();
   const name = values.project ?? 'room';
-  // `--participants a,b` names personas from the project's own agents; each participant's
-  // agent defaults to its name. With none given, kild opens one general-purpose
-  // participant (the `default` persona = kild's system prompt, no role) — kild ships no
-  // roles of its own; personas come from the project (.claude/agents / .pi/agents).
+  // `--participants a,b` names personas from the project's own persona files; each
+  // participant's persona defaults to its name. With none given, kild opens one
+  // general-purpose participant (the `default` persona = kild's system prompt, no role) —
+  // kild ships no roles of its own; personas come from the project
+  // (.claude/agents / .pi/agents — the dir names are upstream convention).
   const participants = values.participants
     ? values.participants
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-        .map((n) => ({ name: n, agent: n }))
-    : [{ name: 'agent', agent: 'default' }];
-  if (participants.length === 0) throw new Error('--participants must name at least one agent');
+        .map((n) => ({ name: n, persona: n }))
+    : [{ name: 'agent', persona: 'default' }];
+  if (participants.length === 0)
+    throw new Error('--participants must name at least one participant');
   const base = values.base;
   // Addressing is structured: the engine defaults an untargeted post to the room lead,
   // so the goal reaches the lead without munging the text.
@@ -588,9 +590,13 @@ async function roomInteractive(goal: string): Promise<void> {
           if (!text) continue;
           const invite = text.match(/^\/invite(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?$/);
           if (invite?.[1]) {
-            const [, name, agent, model] = invite;
+            const [, name, persona, model] = invite;
             ws.send(
-              JSON.stringify({ type: 'room_add', id: roomId, participant: { name, agent, model } }),
+              JSON.stringify({
+                type: 'room_add',
+                id: roomId,
+                participant: { name, persona, model },
+              }),
             );
           } else {
             ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
@@ -615,7 +621,7 @@ async function roomInteractive(goal: string): Promise<void> {
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# room "${name}" — ${participants.map((p) => p.name).join(', ')}${where} · type to post · /invite <name> [agent] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# room "${name}" — ${participants.map((p) => p.name).join(', ')}${where} · type to post · /invite <name> [persona] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
@@ -691,7 +697,7 @@ async function runViaEngine(prompt: string): Promise<void> {
           name: values.project ?? 'run',
           cwd: projectPath ?? process.cwd(),
           worktree: values.worktree,
-          participants: [{ name: 'agent', agent: values.agent, model: values.model }],
+          participants: [{ name: 'agent', persona: values.agent, model: values.model }],
         }),
       );
       ws.send(JSON.stringify({ type: 'room_post', id, text: prompt }));
@@ -751,7 +757,7 @@ async function runViaWorker(prompt: string): Promise<void> {
       ...process.env,
       KILD_ROLE: 'worker',
       KILD_CWD: projectPath ?? process.cwd(),
-      KILD_AGENT: values.agent ?? '',
+      KILD_PERSONA: values.agent ?? '',
       KILD_MODEL: values.model ?? '',
       KILD_WORKTREE: values.worktree ?? '',
     },

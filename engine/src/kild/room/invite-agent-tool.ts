@@ -9,26 +9,24 @@ import { Type } from 'typebox';
  * control line to the engine over stdout).
  */
 export function createInviteAgentTool(
-  emit: (spec: { name: string; agent?: string; model?: string }) => Promise<string>,
+  emit: (spec: { name: string; persona?: string; model?: string }) => Promise<string>,
 ): ToolDefinition {
   return {
     name: 'invite_agent',
     label: 'Invite Agent',
     description:
       'Invite another agent into this room as a new participant you can then address ' +
-      'with @name. `name` is the @handle; `agent` is the agent definition to run (defaults ' +
+      'with @name. `name` is the @handle; `persona` is the persona to run (defaults ' +
       'to the same as the name); `model` is optional.',
     promptSnippet: 'invite_agent — bring another agent into the room, then address it with @name',
     parameters: Type.Object({
       name: Type.String({ description: 'The @handle for the new participant.' }),
-      agent: Type.Optional(
-        Type.String({ description: 'Agent definition to run (default: name).' }),
-      ),
+      persona: Type.Optional(Type.String({ description: 'Persona to run (default: name).' })),
       model: Type.Optional(Type.String({ description: 'Optional model override.' })),
     }),
     async execute(_toolCallId, params) {
-      const p = params as { name: string; agent?: string; model?: string };
-      const message = await emit({ name: p.name, agent: p.agent ?? p.name, model: p.model });
+      const p = params as { name: string; persona?: string; model?: string };
+      const message = await emit({ name: p.name, persona: p.persona ?? p.name, model: p.model });
       return {
         content: [{ type: 'text' as const, text: message }],
         details: null,

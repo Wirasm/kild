@@ -5,7 +5,7 @@ import { configuredMemoryDir, configuredMemorySynthesis } from '../config.ts';
 import { appendRoomLog, roomTranscriptPath, synthesisPrompt } from '../memory.ts';
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { resolveBaseBranch, worktreePath } from '../worktree.ts';
-import { workstreamGitStatus } from '../worktree-status.ts';
+import { roomGitStatus } from '../worktree-status.ts';
 import { applyDecisionMarkers, formatOpenDecisions, openDecisions } from './room-decisions.ts';
 import {
   finalNonSystemPost,
@@ -82,7 +82,7 @@ interface RoomManagerDeps {
 }
 
 interface ValidatedParticipantSpec extends ParticipantSpec {
-  resolvedAgent?: string;
+  resolvedPersona?: string;
 }
 
 function ok<T>(value: T): CommandResult<T> {
@@ -118,7 +118,7 @@ export class RoomManager {
     this.createId = deps.createId ?? randomUUID;
 
     // Forward each participant's transcript (its UiEvent stream from the session
-    // substrate) to room clients, tagged by room + participant — so the cockpit can
+    // substrate) to room clients, tagged by room + participant — so UI clients can
     // render per-participant working detail. The session bus stays internal.
     this.sessions.subscribe((msg) => {
       if (!('session' in msg)) return;
@@ -262,7 +262,7 @@ export class RoomManager {
     return this.registry.liveWithLogs();
   }
 
-  /** Live rooms enriched with each workstream's git/worktree state — the code-state
+  /** Live rooms enriched with each room's git/worktree state — the code-state
    *  half of observability, so a driving agent can land work and spot collisions.
    *  Effective dir = the room's worktree if set, else its cwd. Git failures are
    *  captured per-room (never thrown), so status stays available even mid-conflict. */
@@ -277,27 +277,24 @@ export class RoomManager {
         log: room.log,
         decisions: room.decisions,
         totals: roomCostTotals(room.participants),
-        git: await workstreamGitStatus(
-          room.worktree ? worktreePath(room.worktree) : room.cwd,
-          room.base,
-        ),
+        git: await roomGitStatus(room.worktree ? worktreePath(room.worktree) : room.cwd, room.base),
       })),
     );
   }
 
-  /** The effective workstream dir (the room's worktree if set, else its cwd) + base of
+  /** The effective room dir (the room's worktree if set, else its cwd) + base of
    *  ONE live room — the same resolution {@link liveRoomsStatus} uses per room, exposed
    *  so the review endpoints can drill into a single room without probing every room's
    *  git state. Live rooms only: an archived room's participants are gone and its
-   *  worktree may be pruned, so there is no workstream to inspect (`invalid_state`);
+   *  worktree may be pruned, so there is no working dir to inspect (`invalid_state`);
    *  an id that was never a room is `not_found`. */
-  workstreamDir(roomId: string): CommandResult<{ dir: string; base?: string }> {
+  roomDir(roomId: string): CommandResult<{ dir: string; base?: string }> {
     const room = this.registry.get(roomId);
     if (room) {
       return ok({ dir: room.worktree ? worktreePath(room.worktree) : room.cwd, base: room.base });
     }
     if (this.registry.archived().some((archived) => archived.id === roomId)) {
-      return fail('invalid_state', `room ${roomId} is archived; its workstream is gone`);
+      return fail('invalid_state', `room ${roomId} is archived; its working dir is gone`);
     }
     return fail('not_found', `no such live room: ${roomId}`);
   }
@@ -413,8 +410,8 @@ export class RoomManager {
       this.sessions.spawn(id, {
         model: synthesis.model,
         cwd: room.cwd, // the MAIN checkout — memory files are gitignored, so worktrees never see them
-        agent: synthesis.agent ?? 'default',
-        projectName: `memory:${room.name}`,
+        persona: synthesis.persona ?? 'default',
+        label: `memory:${room.name}`,
       });
       this.sessions.prompt(
         id,
@@ -443,7 +440,7 @@ export class RoomManager {
     room.participants.push({
       name: spec.name,
       sessionId,
-      agent: spec.agent,
+      persona: spec.persona,
       model: spec.model,
       invitedBy,
     });
@@ -453,8 +450,8 @@ export class RoomManager {
         {
           model: spec.model,
           cwd: room.cwd,
-          agent: spec.resolvedAgent,
-          projectName: room.name,
+          persona: spec.resolvedPersona,
+          label: room.name,
           // Every participant attaches to the room's shared worktree, if any.
           worktree: room.worktree,
           // Base branch a brand-new worktree forks from (the first participant creates it).
@@ -504,18 +501,18 @@ export class RoomManager {
     return result;
   }
 
-  /** A participant called `invite_agent`: add the named agent to its room. */
+  /** A participant called `invite_agent`: add the named participant to its room. */
   private async handleInvite(
     sessionId: string,
     spec: InviteOut,
   ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    // The inviter is the calling participant — recorded as the new agent's `invitedBy`,
+    // The inviter is the calling participant — recorded as the new participant's `invitedBy`,
     // so its idle/done notice routes back here (hierarchical delegation signalling).
     return this.addParticipant(
       located.room.id,
-      { name: spec.name, agent: spec.agent, model: spec.model },
+      { name: spec.name, persona: spec.persona, model: spec.model },
       located.participant.name,
     );
   }
@@ -624,7 +621,7 @@ export class RoomManager {
       return fail('rejected', `room capacity exceeded (max ${MAX_PARTICIPANTS} participants)`);
     }
 
-    const knownAgents = new Set((await this.resolveAgents(cwd)).map((agent) => agent.name));
+    const knownPersonas = new Set((await this.resolveAgents(cwd)).map((agent) => agent.name));
     const seenNames = new Set(existing.map((participant) => participant.name));
     const validated: ValidatedParticipantSpec[] = [];
 
@@ -637,11 +634,11 @@ export class RoomManager {
       }
       seenNames.add(spec.name);
 
-      const resolvedAgent = spec.agent ?? spec.name;
-      if (resolvedAgent !== 'default' && !knownAgents.has(resolvedAgent)) {
-        return fail('rejected', `unknown agent: ${resolvedAgent}`);
+      const resolvedPersona = spec.persona ?? spec.name;
+      if (resolvedPersona !== 'default' && !knownPersonas.has(resolvedPersona)) {
+        return fail('rejected', `unknown persona: ${resolvedPersona}`);
       }
-      validated.push({ ...spec, resolvedAgent });
+      validated.push({ ...spec, resolvedPersona });
     }
 
     return ok(validated);
@@ -665,7 +662,7 @@ export class RoomManager {
    *  woken them via routing (or reached the operator channel for @human). Nudge it ONCE
    *  per active→idle transition to report: delegates toward their inviter, top-level
    *  participants toward @human — no one is assumed to be watching the roster (the
-   *  operator is an agent by default; the cockpit human is the special case). Delivered
+   *  operator is an agent by default; the watching human is the special case). Delivered
    *  as a direct session prompt (bypasses room routing, so it can't become a post or
    *  loop); a participant whose post DELIVERED gets nothing (its post is the signal). */
   private nudgeIfIdleWithoutReport(participant: RoomParticipant): void {
@@ -673,7 +670,7 @@ export class RoomManager {
     participant.idle = true;
     if (participant.posted) return; // it reported — a delivered post is the signal
     // Deliver signals, not sights: assume NO ONE is watching the roster — the operator is
-    // an agent (a pi driver, another orchestrator) by default, and the cockpit human is
+    // an agent (a pi operator, another orchestrator) by default, and the watching human is
     // the special case. So top-level participants are nudged too, toward @human: unposted
     // work is invisible to every operator kind except a human who happens to be looking.
     const inviter = participant.invitedBy;

@@ -11,11 +11,11 @@ test('prompt silently drops a dead or missing session', () => {
   expect(sessions.prompt('missing', 'room closed', 'kild')).toBe(false);
 });
 
-test('resolveActor returns the configured agent for a live session', () => {
+test('resolveActor returns the configured persona for a live session', () => {
   const sessions = new SessionManager();
   (sessions as { sessions: Map<string, unknown> }).sessions.set('brain-session', {
     session: {},
-    info: { id: 'brain-session', agent: 'brain', origin: 'cli' },
+    info: { id: 'brain-session', persona: 'brain', origin: 'cli' },
   });
   expect(sessions.resolveActor('brain-session')).toEqual({ ok: true, value: 'brain' });
 });

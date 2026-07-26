@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { configuredBaseBranch, kildHome } from './config.ts';
 
 // execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
-// and the cockpit's worktree selector feed a (possibly LLM-generated) name in here,
+// and UI clients' worktree selectors feed a (possibly LLM-generated) name in here,
 // so shell interpolation would be RCE. This module is kild-owned and hot-path-safe:
 // the session path imports it directly, so it must NOT depend on @flue (the general
 // `worktree()` sandbox lives in flue/worktree-sandbox.ts).
@@ -64,29 +64,26 @@ export async function currentBranch(repo: string): Promise<string | undefined> {
 /** Resolve the base branch for a worktree/room in `cwd`: explicit `flag` wins, else the
  *  configured `baseBranch` (project over global), else the checkout's current branch, else
  *  `main`. This is the branch new worktrees fork from and that git status is measured
- *  against, so ahead/behind + collisions reflect this workstream's own work. */
+ *  against, so ahead/behind + collisions reflect this room's own work. */
 export async function resolveBaseBranch(cwd: string, flag?: string): Promise<string> {
   return flag ?? (await configuredBaseBranch(cwd)) ?? (await currentBranch(cwd)) ?? 'main';
 }
 
-/** Create a fresh isolated worktree on a `kild/<branch>` branch, force-resetting any
+/** Create a fresh isolated worktree on a `kild/<name>` branch, force-resetting any
  *  pre-existing one. For the brain's explicit "new worktree" — NOT the session path
- *  (which must never reset a shared tree; use {@link ensureWorktree}). `base` is the
+ *  (which must never reset a shared tree; use {@link ensureWorktree}). `name` is the
+ *  kild worktree name (the branch is derived as `kild/<name>`); `base` is the
  *  start-point ref (default: current HEAD). */
-export async function createWorktree(
-  repo: string,
-  branch: string,
-  base?: string,
-): Promise<Worktree> {
-  assertSafeBranch(branch);
-  const wtPath = worktreePath(branch);
-  const ref = worktreeRef(branch);
+export async function createWorktree(repo: string, name: string, base?: string): Promise<Worktree> {
+  assertSafeBranch(name);
+  const wtPath = worktreePath(name);
+  const ref = worktreeRef(name);
   // Best-effort pre-clean of a same-named worktree before the force re-create.
   // Force is intentional here ("new worktree" is destructive-by-request).
   await execFile('git', ['-C', repo, 'worktree', 'remove', '--force', wtPath]).catch(() => {});
   const add = ['-C', repo, 'worktree', 'add', '-B', ref, wtPath, ...(base ? [base] : [])];
   await execFile('git', add);
-  return { branch: ref, path: wtPath, name: branch };
+  return { branch: ref, path: wtPath, name };
 }
 
 /** Create the worktree if missing, ATTACH (reuse) it if it already exists. The

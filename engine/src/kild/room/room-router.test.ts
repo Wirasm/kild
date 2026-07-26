@@ -13,7 +13,7 @@ function fixture(participantNames: string[] = ['orchestrator', 'worker']) {
     id: 'r1',
     name: 'demo',
     cwd: '/tmp',
-    participants: participantNames.map((name) => ({ name, sessionId: `s-${name}`, agent: name })),
+    participants: participantNames.map((name) => ({ name, sessionId: `s-${name}`, persona: name })),
     log: [],
     state: 'running',
   };

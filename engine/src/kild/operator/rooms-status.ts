@@ -6,9 +6,9 @@ import {
   type RoomMessage,
   roomCostTotals,
 } from '../room/room-types.ts';
-import type { WorkstreamGitStatus } from '../worktree-status.ts';
+import type { RoomGitStatus } from '../worktree-status.ts';
 
-/** The director's compact view of a workstream's git state: a summary, not the full
+/** The director's compact view of a room's git state: a summary, not the full
  *  changed-file list. Per the pull-not-push discipline, the director sees a COUNT plus
  *  the actionable collisions; the full list stays in the pull/human layer. `path` is
  *  kept — a driving agent needs it to `cd` in and land the work. */
@@ -33,7 +33,7 @@ export function formatCompactGitSummary(git?: CompactGitStatus): string {
 
 /** One overlap: `room` also changed `files`. The specific overlapping files ARE the
  *  actionable signal (which is why they're surfaced compactly, unlike the full list). */
-export interface WorkstreamCollision {
+export interface RoomCollision {
   room: string;
   files: string[];
 }
@@ -43,11 +43,11 @@ export interface CompactRoomStatus {
   name: string;
   participants: ParticipantView[];
   posts: RoomMessage[];
-  /** The workstream's git/worktree summary — code state, not just conversation. */
+  /** The room's git/worktree summary — code state, not just conversation. */
   git?: CompactGitStatus;
-  /** Other live workstreams that touch the same files — a merge collision waiting to
-   *  happen. Empty/absent when this workstream collides with none. */
-  collidesWith?: WorkstreamCollision[];
+  /** Other live rooms that touch the same files — a merge collision waiting to
+   *  happen. Empty/absent when this room collides with none. */
+  collidesWith?: RoomCollision[];
   /** Unresolved keyed decisions — each needs an operator call before this room can close.
    *  Absent when none are open (the normal case). */
   openDecisions?: RoomDecision[];
@@ -58,19 +58,19 @@ export interface CompactRoomStatus {
 
 /** Full changed-file list → a count for the compact view. `path` and the rest ride
  *  through; only the potentially-large file list is dropped (pull it if you need it). */
-function toCompactGit(git: WorkstreamGitStatus): CompactGitStatus {
+function toCompactGit(git: RoomGitStatus): CompactGitStatus {
   const { changedFiles, ...rest } = git;
   return { ...rest, changedFileCount: changedFiles.length };
 }
 
-/** Cross-workstream collisions: for each room, the other live rooms that changed any of
+/** Cross-room collisions: for each room, the other live rooms that changed any of
  *  the same files (committed vs base). Pure — computed once over the enriched set. */
-export function computeCollisions(rooms: LiveRoomStatus[]): Map<string, WorkstreamCollision[]> {
-  const result = new Map<string, WorkstreamCollision[]>();
+export function computeCollisions(rooms: LiveRoomStatus[]): Map<string, RoomCollision[]> {
+  const result = new Map<string, RoomCollision[]>();
   for (const a of rooms) {
     const aFiles = new Set(a.git?.changedFiles ?? []);
     if (aFiles.size === 0) continue;
-    const collisions: WorkstreamCollision[] = [];
+    const collisions: RoomCollision[] = [];
     for (const b of rooms) {
       if (b.id === a.id) continue;
       const shared = (b.git?.changedFiles ?? []).filter((file) => aFiles.has(file));

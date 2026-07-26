@@ -9,13 +9,13 @@ for a cold agent or a future you to pick it up without re-deriving anything.
 
 | Layer | Owns | Lives in |
 |---|---|---|
-| **kild** | **the code / the driver** — who runs where, isolation, handoff, how work lands | `~/Projects/mine/kild` |
+| **kild** | **the code / the orchestration** — who runs where, isolation, handoff, how work lands | `~/Projects/mine/kild` |
 | **PRP** | **the intelligence** — how work is done: plan → implement → review, gates, validation loops | `~/Projects/prp-spaces/PRPs-agentic-eng` |
 | **pi** | **the agent** — cognition: models, sessions, tools, context, auth | upstream (`earendil-works/pi`) |
 
 The rule that makes it work: **each layer ships mechanism, never the layer above's content.**
 kild never bakes a personality or a process. PRP never assumes a harness. pi never knows
-what a "workstream" is.
+what a "room" is.
 
 Concretely: a kild room spawns pi sessions; each session discovers the PRP skills (via
 `~/.agents/skills`); a worker is told *"use the prp-implement skill on this plan"* and the
@@ -82,7 +82,7 @@ kild room, ~$0.20 total:
 - **Agent personalities rewritten** (`.pi/agents/orchestrator.md`, `.pi/agents/worker.md`)
   — the PRP orchestration protocol as prompt: decomposition with definition-of-done,
   evidence-based reporting, verify-before-believe, standing decisions vs. gate digests,
-  one-room-one-workstream, blocked-worker escalation that resumes the *same* worker.
+  one room per unit of parallel work, blocked-delegate escalation that resumes the *same* delegate.
 
 ## Known gaps (ranked)
 
@@ -105,7 +105,7 @@ kild room, ~$0.20 total:
    personality carries the event contract instead of relying on prompt-level polling loops.
 5. **Slice 5 — engine-derived actors.** Free-form `from` still lets callers label themselves;
    actor identity should come from the engine, not prose or client-provided strings.
-6. **Slice 6 — one transport-neutral command API.** UI clients, the CLI, fleet tools, and
+6. **Slice 6 — one transport-neutral command API.** UI clients, the CLI, operator tools, and
    any future harness should drive one command surface instead of parallel
    transport-specific shapes.
 
@@ -115,8 +115,8 @@ kild room, ~$0.20 total:
 actors) and **slice 6** (one transport-neutral command API). Everything else below is
 history or context, not a pending work queue.
 
-**The fleet layer — SHIPPED and live-proven (2026-07-16).** The brain is a kild session
-(`kild fleet "<goal>"`, agent `brain`, `KILD_OPERATOR=1`) whose tools — `open_room`,
+**The operator layer — SHIPPED and live-proven (2026-07-16).** The brain is a kild session
+(`kild operator "<goal>"` — the verb was `kild fleet` at the time — agent `brain`, `KILD_OPERATOR=1`) whose tools — `open_room`,
 `post_room`, `rooms_status`, `close_room` — are HTTP clients of the same engine REST
 surface any UI client drives (new: `POST /api/rooms[,/:id/post,/:id/close]`, participant-
 aware kickoff addressing, non-room WS `spawn/prompt/stop` restored). Memory is a durable
