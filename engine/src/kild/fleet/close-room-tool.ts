@@ -3,7 +3,7 @@ import { Type } from 'typebox';
 
 import { closeRoom } from './engine-client.ts';
 
-export function createFleetCloseRoomTool(): ToolDefinition {
+export function createOperatorCloseRoomTool(): ToolDefinition {
   return {
     name: 'close_room',
     label: 'Close Room',
