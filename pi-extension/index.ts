@@ -628,6 +628,9 @@ export default function (pi: PiExtensionAPI) {
     },
   });
 
+  // The kild_fleet_* tool NAMES are model-facing API — renaming them changes prompts and
+  // agent behavior, so they keep the historical "fleet" name even though the engine
+  // capability they request is now `operator` (POST /api/sessions {operator:true}).
   pi.registerTool({
     name: 'kild_fleet_start',
     label: 'kild: start fleet driver',
@@ -652,7 +655,7 @@ export default function (pi: PiExtensionAPI) {
           agent: p.agent ?? 'default',
           model: p.model,
           projectName: 'fleet',
-          fleet: true,
+          operator: true,
           prompt: p.goal,
         }),
       });

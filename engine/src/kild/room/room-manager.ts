@@ -193,7 +193,7 @@ export class RoomManager {
       cwd: spec.cwd,
       worktree: spec.worktree,
       // Resolve the base once here — the single chokepoint every opener (CLI, REST, WS,
-      // fleet tool) flows through: explicit `base` wins, else the cwd's configured
+      // operator tool) flows through: explicit `base` wins, else the cwd's configured
       // `baseBranch`, else its current branch, else `main`.
       base: await resolveBaseBranch(spec.cwd, spec.base),
       openedBy: spec.openedBy,

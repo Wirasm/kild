@@ -260,7 +260,7 @@ async function fleetInteractive(goal: string): Promise<void> {
       model: values.model,
       cwd,
       projectName: values.project ?? 'fleet',
-      fleet: true,
+      operator: true,
       prompt: goal,
     });
     return void console.log(json ? JSON.stringify(res, null, 2) : res.id);
@@ -319,14 +319,14 @@ async function fleetInteractive(goal: string): Promise<void> {
           type: 'spawn',
           id,
           // The fleet driver's persona comes from the project (`--agent <name>`); with none,
-          // it's the `default` general-purpose session (kild's system prompt) plus the fleet
-          // room-control tools. kild ships no `brain` role of its own.
+          // it's the `default` general-purpose session (kild's system prompt) plus the
+          // operator room-control tools. kild ships no `brain` role of its own.
           agent: values.agent ?? 'default',
           cwd,
           model: values.model,
           worktree: values.worktree,
           projectName: values.project ?? 'fleet',
-          env: { KILD_FLEET: '1' },
+          env: { KILD_OPERATOR: '1' },
         }),
       );
       ws.send(JSON.stringify({ type: 'prompt', id, text: goal }));

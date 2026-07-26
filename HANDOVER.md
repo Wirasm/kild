@@ -116,7 +116,7 @@ actors) and **slice 6** (one transport-neutral command API). Everything else bel
 history or context, not a pending work queue.
 
 **The fleet layer — SHIPPED and live-proven (2026-07-16).** The brain is a kild session
-(`kild fleet "<goal>"`, agent `brain`, `KILD_FLEET=1`) whose tools — `open_room`,
+(`kild fleet "<goal>"`, agent `brain`, `KILD_OPERATOR=1`) whose tools — `open_room`,
 `post_room`, `rooms_status`, `close_room` — are HTTP clients of the same engine REST
 surface any UI client drives (new: `POST /api/rooms[,/:id/post,/:id/close]`, participant-
 aware kickoff addressing, non-room WS `spawn/prompt/stop` restored). Memory is a durable

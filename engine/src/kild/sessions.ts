@@ -79,7 +79,7 @@ export function workerEnv(
     KILD_MODEL: req.model ?? '',
     KILD_CWD: req.cwd ?? process.cwd(),
     KILD_AGENT: req.agent ?? '',
-    // Session identity is manager-owned: fleet tools use it to identify room openers.
+    // Session identity is manager-owned: operator tools use it to identify room openers.
     KILD_SESSION_ID: id,
     // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
     KILD_WORKTREE: req.worktree ?? '',
