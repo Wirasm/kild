@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
+  ModelRuntime,
   SessionManager as PiSessionManager,
 } from '@earendil-works/pi-coding-agent';
 
@@ -81,9 +81,6 @@ export async function runWorker(): Promise<never> {
     }
   }
 
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
-
   // Per-turn state for the implicit-reply rule (room only): the turn's sender, whether
   // the agent posted explicitly this turn, and its accumulated final text. Reset at
   // the start of each turn (in drainPrompts).
@@ -95,6 +92,10 @@ export async function runWorker(): Promise<never> {
   let model: ReturnType<typeof resolveModel>;
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   try {
+    // The canonical model/auth runtime (reads ~/.pi/agent auth.json + models.json);
+    // ModelRegistry is the synchronous facade over it that resolveModel reads.
+    const modelRuntime = await ModelRuntime.create();
+    const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
     // A room participant gets `post_message` + `invite_agent`; the room's LEAD also
     // gets `close_room` (ending the room is the lead's explicit act). An operator-enabled
@@ -149,8 +150,7 @@ export async function runWorker(): Promise<never> {
     const piSessionManager = forkFrom ? PiSessionManager.forkFrom(forkFrom, cwd) : undefined;
     ({ session } = await createAgentSession({
       model,
-      authStorage,
-      modelRegistry: registry,
+      modelRuntime,
       cwd,
       customTools,
       resourceLoader,
