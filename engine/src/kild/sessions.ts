@@ -15,8 +15,10 @@ import { worktreePath, worktreeRef } from './worktree.ts';
 export interface SpawnRequest {
   model?: string;
   cwd?: string;
-  agent?: string;
-  projectName?: string;
+  persona?: string;
+  /** Session label shown in listings (e.g. the room name, or 'operator'). Never a
+   *  registry project name — purely display. */
+  label?: string;
   /** Worktree *name* (not path). Absent → run in the project's main checkout.
    *  Present → the worker ensures `kild/<name>` and runs the agent there. Two
    *  sessions naming the same worktree share its tree (attach); different names
@@ -35,13 +37,14 @@ export interface SpawnRequest {
   env?: Record<string, string>;
 }
 
-/** Metadata the cockpit shows for a session — including ones the CLI started. */
+/** Metadata UI clients show for a session — including ones the CLI started. */
 export interface SessionInfo {
   id: string;
   model?: string;
   cwd?: string;
-  agent?: string;
-  projectName?: string;
+  persona?: string;
+  /** Session label (display only — see {@link SpawnRequest.label}). */
+  label?: string;
   origin: 'ui' | 'cli';
   /** The selected worktree's name (echoed for the worktrees-in-use cross-check). */
   worktree?: string;
@@ -78,7 +81,7 @@ export function workerEnv(
     KILD_ROLE: 'worker',
     KILD_MODEL: req.model ?? '',
     KILD_CWD: req.cwd ?? process.cwd(),
-    KILD_AGENT: req.agent ?? '',
+    KILD_PERSONA: req.persona ?? '',
     // Session identity is manager-owned: operator tools use it to identify room openers.
     KILD_SESSION_ID: id,
     // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
@@ -194,7 +197,7 @@ class PiSession {
 /**
  * The engine's single owner of all live sessions. Each session is an isolated
  * subprocess, so sessions run concurrently and a crash takes down only its own
- * process. Every client (cockpit WS connections, and the CLI) subscribes to the
+ * process. Every client (UI-client WS connections, and the CLI) subscribes to the
  * same broadcast, so a session started anywhere is visible everywhere.
  */
 export class SessionManager {
@@ -216,14 +219,14 @@ export class SessionManager {
   resolveActor(id: string): CommandResult<string> {
     const info = this.sessions.get(id)?.info;
     if (!info) return { ok: false, code: 'rejected', message: `unknown session: ${id}` };
-    if (!info.agent) {
+    if (!info.persona) {
       return {
         ok: false,
         code: 'rejected',
         message: `session '${id}' has no actor identity`,
       };
     }
-    return { ok: true, value: info.agent };
+    return { ok: true, value: info.persona };
   }
 
   spawn(
@@ -237,8 +240,8 @@ export class SessionManager {
       id,
       model: req.model,
       cwd: req.cwd,
-      agent: req.agent,
-      projectName: req.projectName,
+      persona: req.persona,
+      label: req.label,
       origin,
     };
     if (req.worktree) {

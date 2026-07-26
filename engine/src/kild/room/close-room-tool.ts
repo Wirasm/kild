@@ -11,7 +11,7 @@ import { Type } from 'typebox';
  * recovered. So closing is the operator's call, never an autonomous "I think we're done"
  * — the tool description tells the lead to close only on an explicit human instruction. A
  * finished room should idle (agents stay alive, re-promptable with full context) until the
- * human decides the workstream is over.
+ * human decides the room's work is over.
  */
 export function createCloseRoomTool(
   emit: (spec: { reason?: string }) => Promise<string>,

@@ -87,7 +87,7 @@ export function formatRoomLogEntry(room: Room, closedAt: Date): string {
   lines.push(`- outcome: ${oneLine(finalNonSystemPost(room), 400)}`);
   for (const decision of room.decisions ?? []) lines.push(formatDecision(decision));
   for (const participant of room.participants) {
-    const persona = participant.agent ?? 'default';
+    const persona = participant.persona ?? 'default';
     const model = participant.model ? `, ${participant.model}` : '';
     const resume = participant.piSessionFile ?? participant.piSessionId;
     const handle = resume ? ` — pi --session ${resume}` : '';
@@ -130,8 +130,9 @@ export function projectMemorySection(projectCwd: string, dir: string): string {
   return `<project-memory>\n${parts.join('\n\n')}\n</project-memory>`;
 }
 
-/** The fleet-memory prompt section (`$KILD_HOME/MAIN_MEMORY.md`) for operator/driver
- *  sessions that steer many projects. Empty string when absent. */
+/** The fleet-memory prompt section (`$KILD_HOME/MAIN_MEMORY.md`) for operator
+ *  sessions that steer many projects. ("Fleet" here is the tolerated memory-scope
+ *  sense — cross-project — not a capability name.) Empty string when absent. */
 export function fleetMemorySection(): string {
   const memory = readCapped(path.join(kildHome(), 'MAIN_MEMORY.md'));
   if (!memory) return '';

@@ -15,13 +15,13 @@ export function createOpenRoomTool(): ToolDefinition {
       name: Type.String({ description: 'Short room name, e.g. "ops".' }),
       cwd: Type.Optional(Type.String({ description: 'Workspace path for the room.' })),
       project: Type.Optional(
-        Type.String({ description: 'Registered project name or raw project path.' }),
+        Type.String({ description: 'Registered project name (use cwd for a raw path).' }),
       ),
       worktree: Type.Optional(Type.String({ description: 'Optional shared worktree name.' })),
       participants: Type.Array(
         Type.Object({
           name: Type.String({ description: 'Participant @handle.' }),
-          agent: Type.Optional(Type.String({ description: 'Agent definition to run.' })),
+          persona: Type.Optional(Type.String({ description: 'Persona to run.' })),
           model: Type.Optional(Type.String({ description: 'Optional model override.' })),
         }),
       ),

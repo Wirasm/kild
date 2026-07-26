@@ -18,7 +18,7 @@ operator directing many agents. See [`VISION.md`](./VISION.md).
   Runs `pi` coding-agent sessions in-process via the **coding-agent SDK**, exposes
   them over an HTTP + WebSocket server (Hono), and gives any command-line agent a
   kild runtime through the `kild` CLI.
-- **pi extension** (`pi-extension/`) — drives kild rooms/fleets from inside a pi
+- **pi extension** (`pi-extension/`) — drives kild rooms from inside a pi
   session; a thin client over the engine's REST API.
 - **The API is the UI contract.** kild ships no UI. The engine's REST + WebSocket
   surface is the contract; external clients — e.g.
@@ -46,7 +46,7 @@ it never bakes an agent personality into the codebase.
 - **Flue** (`@flue/runtime`) is a **committed dependency** for sandbox experiments,
   deploy targets, and the upstream we contribute back to. Its workflows are frozen,
   explicitly invoked experiments—not on the session hot path—and must not grow until
-  the fleet layer names a real server or CLI endpoint.
+  the operator layer names a real server or CLI endpoint.
 
 ## Core Principles
 
@@ -138,7 +138,7 @@ kild/
 │   │   └── flue/               #   [Flue layer] Flue-promotable mechanisms
 │   │       └── worktree-sandbox.ts #  worktree() SandboxFactory (self-contained; upstream contribution)
 │   └── src/workflows/          #   [Flue layer] runnable Flue workflows (brain/merge/run demos)
-└── pi-extension/               # drive kild rooms/fleets from a pi session (thin REST client)
+└── pi-extension/               # drive kild rooms from a pi session (thin REST client)
 ```
 
 ### Architectural boundaries

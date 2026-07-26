@@ -91,7 +91,7 @@ export class RoomRegistry {
   }
 
   /** Full live Room objects (with cwd + worktree) — the manager needs these to compute
-   *  per-workstream git status, which the ArchivedRoom snapshot deliberately drops. */
+   *  per-room git status, which the ArchivedRoom snapshot deliberately drops. */
   liveRoomObjects(): Room[] {
     return [...this.rooms.values()];
   }

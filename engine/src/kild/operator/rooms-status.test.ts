@@ -60,7 +60,7 @@ test('a live room with no log compacts to an empty post list', () => {
       {
         id: 'room-1',
         name: 'ops',
-        participants: [{ name: 'brain', agent: 'brain' }],
+        participants: [{ name: 'brain', persona: 'brain' }],
         log: [],
       },
     ]),
@@ -68,7 +68,7 @@ test('a live room with no log compacts to an empty post list', () => {
     {
       id: 'room-1',
       name: 'ops',
-      participants: [{ name: 'brain', agent: 'brain' }],
+      participants: [{ name: 'brain', persona: 'brain' }],
       posts: [],
     },
   ]);
@@ -79,7 +79,7 @@ test('a live room keeps only the last two posts and preserves order', () => {
     {
       id: 'room-1',
       name: 'ops',
-      participants: [{ name: 'brain', agent: 'brain' }],
+      participants: [{ name: 'brain', persona: 'brain' }],
       log: [
         { id: 'm1', roomId: 'room-1', from: 'human', to: ['brain'], text: 'one', ts: 1 },
         { id: 'm2', roomId: 'room-1', from: 'brain', to: ['human'], text: 'two', ts: 2 },
@@ -105,7 +105,13 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
     conflictsWithBase: null,
   };
   const compact = compactLiveRooms([
-    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', agent: 'brain' }], log: [], git },
+    {
+      id: 'room-1',
+      name: 'ops',
+      participants: [{ name: 'brain', persona: 'brain' }],
+      log: [],
+      git,
+    },
   ]);
   expect(compact[0]?.git).toEqual({
     path: '/tmp/ws',
@@ -124,16 +130,16 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
 
 test('a live room without git status has no git key', () => {
   const compact = compactLiveRooms([
-    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', agent: 'brain' }], log: [] },
+    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', persona: 'brain' }], log: [] },
   ]);
   expect(compact[0]).not.toHaveProperty('git');
 });
 
-test('collisions: two workstreams that touch the same file each name the other', () => {
+test('collisions: two rooms that touch the same file each name the other', () => {
   const mk = (id: string, name: string, changedFiles: string[]) => ({
     id,
     name,
-    participants: [{ name: 'worker', agent: 'worker' }],
+    participants: [{ name: 'worker', persona: 'worker' }],
     log: [],
     git: {
       path: `/tmp/${name}`,
@@ -226,7 +232,7 @@ test('compaction copies participant and post arrays without mutating the source 
     {
       id: 'room-1',
       name: 'ops',
-      participants: [{ name: 'brain', agent: 'brain' }],
+      participants: [{ name: 'brain', persona: 'brain' }],
       log: [{ id: 'm1', roomId: 'room-1', from: 'human', to: ['brain'], text: 'one', ts: 1 }],
     },
   ];

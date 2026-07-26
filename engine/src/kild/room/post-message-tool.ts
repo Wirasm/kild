@@ -23,7 +23,7 @@ export function createPostMessageTool(
     label: 'Post Message',
     description:
       'Post a message to the room so other agents and the human can read it. ' +
-      'Set `to` to the handles you are addressing (e.g. `["worker"]`, or `["human"]` ' +
+      'Set `to` to the handles you are addressing (e.g. `["coder"]`, or `["human"]` ' +
       'for the operator) — those participants are prompted with your message. Omit `to` ' +
       'to address the room lead by default. This is the ONLY way others see your ' +
       'message — your normal output is private to you.',
@@ -33,7 +33,7 @@ export function createPostMessageTool(
       to: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            'Handles to address, e.g. ["worker"] or ["human"]. Those participants are ' +
+            'Handles to address, e.g. ["coder"] or ["human"]. Those participants are ' +
             'prompted with this message. Omit to address the room lead.',
         }),
       ),

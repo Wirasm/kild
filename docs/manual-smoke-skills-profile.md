@@ -10,7 +10,7 @@ This verifies that a capability profile applies to room participants only.
 3. Open a room and inspect a participant's startup resource/skills list. It must list
    exactly the seven skills above, and must not list `prp-worktree`, `prp-loop`, or
    `prp-pr`, even if those are globally or project-discoverable.
-4. Spawn an ordinary session and run `kild fleet ...`; neither is profile-scoped.
+4. Spawn an ordinary session and run `kild operator ...`; neither is profile-scoped.
    Their normal discovered skills remain available.
 
 The engine rejects a relative `KILD_SKILLS_PROFILE` value at startup.

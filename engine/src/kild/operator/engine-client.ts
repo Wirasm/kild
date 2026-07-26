@@ -72,22 +72,23 @@ export async function getLiveRooms(): Promise<LiveRoomStatus[]> {
 }
 
 export interface SpawnSessionRequest {
-  agent?: string;
+  persona?: string;
   model?: string;
   cwd?: string;
   worktree?: string;
   base?: string;
-  projectName?: string;
+  /** Session label shown in listings (e.g. 'operator', a room name). Display only. */
+  label?: string;
   /** Grant the operator room-control tools (open/post/status/close rooms). */
   operator?: boolean;
   /** Absolute pi session file to fork from — the spawned session starts from a frozen
    *  copy of its history (a new session file; the source is never written). */
   forkFrom?: string;
-  /** Initial prompt delivered right after spawn (e.g. the fleet driver's goal). */
+  /** Initial prompt delivered right after spawn (e.g. the operator session's goal). */
   prompt?: string;
 }
 
-/** Spawn a detached session (e.g. a fleet driver) through the engine; returns its id. */
+/** Spawn a detached session (e.g. a detached operator) through the engine; returns its id. */
 export async function spawnSession(req: SpawnSessionRequest): Promise<{ ok: true; id: string }> {
   return engineFetch('/api/sessions', {
     method: 'POST',
@@ -110,7 +111,7 @@ export async function stopSession(id: string): Promise<{ ok: boolean }> {
 
 export interface SessionSummary {
   id: string;
-  agent?: string;
+  persona?: string;
   model?: string;
   worktree?: string;
   cwd?: string;

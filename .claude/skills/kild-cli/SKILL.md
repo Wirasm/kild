@@ -1,8 +1,8 @@
 ---
 name: kild-cli
 description: |
-  Drive the kild CLI: one-shot pi coding agents (`kild run`), multi-agent room
-  workstreams (`kild room open/post/log/close`, `kild rooms`), fleet drivers, and
+  Drive the kild CLI: one-shot pi coding agents (`kild run`), multi-agent rooms
+  (`kild room open/post/log/close`, `kild rooms`), detached operator sessions, and
   project/agent/worktree management.
 
   USE THIS SKILL to: delegate a task to a sub-agent ("use kild to…", "spawn an
@@ -20,7 +20,7 @@ description: |
 an agent can drive over the Bash tool. It is installed globally: run `kild <args>`
 from anywhere (installed with `bun link` from `engine/`; source `engine/src/cli.ts`).
 `kild run` is **one-shot**: it starts an agent, lets it work to completion, and
-prints the result. For **live, multi-agent, steerable** workstreams, drive **rooms**
+prints the result. For **live, multi-agent, steerable** work, drive **rooms**
 from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
 `room close`) — see "Driving rooms" below.
 
@@ -34,10 +34,10 @@ from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
 | `kild room log <id>` | Read a room's full message thread (the pull view; `kild rooms` shows only the last posts) |
 | `kild room post <id> <text…>` | Post a message into a live room (steer it) |
 | `kild room close <id>` | Close a live room by id |
-| `kild fleet <goal> --detach` | Spawn a fleet-driver session (a driver that opens/steers many rooms), print its id |
-| `kild fleet post <id> <text…>` | Steer a running fleet driver |
-| `kild fleet stop <id>` | Stop a fleet driver |
-| `kild sessions` | List live sessions (fleet drivers + runs) |
+| `kild operator <goal> --detach` | Spawn a detached operator session (opens/steers many rooms), print its id |
+| `kild operator post <id> <text…>` | Steer a running operator session |
+| `kild operator stop <id>` | Stop an operator session |
+| `kild sessions` | List live sessions (operator sessions + runs) |
 | `kild project ls` | List registered projects |
 | `kild project add <name> <path>` | Register a project directory (`~` is expanded) |
 | `kild project rm <name>` | Remove a project |
@@ -49,7 +49,7 @@ from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
 
 Add `--json` to any command for machine-readable output on stdout.
 
-## Driving rooms (multi-agent workstreams) from the CLI
+## Driving rooms (multi-agent units of parallel work) from the CLI
 
 A **room** is a shared workspace where one or more agents collaborate. Unlike `run`
 (one-shot, single agent), a room is steerable and multi-agent — and it is now fully
@@ -98,7 +98,7 @@ going; a delegate's posted result wakes you automatically. Don't busy-wait re-as
 delegate finishes a turn **without** posting, kild nudges *it* to report — so a forgotten
 post can't silently stall the run.
 
-## Worktrees — isolate every workstream (you name them)
+## Worktrees — isolate every room (you name them)
 
 `--worktree <name>` runs the room (or `kild run`) in an isolated git worktree on branch
 `kild/<name>`; kild adds the `kild/` prefix, **you choose the suffix**. There is no
@@ -107,18 +107,18 @@ checkout** with no isolation.
 
 Conventions when you drive kild:
 
-- **One workstream = one worktree.** Give every room/run its own `--worktree`, named for
+- **One room = one worktree.** Give every room/run its own `--worktree`, named for
   the task: `--worktree fix-2247`, `--worktree feat-dark-mode`. Never run two independent
-  workstreams in the same tree — their edits collide.
+  rooms in the same tree — their edits collide.
 - **Reuse the name to share a tree.** Two sessions naming the SAME `--worktree` attach to
-  the one tree (e.g. a reviewer joining a coder's workstream). Different names split.
+  the one tree (e.g. a reviewer joining a coder's room). Different names split.
 - **Base branch.** New worktrees fork from — and git status/collisions are measured
   against — the base branch: `--base <branch>` wins, else `.kild/config.json` `baseBranch`,
   else the checkout's current branch. On a repo whose trunk is `dev`, set
   `{"baseBranch":"dev"}` (or pass `--base dev`) so ahead/behind and collisions reflect
-  only this workstream's work.
-- **Observe & land.** `kild rooms` shows each workstream's branch, ahead/behind, dirty,
-  conflicts, and cross-workstream file collisions; the agent lands the work with normal
+  only this room's work.
+- **Observe & land.** `kild rooms` shows each room's branch, ahead/behind, dirty,
+  conflicts, and cross-room file collisions; the agent lands the work with normal
   git/gh (commit, push, PR) inside its worktree.
 - **Clean up.** After merging, `kild worktree rm <name> --project <p>` frees the tree;
   `kild worktree prune --project <p>` removes trees whose branch merged into base.

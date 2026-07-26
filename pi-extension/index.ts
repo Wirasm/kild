@@ -1,8 +1,8 @@
 /**
  * kild pi extension — drive kild rooms from the pi CLI.
  *
- * The pi session is the OPERATOR/driver: it opens rooms (concurrent multi-agent
- * workstreams), delegates by posting, observes, and closes only on the human's explicit
+ * The pi session is the OPERATOR: it opens rooms (concurrent multi-agent units of
+ * parallel work), delegates by posting, observes, and closes only on the human's explicit
  * order. This is a THIN client over the kild engine's REST API — all orchestration
  * (concurrent workers, routing, idle failsafe, observability) lives in the engine.
  *
@@ -106,7 +106,7 @@ interface LiveRoom {
   state?: string;
   participants: Array<{
     name: string;
-    agent?: string;
+    persona?: string;
     model?: string;
     piSessionId?: string;
     piSessionFile?: string;
@@ -166,7 +166,7 @@ function truncate(text: string): string {
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n… (truncated)` : text;
 }
 
-// ── the driver guide injected into the pi session's system prompt ────────────────────
+// ── the operator guide injected into the pi session's system prompt ──────────────────
 function modelCatalog(): string {
   const read = (f: string): Record<string, string> => {
     try {
@@ -186,8 +186,8 @@ function modelCatalog(): string {
 }
 
 /** The operator's cross-project memory ($KILD_HOME/MAIN_MEMORY.md), capped — the pi
- *  driver is a fleet operator, so it gets the same fleet memory an engine-spawned driver
- *  gets. Empty string when absent. */
+ *  session is an operator, so it gets the same cross-project ("fleet", the tolerated
+ *  memory-scope sense) memory an engine-spawned operator session gets. Empty when absent. */
 function fleetMemory(): string {
   const home = process.env.KILD_HOME ?? path.join(os.homedir(), '.config', 'kild');
   try {
@@ -200,14 +200,14 @@ function fleetMemory(): string {
   }
 }
 
-function driverGuide(): string {
-  return `<kild-fleet-driver>
-You can orchestrate CONCURRENT multi-agent workstreams ("rooms") via the kild_* tools. You
-are the operator/driver: rooms do the work; you open, delegate, observe, and land.
+function operatorGuide(): string {
+  return `<kild-operator>
+You can orchestrate CONCURRENT multi-agent rooms via the kild_* tools. You are the
+operator: rooms do the work; you open, delegate, observe, and land.
 
-- One room = one workstream = one isolated git worktree. Name the worktree for the task
-  (e.g. fix-2247). Participants run concurrently, each a real agent session.
-- Open with kild_open_room (participants: name + agent persona + model; kickoff = the goal,
+- One room = one unit of parallel work = one isolated git worktree. Name the worktree for
+  the task (e.g. fix-2247). Participants run concurrently, each a real agent session.
+- Open with kild_open_room (participants: name + persona + model; kickoff = the goal,
   delivered to the room lead). Steer or delegate more work with kild_room_post.
 - Delegation is asynchronous and you are NOT blocked. When a room reports to @human, kild
   pushes that report to you automatically as a new message — you do not poll for completion.
@@ -221,19 +221,20 @@ are the operator/driver: rooms do the work; you open, delegate, observe, and lan
   opens one; it stays visible in kild_rooms and BLOCKS close until someone posts
   \`resolved[<key>]: <how>\`. When you make the call, post the resolved line into the room.
   Never force-close past open decisions without the human's explicit say-so.
-- For a long campaign you won't drive yourself, hand off to a detached driver with
-  kild_fleet_start (steer with kild_fleet_post, list with kild_sessions); its rooms outlive it.
+- For a long campaign you won't drive yourself, hand off to a detached operator session
+  with kild_fleet_start (steer with kild_fleet_post, list with kild_sessions — the
+  kild_fleet_* names are historical); its rooms outlive it.
 - kild_agents lists the personas valid for participants; "default" always works.
 ${modelCatalog()}
-</kild-fleet-driver>${fleetMemory()}`;
+</kild-operator>${fleetMemory()}`;
 }
 
 // ── completion push: engine WS → injected turns ─────────────────────────────────────
-// The pi driver is an EXTERNAL client — kild's in-engine wake machinery (post routing,
+// The pi operator is an EXTERNAL client — kild's in-engine wake machinery (post routing,
 // idle nudges) never reaches it. This bridge subscribes to the engine's WS and injects a
-// room's report-to-human as a follow-up user message, so the driver is woken instead of
+// room's report-to-human as a follow-up user message, so the operator is woken instead of
 // having to poll. Scoped to rooms this session engaged (opened or posted to) so an
-// unrelated fleet's traffic never spams the session. Started lazily on first engagement.
+// unrelated project's room traffic never spams the session. Started lazily on first engagement.
 //
 // Robustness: pi's extension handle goes STALE on session replacement/reload (the factory
 // re-runs with a fresh `pi`). So we (1) keep a mutable ref to the latest `pi`, refreshed
@@ -313,7 +314,7 @@ async function reconcileAfterReconnect(): Promise<void> {
       pushReport(
         `[kild] room "${name}" (${roomId}) is no longer live — it was closed, or its agents ` +
           `died with an engine restart, while the report bridge was down. Use kild_rooms for ` +
-          `current state and re-open a room if the workstream is unfinished.`,
+          `current state and re-open a room if the work is unfinished.`,
       );
       continue;
     }
@@ -465,7 +466,7 @@ export default function (pi: PiExtensionAPI) {
     name: 'kild_open_room',
     label: 'kild: open room',
     description:
-      'Open a kild room — a concurrent multi-agent workstream in an isolated git worktree. ' +
+      'Open a kild room — a concurrent multi-agent unit of parallel work in an isolated git worktree. ' +
       'Returns the room id. The kickoff goal is delivered to the room lead (first participant).',
     parameters: Type.Object({
       name: Type.String({ description: 'Short room name, e.g. "fix-2247".' }),
@@ -474,12 +475,12 @@ export default function (pi: PiExtensionAPI) {
         Type.Array(
           Type.Object({
             name: Type.String({ description: 'Participant @handle.' }),
-            agent: Type.Optional(Type.String({ description: 'Agent persona to run (default: the general-purpose "default").' })),
+            persona: Type.Optional(Type.String({ description: 'Persona to run (default: the general-purpose "default").' })),
             model: Type.Optional(Type.String({ description: 'provider/model ref, e.g. openai-codex/gpt-5.6-sol.' })),
           }),
         ),
       ),
-      worktree: Type.Optional(Type.String({ description: 'Isolated worktree name (branch kild/<name>). Strongly recommended: one per workstream.' })),
+      worktree: Type.Optional(Type.String({ description: 'Isolated worktree name (branch kild/<name>). Strongly recommended: one per room.' })),
       base: Type.Optional(Type.String({ description: 'Base branch to fork from / measure against (default: config baseBranch, else current branch).' })),
       kickoff: Type.String({ description: 'The goal/steering message delivered to the room lead.' }),
     }),
@@ -487,7 +488,7 @@ export default function (pi: PiExtensionAPI) {
       const p = params as {
         name: string;
         project?: string;
-        participants?: Array<{ name: string; agent?: string; model?: string }>;
+        participants?: Array<{ name: string; persona?: string; model?: string }>;
         worktree?: string;
         base?: string;
         kickoff: string;
@@ -495,7 +496,7 @@ export default function (pi: PiExtensionAPI) {
       const body = {
         name: p.name,
         ...(p.project?.startsWith('/') ? { cwd: p.project } : p.project ? { project: p.project } : { cwd: process.cwd() }),
-        participants: p.participants?.length ? p.participants : [{ name: 'agent', agent: 'default' }],
+        participants: p.participants?.length ? p.participants : [{ name: 'agent', persona: 'default' }],
         worktree: p.worktree,
         base: p.base,
         kickoff: p.kickoff,
@@ -609,22 +610,28 @@ export default function (pi: PiExtensionAPI) {
     },
   });
 
+  // The kild_agents tool NAME is model-facing API and stays frozen; it lists PERSONAS
+  // (the engine route is /api/personas; the on-disk `.pi/agents` dirs are pi convention).
   pi.registerTool({
     name: 'kild_agents',
-    label: 'kild: list agent personas',
+    label: 'kild: list personas',
     description:
-      'List the agent personas available in a project (its .claude/agents, .pi/agents, and ' +
-      'config-plugged packs like prp-core) — the valid `agent` values for kild_open_room ' +
+      'List the personas available in a project (its .claude/agents, .pi/agents, and ' +
+      'config-plugged packs like prp-core) — the valid `persona` values for kild_open_room ' +
       'participants. "default" is always available (general-purpose, no persona).',
     parameters: Type.Object({
-      project: Type.Optional(Type.String({ description: 'Absolute project path. Omit for global-only personas.' })),
+      project: Type.Optional(Type.String({ description: 'Registered kild project name or absolute path. Omit for global-only personas.' })),
     }),
     async execute(_id, params) {
       const p = params as { project?: string };
-      const q = p.project ? `?project=${encodeURIComponent(p.project)}` : '';
-      const agents = await engineFetch<Array<{ name: string; description: string }>>(`/api/agents${q}`);
-      const lines = agents.map((a) => (a.description ? `${a.name} — ${a.description}` : a.name));
-      return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: agents.length } };
+      const q = p.project
+        ? p.project.startsWith('/')
+          ? `?path=${encodeURIComponent(p.project)}`
+          : `?project=${encodeURIComponent(p.project)}`
+        : '';
+      const personas = await engineFetch<Array<{ name: string; description: string }>>(`/api/personas${q}`);
+      const lines = personas.map((a) => (a.description ? `${a.name} — ${a.description}` : a.name));
+      return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: personas.length } };
     },
   });
 
@@ -633,42 +640,42 @@ export default function (pi: PiExtensionAPI) {
   // capability they request is now `operator` (POST /api/sessions {operator:true}).
   pi.registerTool({
     name: 'kild_fleet_start',
-    label: 'kild: start fleet driver',
+    label: 'kild: start detached operator',
     description:
-      'Spawn a DETACHED, persistent fleet-driver session that keeps orchestrating rooms after ' +
+      'Spawn a DETACHED, persistent operator session that keeps orchestrating rooms after ' +
       'you disconnect: it gets the room-control tools and your goal as its first prompt. ' +
       'Returns its session id. Use for long campaigns you want to hand off; for work you are ' +
       'driving yourself, just use the kild_room_* tools directly.',
     parameters: Type.Object({
-      goal: Type.String({ description: 'The campaign goal, delivered as the driver’s first prompt.' }),
-      project: Type.Optional(Type.String({ description: 'Absolute project path the driver works in. Defaults to the current directory.' })),
-      agent: Type.Optional(Type.String({ description: 'Persona for the driver (default: the general-purpose "default").' })),
-      model: Type.Optional(Type.String({ description: 'provider/model ref for the driver (pick a strong orchestration model).' })),
+      goal: Type.String({ description: 'The campaign goal, delivered as the operator session’s first prompt.' }),
+      project: Type.Optional(Type.String({ description: 'Absolute project path the operator session works in. Defaults to the current directory.' })),
+      persona: Type.Optional(Type.String({ description: 'Persona for the operator session (default: the general-purpose "default").' })),
+      model: Type.Optional(Type.String({ description: 'provider/model ref for the operator session (pick a strong orchestration model).' })),
     }),
     async execute(_id, params) {
-      const p = params as { goal: string; project?: string; agent?: string; model?: string };
+      const p = params as { goal: string; project?: string; persona?: string; model?: string };
       const res = await engineFetch<{ id: string }>('/api/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           cwd: p.project ?? process.cwd(),
-          agent: p.agent ?? 'default',
+          persona: p.persona ?? 'default',
           model: p.model,
-          projectName: 'fleet',
+          label: 'operator',
           operator: true,
           prompt: p.goal,
         }),
       });
-      return { content: [{ type: 'text', text: `fleet driver started: ${res.id}` }], details: { sessionId: res.id } };
+      return { content: [{ type: 'text', text: `operator session started: ${res.id}` }], details: { sessionId: res.id } };
     },
   });
 
   pi.registerTool({
     name: 'kild_fleet_post',
-    label: 'kild: post to fleet driver',
-    description: 'Send a steering message to a running fleet-driver session (by session id).',
+    label: 'kild: post to detached operator',
+    description: 'Send a steering message to a running detached operator session (by session id).',
     parameters: Type.Object({
-      id: Type.String({ description: 'Fleet-driver session id.' }),
+      id: Type.String({ description: 'Operator session id (from kild_fleet_start).' }),
       text: Type.String({ description: 'The steering message.' }),
     }),
     async execute(_id, params) {
@@ -684,12 +691,12 @@ export default function (pi: PiExtensionAPI) {
 
   pi.registerTool({
     name: 'kild_fleet_stop',
-    label: 'kild: stop fleet driver',
+    label: 'kild: stop detached operator',
     description:
-      'Stop a fleet-driver session by id. Its rooms keep running (close those separately, ' +
-      'and only on the human’s explicit order).',
+      'Stop a detached operator session by id. Its rooms keep running (close those ' +
+      'separately, and only on the human’s explicit order).',
     parameters: Type.Object({
-      id: Type.String({ description: 'Fleet-driver session id.' }),
+      id: Type.String({ description: 'Operator session id (from kild_fleet_start).' }),
     }),
     async execute(_id, params) {
       const p = params as { id: string };
@@ -701,20 +708,20 @@ export default function (pi: PiExtensionAPI) {
   pi.registerTool({
     name: 'kild_sessions',
     label: 'kild: list sessions',
-    description: 'List live kild sessions (fleet drivers and one-shot runs) with their models.',
+    description: 'List live kild sessions (operator sessions and one-shot runs) with their models.',
     parameters: Type.Object({}),
     async execute() {
-      const sessions = await engineFetch<Array<{ id: string; agent?: string; model?: string; projectName?: string }>>('/api/sessions');
+      const sessions = await engineFetch<Array<{ id: string; persona?: string; model?: string; label?: string }>>('/api/sessions');
       if (sessions.length === 0) return { content: [{ type: 'text', text: 'no live sessions' }] };
       const lines = sessions.map(
-        (s) => `${s.id}\t${s.agent ?? 'default'}${s.model ? ` (${s.model})` : ''}${s.projectName ? ` · ${s.projectName}` : ''}`,
+        (s) => `${s.id}\t${s.persona ?? 'default'}${s.model ? ` (${s.model})` : ''}${s.label ? ` · ${s.label}` : ''}`,
       );
       return { content: [{ type: 'text', text: truncate(lines.join('\n')) }], details: { count: sessions.length } };
     },
   });
 
-  // The driver guide rides the system prompt every turn — chained after other extensions.
+  // The operator guide rides the system prompt every turn — chained after other extensions.
   pi.on('before_agent_start', ((event: { systemPrompt: string }) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${driverGuide()}`,
+    systemPrompt: `${event.systemPrompt}\n\n${operatorGuide()}`,
   })) as never);
 }

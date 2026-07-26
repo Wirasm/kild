@@ -1,5 +1,5 @@
 import type { UiEvent } from '../events.ts';
-import type { WorkstreamGitStatus } from '../worktree-status.ts';
+import type { RoomGitStatus } from '../worktree-status.ts';
 import type { RoomDecision } from './room-decisions.ts';
 
 /**
@@ -10,18 +10,19 @@ import type { RoomDecision } from './room-decisions.ts';
  */
 
 /** Reserved participant handle for the human operator. Messages to `@human` surface
- *  in the cockpit/CLI only — there is no session to deliver a turn to. */
+ *  in UI clients/CLI only — there is no session to deliver a turn to. */
 export const HUMAN = 'human';
 
-/** A participant in a room: an agent instance addressable by its `@name` handle.
+/** A participant in a room: an agent session addressable by its `@name` handle.
  *  (The human is a virtual participant — never in this list.) */
 export interface RoomParticipant {
-  /** The `@mention` handle — equals the agent's name (e.g. `orchestrator`). */
+  /** The `@mention` handle — equals the participant's name (e.g. `orchestrator`). */
   name: string;
   /** The kild session id running this participant. */
   sessionId: string;
-  /** The agent definition (`.pi/agents/<agent>.md`) it runs as. */
-  agent?: string;
+  /** The persona (`.pi/agents/<name>.md` — the dir name is upstream pi convention) it
+   *  runs as. */
+  persona?: string;
   /** The model this participant runs on — the requested ref at spawn, upgraded to the
    *  provider-resolved `provider/id` once the session reports it. Lets an observer see
    *  which model each agent used in a run. */
@@ -59,7 +60,7 @@ export interface RoomParticipant {
  *  identity IS exposed — it's the durable handle for reopening the agent in a terminal. */
 export interface ParticipantView {
   name: string;
-  agent?: string;
+  persona?: string;
   model?: string;
   piSessionId?: string;
   piSessionFile?: string;
@@ -78,7 +79,7 @@ export interface ParticipantView {
 export function participantView(participant: RoomParticipant): ParticipantView {
   return {
     name: participant.name,
-    agent: participant.agent,
+    persona: participant.persona,
     model: participant.model,
     piSessionId: participant.piSessionId,
     piSessionFile: participant.piSessionFile,
@@ -139,7 +140,7 @@ export interface Room {
   /** Optional shared worktree name — every participant attaches to `kild/<name>`. */
   worktree?: string;
   /** Base branch the worktree was created from and that git status/collisions are
-   *  measured against (so ahead/behind and changed files reflect this workstream's own
+   *  measured against (so ahead/behind and changed files reflect this room's own
    *  work, not everything the base is ahead of `main`). */
   base?: string;
   /** Session that opened this room. It is notified only when it is not a participant. */
@@ -156,7 +157,7 @@ export interface Room {
 /** A participant to spawn into a room. */
 export interface ParticipantSpec {
   name: string;
-  agent?: string;
+  persona?: string;
   model?: string;
 }
 
@@ -189,7 +190,7 @@ export interface RoomSummary {
 }
 
 /** A room recovered from disk after an engine restart — its conversation log with no
- *  live participants (their sessions are gone). The cockpit renders it read-only. */
+ *  live participants (their sessions are gone). UI clients render it read-only. */
 export interface ArchivedRoom {
   id: string;
   name: string;
@@ -204,15 +205,15 @@ export interface ArchivedRoom {
   /** Project directory the room ran in — persisted so archived rooms stay attributable
    *  to their project after the worktree is pruned. Optional: older files predate it. */
   cwd?: string;
-  /** Base branch the workstream measured against. Optional: older files predate it. */
+  /** Base branch the room measured against. Optional: older files predate it. */
   base?: string;
 }
 
-/** A live room enriched with its workstream's git/worktree state — the code-state
+/** A live room enriched with its git/worktree state — the code-state
  *  half of observability, so a driving agent can land work and avoid collisions. Git is
  *  live-only (never persisted); computed on demand when serving live-room status. */
 export interface LiveRoomStatus extends ArchivedRoom {
-  git?: WorkstreamGitStatus;
+  git?: RoomGitStatus;
   /** Room cost rollup summed over participants — absent until stats have arrived. */
   totals?: RoomCostTotals;
 }
@@ -266,7 +267,7 @@ export interface InviteOut {
   kind: 'invite';
   requestId?: string;
   name: string;
-  agent?: string;
+  persona?: string;
   model?: string;
 }
 

@@ -24,7 +24,7 @@ afterAll(() => {
 });
 
 function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId?: () => string }) {
-  const spawned: Array<{ id: string; agent?: string }> = [];
+  const spawned: Array<{ id: string; persona?: string }> = [];
   const stopped: string[] = [];
   const callbacks = new Map<string, SessionCallbacks | undefined>();
   const prompted: Array<{ id: string; text: string; from?: string }> = [];
@@ -44,7 +44,7 @@ function fixture(options?: { agents?: string[]; spawnThrowsAt?: number; createId
         spawnCount += 1;
         if (options?.spawnThrowsAt === spawnCount) throw new Error(`spawn failed ${spawnCount}`);
         callbacks.set(id, sessionCallbacks);
-        spawned.push({ id, agent: req.agent });
+        spawned.push({ id, persona: req.persona });
       },
       prompt: (id, text, from) => {
         prompted.push({ id, text, from });
@@ -117,29 +117,29 @@ test('rejects when room capacity would be exceeded', async () => {
   });
 });
 
-test('rejects an omitted-agent participant whose name is not a known agent', async () => {
+test('rejects an omitted-persona participant whose name is not a known persona', async () => {
   const { manager } = fixture();
   expect(await openRoom(manager, [{ name: 'planner' }])).toEqual({
     ok: false,
     code: 'rejected',
-    message: 'unknown agent: planner',
+    message: 'unknown persona: planner',
   });
 });
 
-test('rejects an explicitly named unknown agent', async () => {
+test('rejects an explicitly named unknown persona', async () => {
   const { manager } = fixture();
-  expect(await openRoom(manager, [{ name: 'worker', agent: 'planner' }])).toEqual({
+  expect(await openRoom(manager, [{ name: 'worker', persona: 'planner' }])).toEqual({
     ok: false,
     code: 'rejected',
-    message: 'unknown agent: planner',
+    message: 'unknown persona: planner',
   });
 });
 
-test("accepts explicit agent:'default' as the generic escape hatch", async () => {
+test("accepts explicit persona:'default' as the generic escape hatch", async () => {
   const { manager, spawned } = fixture();
-  const result = await openRoom(manager, [{ name: 'planner', agent: 'default' }]);
+  const result = await openRoom(manager, [{ name: 'planner', persona: 'default' }]);
   expect(result).toMatchObject({ ok: true, value: { roomId: 'room-1' } });
-  expect(spawned).toEqual([{ id: 's-1', agent: 'default' }]);
+  expect(spawned).toEqual([{ id: 's-1', persona: 'default' }]);
 });
 
 test('open transitions the room from opening to running', async () => {
@@ -286,7 +286,7 @@ test('participant invite returns invalid_state for halted rooms', async () => {
   await manager.halt('room-1');
   const result = await callbacks
     .get('s-1')
-    ?.onInvite?.({ kind: 'invite', name: 'reviewer', agent: 'reviewer' });
+    ?.onInvite?.({ kind: 'invite', name: 'reviewer', persona: 'reviewer' });
   expect(result).toEqual({
     ok: false,
     code: 'invalid_state',
@@ -394,7 +394,7 @@ test('failsafe: a delegate that goes idle WITHOUT posting is nudged to report (o
   });
   // Lead (s-1) opens; lead invites a worker → worker.invitedBy = 'agent' (the lead).
   await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
   prompted.length = 0;
 
   // Worker finishes a turn having posted nothing → nudged (the delegate itself).
@@ -414,7 +414,7 @@ test('default: a delegate that POSTED before going idle is NOT nudged (its post 
     agents: ['default', 'agent', 'worker'],
   });
   await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
   prompted.length = 0;
 
   // Worker reports via an explicit post_message, then its turn ends.
@@ -439,7 +439,7 @@ test('a self-addressed post is not a report — the failsafe still nudges', asyn
     agents: ['default', 'agent', 'worker'],
   });
   await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
   prompted.length = 0;
 
   // The #1141 misroute: the worker "reports" to itself. Delivered to no one → still blind.
@@ -467,7 +467,7 @@ test('a delivered turn re-arms the failsafe (idle-without-post next turn nudges 
     agents: ['default', 'agent', 'worker'],
   });
   await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', agent: 'worker' });
+  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
 
   emitSession(WORKER, { kind: 'agent_end' }); // idle without post → nudge 1
   await manager.postAs('room-1', 'agent', 'do more', ['worker']); // deliver a turn → re-arm
@@ -670,7 +670,7 @@ test('memory.synthesis config spawns a synthesis session in the MAIN checkout af
   fs.writeFileSync(
     path.join(project, '.kild', 'config.json'),
     JSON.stringify({
-      memory: { synthesis: { model: 'openai-codex/gpt-5.6-sol', agent: 'default' } },
+      memory: { synthesis: { model: 'openai-codex/gpt-5.6-sol', persona: 'default' } },
     }),
   );
   await manager.open('room-1', { name: 'demo', cwd: project, participants: [{ name: 'worker' }] });
@@ -694,19 +694,19 @@ test('without memory.synthesis config, close spawns nothing extra', async () => 
   expect(spawned.length).toBe(before);
 });
 
-// ── workstreamDir (the review endpoints' room→dir resolution) ─────────────────
+// ── roomDir (the review endpoints' room→dir resolution) ───────────────────────
 
-test('workstreamDir resolves a live room without a worktree to its cwd', async () => {
+test('roomDir resolves a live room without a worktree to its cwd', async () => {
   const { manager } = fixture();
   await openRoom(manager, [{ name: 'worker' }]);
   // base falls all the way through to 'main' (tmp is no git checkout, no config).
-  expect(manager.workstreamDir('room-1')).toEqual({
+  expect(manager.roomDir('room-1')).toEqual({
     ok: true,
     value: { dir: tmp, base: 'main' },
   });
 });
 
-test('workstreamDir resolves a worktree room to the worktree path, with its base', async () => {
+test('roomDir resolves a worktree room to the worktree path, with its base', async () => {
   const { manager } = fixture();
   await manager.open('room-1', {
     name: 'demo',
@@ -715,7 +715,7 @@ test('workstreamDir resolves a worktree room to the worktree path, with its base
     worktree: 'slice-x',
     base: 'develop',
   });
-  const result = manager.workstreamDir('room-1');
+  const result = manager.roomDir('room-1');
   expect(result.ok).toBe(true);
   if (result.ok) {
     expect(result.value.dir).toBe(worktreePath('slice-x'));
@@ -723,24 +723,24 @@ test('workstreamDir resolves a worktree room to the worktree path, with its base
   }
 });
 
-test('workstreamDir on an unknown room is not_found', () => {
+test('roomDir on an unknown room is not_found', () => {
   const { manager } = fixture();
-  expect(manager.workstreamDir('nope')).toEqual({
+  expect(manager.roomDir('nope')).toEqual({
     ok: false,
     code: 'not_found',
     message: 'no such live room: nope',
   });
 });
 
-test('workstreamDir on a closed (archived) room is invalid_state', async () => {
+test('roomDir on a closed (archived) room is invalid_state', async () => {
   const { manager } = fixture();
   await openRoom(manager, [{ name: 'worker' }]);
   await manager.postFromHuman('room-1', 'hello'); // history → the close archives it
   await manager.close('room-1');
-  expect(manager.workstreamDir('room-1')).toEqual({
+  expect(manager.roomDir('room-1')).toEqual({
     ok: false,
     code: 'invalid_state',
-    message: 'room room-1 is archived; its workstream is gone',
+    message: 'room room-1 is archived; its working dir is gone',
   });
 });
 

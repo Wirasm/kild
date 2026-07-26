@@ -24,7 +24,7 @@ export interface KildConfig {
   plugins?: string[];
   /** Extra agent dirs (personas), beyond `.claude/agents` / `.pi/agents`. */
   agentPaths?: string[];
-  /** Extra skill dirs, discoverable by every session (driver + all participants). */
+  /** Extra skill dirs, discoverable by every session (operator + all participants). */
   skillPaths?: string[];
   /** Base branch new worktrees are created from and that git status/collisions are
    *  measured against (e.g. `dev`). Overridable per-invocation with `--base`; if unset,
@@ -47,7 +47,7 @@ export interface KildConfig {
       /** provider/model ref for the synthesis session (pick a strong reasoning model). */
       model?: string;
       /** Persona for the synthesis session (default: the general-purpose `default`). */
-      agent?: string;
+      persona?: string;
     };
   };
 }
@@ -133,7 +133,7 @@ export async function configuredMemoryDir(cwd: string): Promise<string> {
 /** Merged memory-synthesis config (project wins over global); undefined = synthesis off. */
 export async function configuredMemorySynthesis(
   cwd: string,
-): Promise<{ model?: string; agent?: string } | undefined> {
+): Promise<{ model?: string; persona?: string } | undefined> {
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
   return project?.memory?.synthesis ?? global?.memory?.synthesis;

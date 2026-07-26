@@ -26,7 +26,7 @@ function room(id: string, state: Room['state'] = 'running'): Room {
     id,
     name: 'demo',
     cwd: '/tmp',
-    participants: [{ name: 'worker', sessionId: 's1', agent: 'worker' }],
+    participants: [{ name: 'worker', sessionId: 's1', persona: 'worker' }],
     log: [],
     state,
   };
@@ -54,7 +54,7 @@ test('a fresh registry loads past rooms into the archive (read-only) with their 
   const found = reg.archived().find((a) => a.id === 'room-a');
   expect(found).toBeDefined();
   expect(found?.log.map((m) => m.text)).toEqual(['hello']);
-  expect(found?.participants).toEqual([{ name: 'worker', agent: 'worker' }]);
+  expect(found?.participants).toEqual([{ name: 'worker', persona: 'worker' }]);
   expect(found?.state).toBe('running');
   // Archived rooms are history only — they are NOT live in-memory rooms.
   expect(reg.get('room-a')).toBeUndefined();

@@ -1,7 +1,7 @@
 /**
- * The cockpit-facing event stream and its translation from pi agent events.
+ * The UI-client-facing event stream and its translation from pi agent events.
  *
- * `UiEvent` is identical to what the old Rust `rpc` slice produced; the cockpit
+ * `UiEvent` is identical to what the old Rust `rpc` slice produced; UI clients
  * routes each to the right transcript by session id. pi wire shapes never reach
  * the UI — translation happens here, at the boundary.
  */

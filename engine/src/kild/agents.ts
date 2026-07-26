@@ -3,8 +3,10 @@ import path from 'node:path';
 
 import { kildHome, resolvePluginPaths } from './config.ts';
 
-/** A reusable role: a name + system prompt, read from convention dirs.
- *  Mirror of kild-core::agent (same .kild/.claude/.pi discovery). */
+/** A reusable role (a persona): a name + system prompt, read from convention dirs.
+ *  The on-disk dir names (`.pi/agents`, `.claude/agents`, `.kild/agents`) are upstream
+ *  pi/Claude convention and deliberately NOT renamed to "personas" — kild only reads
+ *  what those ecosystems already write. Mirror of kild-core::agent. */
 export interface Agent {
   name: string;
   /** From frontmatter `description:` — the discovery signal an orchestrator reads

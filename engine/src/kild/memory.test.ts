@@ -36,7 +36,7 @@ function room(cwd: string, overrides: Partial<Room> = {}): Room {
       {
         name: 'worker',
         sessionId: 's-1',
-        agent: 'worker',
+        persona: 'worker',
         model: 'openai-codex/gpt-5.6-sol',
         piSessionId: 'aaaa-bbbb',
         piSessionFile: '/sessions/aaaa-bbbb.jsonl',
