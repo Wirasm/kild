@@ -11,19 +11,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { listAgents } from './kild/agents.ts';
+import { claudeStopOutput } from './kild/claude-stop.ts';
 import {
-  closeRoom,
-  drainRoom,
-  getLiveRooms,
-  joinRoom,
-  listSessions,
-  openRoom,
-  postRoom,
+  attachAgent,
+  drainInbox,
+  getLiveKilds,
+  listAgents,
+  newKild,
+  sendMessage,
+  stopKild,
 } from './kild/engine-client.ts';
+import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
+import { listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
-import { claudeStopOutput } from './kild/room/claude-stop.ts';
-import { compactLiveRooms, formatCompactGitSummary } from './kild/rooms-status.ts';
 import {
   forceRemoveWorktree,
   listWorktrees,
@@ -38,16 +38,16 @@ const { values, positionals } = parseArgs({
   options: {
     json: { type: 'boolean', default: false },
     project: { type: 'string' },
-    agent: { type: 'string' },
+    persona: { type: 'string' },
     model: { type: 'string' },
     worktree: { type: 'string' },
     force: { type: 'boolean', default: false },
-    participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,coder,reviewer
-    detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
+    agents: { type: 'string' }, // `kild new` agents, e.g. orchestrator,coder,reviewer
+    detach: { type: 'boolean', default: false }, // `kild new --detach`: print the id, don't stream
     base: { type: 'string' }, // base branch for the worktree + git-status baseline
-    as: { type: 'string' }, // `kild room join|drain --as <name>`: the attached participant's handle
-    format: { type: 'string' }, // `kild room drain --format claude-stop`: harness hook output
-    to: { type: 'string' }, // `kild room post --to a,b`: recipients; omit to reach the room lead
+    as: { type: 'string' }, // `kild attach|inbox --as <handle>`: the attached agent's handle
+    format: { type: 'string' }, // `kild inbox --format claude-stop`: harness hook output
+    to: { type: 'string' }, // `kild send --to a,b`: recipients; omit to reach the kild lead
   },
 });
 
@@ -67,20 +67,42 @@ async function dispatch(): Promise<void> {
   switch (group) {
     case 'project':
       return project(action, rest);
-    case 'agent':
-      return agent(action, rest);
+    case 'persona':
+      return persona(action, rest);
     case 'worktree':
       return worktree(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
-    case 'room':
-      return room(action, rest);
-    case 'rooms':
-      return roomsList();
-    case 'sessions':
-      return sessionsList();
+    case 'ls':
+      return kildList();
+    case 'new':
+      return kildNew([action, ...rest].filter(Boolean).join(' '));
+    case 'send': {
+      if (!action || rest.length === 0) throw new Error('usage: kild send <id> <text…>');
+      return kildSend(action, rest.join(' '));
+    }
+    case 'stop': {
+      if (!action) throw new Error('usage: kild stop <id>');
+      return kildStop(action);
+    }
+    case 'attach':
+      return kildAttach(action);
+    case 'inbox':
+      return kildInbox(action);
+    case 'log': {
+      if (!action) throw new Error('usage: kild log <id>');
+      return kildLog(action);
+    }
+    case 'show': {
+      if (!action) throw new Error('usage: kild show <id>');
+      return kildShow(action);
+    }
+    case 'agents':
+      return agentsList();
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|rooms|sessions> …');
+      console.error(
+        'usage: kild <ls|new|send|stop|attach|inbox|log|show|agents|persona|project|worktree|run> …',
+      );
       process.exit(2);
   }
 }
@@ -112,8 +134,8 @@ async function project(action: string | undefined, args: string[]): Promise<void
  *
  *  Without the existence check a bare unregistered NAME resolves against the cwd, so
  *  `--project helm` run from `…/sild/helm` became `…/sild/helm/helm`. Nothing downstream
- *  verified it, so the room opened, its worktree could not be created, no agent ever
- *  spawned, and the command still exited 0 with a room id. A delegation that silently
+ *  verified it, so the kild was created, its worktree could not be created, no agent ever
+ *  spawned, and the command still exited 0 with a kild id. A delegation that silently
  *  does nothing is worse than one that fails. */
 async function resolveProjectFlag(): Promise<string | undefined> {
   if (!values.project) return undefined;
@@ -131,22 +153,23 @@ async function resolveProjectFlag(): Promise<string | undefined> {
   );
 }
 
-async function agent(action: string | undefined, args: string[]): Promise<void> {
+/** `kild persona <ls|show>` — the reusable persona definitions the project ships. */
+async function persona(action: string | undefined, args: string[]): Promise<void> {
   const projectPath = await resolveProjectFlag();
   if (action === 'ls') {
-    const agents = await listAgents(projectPath);
-    if (json) return void console.log(JSON.stringify(agents, null, 2));
-    for (const a of agents) console.log(a.name);
+    const personas = await listPersonas(projectPath);
+    if (json) return void console.log(JSON.stringify(personas, null, 2));
+    for (const p of personas) console.log(p.name);
   } else if (action === 'show') {
     const [name] = args;
-    if (!name) throw new Error('usage: kild agent show <name>');
-    const found = (await listAgents(projectPath)).find((a) => a.name === name);
+    if (!name) throw new Error('usage: kild persona show <name>');
+    const found = (await listPersonas(projectPath)).find((p) => p.name === name);
     if (!found) throw new Error(`no such persona: ${name}`);
     if (json) console.log(JSON.stringify(found, null, 2));
     else if (found.systemPrompt) console.log(found.systemPrompt);
     else console.error(`(persona '${name}' uses pi's default prompt)`);
   } else {
-    throw new Error('usage: kild agent <ls|show>');
+    throw new Error('usage: kild persona <ls|show>');
   }
 }
 
@@ -239,122 +262,86 @@ async function run(prompt: string): Promise<void> {
   if (!prompt) throw new Error('usage: kild run <prompt…>');
   // If the engine is up, run THROUGH it so the session shows up in UI clients;
   // otherwise run the agent in-process so the CLI works standalone.
-  return (await engineRunning()) ? runViaEngine(prompt) : runViaWorker(prompt);
+  return (await engineRunning()) ? runViaEngine(prompt) : runViaAgent(prompt);
 }
 
-/** `kild sessions` — list live sessions. */
-async function sessionsList(): Promise<void> {
-  const sessions = await listSessions();
-  if (json) return void console.log(JSON.stringify(sessions, null, 2));
-  if (sessions.length === 0) return void console.error('no live sessions');
-  for (const s of sessions) {
-    console.log(`${s.id}\t${s.persona ?? 'default'}${s.model ? ` (${s.model})` : ''}`);
+/** `kild agents` — list live agents. */
+async function agentsList(): Promise<void> {
+  const agents = await listAgents();
+  if (json) return void console.log(JSON.stringify(agents, null, 2));
+  if (agents.length === 0) return void console.error('no live agents');
+  for (const a of agents) {
+    console.log(`${a.id}\t${a.persona ?? 'default'}${a.model ? ` (${a.model})` : ''}`);
   }
 }
 
 /**
- * `kild room <goal>` — opens a room of participants (`--participants a,b,c`, each a
- * persona from the project's own agents; with none, one general-purpose `default`
- * participant), posts the goal to the lead, and streams every message. With `--worktree
- * <name>` the whole room shares one `kild/<name>` tree (participants attach to it).
- * You can keep typing to post more messages (address participants with @name).
- * The run ends when the room does: the lead closes it with its `close_room` tool
- * after the final report, or Ctrl-C is the kill switch — it closes the room
- * (stopping all participants) and exits. Requires the engine (it is multi-session).
+ * `kild new <goal>` — opens a kild of agents (`--agents a,b,c`, each a
+ * persona from the project's own personas; with none, one general-purpose `default`
+ * agent), sends the goal to the lead, and streams every message. With `--worktree
+ * <name>` the whole kild shares one `kild/<name>` tree (agents attach to it).
+ * You can keep typing to send more messages (address agents with @handle).
+ * The run ends when the kild does: the lead stops it with its `stop` tool
+ * after the final report, or Ctrl-C is the kill switch — it stops the kild
+ * (stopping all agents) and exits. Requires the engine (it is multi-session).
  */
-/** Shared spec for opening a room from either the interactive or `--detach` path. */
-function roomParticipants(): Array<{ name: string; persona: string; model?: string }> {
-  return values.participants
-    ? values.participants
+/** Shared spec for opening a kild from either the interactive or `--detach` path. */
+function kildAgents(): Array<{ handle: string; persona: string; model?: string }> {
+  return values.agents
+    ? values.agents
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-        .map((n) => ({ name: n, persona: n, model: values.model }))
-    : [{ name: 'agent', persona: 'default', model: values.model }];
+        .map((n) => ({ handle: n, persona: n, model: values.model }))
+    : [{ handle: 'agent', persona: 'default', model: values.model }];
 }
 
-async function roomCwd(): Promise<string> {
+async function kildCwd(): Promise<string> {
   return (await resolveProjectFlag()) ?? process.cwd();
 }
 
-/** `kild room <ls|open|post|close>` — the scriptable, non-interactive room primitives an
- *  external operator (agent or human over bash) needs. A bare goal stays interactive. */
-async function room(action: string | undefined, args: string[]): Promise<void> {
-  if (action === 'ls') return roomsList();
-  if (action === 'open') return roomOpen(args.join(' '));
-  if (action === 'log') {
-    const [id] = args;
-    if (!id) throw new Error('usage: kild room log <id>');
-    return roomLog(id);
-  }
-  if (action === 'show') {
-    const [id] = args;
-    if (!id) throw new Error('usage: kild room show <id>');
-    return roomShow(id);
-  }
-  if (action === 'post') {
-    const [id, ...text] = args;
-    if (!id || text.length === 0) throw new Error('usage: kild room post <id> <text…>');
-    return roomPost(id, text.join(' '));
-  }
-  if (action === 'close') {
-    const [id] = args;
-    if (!id) throw new Error('usage: kild room close <id>');
-    return roomClose(id);
-  }
-  if (action === 'join') {
-    const [id] = args;
-    return roomJoin(id);
-  }
-  if (action === 'drain') {
-    const [id] = args;
-    return roomDrain(id);
-  }
-  return roomInteractive([action, ...args].filter(Boolean).join(' '));
-}
-
-/** `kild room join <id> --as <name>` — register an ATTACHED participant: a harness kild
+/** `kild attach <id> --as <handle>` — register an ATTACHED agent: a harness kild
  *  does not own (the Claude Code session you are driving) claiming a `@handle` in the
- *  room. Nothing is spawned; the handle is addressable immediately. Idempotent. */
-async function roomJoin(id: string | undefined): Promise<void> {
-  const name = values.as;
-  if (!id || !name) throw new Error('usage: kild room join <id> --as <name>');
-  const result = await joinRoom(id, name);
+ *  kild. Nothing is spawned; the handle is addressable immediately. Idempotent. */
+async function kildAttach(id: string | undefined): Promise<void> {
+  const handle = values.as;
+  if (!id || !handle) throw new Error('usage: kild attach <id> --as <handle>');
+  const result = await attachAgent(id, handle);
   console.log(json ? JSON.stringify(result, null, 2) : result.message);
 }
 
 /**
- * `kild room drain <id> --as <name> [--format claude-stop]` — destructively read that
- * participant's mailbox. An empty drain is also its idle signal; there is no status verb.
+ * `kild inbox <id> --as <handle> [--format claude-stop]` — destructively read that
+ * agent's inbox. An empty drain is also its idle signal; there is no status verb.
  *
  * With `--format claude-stop` this IS a Claude Code Stop hook's entire body, so it obeys
  * the hook contract absolutely: print the block JSON when mail is waiting, print **nothing
  * at all** when it is not, and **exit 0 either way** — including when the engine is down,
- * the room is gone, or the handle was never joined. A hook that cannot reach kild must
+ * the kild is gone, or the handle was never attached. A hook that cannot reach kild must
  * never stop the operator from finishing a turn. Without the flag it is an ordinary CLI
  * verb and failures are ordinary loud errors.
  */
-async function roomDrain(id: string | undefined): Promise<void> {
+async function kildInbox(id: string | undefined): Promise<void> {
   const claudeStop = values.format === 'claude-stop';
-  const name = values.as;
-  if (!id || !name) {
+  const handle = values.as;
+  if (!id || !handle) {
     if (claudeStop) return; // misconfigured hook → silence, never a blocked turn
-    throw new Error('usage: kild room drain <id> --as <name> [--format claude-stop]');
+    throw new Error('usage: kild inbox <id> --as <handle> [--format claude-stop]');
   }
   if (values.format !== undefined && !claudeStop) {
     throw new Error(`unknown --format: ${values.format} (supported: claude-stop)`);
   }
 
-  let drained: Awaited<ReturnType<typeof drainRoom>>;
+  let drained: Awaited<ReturnType<typeof drainInbox>>;
   try {
-    drained = await drainRoom(id, name);
+    drained = await drainInbox(id, handle);
   } catch (err) {
     if (!claudeStop) throw err;
-    return; // engine down / unknown room / timeout — degrade to silence
+    return; // engine down / unknown kild / timeout — degrade to silence
   }
 
   if (claudeStop) {
-    const output = claudeStopOutput({ roomId: id, participant: name, posts: drained.posts });
+    const output = claudeStopOutput({ kildId: id, handle, posts: drained.posts });
     if (output) console.log(JSON.stringify(output));
     return;
   }
@@ -363,46 +350,46 @@ async function roomDrain(id: string | undefined): Promise<void> {
   if (drained.posts.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
 }
 
-/** `kild room log <id>` — read a live room's full thread (the pull view; `kild rooms`
+/** `kild log <id>` — read a live kild's full thread (the pull view; `kild ls`
  *  shows only the last couple posts). Pull the whole conversation on demand. */
-async function roomLog(id: string): Promise<void> {
-  const room = (await getLiveRooms()).find((r) => r.id === id);
-  if (!room) throw new Error(`no such live room: ${id}`);
-  if (json) return void console.log(JSON.stringify(room.log, null, 2));
-  for (const m of room.log) {
+async function kildLog(id: string): Promise<void> {
+  const kild = (await getLiveKilds()).find((r) => r.id === id);
+  if (!kild) throw new Error(`no such live kild: ${id}`);
+  if (json) return void console.log(JSON.stringify(kild.log, null, 2));
+  for (const m of kild.log) {
     const tag = m.system ? ' [sys]' : '';
     console.log(`${m.from} → [${m.to.join(', ')}]${tag}: ${m.text}`);
   }
 }
 
-/** `kild room show <id>` — one live room's complete coordination and code-state context. */
-async function roomShow(id: string): Promise<void> {
-  const liveRooms = await getLiveRooms();
-  const room = liveRooms.find((candidate) => candidate.id === id);
-  if (!room) throw new Error(`no such live room: ${id}`);
-  const compact = compactLiveRooms(liveRooms).find((candidate) => candidate.id === id);
-  if (!compact) throw new Error(`no such live room: ${id}`);
+/** `kild show <id>` — one live kild's complete coordination and code-state context. */
+async function kildShow(id: string): Promise<void> {
+  const liveKilds = await getLiveKilds();
+  const kild = liveKilds.find((candidate) => candidate.id === id);
+  if (!kild) throw new Error(`no such live kild: ${id}`);
+  const compact = compactLiveKilds(liveKilds).find((candidate) => candidate.id === id);
+  if (!compact) throw new Error(`no such live kild: ${id}`);
 
   const detail = {
     id: compact.id,
     name: compact.name,
-    participants: compact.participants,
+    agents: compact.agents,
     ...(compact.git ? { git: compact.git } : {}),
     ...(compact.collidesWith ? { collidesWith: compact.collidesWith } : {}),
-    worktree: room.worktree,
-    state: room.state,
-    log: room.log,
+    worktree: kild.worktree,
+    state: kild.state,
+    log: kild.log,
   };
   if (json) return void console.log(JSON.stringify(detail, null, 2));
 
-  console.log(`${room.id}\t${room.name}`);
-  console.log(`state: ${room.state ?? 'unknown'}`);
-  console.log(`worktree: ${room.worktree ?? '(none)'}`);
-  console.log('participants:');
-  for (const participant of compact.participants) {
-    const persona = participant.persona ? ` (${participant.persona})` : '';
-    const model = participant.model ? ` — ${participant.model}` : '';
-    console.log(`  ${participant.name}${persona}${model}`);
+  console.log(`${kild.id}\t${kild.name}`);
+  console.log(`state: ${kild.state ?? 'unknown'}`);
+  console.log(`worktree: ${kild.worktree ?? '(none)'}`);
+  console.log('agents:');
+  for (const agent of compact.agents) {
+    const persona = agent.persona ? ` (${agent.persona})` : '';
+    const model = agent.model ? ` — ${agent.model}` : '';
+    console.log(`  ${agent.handle}${persona}${model}`);
   }
   if (compact.git) {
     console.log(
@@ -412,38 +399,38 @@ async function roomShow(id: string): Promise<void> {
   if (compact.collidesWith?.length) {
     console.log('collisions:');
     for (const collision of compact.collidesWith) {
-      console.log(`  ${collision.room}: ${collision.files.join(', ')}`);
+      console.log(`  ${collision.kild}: ${collision.files.join(', ')}`);
     }
   }
   console.log('log:');
-  for (const message of room.log) {
+  for (const message of kild.log) {
     const tag = message.system ? ' [sys]' : '';
     console.log(`${message.from} → [${message.to.join(', ')}]${tag}: ${message.text}`);
   }
 }
 
-/** `kild rooms` / `kild room ls` — live rooms with their code-state observability. */
-async function roomsList(): Promise<void> {
-  const rooms = compactLiveRooms(await getLiveRooms());
-  if (json) return void console.log(JSON.stringify(rooms, null, 2));
-  if (rooms.length === 0) return void console.error('no live rooms');
-  for (const r of rooms) {
-    const parts = r.participants.map((p) => (p.model ? `${p.name}:${p.model}` : p.name)).join(', ');
+/** `kild ls` — live kilds with their code-state observability. */
+async function kildList(): Promise<void> {
+  const kilds = compactLiveKilds(await getLiveKilds());
+  if (json) return void console.log(JSON.stringify(kilds, null, 2));
+  if (kilds.length === 0) return void console.error('no live kilds');
+  for (const r of kilds) {
+    const parts = r.agents.map((p) => (p.model ? `${p.handle}:${p.model}` : p.handle)).join(', ');
     const col = r.collidesWith?.length
-      ? ` · collides: ${r.collidesWith.map((c) => `${c.room}(${c.files.length})`).join(', ')}`
+      ? ` · collides: ${r.collidesWith.map((c) => `${c.kild}(${c.files.length})`).join(', ')}`
       : '';
     console.log(`${r.id}\t${r.name} [${parts}]${formatCompactGitSummary(r.git)}${col}`);
   }
 }
 
-/** `kild room open <goal> --detach` — open a room, print its id, return (no streaming). */
-async function roomOpen(goal: string): Promise<void> {
-  if (!goal) throw new Error('usage: kild room open <goal…> [--participants a,b] [--detach]');
-  if (!values.detach) return roomInteractive(goal);
-  const res = await openRoom({
-    name: values.project ?? 'room',
-    cwd: await roomCwd(),
-    participants: roomParticipants(),
+/** `kild new <goal> --detach` — open a kild, print its id, return (no streaming). */
+async function kildNew(goal: string): Promise<void> {
+  if (!goal) throw new Error('usage: kild new <goal…> [--agents a,b] [--detach]');
+  if (!values.detach) return kildInteractive(goal);
+  const res = await newKild({
+    name: values.project ?? 'kild',
+    cwd: await kildCwd(),
+    agents: kildAgents(),
     worktree: values.worktree,
     base: values.base,
     kickoff: goal,
@@ -451,35 +438,33 @@ async function roomOpen(goal: string): Promise<void> {
   console.log(json ? JSON.stringify(res, null, 2) : res.id);
 }
 
-/** `kild room post <id> <text> [--to a,b]` — steer an existing room from a separate
- *  call. `--to` names the participants addressed, mirroring the in-room `post_message`
- *  tool; omit it to reach the room lead. Recipients are never parsed from the text, so
- *  writing `@name` in the message body addresses nobody. */
-async function roomPost(id: string, text: string): Promise<void> {
+/** `kild send <id> <text> [--to a,b]` — steer an existing kild from a separate
+ *  call. `--to` names the agents addressed, mirroring the in-kild `send`
+ *  tool; omit it to reach the kild lead. Recipients are never parsed from the text, so
+ *  writing `@handle` in the message body addresses nobody. */
+async function kildSend(id: string, text: string): Promise<void> {
   const to = values.to
     ?.split(',')
     .map((s) => s.trim().replace(/^@/, ''))
     .filter(Boolean);
   if (values.to !== undefined && !to?.length) {
-    throw new Error('--to must name at least one participant, e.g. --to claude');
+    throw new Error('--to must name at least one agent, e.g. --to claude');
   }
-  const res = await postRoom(id, text, undefined, to);
+  const res = await sendMessage(id, text, undefined, to);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
 }
 
-/** `kild room close <id>` — close a specific room by id. */
-async function roomClose(id: string): Promise<void> {
-  const res = await closeRoom(id);
+/** `kild stop <id>` — stop a specific kild by id. */
+async function kildStop(id: string): Promise<void> {
+  const res = await stopKild(id);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
 }
 
-async function roomInteractive(goal: string): Promise<void> {
+async function kildInteractive(goal: string): Promise<void> {
   if (!goal) {
-    throw new Error(
-      'usage: kild room <goal…> [--participants a,b,c] [--worktree <n>] [--project <p>]',
-    );
+    throw new Error('usage: kild new <goal…> [--agents a,b,c] [--worktree <n>] [--project <p>]');
   }
   const engineUp = await fetch(`${ENGINE}/api/health`)
     .then((r) => r.ok)
@@ -488,65 +473,64 @@ async function roomInteractive(goal: string): Promise<void> {
     throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
   }
   const cwd = (await resolveProjectFlag()) ?? process.cwd();
-  const name = values.project ?? 'room';
-  // `--participants a,b` names personas from the project's own persona files; each
-  // participant's persona defaults to its name. With none given, kild opens one
-  // general-purpose participant (the `default` persona = kild's system prompt, no role) —
-  // kild ships no roles of its own; personas come from the project
+  const name = values.project ?? 'kild';
+  // `--agents a,b` names personas from the project's own persona files; each
+  // agent's persona defaults to its handle. With none given, kild opens one
+  // general-purpose agent (the `default` persona = kild's system prompt, no persona) —
+  // kild ships no personas of its own; personas come from the project
   // (.claude/agents / .pi/agents — the dir names are upstream convention).
-  const participants = values.participants
-    ? values.participants
+  const agents = values.agents
+    ? values.agents
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-        .map((n) => ({ name: n, persona: n }))
-    : [{ name: 'agent', persona: 'default' }];
-  if (participants.length === 0)
-    throw new Error('--participants must name at least one participant');
+        .map((n) => ({ handle: n, persona: n }))
+    : [{ handle: 'agent', persona: 'default' }];
+  if (agents.length === 0) throw new Error('--agents must name at least one agent');
   const base = values.base;
-  // Addressing is structured: the engine defaults an untargeted post to the room lead,
+  // Addressing is structured: the engine defaults an untargeted message to the kild lead,
   // so the goal reaches the lead without munging the text.
   const kickoff = goal;
-  const roomId = crypto.randomUUID();
+  const kildId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
   await new Promise<void>((resolve, reject) => {
-    const closeRoom = () => {
+    const stopKild = () => {
       try {
-        ws.send(JSON.stringify({ type: 'room_close', id: roomId }));
+        ws.send(JSON.stringify({ type: 'kild_stop', id: kildId }));
       } catch {
-        // socket already gone — nothing to close
+        // socket already gone — nothing to stop
       }
       setTimeout(() => {
         ws.close();
         resolve();
-      }, 200); // let the close frame flush before we exit
+      }, 200); // let the stop frame flush before we exit
     };
     process.on('SIGINT', () => {
-      if (!json) console.error('\n\x1b[2m— closing room —\x1b[0m');
-      closeRoom();
+      if (!json) console.error('\n\x1b[2m— stopping kild —\x1b[0m');
+      stopKild();
     });
 
-    // Mid-flight steering: each line you type is posted into the room (address
-    // participants with @name). Off in --json mode, which is machine-driven.
+    // Mid-flight steering: each line you type is sent into the kild (address
+    // agents with @handle). Off in --json mode, which is machine-driven.
     if (!json) {
       process.stdin.setEncoding('utf8');
       process.stdin.on('data', (chunk: string) => {
         for (const raw of chunk.split('\n')) {
           const text = raw.trim();
           if (!text) continue;
-          const invite = text.match(/^\/invite(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?$/);
-          if (invite?.[1]) {
-            const [, name, persona, model] = invite;
+          const spawn = text.match(/^\/spawn(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?$/);
+          if (spawn?.[1]) {
+            const [, handle, persona, model] = spawn;
             ws.send(
               JSON.stringify({
-                type: 'room_add',
-                id: roomId,
-                participant: { name, persona, model },
+                type: 'kild_spawn',
+                id: kildId,
+                agent: { handle, persona, model },
               }),
             );
           } else {
-            ws.send(JSON.stringify({ type: 'room_post', id: roomId, text }));
+            ws.send(JSON.stringify({ type: 'kild_send', id: kildId, text }));
           }
         }
       });
@@ -555,44 +539,44 @@ async function roomInteractive(goal: string): Promise<void> {
     ws.addEventListener('open', () => {
       ws.send(
         JSON.stringify({
-          type: 'room_open',
-          id: roomId,
+          type: 'kild_new',
+          id: kildId,
           name,
           cwd,
           worktree: values.worktree,
           base,
-          participants: participants.map((p) => ({ ...p, model: values.model })),
+          agents: agents.map((p) => ({ ...p, model: values.model })),
         }),
       );
-      ws.send(JSON.stringify({ type: 'room_post', id: roomId, text: kickoff }));
+      ws.send(JSON.stringify({ type: 'kild_send', id: kildId, text: kickoff }));
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# room "${name}" — ${participants.map((p) => p.name).join(', ')}${where} · type to post · /invite <name> [persona] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · type to send · /spawn <handle> [persona] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
 
     ws.addEventListener('message', (e) => {
       let parsed: {
-        roomMessage?: { roomId: string; from: string; to: string[]; text: string };
-        archivedRoom?: { id: string };
+        message?: { kildId: string; from: string; to: string[]; text: string };
+        archivedKild?: { id: string };
       };
       try {
         parsed = JSON.parse(String((e as { data: unknown }).data));
       } catch {
         return;
       }
-      // The engine archived our room (the lead called `close_room`, or another
-      // client closed it) — the run is over; resolve without re-closing.
-      if (parsed.archivedRoom?.id === roomId) {
-        if (!json) console.error('\x1b[2m— room closed —\x1b[0m');
+      // The engine archived our kild (the lead called `stop`, or another
+      // client stopped it) — the run is over; resolve without re-stopping.
+      if (parsed.archivedKild?.id === kildId) {
+        if (!json) console.error('\x1b[2m— kild stopped —\x1b[0m');
         ws.close();
         resolve();
         return;
       }
-      const m = parsed.roomMessage;
-      if (!m || m.roomId !== roomId) return;
+      const m = parsed.message;
+      if (!m || m.kildId !== kildId) return;
       if (json) {
         console.log(JSON.stringify(m));
       } else {
@@ -616,16 +600,16 @@ async function runViaEngine(prompt: string): Promise<void> {
   let cost = 0;
 
   await new Promise<void>((resolve, reject) => {
-    // Settle exactly once, then tear the worker down. Without this the CLI hung
+    // Settle exactly once, then tear the agent down. Without this the CLI hung
     // forever: it only resolved on `agent_end` and only rejected on a socket
-    // `error`, so a worker-emitted `error`/`session_end` or a *graceful* close
+    // `error`, so an agent-emitted `error`/`session_end` or a *graceful* close
     // (the engine restarting under `--watch`) left the run waiting on nothing.
     let settled = false;
     const finish = (err?: Error) => {
       if (settled) return;
       settled = true;
       try {
-        ws.send(JSON.stringify({ type: 'room_close', id })); // one-shot: tear the room down
+        ws.send(JSON.stringify({ type: 'kild_stop', id })); // one-shot: tear the kild down
       } catch {
         // socket already closing/closed — nothing to close
       }
@@ -635,27 +619,27 @@ async function runViaEngine(prompt: string): Promise<void> {
     };
 
     ws.addEventListener('open', () => {
-      // A one-shot run is a 1-participant room: the agent is the sole participant, so
-      // the bare post (no @mention) is delivered straight to it.
+      // A one-shot run is a 1-agent kild: the agent is the sole inhabitant, so
+      // the bare send (no @mention) is delivered straight to it.
       ws.send(
         JSON.stringify({
-          type: 'room_open',
+          type: 'kild_new',
           id,
           name: values.project ?? 'run',
           cwd: projectPath ?? process.cwd(),
           worktree: values.worktree,
-          participants: [{ name: 'agent', persona: values.agent, model: values.model }],
+          agents: [{ handle: 'agent', persona: values.persona, model: values.model }],
         }),
       );
-      ws.send(JSON.stringify({ type: 'room_post', id, text: prompt }));
+      ws.send(JSON.stringify({ type: 'kild_send', id, text: prompt }));
     });
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(String((e as { data: unknown }).data)) as {
-        room?: string;
-        participant?: string;
+        kild?: string;
+        agent?: string;
         event?: { kind: string; [k: string]: unknown };
       };
-      if (msg.room !== id || !msg.event) return;
+      if (msg.kild !== id || !msg.event) return;
       const ev = msg.event;
       if (ev.kind === 'model') model = `${ev.provider}/${ev.id}`;
       else if (ev.kind === 'text') {
@@ -670,7 +654,7 @@ async function runViaEngine(prompt: string): Promise<void> {
       } else if (ev.kind === 'agent_end') {
         setTimeout(finish, 150); // settle after the trailing stats event
       } else if (ev.kind === 'session_end') {
-        finish(); // worker ended (normally after our stop, or abnormally) — don't hang
+        finish(); // agent ended (normally after our stop, or abnormally) — don't hang
       }
     });
     // A graceful close (e.g. the engine reloading under `--watch`) is not an
@@ -692,19 +676,19 @@ async function runViaEngine(prompt: string): Promise<void> {
 }
 
 /**
- * Run through the same JSONL worker boundary as the engine. `server.ts` owns the
- * worker role dispatch, so invoke that entry explicitly rather than re-invoking this
+ * Run through the same JSONL agent boundary as the engine. `server.ts` owns the
+ * agent role dispatch, so invoke that entry explicitly rather than re-invoking this
  * CLI entry (which would otherwise start a second CLI process under `KILD_ROLE`).
  */
-async function runViaWorker(prompt: string): Promise<void> {
+async function runViaAgent(prompt: string): Promise<void> {
   const projectPath = values.project ? (await findProject(values.project))?.path : undefined;
-  const workerEntry = fileURLToPath(new URL('./server.ts', import.meta.url));
-  const child = spawn(process.execPath, [workerEntry], {
+  const agentEntry = fileURLToPath(new URL('./server.ts', import.meta.url));
+  const child = spawn(process.execPath, [agentEntry], {
     env: {
       ...process.env,
-      KILD_ROLE: 'worker',
+      KILD_ROLE: 'agent',
       KILD_CWD: projectPath ?? process.cwd(),
-      KILD_PERSONA: values.agent ?? '',
+      KILD_PERSONA: values.persona ?? '',
       KILD_MODEL: values.model ?? '',
       KILD_WORKTREE: values.worktree ?? '',
     },
@@ -734,7 +718,7 @@ async function runViaWorker(prompt: string): Promise<void> {
       try {
         event = JSON.parse(line) as { kind?: string; [key: string]: unknown };
       } catch {
-        finish(new Error(`worker emitted invalid JSONL: ${line}`));
+        finish(new Error(`agent emitted invalid JSONL: ${line}`));
         return;
       }
       switch (event.kind) {
@@ -755,11 +739,11 @@ async function runViaWorker(prompt: string): Promise<void> {
           cost = Number(event.cost ?? 0);
           break;
         case 'error':
-          finish(new Error(String(event.message ?? 'worker error')));
+          finish(new Error(String(event.message ?? 'agent error')));
           break;
         case 'agent_end':
           agentEnded = true;
-          // The worker writes stats immediately after agent_end. Defer stopping until
+          // The agent writes stats immediately after agent_end. Defer stopping until
           // this stdout batch has been consumed so the final outcome includes them.
           setTimeout(stop, 0);
           break;
@@ -775,11 +759,11 @@ async function runViaWorker(prompt: string): Promise<void> {
         if (line) consume(line);
       }
     });
-    child.on('error', (err) => finish(new Error(`worker failed: ${err.message}`)));
+    child.on('error', (err) => finish(new Error(`agent failed: ${err.message}`)));
     child.on('close', (code) => {
       if (buffer.trim()) consume(buffer.trim());
       if (!agentEnded)
-        finish(new Error(`worker exited before completing (code ${code ?? 'unknown'})`));
+        finish(new Error(`agent exited before completing (code ${code ?? 'unknown'})`));
       else finish();
     });
     child.stdin?.write(`${JSON.stringify({ type: 'prompt', text: prompt })}\n`);

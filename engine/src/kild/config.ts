@@ -20,7 +20,7 @@ export interface KildConfig {
   plugins?: string[];
   /** Extra agent dirs (personas), beyond `.claude/agents` / `.pi/agents`. */
   agentPaths?: string[];
-  /** Extra skill dirs, discoverable by every session (operator + all participants). */
+  /** Extra skill dirs, discoverable by every session (the engine + all agents). */
   skillPaths?: string[];
   /** Base branch new worktrees are created from and that git status/collisions are
    *  measured against (e.g. `dev`). Overridable per-invocation with `--base`; if unset,
@@ -30,8 +30,8 @@ export interface KildConfig {
    *  it's good at, cost). Appended to a delegating session's system prompt so the user
    *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
   models?: Record<string, string>;
-  /** Project memory behavior. The engine-written room log (`<dir>/LOG.md`) is always on;
-   *  `synthesis` opts in to the LLM half: on room close, a session is spawned to distill
+  /** Project memory behavior. The engine-written kild log (`<dir>/LOG.md`) is always on;
+   *  `synthesis` opts in to the LLM half: on kild close, a session is spawned to distill
    *  the transcript into `<dir>/MEMORY.md`. Absent → no synthesis session is spawned. */
   memory?: {
     /** Directory holding the project's memory files (LOG.md, MEMORY.md, direction.md).

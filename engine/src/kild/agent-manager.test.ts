@@ -1,28 +1,28 @@
 import { expect, test } from 'bun:test';
 
-import { SessionManager, workerEnv } from './sessions.ts';
+import { AgentManager, agentEnv } from './agent-manager.ts';
 import { worktreePath, worktreeRef } from './worktree.ts';
 
-// The session path derives SessionInfo.branch/worktreePath from the worktree name
+// The agent path derives AgentInfo.branch/worktreePath from the worktree name
 // synchronously (no await, no subprocess). These assert that pure mapping — the same
-// derivation SessionManager.spawn performs — independent of git.
+// derivation AgentManager.spawn performs — independent of git.
 test('prompt silently drops a dead or missing session', () => {
-  const sessions = new SessionManager();
-  expect(sessions.prompt('missing', 'room closed', 'kild')).toBe(false);
+  const agents = new AgentManager();
+  expect(agents.prompt('missing', 'kild stopped', 'kild')).toBe(false);
 });
 
 test('resolveActor returns the configured persona for a live session', () => {
-  const sessions = new SessionManager();
-  (sessions as { sessions: Map<string, unknown> }).sessions.set('brain-session', {
+  const agents = new AgentManager();
+  (agents as { sessions: Map<string, unknown> }).sessions.set('brain-session', {
     session: {},
     info: { id: 'brain-session', persona: 'brain', origin: 'cli' },
   });
-  expect(sessions.resolveActor('brain-session')).toEqual({ ok: true, value: 'brain' });
+  expect(agents.resolveActor('brain-session')).toEqual({ ok: true, value: 'brain' });
 });
 
 test('resolveActor rejects an unknown session id', () => {
-  const sessions = new SessionManager();
-  expect(sessions.resolveActor('missing')).toEqual({
+  const agents = new AgentManager();
+  expect(agents.resolveActor('missing')).toEqual({
     ok: false,
     code: 'rejected',
     message: 'unknown session: missing',
@@ -30,20 +30,20 @@ test('resolveActor rejects an unknown session id', () => {
 });
 
 test('resolveActor rejects a live session with no actor identity', () => {
-  const sessions = new SessionManager();
-  (sessions as { sessions: Map<string, unknown> }).sessions.set('anon-session', {
+  const agents = new AgentManager();
+  (agents as { sessions: Map<string, unknown> }).sessions.set('anon-session', {
     session: {},
     info: { id: 'anon-session', origin: 'cli' },
   });
-  expect(sessions.resolveActor('anon-session')).toEqual({
+  expect(agents.resolveActor('anon-session')).toEqual({
     ok: false,
     code: 'rejected',
     message: "session 'anon-session' has no actor identity",
   });
 });
 
-test('workerEnv carries the fork source to the worker as KILD_FORK_SESSION', () => {
-  const env = workerEnv(
+test('agentEnv carries the fork source to the agent as KILD_FORK_SESSION', () => {
+  const env = agentEnv(
     's-1',
     { cwd: '/proj', forkFrom: '/sessions/2026-07-24_abc.jsonl' },
     undefined,
@@ -53,8 +53,8 @@ test('workerEnv carries the fork source to the worker as KILD_FORK_SESSION', () 
   expect(env.KILD_SESSION_ID).toBe('s-1');
 });
 
-test('workerEnv leaves KILD_FORK_SESSION empty for an ordinary (fresh) spawn', () => {
-  expect(workerEnv('s-2', { cwd: '/proj' }, undefined).KILD_FORK_SESSION).toBe('');
+test('agentEnv leaves KILD_FORK_SESSION empty for an ordinary (fresh) spawn', () => {
+  expect(agentEnv('s-2', { cwd: '/proj' }, undefined).KILD_FORK_SESSION).toBe('');
 });
 
 test('a worktree name maps to its kild/ branch and on-disk path', () => {

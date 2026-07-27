@@ -1,58 +1,58 @@
-import type { CommandResult, Room, RoomLifecycleState } from './room-types.ts';
+import type { CommandResult, Kild, KildLifecycleState } from './kild-types.ts';
 
 function fail<T>(message: string): CommandResult<T> {
   return { ok: false, code: 'invalid_state', message };
 }
 
-function inState(room: Room, states: RoomLifecycleState[]): boolean {
-  return states.includes(room.state);
+function inState(kild: Kild, states: KildLifecycleState[]): boolean {
+  return states.includes(kild.state);
 }
 
-export function transitionRoomState<T>(
-  room: Room,
-  next: RoomLifecycleState,
+export function transitionKildState<T>(
+  kild: Kild,
+  next: KildLifecycleState,
 ): CommandResult<T | undefined> {
   const allowed =
-    (room.state === 'opening' && next === 'running') ||
-    (room.state === 'running' && (next === 'halted' || next === 'closed')) ||
-    (room.state === 'halted' && next === 'closed');
+    (kild.state === 'opening' && next === 'running') ||
+    (kild.state === 'running' && (next === 'halted' || next === 'closed')) ||
+    (kild.state === 'halted' && next === 'closed');
   if (!allowed) {
-    return fail(`room '${room.name}' is ${room.state}`);
+    return fail(`kild '${kild.name}' is ${kild.state}`);
   }
-  room.state = next;
+  kild.state = next;
   return { ok: true, value: undefined };
 }
 
-export function ensureRoomCanAddParticipant<T>(room: Room): CommandResult<T | undefined> {
-  if (inState(room, ['running'])) return { ok: true, value: undefined };
-  if (room.state === 'halted') return fail(`room '${room.name}' is halted`);
-  return fail(`room '${room.name}' is ${room.state}`);
+export function ensureKildCanSpawnAgent<T>(kild: Kild): CommandResult<T | undefined> {
+  if (inState(kild, ['running'])) return { ok: true, value: undefined };
+  if (kild.state === 'halted') return fail(`kild '${kild.name}' is halted`);
+  return fail(`kild '${kild.name}' is ${kild.state}`);
 }
 
-export function ensureRoomCanPost<T>(
-  room: Room,
+export function ensureKildCanSend<T>(
+  kild: Kild,
   opts: { allowHalted?: boolean; allowClosed?: boolean } = {},
 ): CommandResult<T | undefined> {
-  if (room.state === 'running') return { ok: true, value: undefined };
-  if (room.state === 'halted' && opts.allowHalted) return { ok: true, value: undefined };
-  if (room.state === 'closed' && opts.allowClosed) return { ok: true, value: undefined };
-  if (room.state === 'halted') return fail(`room '${room.name}' is halted`);
-  return fail(`room '${room.name}' is ${room.state}`);
+  if (kild.state === 'running') return { ok: true, value: undefined };
+  if (kild.state === 'halted' && opts.allowHalted) return { ok: true, value: undefined };
+  if (kild.state === 'closed' && opts.allowClosed) return { ok: true, value: undefined };
+  if (kild.state === 'halted') return fail(`kild '${kild.name}' is halted`);
+  return fail(`kild '${kild.name}' is ${kild.state}`);
 }
 
-export function ensureRoomCanHalt<T>(room: Room): CommandResult<T | undefined> {
-  if (room.state === 'running') return { ok: true, value: undefined };
-  if (room.state === 'halted') return fail(`room '${room.name}' is already halted`);
-  return fail(`room '${room.name}' is ${room.state}`);
+export function ensureKildCanHalt<T>(kild: Kild): CommandResult<T | undefined> {
+  if (kild.state === 'running') return { ok: true, value: undefined };
+  if (kild.state === 'halted') return fail(`kild '${kild.name}' is already halted`);
+  return fail(`kild '${kild.name}' is ${kild.state}`);
 }
 
-export function ensureRoomCanCloseFromOperator<T>(room: Room): CommandResult<T | undefined> {
-  if (inState(room, ['running', 'halted'])) return { ok: true, value: undefined };
-  return fail(`room '${room.name}' is ${room.state}`);
+export function ensureKildCanStopFromOperator<T>(kild: Kild): CommandResult<T | undefined> {
+  if (inState(kild, ['running', 'halted'])) return { ok: true, value: undefined };
+  return fail(`kild '${kild.name}' is ${kild.state}`);
 }
 
-export function ensureRoomCanCloseFromParticipant<T>(room: Room): CommandResult<T | undefined> {
-  if (room.state === 'running') return { ok: true, value: undefined };
-  if (room.state === 'halted') return fail(`room '${room.name}' is halted`);
-  return fail(`room '${room.name}' is ${room.state}`);
+export function ensureKildCanStopFromAgent<T>(kild: Kild): CommandResult<T | undefined> {
+  if (kild.state === 'running') return { ok: true, value: undefined };
+  if (kild.state === 'halted') return fail(`kild '${kild.name}' is halted`);
+  return fail(`kild '${kild.name}' is ${kild.state}`);
 }

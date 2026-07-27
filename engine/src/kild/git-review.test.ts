@@ -177,7 +177,7 @@ test("files never include the base's own advances (merge-base semantics)", async
   fs.writeFileSync(path.join(dir, 'mine.txt'), 'mine\n');
   await git(dir, ['add', '.']);
   await commit(dir, 'mine');
-  // Advance main independently — that change is NOT this room's work.
+  // Advance main independently — that change is NOT this kild's work.
   await git(dir, ['checkout', 'main']);
   fs.writeFileSync(path.join(dir, 'theirs.txt'), 'theirs\n');
   await git(dir, ['add', '.']);

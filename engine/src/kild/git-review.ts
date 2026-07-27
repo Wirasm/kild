@@ -7,7 +7,7 @@ import { resolveDefaultBase } from './worktree-status.ts';
 
 /**
  * Review intelligence — the git drill-down behind a review surface. Where
- * worktree-status answers "how far along is this room?" (summary), this module
+ * worktree-status answers "how far along is this kild?" (summary), this module
  * answers "what exactly changed?": the commits vs base, per-file diff stats
  * (committed + uncommitted), and one file's unified patch.
  *
@@ -28,8 +28,8 @@ export const DIFF_CAP = 200 * 1024;
  *  which a real diff easily exceeds). */
 const MAX_BUFFER = 64 * 1024 * 1024;
 
-/** One commit on the room's branch that base doesn't have. `ts` is epoch millis
- *  (matching `RoomMessage.ts`). */
+/** One commit on the kild's branch that base doesn't have. `ts` is epoch millis
+ *  (matching `Message.ts`). */
 export interface ReviewCommit {
   sha: string;
   subject: string;
@@ -219,7 +219,7 @@ export function parsePorcelainZ(stdout: string): {
 
 // ── Probes ────────────────────────────────────────────────────────────────────
 
-/** Commits on the room's branch that base doesn't have (`base..HEAD`), newest
+/** Commits on the kild's branch that base doesn't have (`base..HEAD`), newest
  *  first, each with its own diff stats. Never throws — failures land in `error`. */
 export async function reviewCommits(dir: string, base?: string): Promise<ReviewCommitsResult> {
   const resolvedBase = base ?? (await resolveDefaultBase(dir));
@@ -246,7 +246,7 @@ export async function reviewCommits(dir: string, base?: string): Promise<ReviewC
 /** The merge-base of base and HEAD — the same baseline `base...HEAD` uses, computed
  *  explicitly so the working tree can be diffed against it directly (covering
  *  committed + uncommitted in one diff) without the base's own advances ever reading
- *  as this room's changes. */
+ *  as this kild's changes. */
 async function mergeBase(dir: string, base: string): Promise<GitResult> {
   const result = await runGit(dir, ['merge-base', base, 'HEAD']);
   return result.ok ? { ok: true, stdout: result.stdout.trim() } : result;

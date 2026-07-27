@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-/** Read once when the engine starts: a room-only directory of skills. */
+/** Read once when the engine starts: a kild-only directory of skills. */
 export function readSkillsProfile(value: string | undefined): string | undefined {
   if (!value) return undefined;
   if (!path.isAbsolute(value)) {
@@ -9,10 +9,10 @@ export function readSkillsProfile(value: string | undefined): string | undefined
   return value;
 }
 
-/** A capability profile belongs only to room participants, never ordinary sessions. */
-export function skillsProfileForWorker(
-  roomId: string | undefined,
+/** A capability profile belongs only to agents in a kild, never ordinary sessions. */
+export function skillsProfileForAgent(
+  kildId: string | undefined,
   skillsProfile: string | undefined,
 ): string | undefined {
-  return roomId ? skillsProfile : undefined;
+  return kildId ? skillsProfile : undefined;
 }

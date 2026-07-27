@@ -2,14 +2,13 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
+import type { Kild } from './kild-types.ts';
 import {
-  appendRoomLog,
-  formatRoomLogEntry,
+  appendKildLog,
+  formatKildLogEntry,
   projectMemorySection,
   synthesisPrompt,
 } from './memory.ts';
-import type { Room } from './room/room-types.ts';
 
 let tmp: string;
 let prevHome: string | undefined;
@@ -26,16 +25,16 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function room(cwd: string, overrides: Partial<Room> = {}): Room {
+function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
   return {
-    id: 'room-1',
+    id: 'kild-1',
     name: 'fix-auth',
     cwd,
-    participants: [
+    agents: [
       {
-        name: 'worker',
-        sessionId: 's-1',
-        persona: 'worker',
+        handle: 'agent',
+        id: 's-1',
+        persona: 'agent',
         model: 'openai-codex/gpt-5.6-sol',
         piSessionId: 'aaaa-bbbb',
         piSessionFile: '/sessions/aaaa-bbbb.jsonl',
@@ -44,17 +43,17 @@ function room(cwd: string, overrides: Partial<Room> = {}): Room {
     log: [
       {
         id: 'm0',
-        roomId: 'room-1',
+        kildId: 'kild-1',
         from: 'human',
-        to: ['worker'],
+        to: ['agent'],
         text: 'Fix the auth bug',
         ts: 1,
       },
-      { id: 'm1', roomId: 'room-1', from: 'human', to: [], text: 'joined', ts: 2, system: true },
+      { id: 'm1', kildId: 'kild-1', from: 'human', to: [], text: 'joined', ts: 2, system: true },
       {
         id: 'm2',
-        roomId: 'room-1',
-        from: 'worker',
+        kildId: 'kild-1',
+        from: 'agent',
         to: ['human'],
         text: 'Done: commit abc123, tests green',
         ts: 3,
@@ -68,22 +67,22 @@ function room(cwd: string, overrides: Partial<Room> = {}): Room {
 }
 
 test('the log entry carries goal, outcome, resume handles, worktree — pure facts', () => {
-  const entry = formatRoomLogEntry(room('/p'), new Date('2026-07-24T12:00:00Z'));
-  expect(entry).toContain('## 2026-07-24 — fix-auth (room-1)');
+  const entry = formatKildLogEntry(kild('/p'), new Date('2026-07-24T12:00:00Z'));
+  expect(entry).toContain('## 2026-07-24 — fix-auth (kild-1)');
   expect(entry).toContain('- goal: Fix the auth bug');
   expect(entry).toContain('- outcome: Done: commit abc123, tests green');
   expect(entry).toContain(
-    '- agent @worker (worker, openai-codex/gpt-5.6-sol) — pi --session /sessions/aaaa-bbbb.jsonl',
+    '- agent @agent (agent, openai-codex/gpt-5.6-sol) — pi --session /sessions/aaaa-bbbb.jsonl',
   );
   expect(entry).toContain('- worktree: kild/fix-auth (base main)');
 });
 
-test('appendRoomLog creates the memory dir with a .gitignore and appends in order', () => {
+test('appendKildLog creates the memory dir with a .gitignore and appends in order', () => {
   const project = fs.mkdtempSync(path.join(tmp, 'proj-'));
   const dir = path.join(project, '.kild');
-  appendRoomLog(room(project), dir, new Date('2026-07-24T12:00:00Z'));
-  appendRoomLog(
-    room(project, { id: 'room-2', name: 'second' }),
+  appendKildLog(kild(project), dir, new Date('2026-07-24T12:00:00Z'));
+  appendKildLog(
+    kild(project, { id: 'kild-2', name: 'second' }),
     dir,
     new Date('2026-07-25T12:00:00Z'),
   );
@@ -102,14 +101,14 @@ test('an existing memory-dir .gitignore is never clobbered', () => {
   const dir = path.join(project, '.kild');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, '.gitignore'), '# user-managed\n');
-  appendRoomLog(room(project), dir);
+  appendKildLog(kild(project), dir);
   expect(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8')).toBe('# user-managed\n');
 });
 
 test('a memory dir outside the project gets the log but NO .gitignore', () => {
   const project = fs.mkdtempSync(path.join(tmp, 'proj-'));
   const external = fs.mkdtempSync(path.join(tmp, 'store-')); // e.g. a user-home store
-  appendRoomLog(room(project), external, new Date('2026-07-24T12:00:00Z'));
+  appendKildLog(kild(project), external, new Date('2026-07-24T12:00:00Z'));
 
   expect(fs.readFileSync(path.join(external, 'LOG.md'), 'utf8')).toContain('fix-auth');
   expect(fs.existsSync(path.join(external, '.gitignore'))).toBe(false);
@@ -140,15 +139,15 @@ test('projectMemorySection reads an external memory dir and names its actual pat
 });
 
 test('the synthesis charter names the transcript, the memory file, and the constraints', () => {
-  const prompt = synthesisPrompt(room('/p'), '/home/rooms/room-1.json', '/p/.kild');
+  const prompt = synthesisPrompt(kild('/p'), '/home/kilds/kild-1.json', '/p/.kild');
   expect(prompt).toContain('[kild memory synthesis]');
-  expect(prompt).toContain('/home/rooms/room-1.json');
+  expect(prompt).toContain('/home/kilds/kild-1.json');
   expect(prompt).toContain('.kild/MEMORY.md');
   expect(prompt).toContain('READ-ONLY');
 });
 
 test('the synthesis charter names the ACTUAL configured paths for an external dir', () => {
-  const prompt = synthesisPrompt(room('/p'), '/home/rooms/room-1.json', '/stores/proj');
+  const prompt = synthesisPrompt(kild('/p'), '/home/kilds/kild-1.json', '/stores/proj');
   expect(prompt).toContain('/stores/proj/MEMORY.md');
   expect(prompt).toContain('/stores/proj/LOG.md');
   expect(prompt).toContain('/stores/proj/direction.md');

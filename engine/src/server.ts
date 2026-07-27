@@ -1,7 +1,7 @@
-// One binary, two roles: `KILD_ROLE=worker` runs a single agent session (one per
+// One binary, two roles: `KILD_ROLE=agent` runs a single agent session (one per
 // process — the coding-agent SDK requires it); otherwise this is the engine.
-if (process.env.KILD_ROLE === 'worker') {
-  await (await import('./worker.ts')).runWorker();
+if (process.env.KILD_ROLE === 'agent') {
+  await (await import('./agent.ts')).runAgent();
 }
 
 import { execFile as execFileCb } from 'node:child_process';
@@ -13,19 +13,18 @@ import { promisify } from 'node:util';
 import { type Context, Hono } from 'hono';
 import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
-
-import { listAgents } from './kild/agents.ts';
+import { agentManager } from './kild/agent-manager.ts';
 import { reviewCommits, reviewDiff, reviewFiles } from './kild/git-review.ts';
+import { kildManager } from './kild/kild-manager.ts';
+import type { AgentSpec, CommandResult } from './kild/kild-types.ts';
+import { listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import {
-  resolveCloseRoomActor,
-  resolveOpenRoomActor,
-  resolvePostRoomActor,
-} from './kild/room/rest-room-attribution.ts';
-import { roomManager } from './kild/room/room-manager.ts';
-import type { CommandResult, ParticipantSpec } from './kild/room/room-types.ts';
+  resolveNewKildActor,
+  resolveSendActor,
+  resolveStopActor,
+} from './kild/rest-attribution.ts';
 import { readSessionTranscript } from './kild/session-transcript.ts';
-import { sessionManager } from './kild/sessions.ts';
 import {
   assertSafeBranch,
   forceRemoveWorktree,
@@ -113,7 +112,7 @@ const optionalString = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
 
 // ── Personas ──────────────────────────────────────────────────────────────────
-// Reusable role definitions, read from the convention dirs (`.pi/agents` etc. — the
+// Reusable persona definitions, read from the convention dirs (`.pi/agents` etc. — the
 // on-disk dir names are upstream pi convention and unrelated to this route's name).
 app.get('/api/personas', async (c) => {
   const ref = await resolveProjectRef(c.req.query('project'), c.req.query('path'));
@@ -121,28 +120,28 @@ app.get('/api/personas', async (c) => {
   if (!ref.ok && (c.req.query('project') !== undefined || c.req.query('path') !== undefined)) {
     return c.json({ error: ref.error }, ref.status);
   }
-  return c.json(await listAgents(ref.ok ? ref.dir : undefined));
+  return c.json(await listPersonas(ref.ok ? ref.dir : undefined));
 });
 
 // ── Worktrees ─────────────────────────────────────────────────────────────────
 // Worktree names a live session is using are never pruned.
 
-function participantSpecs(input: unknown): ParticipantSpec[] | null {
+function agentSpecs(input: unknown): AgentSpec[] | null {
   if (!Array.isArray(input)) return null;
-  const participants: ParticipantSpec[] = [];
+  const agents: AgentSpec[] = [];
   for (const item of input) {
     if (typeof item !== 'object' || item === null) return null;
-    const participant = item as Record<string, unknown>;
-    if (typeof participant.name !== 'string') return null;
-    if (participant.persona !== undefined && typeof participant.persona !== 'string') return null;
-    if (participant.model !== undefined && typeof participant.model !== 'string') return null;
-    participants.push({
-      name: participant.name,
-      persona: typeof participant.persona === 'string' ? participant.persona : undefined,
-      model: typeof participant.model === 'string' ? participant.model : undefined,
+    const agent = item as Record<string, unknown>;
+    if (typeof agent.handle !== 'string') return null;
+    if (agent.persona !== undefined && typeof agent.persona !== 'string') return null;
+    if (agent.model !== undefined && typeof agent.model !== 'string') return null;
+    agents.push({
+      handle: agent.handle,
+      persona: typeof agent.persona === 'string' ? agent.persona : undefined,
+      model: typeof agent.model === 'string' ? agent.model : undefined,
     });
   }
-  return participants;
+  return agents;
 }
 
 function envRecord(input: unknown): Record<string, string> | undefined {
@@ -156,13 +155,13 @@ function envRecord(input: unknown): Record<string, string> | undefined {
   return env;
 }
 
-function roomResultStatus(result: Extract<CommandResult<unknown>, { ok: false }>): 404 | 409 {
+function kildResultStatus(result: Extract<CommandResult<unknown>, { ok: false }>): 404 | 409 {
   return result.code === 'not_found' ? 404 : 409;
 }
 
 const worktreesInUse = (): Set<string> =>
   new Set(
-    sessionManager
+    agentManager
       .list()
       .map((s) => s.worktree)
       .filter((w): w is string => typeof w === 'string'),
@@ -301,35 +300,35 @@ async function serveTranscript(
   }
 }
 
-// A room participant's transcript — works for LIVE and ARCHIVED rooms alike: the
-// piSessionFile handle persists in $KILD_HOME/rooms/<id>.json past the session's death.
-app.get('/api/rooms/:id/participants/:name/transcript', async (c) => {
+// An agent's transcript — works for LIVE and ARCHIVED kilds alike: the piSessionFile
+// handle persists in $KILD_HOME/kilds/<id>.json past the session's death.
+app.get('/api/kilds/:id/agents/:handle/transcript', async (c) => {
   const id = c.req.param('id');
-  const name = c.req.param('name');
-  const room =
-    roomManager.liveRooms().find((r) => r.id === id) ??
-    roomManager.archived().find((r) => r.id === id);
-  if (!room) return c.json({ error: `no such room: ${id}` }, 404);
-  const participant = room.participants.find((p) => p.name === name);
-  if (!participant) return c.json({ error: `no such participant: @${name}` }, 404);
-  return serveTranscript(c, participant.piSessionFile, `participant @${name}`);
+  const handle = c.req.param('handle');
+  const kild =
+    kildManager.liveKilds().find((k) => k.id === id) ??
+    kildManager.archived().find((k) => k.id === id);
+  if (!kild) return c.json({ error: `no such kild: ${id}` }, 404);
+  const agent = kild.agents.find((a) => a.handle === handle);
+  if (!agent) return c.json({ error: `no such agent: @${handle}` }, 404);
+  return serveTranscript(c, agent.piSessionFile, `agent @${handle}`);
 });
 
-// A live session's transcript (operator sessions, one-shot runs) via SessionInfo.
-app.get('/api/sessions/:id/transcript', async (c) => {
+// A live agent's transcript (detached agents, one-shot runs) via AgentInfo.
+app.get('/api/agents/:id/transcript', async (c) => {
   const id = c.req.param('id');
-  const info = sessionManager.list().find((s) => s.id === id);
+  const info = agentManager.list().find((a) => a.id === id);
   if (!info) return c.json({ error: `no such session: ${id}` }, 404);
   return serveTranscript(c, info.piSessionFile, `session ${id}`);
 });
 
-// ── Sessions ──────────────────────────────────────────────────────────────────
-app.get('/api/sessions', (c) => c.json(sessionManager.list()));
+// ── Agents ────────────────────────────────────────────────────────────────────
+app.get('/api/agents', (c) => c.json(agentManager.list()));
 
-// Spawn a detached session — the CLI/scripts drive this over REST instead of holding a
-// WS open. `forkFrom` spawns the session from a frozen copy of an existing pi session
+// Spawn a detached agent — the CLI/scripts drive this over REST instead of holding a
+// WS open. `forkFrom` spawns the agent from a frozen copy of an existing pi session
 // file: the fork gets a NEW session file and never writes the source.
-app.post('/api/sessions', async (c) => {
+app.post('/api/agents', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     persona?: string;
     model?: string;
@@ -350,7 +349,7 @@ app.post('/api/sessions', async (c) => {
     }
   }
   const id = randomUUID();
-  sessionManager.spawn(
+  agentManager.spawn(
     id,
     {
       cwd: body.cwd,
@@ -363,38 +362,38 @@ app.post('/api/sessions', async (c) => {
     },
     'cli',
   );
-  if (body.prompt) sessionManager.prompt(id, body.prompt);
+  if (body.prompt) agentManager.prompt(id, body.prompt);
   return c.json({ ok: true, id });
 });
 
-app.post('/api/sessions/:id/prompt', async (c) => {
+app.post('/api/agents/:id/prompt', async (c) => {
   const { text } = (await c.req.json().catch(() => ({}))) as { text?: string };
   if (!text) return c.json({ error: 'text required' }, 400);
-  const delivered = sessionManager.prompt(c.req.param('id'), text);
+  const delivered = agentManager.prompt(c.req.param('id'), text);
   return delivered ? c.json({ ok: true }) : c.json({ error: 'no such session' }, 404);
 });
 
-app.post('/api/sessions/:id/stop', (c) => {
-  sessionManager.stop(c.req.param('id'));
+app.post('/api/agents/:id/stop', (c) => {
+  agentManager.stop(c.req.param('id'));
   return c.json({ ok: true });
 });
 
-// ── Rooms ─────────────────────────────────────────────────────────────────────
-// Past rooms recovered from disk (read-only history). Live rooms flow over the WS
-// (`{rooms}` summaries + `{roomMessage}` posts); this is the conversation record of
-// rooms from previous engine runs — their participant subprocesses are long gone.
-app.get('/api/rooms/archive', (c) => c.json(roomManager.archived()));
-// Live rooms WITH their logs — so a UI client joining a room it didn't open (or after a
+// ── Kilds ─────────────────────────────────────────────────────────────────────
+// Past kilds recovered from disk (read-only history). Live kilds flow over the WS
+// (`{kilds}` summaries + `{message}` sends); this is the conversation record of
+// kilds from previous engine runs — their agent subprocesses are long gone.
+app.get('/api/kilds/archive', (c) => c.json(kildManager.archived()));
+// Live kilds WITH their logs — so a UI client joining a kild it didn't create (or after a
 // refresh) can load the conversation so far. The WS only streams *new* messages.
-app.get('/api/rooms/live', async (c) => c.json(await roomManager.liveRoomsStatus()));
-app.post('/api/rooms', async (c) => {
+app.get('/api/kilds', async (c) => c.json(await kildManager.liveKildsStatus()));
+app.post('/api/kilds', async (c) => {
   const body = await c.req.json<{
     name?: unknown;
     cwd?: unknown;
     project?: unknown;
     worktree?: unknown;
     base?: unknown;
-    participants?: unknown;
+    agents?: unknown;
     kickoff?: unknown;
     from?: unknown;
     openedBy?: unknown;
@@ -420,12 +419,12 @@ app.post('/api/rooms', async (c) => {
   if (body.openedBy !== undefined && typeof body.openedBy !== 'string') {
     return c.json({ error: 'openedBy must be a string' }, 400);
   }
-  const participants = participantSpecs(body.participants);
-  if (!participants || participants.length === 0) {
-    return c.json({ error: 'participants must name at least one participant' }, 400);
+  const agents = agentSpecs(body.agents);
+  if (!agents || agents.length === 0) {
+    return c.json({ error: 'agents must name at least one agent' }, 400);
   }
 
-  // Where the room runs: `project` is a registered name, `cwd` an absolute path —
+  // Where the kild runs: `project` is a registered name, `cwd` an absolute path —
   // explicit, exactly one (same contract as the worktree/persona endpoints).
   let cwd: string;
   if (typeof body.project === 'string') {
@@ -440,10 +439,10 @@ app.post('/api/rooms', async (c) => {
       return c.json({ error: `cwd must be absolute: ${body.cwd}` }, 400);
     }
     // Absolute is not enough: a caller that resolved an unregistered NAME against its
-    // own cwd sends a well-formed path to a directory that does not exist. That opened
-    // a room whose worktree could not be created and whose participants never spawned —
-    // and the caller got a room id and a success. Refuse here so the failure is the
-    // caller's, not a room that quietly does nothing.
+    // own cwd sends a well-formed path to a directory that does not exist. That created
+    // a kild whose worktree could not be created and whose agents never spawned —
+    // and the caller got a kild id and a success. Refuse here so the failure is the
+    // caller's, not a kild that quietly does nothing.
     const dir = await fs.stat(body.cwd).catch(() => null);
     if (!dir?.isDirectory()) {
       return c.json({ error: `cwd is not an existing directory: ${body.cwd}` }, 400);
@@ -453,41 +452,41 @@ app.post('/api/rooms', async (c) => {
     return c.json({ error: 'cwd (absolute path) or project (registered name) required' }, 400);
   }
 
-  const attribution = resolveOpenRoomActor(
+  const attribution = resolveNewKildActor(
     {
       from: typeof body.from === 'string' ? body.from : undefined,
       openedBy: body.openedBy,
     },
-    sessionManager,
+    agentManager,
   );
-  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
+  if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
 
   const id = randomUUID();
-  const opened = await roomManager.open(id, {
+  const created = await kildManager.create(id, {
     name: body.name,
     cwd,
-    participants,
+    agents,
     worktree: body.worktree,
     base: typeof body.base === 'string' ? body.base : undefined,
     openedBy: body.openedBy,
   });
-  if (!opened.ok) return c.json({ error: opened.message }, roomResultStatus(opened));
-  // Addressing is structured now: the manager defaults an untargeted post to the room
+  if (!created.ok) return c.json({ error: created.message }, kildResultStatus(created));
+  // Addressing is structured now: the manager defaults an untargeted send to the kild
   // lead, so the kickoff reaches the orchestrator without munging the text.
-  const posted = attribution.value.human
-    ? await roomManager.postFromHuman(id, body.kickoff)
-    : await roomManager.postAs(id, attribution.value.actor, body.kickoff);
-  if (!posted.ok) {
-    await roomManager.close(id);
-    return c.json({ error: posted.message }, roomResultStatus(posted));
+  const sent = attribution.value.human
+    ? await kildManager.sendFromHuman(id, body.kickoff)
+    : await kildManager.sendAs(id, attribution.value.actor, body.kickoff);
+  if (!sent.ok) {
+    await kildManager.stop(id);
+    return c.json({ error: sent.message }, kildResultStatus(sent));
   }
-  return c.json({ ok: true, id: opened.value.roomId, message: opened.value.message });
+  return c.json({ ok: true, id: created.value.kildId, message: created.value.message });
 });
-// `to` is the structured recipient list the in-room `post_message` tool already takes —
-// exposed here so a caller outside the room (the CLI, a script, helm) can address a
-// specific participant instead of always falling through to the room lead. Addressing is
-// never parsed from the message text, so `@name` in `text` remains just text.
-app.post('/api/rooms/:id/post', async (c) => {
+// `to` is the structured recipient list the in-kild `send` tool already takes —
+// exposed here so a caller outside the kild (the CLI, a script, helm) can address a
+// specific agent instead of always falling through to the kild lead. Addressing is
+// never parsed from the message text, so `@handle` in `text` remains just text.
+app.post('/api/kilds/:id/messages', async (c) => {
   const { text, from, sessionId, to } = await c.req.json<{
     text?: unknown;
     from?: unknown;
@@ -500,45 +499,47 @@ app.post('/api/rooms/:id/post', async (c) => {
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
   if (to !== undefined && (!Array.isArray(to) || to.some((t) => typeof t !== 'string')))
-    return c.json({ error: 'to must be an array of participant handles' }, 400);
+    return c.json({ error: 'to must be an array of agent handles' }, 400);
   // An empty array would read as "addressed to nobody" while behaving as "addressed to
   // the lead" — reject it rather than silently doing something else.
   if (Array.isArray(to) && to.length === 0)
-    return c.json({ error: 'to must name at least one participant' }, 400);
+    return c.json({ error: 'to must name at least one agent' }, 400);
   const recipients = to as string[] | undefined;
   const id = c.req.param('id');
-  const attribution = resolvePostRoomActor(
+  const attribution = resolveSendActor(
     { from: typeof from === 'string' ? from : undefined, sessionId },
-    sessionManager,
+    agentManager,
   );
-  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
+  if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
   const result = attribution.value.human
-    ? await roomManager.postFromHuman(id, text, recipients)
-    : await roomManager.postAs(id, attribution.value.actor, text, recipients);
-  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+    ? await kildManager.sendFromHuman(id, text, recipients)
+    : await kildManager.sendAs(id, attribution.value.actor, text, recipients);
+  if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
 // The attached half of the roster: a harness kild does NOT own (a Claude Code session the
-// human is driving) claims a `@handle` and gets a mailbox. Idempotent by name, so a hook
+// human is driving) claims a `@handle` and gets an inbox. Idempotent by handle, so a hook
 // or shell alias can call it on every session start.
-app.post('/api/rooms/:id/join', async (c) => {
-  const { name } = await c.req.json<{ name?: unknown }>();
-  if (typeof name !== 'string' || !name.trim()) return c.json({ error: 'name required' }, 400);
-  const result = await roomManager.join(c.req.param('id'), name);
-  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+app.post('/api/kilds/:id/agents/attach', async (c) => {
+  const { handle } = await c.req.json<{ handle?: unknown }>();
+  if (typeof handle !== 'string' || !handle.trim())
+    return c.json({ error: 'handle required' }, 400);
+  const result = await kildManager.attach(c.req.param('id'), handle);
+  if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
-// The destructive read of that mailbox, and with it the participant's idle signal (an
-// empty drain = idle). POST, never GET: this MUTATES, so a caching proxy or a retry on a
+// The destructive read of that inbox, and with it the agent's idle signal (an empty
+// drain = idle). POST, never GET: this MUTATES, so a caching proxy or a retry on a
 // GET would silently eat somebody's messages.
-app.post('/api/rooms/:id/drain', async (c) => {
-  const { name } = await c.req.json<{ name?: unknown }>();
-  if (typeof name !== 'string' || !name.trim()) return c.json({ error: 'name required' }, 400);
-  const result = roomManager.drain(c.req.param('id'), name);
-  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+app.post('/api/kilds/:id/inbox/drain', async (c) => {
+  const { handle } = await c.req.json<{ handle?: unknown }>();
+  if (typeof handle !== 'string' || !handle.trim())
+    return c.json({ error: 'handle required' }, 400);
+  const result = kildManager.drain(c.req.param('id'), handle);
+  if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, ...result.value });
 });
-app.post('/api/rooms/:id/close', async (c) => {
+app.post('/api/kilds/:id/stop', async (c) => {
   const { from, sessionId } = await c.req.json<{
     from?: unknown;
     sessionId?: unknown;
@@ -547,42 +548,42 @@ app.post('/api/rooms/:id/close', async (c) => {
     return c.json({ error: 'from must be a string' }, 400);
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
-  const attribution = resolveCloseRoomActor(
+  const attribution = resolveStopActor(
     { from: typeof from === 'string' ? from : undefined, sessionId },
-    sessionManager,
+    agentManager,
   );
-  if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
-  const result = await roomManager.close(c.req.param('id'));
-  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+  if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
+  const result = await kildManager.stop(c.req.param('id'));
+  if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
 
 // ── Review intelligence ───────────────────────────────────────────────────────
-// Git drill-down for a live room (worktree if set, else cwd — the same resolution
-// live-room status uses): commits vs the room's base, per-file diff stats
-// (committed + uncommitted), and one file's unified patch. Live rooms only — an
-// archived room's working dir is gone (409); unknown ids 404. Git failures inside
-// a resolved room are data ({error} in the body, per room-git-status), never a 500.
-app.get('/api/rooms/:id/git/commits', async (c) => {
-  const located = roomManager.roomDir(c.req.param('id'));
+// Git drill-down for a live kild (worktree if set, else cwd — the same resolution
+// live-kild status uses): commits vs the kild's base, per-file diff stats
+// (committed + uncommitted), and one file's unified patch. Live kilds only — an
+// archived kild's working dir is gone (409); unknown ids 404. Git failures inside
+// a resolved kild are data ({error} in the body, per worktree-status), never a 500.
+app.get('/api/kilds/:id/git/commits', async (c) => {
+  const located = kildManager.kildDir(c.req.param('id'));
   if (!located.ok) {
-    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+    return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
   return c.json(await reviewCommits(located.value.dir, located.value.base));
 });
-app.get('/api/rooms/:id/git/files', async (c) => {
-  const located = roomManager.roomDir(c.req.param('id'));
+app.get('/api/kilds/:id/git/files', async (c) => {
+  const located = kildManager.kildDir(c.req.param('id'));
   if (!located.ok) {
-    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+    return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
   return c.json(await reviewFiles(located.value.dir, located.value.base));
 });
-app.get('/api/rooms/:id/git/diff', async (c) => {
+app.get('/api/kilds/:id/git/diff', async (c) => {
   const file = c.req.query('path');
   if (!file) return c.json({ error: 'path query parameter required' }, 400);
-  const located = roomManager.roomDir(c.req.param('id'));
+  const located = kildManager.kildDir(c.req.param('id'));
   if (!located.ok) {
-    return c.json({ error: located.message, code: located.code }, roomResultStatus(located));
+    return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
   const diff = await reviewDiff(located.value.dir, located.value.base, file);
   // The traversal guard: only a path git itself reported may be diffed.
@@ -591,9 +592,9 @@ app.get('/api/rooms/:id/git/diff', async (c) => {
 });
 
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
-// Every connection subscribes to the room broadcast — so rooms opened by any client
-// (UI client or CLI) are visible to all. Rooms are engine-owned and survive a drop.
-// Frames carry the room id as `id`; sessions are the internal substrate, not on the wire.
+// Every connection subscribes to the kild broadcast — so kilds created by any client
+// (UI client or CLI) are visible to all. Kilds are engine-owned and survive a drop.
+// Frames carry the kild id as `id`; sessions are the internal substrate, not on the wire.
 type ClientMessage =
   | {
       type: 'spawn';
@@ -609,22 +610,22 @@ type ClientMessage =
   | { type: 'prompt'; id: string; text: string; from?: string }
   | { type: 'stop'; id: string }
   | {
-      type: 'room_open';
+      type: 'kild_new';
       id: string;
       name: string;
       cwd: string;
-      participants: Array<{ name: string; persona?: string; model?: string }>;
+      agents: Array<{ handle: string; persona?: string; model?: string }>;
       worktree?: string;
       base?: string;
     }
-  | { type: 'room_post'; id: string; text: string }
+  | { type: 'kild_send'; id: string; text: string }
   | {
-      type: 'room_add';
+      type: 'kild_spawn';
       id: string;
-      participant: { name: string; persona?: string; model?: string };
+      agent: { handle: string; persona?: string; model?: string };
     }
-  | { type: 'room_halt'; id: string }
-  | { type: 'room_close'; id: string };
+  | { type: 'kild_halt'; id: string }
+  | { type: 'kild_stop'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
   let msg: unknown;
@@ -652,19 +653,19 @@ function parseClientMessage(data: string): ClientMessage | null {
     return m as ClientMessage;
   }
   if (m.type === 'stop') return m as ClientMessage;
-  if (m.type === 'room_open') {
-    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.participants)) {
+  if (m.type === 'kild_new') {
+    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.agents)) {
       return null;
     }
     if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
     return m as ClientMessage;
   }
-  if (m.type === 'room_post' && typeof m.text === 'string') return m as ClientMessage;
-  if (m.type === 'room_add' && typeof m.participant === 'object' && m.participant !== null) {
+  if (m.type === 'kild_send' && typeof m.text === 'string') return m as ClientMessage;
+  if (m.type === 'kild_spawn' && typeof m.agent === 'object' && m.agent !== null) {
     return m as ClientMessage;
   }
-  if (m.type === 'room_halt') return m as ClientMessage;
-  if (m.type === 'room_close') return m as ClientMessage;
+  if (m.type === 'kild_halt') return m as ClientMessage;
+  if (m.type === 'kild_stop') return m as ClientMessage;
   return null;
 }
 
@@ -675,11 +676,11 @@ app.get(
     return next();
   },
   upgradeWebSocket(() => {
-    let unsubscribeRooms: (() => void) | undefined;
-    let unsubscribeSessions: (() => void) | undefined;
-    // Room commands became async when open() gained validation, which broke the
-    // implicit frame ordering clients rely on (open immediately followed by the
-    // kickoff post raced, and the post was rejected with "no such room"). Frames
+    let unsubscribeKilds: (() => void) | undefined;
+    let unsubscribeAgents: (() => void) | undefined;
+    // Kild commands became async when create() gained validation, which broke the
+    // implicit frame ordering clients rely on (create immediately followed by the
+    // kickoff send raced, and the send was rejected with "no such kild"). Frames
     // on one connection execute strictly in arrival order.
     let queue: Promise<void> = Promise.resolve();
     const enqueue = (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
@@ -691,14 +692,14 @@ app.get(
     };
     return {
       onOpen(_evt, ws) {
-        unsubscribeRooms = roomManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
-        unsubscribeSessions = sessionManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
+        unsubscribeKilds = kildManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
+        unsubscribeAgents = agentManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
       },
       onMessage(evt) {
         const msg = parseClientMessage(String(evt.data));
         if (!msg) return; // ignore malformed / unknown frames
         if (msg.type === 'spawn') {
-          sessionManager.spawn(
+          agentManager.spawn(
             msg.id,
             {
               cwd: msg.cwd,
@@ -712,32 +713,32 @@ app.get(
             'cli',
           );
         } else if (msg.type === 'prompt') {
-          sessionManager.prompt(msg.id, msg.text, msg.from);
+          agentManager.prompt(msg.id, msg.text, msg.from);
         } else if (msg.type === 'stop') {
-          sessionManager.stop(msg.id);
-        } else if (msg.type === 'room_open') {
-          enqueue(`room_open ${msg.id}`, () =>
-            roomManager.open(msg.id, {
+          agentManager.stop(msg.id);
+        } else if (msg.type === 'kild_new') {
+          enqueue(`kild_new ${msg.id}`, () =>
+            kildManager.create(msg.id, {
               name: msg.name,
               cwd: msg.cwd,
-              participants: msg.participants,
+              agents: msg.agents,
               worktree: msg.worktree,
               base: msg.base,
             }),
           );
-        } else if (msg.type === 'room_post') {
-          enqueue(`room_post ${msg.id}`, () => roomManager.postFromHuman(msg.id, msg.text));
-        } else if (msg.type === 'room_add') {
-          enqueue(`room_add ${msg.id}`, () => roomManager.addParticipant(msg.id, msg.participant));
-        } else if (msg.type === 'room_halt') {
-          enqueue(`room_halt ${msg.id}`, () => roomManager.halt(msg.id));
-        } else if (msg.type === 'room_close') {
-          enqueue(`room_close ${msg.id}`, () => roomManager.close(msg.id));
+        } else if (msg.type === 'kild_send') {
+          enqueue(`kild_send ${msg.id}`, () => kildManager.sendFromHuman(msg.id, msg.text));
+        } else if (msg.type === 'kild_spawn') {
+          enqueue(`kild_spawn ${msg.id}`, () => kildManager.spawnAgent(msg.id, msg.agent));
+        } else if (msg.type === 'kild_halt') {
+          enqueue(`kild_halt ${msg.id}`, () => kildManager.halt(msg.id));
+        } else if (msg.type === 'kild_stop') {
+          enqueue(`kild_stop ${msg.id}`, () => kildManager.stop(msg.id));
         }
       },
       onClose() {
-        unsubscribeRooms?.();
-        unsubscribeSessions?.();
+        unsubscribeKilds?.();
+        unsubscribeAgents?.();
       },
     };
   }),
@@ -761,11 +762,11 @@ void loadProjects()
   )
   .catch((err) => console.warn(`kild: startup prune failed: ${errText(err)}`));
 
-// Kill child workers on shutdown so a `--watch` reload or Ctrl-C never orphans
+// Kill child agent processes on shutdown so a `--watch` reload or Ctrl-C never orphans
 // them (otherwise they reparent to init and linger as zombie sessions).
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
-    sessionManager.shutdown();
+    agentManager.shutdown();
     process.exit(0);
   });
 }

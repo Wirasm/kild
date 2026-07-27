@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { kildHome } from './config.ts';
-import { finalNonSystemPost } from './room/room-events.ts';
-import type { Room } from './room/room-types.ts';
+import { finalNonSystemPost } from './kild-events.ts';
+import type { Kild } from './kild-types.ts';
 
 /**
  * Project memory — the filesystem half of "kild remembers".
@@ -12,7 +12,7 @@ import type { Room } from './room/room-types.ts';
  * in the project — callers resolve it via `configuredMemoryDir` and pass it in).
  * Two layers with different owners, deliberately split:
  *
- * - `LOG.md` — append-only, ENGINE-written: one entry per closed room, built
+ * - `LOG.md` — append-only, ENGINE-written: one entry per stopped kild, built
  *   entirely from structured state the engine already holds (goal, outcome, agents +
  *   their pi resume handles, worktree). Free, instant, never hallucinates.
  * - `MEMORY.md` — lean CURATED memory, written by an optional synthesis session
@@ -24,7 +24,7 @@ import type { Room } from './room/room-types.ts';
  * index. All memory files are personal for now (a project-internal dir is gitignored
  * via its own `.gitignore`; an external dir needs none), which also means worktree
  * checkouts don't carry them: memory is always read from and written to the project's
- * MAIN checkout (`room.cwd`), never a worktree.
+ * MAIN checkout (`kild.cwd`), never a worktree.
  */
 
 const MEMORY_GITIGNORE = ['MEMORY.md', 'LOG.md', 'direction.md', '.memory-state.json'];
@@ -70,36 +70,36 @@ function ensureMemoryDir(projectCwd: string, dir: string): string {
   return dir;
 }
 
-/** One room's log entry, built purely from engine-held state. */
-export function formatRoomLogEntry(room: Room, closedAt: Date): string {
+/** One kild's log entry, built purely from engine-held state. */
+export function formatKildLogEntry(kild: Kild, closedAt: Date): string {
   const lines: string[] = [];
-  lines.push(`## ${closedAt.toISOString().slice(0, 10)} — ${room.name} (${room.id})`);
-  const kickoff = room.log.find((message) => !message.system);
+  lines.push(`## ${closedAt.toISOString().slice(0, 10)} — ${kild.name} (${kild.id})`);
+  const kickoff = kild.log.find((message) => !message.system);
   if (kickoff) lines.push(`- goal: ${oneLine(kickoff.text, 240)}`);
-  lines.push(`- outcome: ${oneLine(finalNonSystemPost(room), 400)}`);
-  for (const participant of room.participants) {
-    // An attached participant is a harness kild never owned: no persona, no model it can
+  lines.push(`- outcome: ${oneLine(finalNonSystemPost(kild), 400)}`);
+  for (const agent of kild.agents) {
+    // An attached agent is a harness kild never owned: no persona, no model it can
     // vouch for, and nothing to resume.
-    if (participant.kind === 'attached') {
-      lines.push(`- attached @${participant.name}`);
+    if (agent.ownership === 'attached') {
+      lines.push(`- attached @${agent.handle}`);
       continue;
     }
-    const persona = participant.persona ?? 'default';
-    const model = participant.model ? `, ${participant.model}` : '';
-    const resume = participant.piSessionFile ?? participant.piSessionId;
+    const persona = agent.persona ?? 'default';
+    const model = agent.model ? `, ${agent.model}` : '';
+    const resume = agent.piSessionFile ?? agent.piSessionId;
     const handle = resume ? ` — pi --session ${resume}` : '';
-    lines.push(`- agent @${participant.name} (${persona}${model})${handle}`);
+    lines.push(`- agent @${agent.handle} (${persona}${model})${handle}`);
   }
-  if (room.worktree) lines.push(`- worktree: kild/${room.worktree} (base ${room.base ?? '?'})`);
+  if (kild.worktree) lines.push(`- worktree: kild/${kild.worktree} (base ${kild.base ?? '?'})`);
   return `${lines.join('\n')}\n\n`;
 }
 
-/** Append the room's entry to the memory dir's `LOG.md`; returns the log path.
+/** Append the kild's entry to the memory dir's `LOG.md`; returns the log path.
  *  `dir` is the resolved memory dir (see `configuredMemoryDir`). */
-export function appendRoomLog(room: Room, dir: string, closedAt: Date = new Date()): string {
-  ensureMemoryDir(room.cwd, dir);
+export function appendKildLog(kild: Kild, dir: string, closedAt: Date = new Date()): string {
+  ensureMemoryDir(kild.cwd, dir);
   const logPath = path.join(dir, 'LOG.md');
-  fs.appendFileSync(logPath, formatRoomLogEntry(room, closedAt));
+  fs.appendFileSync(logPath, formatKildLogEntry(kild, closedAt));
   return logPath;
 }
 
@@ -131,15 +131,15 @@ export function projectMemorySection(projectCwd: string, dir: string): string {
  *  constraints); its judgment/voice comes from the configured persona, not from here.
  *  `dir` is the resolved memory dir — the charter must name the ACTUAL paths, or the
  *  synthesis agent writes to the wrong place. */
-export function synthesisPrompt(room: Room, transcriptPath: string, dir: string): string {
-  const logPath = displayPath(room.cwd, dir, 'LOG.md');
-  const memoryPath = displayPath(room.cwd, dir, 'MEMORY.md');
-  const directionPath = displayPath(room.cwd, dir, 'direction.md');
+export function synthesisPrompt(kild: Kild, transcriptPath: string, dir: string): string {
+  const logPath = displayPath(kild.cwd, dir, 'LOG.md');
+  const memoryPath = displayPath(kild.cwd, dir, 'MEMORY.md');
+  const directionPath = displayPath(kild.cwd, dir, 'direction.md');
   return (
-    `[kild memory synthesis] Room '${room.name}' just closed in this project.\n\n` +
+    `[kild memory synthesis] Kild '${kild.name}' just stopped in this project.\n\n` +
     `Inputs:\n` +
-    `- Room transcript (JSON): ${transcriptPath}\n` +
-    `- Engine-written room log: ${logPath} — this room's factual entry is already ` +
+    `- Kild transcript (JSON): ${transcriptPath}\n` +
+    `- Engine-written kild log: ${logPath} — this kild's factual entry is already ` +
     `appended; do not duplicate its facts.\n` +
     `- Current curated memory: ${memoryPath} (may not exist yet)\n` +
     `- Product direction (human-owned, READ-ONLY): ${directionPath} (may not exist)\n\n` +
@@ -152,7 +152,7 @@ export function synthesisPrompt(room: Room, transcriptPath: string, dir: string)
   );
 }
 
-/** Path of the persisted room transcript the registry writes (input for synthesis). */
-export function roomTranscriptPath(roomId: string): string {
-  return path.join(kildHome(), 'rooms', `${roomId}.json`);
+/** Path of the persisted kild transcript the registry writes (input for synthesis). */
+export function kildTranscriptPath(kildId: string): string {
+  return path.join(kildHome(), 'kilds', `${kildId}.json`);
 }

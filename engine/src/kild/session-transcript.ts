@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 
 /**
  * Compact, defensive reader for pi session JSONL files (`~/.pi/agent/sessions/…`) —
- * the transcript half of observability: any participant/session with a persisted
+ * the transcript half of observability: any agent with a persisted
  * `piSessionFile` can be read back as a compact conversation, live or archived.
  *
  * The file format is pi's (session header + `message` entries with role

@@ -9,42 +9,37 @@ import {
   SessionManager as PiSessionManager,
 } from '@earendil-works/pi-coding-agent';
 
-import { resolveAgentInstructions } from './kild/agents.ts';
 import { configuredMemoryDir, configuredModels, resolvePluginPaths } from './kild/config.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
+import type { CommandAck, SendOut, SpawnOut, StopOut } from './kild/kild-types.ts';
 import {
   composeSessionTurn,
   formatModelsSection,
   MECHANISM_PROMPT,
 } from './kild/mechanism-prompt.ts';
 import { projectMemorySection } from './kild/memory.ts';
-import { resolveModel, withRole } from './kild/models.ts';
-import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
-import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
-import { createPostMessageTool } from './kild/room/post-message-tool.ts';
-import type {
-  CloseRoomOut,
-  InviteOut,
-  MessageOut,
-  RoomCommandAck,
-} from './kild/room/room-types.ts';
+import { resolveModel, withPersona } from './kild/models.ts';
+import { resolvePersonaInstructions } from './kild/personas.ts';
+import { createSendTool } from './kild/send-tool.ts';
+import { createSpawnTool } from './kild/spawn-tool.ts';
+import { createStopTool } from './kild/stop-tool.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
 /**
  * One agent session, one process. The engine spawns this (the same binary with
- * `KILD_ROLE=worker`) once per session — the coding-agent SDK keeps process-global
+ * `KILD_ROLE=agent`) once per session — the coding-agent SDK keeps process-global
  * state and supports only a single session per process, so concurrency *requires* a
- * process per session. `UiEvent` JSONL (and, in a room, `message_out` / `invite`
- * control lines) go to stdout; prompt / stop commands are read from stdin.
+ * process per session. `UiEvent` JSONL (and, in a kild, `send` / `spawn` control
+ * lines) go to stdout; prompt / stop commands are read from stdin.
  */
-export async function runWorker(): Promise<never> {
+export async function runAgent(): Promise<never> {
   let cwd = process.env.KILD_CWD || process.cwd();
   const worktreeName = process.env.KILD_WORKTREE || undefined;
   const worktreeBase = process.env.KILD_BASE || undefined;
   const personaName = process.env.KILD_PERSONA || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
-  const inRoom = !!process.env.KILD_ROOM;
-  const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
+  const inKild = !!process.env.KILD_KILD_ID;
+  const isKildLead = process.env.KILD_LEAD === '1';
   const skillsProfile = process.env.KILD_SKILLS_PROFILE || undefined;
   const forkFrom = process.env.KILD_FORK_SESSION || undefined;
 
@@ -54,9 +49,7 @@ export async function runWorker(): Promise<never> {
     { resolve: (text: string) => void; reject: (error: Error) => void }
   >();
 
-  const emitRoomCommand = <T extends MessageOut | InviteOut | CloseRoomOut>(
-    command: T,
-  ): Promise<string> => {
+  const emitKildCommand = <T extends SendOut | SpawnOut | StopOut>(command: T): Promise<string> => {
     const requestId = randomUUID();
     process.stdout.write(`${JSON.stringify({ ...command, requestId })}\n`);
     return new Promise<string>((resolve, reject) => {
@@ -85,23 +78,23 @@ export async function runWorker(): Promise<never> {
     const modelRuntime = await ModelRuntime.create();
     const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
-    // A room participant gets `post_message` + `invite_agent`; the room's LEAD also
-    // gets `close_room` (ending the room is the lead's explicit act). A non-room session
-    // gets no custom tools.
-    const customTools = inRoom
+    // An agent in a kild gets `send` + `spawn`; the kild's LEAD also gets `stop`
+    // (ending the kild is the lead's explicit act). A non-kild session gets no custom
+    // tools.
+    const customTools = inKild
       ? [
-          createPostMessageTool((text, to) => emitRoomCommand({ kind: 'message_out', text, to })),
-          createInviteAgentTool((spec) => emitRoomCommand({ kind: 'invite', ...spec })),
-          ...(isRoomLead
-            ? [createCloseRoomTool((spec) => emitRoomCommand({ kind: 'close_room', ...spec }))]
+          createSendTool((text, to) => emitKildCommand({ kind: 'send', text, to })),
+          createSpawnTool((spec) => emitKildCommand({ kind: 'spawn', ...spec })),
+          ...(isKildLead
+            ? [createStopTool((spec) => emitKildCommand({ kind: 'stop', ...spec }))]
             : []),
         ]
       : undefined;
-    // Skills: an explicit room capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
+    // Skills: an explicit kild capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
     // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
-    // PLUS the config-declared skill dirs, so an invited agent can load `prp-implement` when
+    // PLUS the config-declared skill dirs, so a spawned agent can load `prp-implement` when
     // the orchestrator tells it to. This is what makes a plugged-in framework's process
-    // reachable by whoever gets invited, not only the lead.
+    // reachable by whoever gets spawned, not only the lead.
     let resourceLoader: DefaultResourceLoader | undefined;
     if (skillsProfile) {
       resourceLoader = new DefaultResourceLoader({
@@ -161,13 +154,13 @@ export async function runWorker(): Promise<never> {
     }
   });
 
-  let preamble = personaName ? await resolveAgentInstructions(personaName, cwd) : null;
+  let preamble = personaName ? await resolvePersonaInstructions(personaName, cwd) : null;
   // Every session gets the generic mechanism guide (how to operate) on top of everything,
   // above the persona — so even a bare `default` session is competent. One-shot: it rides
-  // only the first delivered turn. The room-comms part is conditional inside the prompt.
-  // A delegating (in-room) session also gets the configured model catalog so it can pick
+  // only the first delivered turn. The kild-comms part is conditional inside the prompt.
+  // A delegating (in-kild) session also gets the configured model catalog so it can pick
   // a model per fan-out agent.
-  const modelsSection = inRoom ? formatModelsSection(await configuredModels(cwd)) : '';
+  const modelsSection = inKild ? formatModelsSection(await configuredModels(cwd)) : '';
   // Persistent memory rides the first turn: every session gets the project's curated
   // memory + direction, read from the resolved memory dir (config `memory.dir`, default
   // `.kild/` — gitignored, so worktree checkouts never carry the default-dir files).
@@ -178,9 +171,9 @@ export async function runWorker(): Promise<never> {
     .filter(Boolean)
     .join('\n\n');
 
-  // pi runs one turn at a time. A room can deliver a message (prompt) to this
-  // participant while it is still mid-turn, so we queue prompts and drain them
-  // strictly sequentially rather than awaiting inside the stdin handler.
+  // pi runs one turn at a time. A kild can deliver a message (prompt) to this agent
+  // while it is still mid-turn, so we queue prompts and drain them strictly
+  // sequentially rather than awaiting inside the stdin handler.
   const promptQueue: string[] = [];
   let draining = false;
   async function drainPrompts(): Promise<void> {
@@ -209,26 +202,26 @@ export async function runWorker(): Promise<never> {
         type?: string;
         text?: string;
         requestId?: string;
-        result?: RoomCommandAck['result'];
+        result?: CommandAck['result'];
       };
       try {
         msg = JSON.parse(line) as typeof msg;
       } catch {
-        continue; // a malformed command line must not crash the worker; skip it
+        continue; // a malformed command line must not crash the agent; skip it
       }
       if (msg.type === 'prompt' && msg.text) {
         // First delivered turn carries the preamble: the mechanism guide (how to operate)
-        // on top of the persona (<role>). Both ride only the first turn.
-        promptQueue.push(composeSessionTurn(withRole(msg.text, preamble), sessionPrefix));
+        // on top of the persona (<persona>). Both ride only the first turn.
+        promptQueue.push(composeSessionTurn(withPersona(msg.text, preamble), sessionPrefix));
         preamble = null;
         sessionPrefix = null;
         void drainPrompts();
       } else if (msg.type === 'stop') {
-        for (const pending of pendingCommands.values()) pending.reject(new Error('worker stopped'));
+        for (const pending of pendingCommands.values()) pending.reject(new Error('agent stopped'));
         pendingCommands.clear();
         session.dispose();
         process.exit(0);
-      } else if (msg.type === 'room_command_result' && msg.requestId && msg.result) {
+      } else if (msg.type === 'command_result' && msg.requestId && msg.result) {
         const pending = pendingCommands.get(msg.requestId);
         if (!pending) continue;
         pendingCommands.delete(msg.requestId);
@@ -238,7 +231,7 @@ export async function runWorker(): Promise<never> {
     }
   });
   process.stdin.on('end', () => {
-    for (const pending of pendingCommands.values()) pending.reject(new Error('worker stdin ended'));
+    for (const pending of pendingCommands.values()) pending.reject(new Error('agent stdin ended'));
     pendingCommands.clear();
     session.dispose();
     process.exit(0);

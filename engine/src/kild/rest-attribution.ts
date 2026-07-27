@@ -1,35 +1,35 @@
-import type { CommandResult } from './room-types.ts';
-import { HUMAN } from './room-types.ts';
+import type { CommandResult } from './kild-types.ts';
+import { HUMAN } from './kild-types.ts';
 
-export interface OpenRoomAttributionInput {
+export interface NewKildAttributionInput {
   openedBy?: string;
   from?: string;
 }
 
-export interface PostRoomAttributionInput {
+export interface SendAttributionInput {
   sessionId?: string;
   from?: string;
 }
 
-export interface CloseRoomAttributionInput {
+export interface StopAttributionInput {
   sessionId?: string;
   from?: string;
 }
 
-export interface RestRoomAttributionSuccess {
+export interface RestAttributionSuccess {
   actor: string;
   human: boolean;
 }
 
-interface RestRoomAttributionDeps {
+interface RestAttributionDeps {
   resolveActor(sessionId: string): CommandResult<string>;
 }
 
-function ok(actor: string): CommandResult<RestRoomAttributionSuccess> {
+function ok(actor: string): CommandResult<RestAttributionSuccess> {
   return { ok: true, value: { actor, human: actor === HUMAN } };
 }
 
-function reject(): CommandResult<RestRoomAttributionSuccess> {
+function reject(): CommandResult<RestAttributionSuccess> {
   return {
     ok: false,
     code: 'rejected',
@@ -40,31 +40,31 @@ function reject(): CommandResult<RestRoomAttributionSuccess> {
 function resolveSessionActor(
   sessionId: string | undefined,
   from: string | undefined,
-  deps: RestRoomAttributionDeps,
-): CommandResult<RestRoomAttributionSuccess> {
+  deps: RestAttributionDeps,
+): CommandResult<RestAttributionSuccess> {
   if (from !== undefined) return reject();
   if (sessionId === undefined) return ok(HUMAN);
   const actor = deps.resolveActor(sessionId);
   return actor.ok ? ok(actor.value) : actor;
 }
 
-export function resolveOpenRoomActor(
-  input: OpenRoomAttributionInput,
-  deps: RestRoomAttributionDeps,
-): CommandResult<RestRoomAttributionSuccess> {
+export function resolveNewKildActor(
+  input: NewKildAttributionInput,
+  deps: RestAttributionDeps,
+): CommandResult<RestAttributionSuccess> {
   return resolveSessionActor(input.openedBy, input.from, deps);
 }
 
-export function resolvePostRoomActor(
-  input: PostRoomAttributionInput,
-  deps: RestRoomAttributionDeps,
-): CommandResult<RestRoomAttributionSuccess> {
+export function resolveSendActor(
+  input: SendAttributionInput,
+  deps: RestAttributionDeps,
+): CommandResult<RestAttributionSuccess> {
   return resolveSessionActor(input.sessionId, input.from, deps);
 }
 
-export function resolveCloseRoomActor(
-  input: CloseRoomAttributionInput,
-  deps: RestRoomAttributionDeps,
-): CommandResult<RestRoomAttributionSuccess> {
+export function resolveStopActor(
+  input: StopAttributionInput,
+  deps: RestAttributionDeps,
+): CommandResult<RestAttributionSuccess> {
   return resolveSessionActor(input.sessionId, input.from, deps);
 }

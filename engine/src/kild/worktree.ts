@@ -45,7 +45,7 @@ export function worktreeName(branch: string): string {
 }
 
 /** The on-disk path a worktree name maps to. Deterministic, no I/O — so the engine
- *  can fill `SessionInfo.worktreePath` synchronously before the worker creates it. */
+ *  can fill `AgentInfo.worktreePath` synchronously before the agent creates it. */
 export function worktreePath(name: string): string {
   assertSafeBranch(name);
   return path.join(worktreesRoot(), name.replace(/\//g, '-'));
@@ -59,10 +59,10 @@ export async function currentBranch(repo: string): Promise<string | undefined> {
   return branch || undefined;
 }
 
-/** Resolve the base branch for a worktree/room in `cwd`: explicit `flag` wins, else the
+/** Resolve the base branch for a worktree/kild in `cwd`: explicit `flag` wins, else the
  *  configured `baseBranch` (project over global), else the checkout's current branch, else
  *  `main`. This is the branch new worktrees fork from and that git status is measured
- *  against, so ahead/behind + collisions reflect this room's own work. */
+ *  against, so ahead/behind + collisions reflect this kild's own work. */
 export async function resolveBaseBranch(cwd: string, flag?: string): Promise<string> {
   return flag ?? (await configuredBaseBranch(cwd)) ?? (await currentBranch(cwd)) ?? 'main';
 }
