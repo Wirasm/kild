@@ -11,36 +11,10 @@ test('prompt silently drops a dead or missing session', () => {
   expect(agents.prompt('missing', 'kild stopped', 'kild')).toBe(false);
 });
 
-test('resolveActor returns the configured persona for a live session', () => {
-  const agents = new AgentManager();
-  (agents as { sessions: Map<string, unknown> }).sessions.set('brain-session', {
-    session: {},
-    info: { id: 'brain-session', persona: 'brain', origin: 'cli' },
-  });
-  expect(agents.resolveActor('brain-session')).toEqual({ ok: true, value: 'brain' });
-});
-
-test('resolveActor rejects an unknown session id', () => {
-  const agents = new AgentManager();
-  expect(agents.resolveActor('missing')).toEqual({
-    ok: false,
-    code: 'rejected',
-    message: 'unknown session: missing',
-  });
-});
-
-test('resolveActor rejects a live session with no actor identity', () => {
-  const agents = new AgentManager();
-  (agents as { sessions: Map<string, unknown> }).sessions.set('anon-session', {
-    session: {},
-    info: { id: 'anon-session', origin: 'cli' },
-  });
-  expect(agents.resolveActor('anon-session')).toEqual({
-    ok: false,
-    code: 'rejected',
-    message: "session 'anon-session' has no actor identity",
-  });
-});
+// The three `resolveActor` cases that stood here are gone with the method: attribution
+// answers with a HANDLE, which is kild-level knowledge, so it is resolved by the kild
+// manager (`handleForSession`) and covered by `kild-manager.test.ts`. The session substrate
+// only ever knew the persona, which named the wrong thing.
 
 test('agentEnv carries the fork source to the agent as KILD_FORK_SESSION', () => {
   const env = agentEnv(

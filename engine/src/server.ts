@@ -132,6 +132,17 @@ async function jsonBody(c: Context): Promise<Record<string, unknown>> {
   return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
 }
 
+/** The bearer credential a request presents, if any — minted by `attach` and resolved to
+ *  the handle that attached (see `rest-attribution.ts`). Absent, blank or another scheme
+ *  means "no credential", which is the CLI, curl and helm: they are attributed exactly as
+ *  before. A present-but-unknown Bearer token is a different thing entirely and is
+ *  rejected downstream rather than downgraded. */
+function bearerToken(c: Context): string | undefined {
+  const header = c.req.header('authorization');
+  const token = /^bearer\s+(\S+)$/i.exec(header?.trim() ?? '')?.[1];
+  return token || undefined;
+}
+
 function agentSpecs(input: unknown): AgentSpec[] | null {
   if (!Array.isArray(input)) return null;
   const agents: AgentSpec[] = [];
@@ -554,8 +565,9 @@ app.post('/api/kilds', async (c) => {
     {
       from: typeof body.from === 'string' ? body.from : undefined,
       openedBy: body.openedBy,
+      token: bearerToken(c),
     },
-    agentManager,
+    kildManager,
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
 
@@ -594,8 +606,13 @@ app.post('/api/kilds/:id/messages', async (c) => {
   if (!addressed.ok) return c.json({ error: addressed.error }, 400);
   const id = c.req.param('id');
   const attribution = resolveSendActor(
-    { from: typeof from === 'string' ? from : undefined, sessionId },
-    agentManager,
+    {
+      kildId: id,
+      from: typeof from === 'string' ? from : undefined,
+      sessionId,
+      token: bearerToken(c),
+    },
+    kildManager,
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
   const result = await kildManager.send(id, attribution.value, addressed.to, text);
@@ -674,13 +691,18 @@ app.delete('/api/kilds/:id/agents/:handle', (c) => {
 // The attached half of the roster: a harness kild does NOT own (a Claude Code session the
 // human is driving) claims a `@handle` and gets an inbox. Idempotent by handle, so a hook
 // or shell alias can call it on every session start.
+//
+// It also gets a `token`: send it back as `Authorization: Bearer <token>` and this handle is
+// what the engine writes as `from`. Without it an attached sender has no kild session to be
+// recognised by and reads as the unattributed label — so two attached agents in one kild
+// were indistinguishable on the log. Re-attaching returns the same token (see AttachTokens).
 app.post('/api/kilds/:id/agents/attach', async (c) => {
   const { handle } = (await jsonBody(c)) as { handle?: unknown };
   if (typeof handle !== 'string' || !handle.trim())
     return c.json({ error: 'handle required' }, 400);
   const result = await kildManager.attach(c.req.param('id'), handle);
   if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
-  return c.json({ ok: true, message: result.value.message });
+  return c.json({ ok: true, message: result.value.message, token: result.value.token });
 });
 // The destructive read of that inbox, and with it the agent's idle signal (an empty
 // drain = idle). POST, never GET: this MUTATES, so a caching proxy or a retry on a
@@ -703,8 +725,13 @@ app.post('/api/kilds/:id/stop', async (c) => {
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
   const attribution = resolveStopActor(
-    { from: typeof from === 'string' ? from : undefined, sessionId },
-    agentManager,
+    {
+      kildId: c.req.param('id'),
+      from: typeof from === 'string' ? from : undefined,
+      sessionId,
+      token: bearerToken(c),
+    },
+    kildManager,
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
   const result = await kildManager.stop(c.req.param('id'));

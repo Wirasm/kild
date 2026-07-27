@@ -750,8 +750,10 @@ test('archived snapshots keep cwd and base so history stays project-attributable
 test('attach registers an attached agent that is addressable but never spawned', async () => {
   const { manager, spawned } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  expect(await manager.attach('kild-1', 'claude')).toEqual({
+  expect(await manager.attach('kild-1', 'claude')).toMatchObject({
     ok: true,
+    // …plus the attach token, which is what makes this handle attributable when it SENDS
+    // (asserted below — an attached agent has no session to be recognised by).
     value: { message: "@claude attached to kild 'demo'." },
   });
   expect(spawned.map((s) => s.id)).toEqual(['s-1']); // the coder only
@@ -778,7 +780,7 @@ test('attaching twice with the same handle is a no-op, not an error', async () =
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  expect(await manager.attach('kild-1', 'claude')).toEqual({
+  expect(await manager.attach('kild-1', 'claude')).toMatchObject({
     ok: true,
     value: { message: "@claude is already attached to kild 'demo'." },
   });
@@ -992,4 +994,92 @@ test('an ordinary spawn carries no forkFrom, so a fresh agent starts fresh', asy
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.spawnAgent('kild-1', { handle: 'second', persona: 'reviewer' });
   expect(spawned.at(-1)?.forkFrom).toBeUndefined();
+});
+
+// ── Attribution ───────────────────────────────────────────────────────────────
+// A message's `from` is the sender's HANDLE — the thing recipients address and the thing
+// `to[]` names. Both credentials resolve here because a handle is kild-level knowledge:
+// a kild session id (owned agents) and an attach token (harnesses kild does not own).
+
+test('an owned agent is attributed to its HANDLE, never to the persona it runs', async () => {
+  const { manager } = fixture();
+  // The case that was attributed outright wrongly: handle `reviewer`, persona `coder`.
+  await newKild(manager, [{ handle: 'reviewer', persona: 'coder' }]);
+  expect(manager.handleForSession('s-1')).toEqual({ ok: true, value: 'reviewer' });
+});
+
+test('two agents sharing one persona are two senders on the log', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [
+    { handle: 'left', persona: 'coder' },
+    { handle: 'right', persona: 'coder' },
+  ]);
+  for (const session of ['s-1', 's-2']) {
+    const actor = manager.handleForSession(session);
+    expect(actor).toMatchObject({ ok: true });
+    if (actor.ok) await manager.send('kild-1', actor.value, ['left', 'right'], 'ping');
+  }
+  // Attributed by persona both lines read `coder`, and the log could not say who spoke.
+  expect(manager.messages('kild-1')?.map((m) => m.from)).toEqual(['left', 'right']);
+});
+
+test('a session in no live kild has no handle to be attributed to', () => {
+  const { manager } = fixture();
+  // An agent kild spawned outside a kild is nobody's peer — there is no handle to invent.
+  expect(manager.handleForSession('never-a-kild-agent')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'unknown session: never-a-kild-agent',
+  });
+});
+
+test('attach mints a token that identifies exactly one (kild, handle)', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  const attached = await manager.attach('kild-1', 'claude');
+  expect(attached).toMatchObject({ ok: true });
+  if (!attached.ok) return;
+  expect(manager.identifyToken(attached.value.token)).toEqual({
+    kildId: 'kild-1',
+    handle: 'claude',
+  });
+});
+
+test('re-attaching returns the SAME token — a session-start hook revokes nothing', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  const first = await manager.attach('kild-1', 'claude');
+  const again = await manager.attach('kild-1', 'claude');
+  if (!first.ok || !again.ok) throw new Error('attach should have succeeded');
+  expect(again.value.token).toBe(first.value.token);
+  expect(manager.identifyToken(first.value.token)).toEqual({
+    kildId: 'kild-1',
+    handle: 'claude',
+  });
+});
+
+test('two attached harnesses in one kild are two distinct senders, not two `human`s', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  const honryo = await manager.attach('kild-1', 'honryo');
+  const claude = await manager.attach('kild-1', 'claude');
+  if (!honryo.ok || !claude.ok) throw new Error('attach should have succeeded');
+  expect(honryo.value.token).not.toBe(claude.value.token);
+
+  for (const token of [honryo.value.token, claude.value.token]) {
+    const identity = manager.identifyToken(token);
+    expect(identity?.kildId).toBe('kild-1');
+    await manager.send('kild-1', identity?.handle ?? 'human', ['coder'], 'hi');
+  }
+  expect(manager.messages('kild-1')?.map((m) => m.from)).toEqual(['honryo', 'claude']);
+});
+
+test("a kild's tokens die with the kild — nothing to expire, nothing on disk", async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  const attached = await manager.attach('kild-1', 'claude');
+  expect(attached).toMatchObject({ ok: true });
+  if (!attached.ok) return;
+  await manager.stop('kild-1');
+  expect(manager.identifyToken(attached.value.token)).toBeUndefined();
 });

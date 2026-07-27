@@ -57,3 +57,43 @@ test('drain is not exposed as a GET — a destructive read must not be retryable
   const res = await fetchApp(new Request('http://localhost/api/kilds/kild-1/inbox/drain'));
   expect(res.status).toBe(404); // no route matches the GET
 });
+
+// ── The attach credential, as the wire presents it ────────────────────────────
+// `Authorization: Bearer <token>` is how an attached harness names itself when it sends.
+// The token itself is minted against a LIVE kild (covered in kild-manager.test.ts); what
+// matters here is that the header is read, and what happens when it is wrong or absent.
+
+const sendWithAuth = (authorization?: string) =>
+  fetchApp(
+    new Request('http://localhost/api/kilds/kild-1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(authorization === undefined ? {} : { authorization }),
+      },
+      body: JSON.stringify({ text: 'hi', to: ['coder'] }),
+    }),
+  );
+
+test('a bogus bearer token is rejected, not silently downgraded to the label', async () => {
+  const res = await sendWithAuth('Bearer definitely-not-minted');
+  // 409, and it never reaches the kild lookup: the caller presented a credential and is
+  // told it means nothing, rather than having someone else's name written on its message.
+  expect(res.status).toBe(409);
+  expect(await res.json()).toEqual({ error: 'unknown attach token' });
+});
+
+test('no Authorization header keeps the old path exactly — the CLI and curl are unchanged', async () => {
+  const res = await sendWithAuth();
+  // Attribution succeeded (the unattributed label) and the request failed on the KILD,
+  // which is the pre-token behaviour to the byte.
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: 'no such kild: kild-1' });
+});
+
+test('an Authorization header that is not a bearer token is no credential at all', async () => {
+  for (const header of ['Basic dXNlcjpwYXNz', 'Bearer', 'Bearer    ']) {
+    const res = await sendWithAuth(header);
+    expect(res.status).toBe(404); // fell through to the unattributed label
+  }
+});
