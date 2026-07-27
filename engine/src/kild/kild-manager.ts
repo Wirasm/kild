@@ -555,6 +555,9 @@ export class KildManager {
           worktree: kild.worktree,
           // Base branch a brand-new worktree forks from (the first agent creates it).
           base: kild.base,
+          // Seed this agent from a COPY of an existing pi session, when asked. The copy is
+          // what makes forking a live agent's session safe: the source file is never written.
+          forkFrom: spec.forkFrom,
           // Opaque to the AgentManager; the agent process reads these to register its
           // kild tools (`send`, `spawn`, `stop`) and tag its outbound control lines.
           env: {

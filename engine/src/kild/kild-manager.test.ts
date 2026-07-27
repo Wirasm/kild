@@ -29,7 +29,7 @@ function fixture(options?: {
   spawnThrowsAt?: number;
   createId?: () => string;
 }) {
-  const spawned: Array<{ id: string; persona?: string }> = [];
+  const spawned: Array<{ id: string; persona?: string; forkFrom?: string }> = [];
   const stopped: string[] = [];
   const callbacks = new Map<string, AgentCallbacks | undefined>();
   const prompted: Array<{ id: string; text: string; from?: string }> = [];
@@ -49,7 +49,7 @@ function fixture(options?: {
         spawnCount += 1;
         if (options?.spawnThrowsAt === spawnCount) throw new Error(`spawn failed ${spawnCount}`);
         callbacks.set(id, agentCallbacks);
-        spawned.push({ id, persona: req.persona });
+        spawned.push({ id, persona: req.persona, forkFrom: req.forkFrom });
       },
       prompt: (id, text, from) => {
         prompted.push({ id, text, from });
@@ -958,4 +958,35 @@ test('an attached agent rides the archived snapshot with its ownership', async (
   expect(manager.archived()[0]?.agents).toContainEqual(
     expect.objectContaining({ handle: 'claude', ownership: 'attached' }),
   );
+});
+
+// ── Forking a session onto a spawned agent ───────────────────────────────────────────────
+// `forkFrom` seeds an agent from a COPY of an existing pi session file. The copy is the
+// point: the source is never written, so two writers on one conversation are impossible and
+// forking a LIVE agent's session is safe. A fork is a snapshot — it diverges at the moment
+// it is taken and does not follow the original.
+//
+// The capability was never lost in the reshape (`agent.ts` still calls
+// `PiSessionManager.forkFrom`, and the manager still passes `KILD_FORK_SESSION`), but the
+// only REST route that reached it was deleted. This pins the domain half of the path so the
+// route cannot be wired to a manager that silently drops the field.
+
+test('forkFrom reaches the spawn request, so a forked agent is actually seeded', async () => {
+  const { manager, spawned } = fixture();
+  expect(await newKild(manager, [{ handle: 'coder' }])).toMatchObject({ ok: true });
+
+  const result = await manager.spawnAgent('kild-1', {
+    handle: 'forked',
+    persona: 'coder', // a fork inherits history, not necessarily a same-named persona
+    forkFrom: '/sessions/original.jsonl',
+  });
+  expect(result).toMatchObject({ ok: true });
+  expect(spawned.at(-1)?.forkFrom).toBe('/sessions/original.jsonl');
+});
+
+test('an ordinary spawn carries no forkFrom, so a fresh agent starts fresh', async () => {
+  const { manager, spawned } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  await manager.spawnAgent('kild-1', { handle: 'second', persona: 'reviewer' });
+  expect(spawned.at(-1)?.forkFrom).toBeUndefined();
 });
