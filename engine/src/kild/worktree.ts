@@ -7,9 +7,7 @@ import { configuredBaseBranch, kildHome } from './config.ts';
 
 // execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
 // and UI clients' worktree selectors feed a (possibly LLM-generated) name in here,
-// so shell interpolation would be RCE. This module is kild-owned and hot-path-safe:
-// the session path imports it directly, so it must NOT depend on @flue (the general
-// `worktree()` sandbox lives in flue/worktree-sandbox.ts).
+// so shell interpolation would be RCE.
 const execFile = promisify(execFileCb);
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));

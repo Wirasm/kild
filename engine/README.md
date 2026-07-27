@@ -3,8 +3,7 @@
 The kild engine — the agent runtime, daemon, and CLI. TypeScript on bun. It runs
 `pi` coding-agent sessions in-process (coding-agent SDK, native pi auth) and exposes
 them over HTTP + WebSocket — the API contract external UI clients (e.g.
-[helm](https://github.com/Wirasm/helm)) consume. Flue is a complementary layer
-(sandbox, deploy, orchestration workflows) and the upstream we contribute to.
+[helm](https://github.com/Wirasm/helm)) consume.
 
 ## Run
 
@@ -30,21 +29,14 @@ src/
   cli.ts           the `kild` CLI — project/agent/worktree/run
   worker.ts        per-session subprocess; ensures the worktree, then createAgentSession({cwd})
   kild/
-    config.ts      default model + state dir (~/.config/kild)
+    config.ts      kild config (plugins, base branch, memory) + state dir (~/.config/kild)
     projects.ts    project registry
     agents.ts      agents from .kild/.claude/.pi convention dirs
     sessions.ts    SessionManager: coding-agent SDK sessions → UiEvent stream
-    worktree.ts    [kild-owned] git worktree CRUD + ensureWorktree + merge-prune (no @flue)
-    run/rooms/brain/auth.ts                 [Flue layer]
-  flue/
-    worktree-sandbox.ts   [Flue layer] worktree() SandboxFactory — the upstream contribution
-  workflows/       [Flue layer] runnable Flue workflows (rooms/brain/merge/run demos)
+    worktree.ts    git worktree CRUD + ensureWorktree + merge-prune
 ```
 
 Worktrees live under `$KILD_HOME/worktrees/<name>` on `kild/<name>` branches. They
 **persist** — a session closing never removes one; removal is explicit (`kild worktree
 rm` / API delete) or automatic only for a `kild/*` branch already merged into the default
 branch (merge-prune, non-destructive: dirty/in-use trees are preserved).
-
-`COMPARISON.md` is the decision record for choosing this engine.
-```
