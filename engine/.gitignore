@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.flue-vite/
 .cache/
 .turbo/
 *.tsbuildinfo
