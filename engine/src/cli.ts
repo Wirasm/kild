@@ -49,6 +49,7 @@ const { values, positionals } = parseArgs({
     base: { type: 'string' }, // base branch for the worktree + git-status baseline
     as: { type: 'string' }, // `kild room join|drain --as <name>`: the attached participant's handle
     format: { type: 'string' }, // `kild room drain --format claude-stop`: harness hook output
+    to: { type: 'string' }, // `kild room post --to a,b`: recipients; omit to reach the room lead
   },
 });
 
@@ -577,9 +578,19 @@ async function roomOpen(goal: string): Promise<void> {
   console.log(json ? JSON.stringify(res, null, 2) : res.id);
 }
 
-/** `kild room post <id> <text>` — steer an existing room from a separate call. */
+/** `kild room post <id> <text> [--to a,b]` — steer an existing room from a separate
+ *  call. `--to` names the participants addressed, mirroring the in-room `post_message`
+ *  tool; omit it to reach the room lead. Recipients are never parsed from the text, so
+ *  writing `@name` in the message body addresses nobody. */
 async function roomPost(id: string, text: string): Promise<void> {
-  const res = await postRoom(id, text);
+  const to = values.to
+    ?.split(',')
+    .map((s) => s.trim().replace(/^@/, ''))
+    .filter(Boolean);
+  if (values.to !== undefined && !to?.length) {
+    throw new Error('--to must name at least one participant, e.g. --to claude');
+  }
+  const res = await postRoom(id, text, undefined, to);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
 }
