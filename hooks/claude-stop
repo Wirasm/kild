@@ -1,5 +1,5 @@
 #!/bin/sh
-# kild → Claude Code `Stop` hook: makes the session you are driving a real room member.
+# kild → Claude Code `Stop` hook: makes the session you are driving a real agent in a kild.
 #
 # WIRE THIS BY HAND. It lives in the kild repo, is versioned with the engine it talks to,
 # and never writes itself into ~/.claude. The previous generation auto-generated itself
@@ -10,31 +10,38 @@
 #        { "hooks": { "Stop": [ { "hooks": [ { "type": "command",
 #            "command": "/abs/path/to/kild/hooks/claude-stop" } ] } ] } }
 #
-#   2. In the environment of the session you want attached:
-#        export KILD_ROOM=<room id from `kild rooms`>
-#        export KILD_PARTICIPANT=claude        # optional, defaults to `claude`
+#   2. In the environment of the session you want attached (the same names the engine
+#      sets on the agents it spawns, so an attached agent describes itself identically):
+#        export KILD_KILD_ID=<kild id from `kild ls`>
+#        export KILD_HANDLE=claude              # optional, defaults to `claude`
 #
-#   3. Claim the handle once the room exists:
-#        kild room join "$KILD_ROOM" --as "$KILD_PARTICIPANT"
+#   3. Claim the handle once the kild exists:
+#        kild attach "$KILD_KILD_ID" --as "$KILD_HANDLE"
 #
 # The contract, in one line: print the drain's JSON, or print nothing, and ALWAYS exit 0.
 # A hook that cannot reach kild must never stop you from finishing a turn.
+#
+# Because every failure here is silent BY DESIGN, the CLI verbs below are the one thing to
+# re-check whenever the engine's command surface moves: a renamed verb does not raise an
+# error, it just stops working. That is not hypothetical — the `kild room drain` this line
+# used to call became `kild inbox`, and the hook would have gone quiet exactly the way the
+# previous generation did.
 set -eu
 
-# Not in a room → this session is completely unaffected. The common case, and the fastest.
-[ -n "${KILD_ROOM:-}" ] || exit 0
+# Not in a kild → this session is completely unaffected. The common case, and the fastest.
+[ -n "${KILD_KILD_ID:-}" ] || exit 0
 # No kild on PATH (another machine, a stale wiring) → silence, never a hook error.
 command -v kild >/dev/null 2>&1 || exit 0
 
 # Consume the hook payload on stdin so Claude Code never writes into a closed pipe. kild
-# reads nothing from it: the room and handle come from the environment, and the loop guard
+# reads nothing from it: the kild and handle come from the environment, and the loop guard
 # is the engine's consecutive-wake cap rather than the payload's `stop_hook_active` — so it
 # lives in one place and no hook can opt out of it.
 cat >/dev/null 2>&1 || true
 
 # stderr is discarded: stray chatter on a hook reads as a failure. Any non-zero exit from
 # the CLI (it should never produce one in this mode) degrades to silence as well.
-kild room drain "$KILD_ROOM" \
-  --as "${KILD_PARTICIPANT:-claude}" \
+kild inbox "$KILD_KILD_ID" \
+  --as "${KILD_HANDLE:-claude}" \
   --format claude-stop 2>/dev/null || exit 0
 exit 0
