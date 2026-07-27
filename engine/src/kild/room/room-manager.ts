@@ -6,6 +6,7 @@ import { appendRoomLog, roomTranscriptPath, synthesisPrompt } from '../memory.ts
 import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
 import { resolveBaseBranch, worktreePath } from '../worktree.ts';
 import { roomGitStatus } from '../worktree-status.ts';
+import { Mailbox, type MailboxDrain } from './attached.ts';
 import { applyDecisionMarkers, formatOpenDecisions, openDecisions } from './room-decisions.ts';
 import {
   finalNonSystemPost,
@@ -34,13 +35,14 @@ import {
   type OpenRoomSpec,
   type OpenRoomSuccess,
   type ParticipantSpec,
+  participantSessionId,
   participantView,
   type Room,
   type RoomActionSuccess,
   type RoomMessage,
   type RoomOutbound,
-  type RoomParticipant,
   roomCostTotals,
+  type SpawnedParticipant,
 } from './room-types.ts';
 
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
@@ -328,6 +330,84 @@ export class RoomManager {
     return ok({ message: `Invited @${spec.name} to the room.` });
   }
 
+  /** Register an ATTACHED participant: a harness kild does not own (a Claude Code session
+   *  the human is driving) that wants a `@handle` in this room. Nothing is spawned — the
+   *  participant gets a mailbox and is addressable from the moment it joins.
+   *
+   *  Idempotent by name: re-joining an existing attached handle is a no-op, so a hook or a
+   *  shell alias can call it on every session start without special-casing. Taking over a
+   *  SPAWNED participant's handle is refused — two transports for one address would make
+   *  delivery ambiguous. */
+  async join(roomId: string, name: string): Promise<CommandResult<RoomActionSuccess>> {
+    const room = this.registry.get(roomId);
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+
+    const handle = name.trim();
+    if (!handle) return fail('rejected', 'participant name required');
+    if (handle === HUMAN) return fail('rejected', `participant name '${HUMAN}' is reserved`);
+
+    const existing = room.participants.find((participant) => participant.name === handle);
+    if (existing) {
+      if (existing.kind !== 'attached') {
+        return fail('rejected', `@${handle} is already a spawned participant in '${room.name}'`);
+      }
+      return ok({ message: `@${handle} is already attached to room '${room.name}'.` });
+    }
+
+    const allowed = ensureRoomCanAddParticipant(room);
+    if (!allowed.ok) return allowed;
+    if (room.participants.length + 1 > MAX_PARTICIPANTS) {
+      return fail('rejected', `room capacity exceeded (max ${MAX_PARTICIPANTS} participants)`);
+    }
+
+    room.participants.push({
+      name: handle,
+      kind: 'attached',
+      invitedBy: HUMAN,
+      // Attached and waiting: it has taken no turn for this room yet.
+      idle: true,
+      mailbox: new Mailbox(),
+    });
+    this.registry.persistNow(roomId);
+    this.broadcast({ rooms: this.registry.summaries() });
+    await this.post(roomId, HUMAN, `@${handle} joined the room (attached).`, {
+      system: true,
+      allowStopped: true,
+    });
+    return ok({ message: `@${handle} attached to room '${room.name}'.` });
+  }
+
+  /** Destructively read an attached participant's mailbox — the pull half of the inverted
+   *  transport, called at the harness's own turn boundary.
+   *
+   *  This IS the lifecycle signal too: an empty drain marks the participant idle, a
+   *  non-empty one marks it working. There is deliberately no separate status verb — the
+   *  drain the harness already makes on every turn end answers the question for free. */
+  drain(roomId: string, name: string): CommandResult<MailboxDrain> {
+    const room = this.registry.get(roomId);
+    if (!room) return fail('not_found', `no such room: ${roomId}`);
+    const participant = room.participants.find((candidate) => candidate.name === name.trim());
+    if (!participant) return fail('not_found', `no such participant: @${name}`);
+    if (participant.kind !== 'attached') {
+      return fail('rejected', `@${participant.name} is a spawned participant — kild pushes to it`);
+    }
+    const drained = participant.mailbox.drain();
+    participant.idle = drained.idle;
+    if (drained.capped) {
+      // The loop guard tripped. One structured line so a wake loop is visible in the
+      // engine log rather than only in the owner's credit bill.
+      console.error(
+        JSON.stringify({
+          t: 'room.wake_cap',
+          room: room.name,
+          participant: participant.name,
+          pending: participant.mailbox.pending,
+        }),
+      );
+    }
+    return ok(drained);
+  }
+
   /** Stop every participant session — the human kill switch / room teardown. A room
    *  with history moves straight into the archive and is pushed to clients, so it stays
    *  visible as a read-only transcript without an engine restart.
@@ -350,7 +430,7 @@ export class RoomManager {
           `Resolve each (post 'resolved[<key>]: <how>') or close with force.`,
       );
     }
-    for (const participant of room.participants) this.sessions.stop(participant.sessionId);
+    this.stopSessions(room);
     const transitioned = transitionRoomState(room, 'closed');
     if (!transitioned.ok) return transitioned;
     const archived = this.registry.remove(roomId);
@@ -372,7 +452,7 @@ export class RoomManager {
     if (!room) return fail('not_found', `no such room: ${roomId}`);
     const allowed = ensureRoomCanHalt(room);
     if (!allowed.ok) return allowed;
-    for (const participant of room.participants) this.sessions.stop(participant.sessionId);
+    this.stopSessions(room);
     const transitioned = transitionRoomState(room, 'halted');
     if (!transitioned.ok) return transitioned;
     await this.post(roomId, HUMAN, 'Room halted by the operator.', {
@@ -474,7 +554,7 @@ export class RoomManager {
       );
     } catch (err) {
       room.participants = room.participants.filter(
-        (participant) => participant.sessionId !== sessionId,
+        (participant) => participantSessionId(participant) !== sessionId,
       );
       return fail('rejected', err instanceof Error ? err.message : String(err));
     }
@@ -529,7 +609,8 @@ export class RoomManager {
     const { room, participant } = located;
     const allowed = ensureRoomCanCloseFromParticipant(room);
     if (!allowed.ok) return allowed;
-    if (room.participants[0]?.sessionId !== sessionId) {
+    const lead = room.participants[0];
+    if (!lead || participantSessionId(lead) !== sessionId) {
       return fail('rejected', `only the lead may close room '${room.name}'`);
     }
     // No force on the participant path: an agent may not bury a raised decision. Only
@@ -644,6 +725,15 @@ export class RoomManager {
     return ok(validated);
   }
 
+  /** Stop the sessions kild owns. An attached participant has none — its harness belongs
+   *  to the human, and kild must never assume it can end it. */
+  private stopSessions(room: Room): void {
+    for (const participant of room.participants) {
+      const sessionId = participantSessionId(participant);
+      if (sessionId) this.sessions.stop(sessionId);
+    }
+  }
+
   private rollbackOpen(roomId: string, sessionIds: string[]): void {
     for (const sessionId of sessionIds) this.sessions.stop(sessionId);
     this.registry.remove(roomId);
@@ -664,8 +754,12 @@ export class RoomManager {
    *  participants toward @human — no one is assumed to be watching the roster (the
    *  operator is an agent by default; the watching human is the special case). Delivered
    *  as a direct session prompt (bypasses room routing, so it can't become a post or
-   *  loop); a participant whose post DELIVERED gets nothing (its post is the signal). */
-  private nudgeIfIdleWithoutReport(participant: RoomParticipant): void {
+   *  loop); a participant whose post DELIVERED gets nothing (its post is the signal).
+   *
+   *  Spawned only — it is driven by `agent_end` on the session bus, and an attached
+   *  participant has no session to emit one or to be nudged through. Its equivalent is the
+   *  empty drain (see {@link drain}). */
+  private nudgeIfIdleWithoutReport(participant: SpawnedParticipant): void {
     if (participant.idle) return; // dedup: already handled this transition
     participant.idle = true;
     if (participant.posted) return; // it reported — a delivered post is the signal
@@ -695,6 +789,12 @@ export class RoomManager {
           located.participant.posted = false;
         }
         this.sessions.prompt(sessionId, text, from);
+      },
+      // The attached counterpart of the stdin push: queue it and let the participant
+      // collect it. `idle` deliberately does NOT flip here — the harness really is idle
+      // until it takes its next turn; the drain is what moves it.
+      queueForAttached: (participant, from, text) => {
+        participant.mailbox.enqueue({ from, text, ts: Date.now() });
       },
       broadcast: (message) => this.broadcast({ roomMessage: message }),
     };

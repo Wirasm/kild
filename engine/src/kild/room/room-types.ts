@@ -1,5 +1,6 @@
 import type { UiEvent } from '../events.ts';
 import type { RoomGitStatus } from '../worktree-status.ts';
+import type { Mailbox } from './attached.ts';
 import type { RoomDecision } from './room-decisions.ts';
 
 /**
@@ -13,13 +14,23 @@ import type { RoomDecision } from './room-decisions.ts';
  *  in UI clients/CLI only — there is no session to deliver a turn to. */
 export const HUMAN = 'human';
 
-/** A participant in a room: an agent session addressable by its `@name` handle.
- *  (The human is a virtual participant — never in this list.) */
-export interface RoomParticipant {
+/** How kild reaches a participant.
+ *
+ *  - `spawned` (the default, and everything that existed before): kild owns the process,
+ *    so delivery is a PUSH — a prompt written to its stdin the moment a post is routed.
+ *  - `attached`: a harness the human drives (a Claude Code session), which kild registers
+ *    and addresses but never spawns. There is nothing to push to, so delivery inverts —
+ *    kild queues into a {@link Mailbox} and the harness PULLS at its own turn boundary.
+ *
+ *  Absent means `spawned`: rooms persisted before attached participants existed decode
+ *  unchanged (see {@link ArchivedRoom}). */
+export type ParticipantKind = 'spawned' | 'attached';
+
+/** Everything both participant kinds carry — identity plus the report-and-idle state the
+ *  room lifecycle is built on. */
+interface RoomParticipantBase {
   /** The `@mention` handle — equals the participant's name (e.g. `orchestrator`). */
   name: string;
-  /** The kild session id running this participant. */
-  sessionId: string;
   /** The persona (`.pi/agents/<name>.md` — the dir name is upstream pi convention) it
    *  runs as. */
   persona?: string;
@@ -31,17 +42,11 @@ export interface RoomParticipant {
    *  the opener's initial roster. Ground-truth spawn edge (vs inferring it from the log)
    *  and the routing target for its idle/done notice. */
   invitedBy?: string;
-  /** The underlying pi session id — the durable terminal-resume handle
-   *  (`pi --session <piSessionFile ?? piSessionId>`). Captured from the worker's
-   *  `pi_session` event and persisted with the room, so any agent in any room —
-   *  live or archived — can be reopened in the pi CLI. */
-  piSessionId?: string;
-  /** Absolute pi session file path (resume works from any cwd). */
-  piSessionFile?: string;
-  /** True when the session has finished a turn and is waiting. Set on `agent_end`,
-   *  cleared when a new prompt is delivered. Dedups the idle failsafe to one check per
-   *  active→idle transition, and rides {@link ParticipantView} so observers can rank
-   *  finished-and-waiting rooms without parsing logs. */
+  /** True when the participant has finished a turn and is waiting. Set on `agent_end` for
+   *  a spawned participant and by an EMPTY drain for an attached one, cleared when work
+   *  arrives. Dedups the idle failsafe to one check per active→idle transition, and rides
+   *  {@link ParticipantView} so observers can rank finished-and-waiting rooms without
+   *  parsing logs. */
   idle?: boolean;
   /** True once this participant made an EXPLICIT post_message since its last activation.
    *  If it goes idle with this still false, it finished without reporting — the failsafe
@@ -55,11 +60,51 @@ export interface RoomParticipant {
   cost?: number;
 }
 
+/** A participant kild spawned and owns: an agent session addressable by its `@name`
+ *  handle, delivered to by writing a prompt to its stdin. */
+export interface SpawnedParticipant extends RoomParticipantBase {
+  /** Absent (the persisted default) or explicit — both mean kild owns the process. */
+  kind?: 'spawned';
+  /** The kild session id running this participant. */
+  sessionId: string;
+  /** The underlying pi session id — the durable terminal-resume handle
+   *  (`pi --session <piSessionFile ?? piSessionId>`). Captured from the worker's
+   *  `pi_session` event and persisted with the room, so any agent in any room —
+   *  live or archived — can be reopened in the pi CLI. */
+  piSessionId?: string;
+  /** Absolute pi session file path (resume works from any cwd). */
+  piSessionFile?: string;
+}
+
+/** A participant kild registered but did not spawn — a harness the human drives. It has
+ *  no kild session and no pi session (nothing to resume): its whole transport is the
+ *  mailbox it drains at its own turn boundary. */
+export interface AttachedParticipant extends RoomParticipantBase {
+  kind: 'attached';
+  /** Unread posts addressed to this participant, waiting for the next drain. Live state
+   *  only — never persisted (a mailbox outlives nothing; the room log is the record). */
+  mailbox: Mailbox;
+}
+
+/** A participant in a room, of either kind. The human is a virtual participant — never
+ *  in this list. */
+export type RoomParticipant = SpawnedParticipant | AttachedParticipant;
+
+/** The kild session behind a participant, or `undefined` when kild does not own its
+ *  process. The ONE place callers that genuinely do not care about the kind (stop the
+ *  sessions, find a room by session id) ask the question. */
+export function participantSessionId(participant: RoomParticipant): string | undefined {
+  return participant.kind === 'attached' ? undefined : participant.sessionId;
+}
+
 /** A participant as surfaced to observers (room lists, status, archive) — identity plus
  *  the model it ran on. No kild sessionId (that's an internal handle); the PI session
  *  identity IS exposed — it's the durable handle for reopening the agent in a terminal. */
 export interface ParticipantView {
   name: string;
+  /** Omitted for a spawned participant (the default), `'attached'` for one kild does not
+   *  own — so a roster stops implying every participant is a process kild can steer. */
+  kind?: ParticipantKind;
   persona?: string;
   model?: string;
   piSessionId?: string;
@@ -77,12 +122,14 @@ export interface ParticipantView {
 /** The one mapping from a live participant to its observer view — every list/status/
  *  archive producer uses this so new view fields appear everywhere at once. */
 export function participantView(participant: RoomParticipant): ParticipantView {
+  const attached = participant.kind === 'attached';
   return {
     name: participant.name,
+    kind: participant.kind,
     persona: participant.persona,
     model: participant.model,
-    piSessionId: participant.piSessionId,
-    piSessionFile: participant.piSessionFile,
+    piSessionId: attached ? undefined : participant.piSessionId,
+    piSessionFile: attached ? undefined : participant.piSessionFile,
     idle: participant.idle,
     posted: participant.posted,
     tokens: participant.tokens,

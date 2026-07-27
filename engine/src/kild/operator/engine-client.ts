@@ -1,3 +1,4 @@
+import type { MailboxPost } from '../room/attached.ts';
 import type { LiveRoomStatus, ParticipantSpec } from '../room/room-types.ts';
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
@@ -69,6 +70,41 @@ export async function closeRoom(
 
 export async function getLiveRooms(): Promise<LiveRoomStatus[]> {
   return engineFetch('/api/rooms/live');
+}
+
+/** Register an attached participant — a harness kild does not own claiming a `@handle`.
+ *  Idempotent by name: re-joining is a no-op, not an error. */
+export async function joinRoom(roomId: string, name: string): Promise<RoomActionResponse> {
+  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/join`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export interface DrainRoomResponse {
+  ok: true;
+  posts: MailboxPost[];
+  /** True when this drain reported nothing — the attached participant's idle signal. */
+  idle: boolean;
+  /** True when the engine's wake cap withheld mail. The caller is told nothing either way. */
+  capped: boolean;
+}
+
+/** Hard deadline for a drain. This call sits inside a turn-end hook on EVERY turn, so it
+ *  gets one short attempt and no retries: a slow or wedged engine must cost the operator
+ *  a blink, not a stall. */
+const DRAIN_TIMEOUT_MS = 1500;
+
+/** Destructively read an attached participant's mailbox. Throws on any failure — the
+ *  hook-shaped caller is the one that decides failure means silence. */
+export async function drainRoom(roomId: string, name: string): Promise<DrainRoomResponse> {
+  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/drain`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+    signal: AbortSignal.timeout(DRAIN_TIMEOUT_MS),
+  });
 }
 
 export interface SpawnSessionRequest {
