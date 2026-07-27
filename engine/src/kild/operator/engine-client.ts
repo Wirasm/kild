@@ -44,15 +44,24 @@ export async function openRoom(req: OpenRoomRequest): Promise<OpenRoomResponse> 
   });
 }
 
+/** `to` names the participants being addressed, exactly as the in-room `post_message`
+ *  tool does. Omit it to reach the room lead — the long-standing default, unchanged.
+ *  Without it a caller outside a room could only ever reach the lead, so an attached
+ *  participant was addressable by agents but not by the human. */
 export async function postRoom(
   roomId: string,
   text: string,
   sessionId?: string,
+  to?: string[],
 ): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/post`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, ...(sessionId ? { sessionId } : {}) }),
+    body: JSON.stringify({
+      text,
+      ...(sessionId ? { sessionId } : {}),
+      ...(to?.length ? { to } : {}),
+    }),
   });
 }
 

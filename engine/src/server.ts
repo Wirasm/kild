@@ -477,17 +477,29 @@ app.post('/api/rooms', async (c) => {
   }
   return c.json({ ok: true, id: opened.value.roomId, message: opened.value.message });
 });
+// `to` is the structured recipient list the in-room `post_message` tool already takes —
+// exposed here so a caller outside the room (the CLI, a script, helm) can address a
+// specific participant instead of always falling through to the room lead. Addressing is
+// never parsed from the message text, so `@name` in `text` remains just text.
 app.post('/api/rooms/:id/post', async (c) => {
-  const { text, from, sessionId } = await c.req.json<{
+  const { text, from, sessionId, to } = await c.req.json<{
     text?: unknown;
     from?: unknown;
     sessionId?: unknown;
+    to?: unknown;
   }>();
   if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
+  if (to !== undefined && (!Array.isArray(to) || to.some((t) => typeof t !== 'string')))
+    return c.json({ error: 'to must be an array of participant handles' }, 400);
+  // An empty array would read as "addressed to nobody" while behaving as "addressed to
+  // the lead" — reject it rather than silently doing something else.
+  if (Array.isArray(to) && to.length === 0)
+    return c.json({ error: 'to must name at least one participant' }, 400);
+  const recipients = to as string[] | undefined;
   const id = c.req.param('id');
   const attribution = resolvePostRoomActor(
     { from: typeof from === 'string' ? from : undefined, sessionId },
@@ -495,8 +507,8 @@ app.post('/api/rooms/:id/post', async (c) => {
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, roomResultStatus(attribution));
   const result = attribution.value.human
-    ? await roomManager.postFromHuman(id, text)
-    : await roomManager.postAs(id, attribution.value.actor, text);
+    ? await roomManager.postFromHuman(id, text, recipients)
+    : await roomManager.postAs(id, attribution.value.actor, text, recipients);
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
