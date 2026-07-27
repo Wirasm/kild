@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { SessionCallbacks } from '../sessions.ts';
 import { worktreePath } from '../worktree.ts';
+import { DEFAULT_WAKE_CAP } from './attached.ts';
 import { RoomManager } from './room-manager.ts';
 import { RoomRegistry } from './room-registry.ts';
 import { HUMAN, type ParticipantSpec } from './room-types.ts';
@@ -751,4 +752,187 @@ test('archived snapshots keep cwd and base so history stays project-attributable
   await manager.postFromHuman('room-1', 'work');
   await manager.close('room-1');
   expect(manager.archived()[0]).toMatchObject({ cwd: project });
+});
+
+// ── Attached participants ─────────────────────────────────────────────────────
+// kild registers these but never spawns them, so delivery inverts: it queues, and the
+// harness pulls at its own turn boundary. Everything upstream — recipient resolution,
+// the lead default, the ledger — is unchanged.
+
+test('join registers an attached participant that is addressable but never spawned', async () => {
+  const { manager, spawned } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  expect(await manager.join('room-1', 'claude')).toEqual({
+    ok: true,
+    value: { message: "@claude attached to room 'demo'." },
+  });
+  expect(spawned.map((s) => s.id)).toEqual(['s-1']); // the worker only
+  expect(manager.liveRooms()[0]?.participants).toEqual([
+    expect.objectContaining({ name: 'worker' }),
+    expect.objectContaining({ name: 'claude', kind: 'attached', idle: true }),
+  ]);
+});
+
+test('the roster reports the kind, and an attached participant carries no pi handles', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  const [worker, claude] = manager.liveRooms()[0]?.participants ?? [];
+  expect(worker?.kind).toBeUndefined(); // absent means spawned — no wire churn
+  expect(claude).toMatchObject({ kind: 'attached' });
+  expect(claude?.piSessionFile).toBeUndefined();
+});
+
+test('joining twice with the same name is a no-op, not an error', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  expect(await manager.join('room-1', 'claude')).toEqual({
+    ok: true,
+    value: { message: "@claude is already attached to room 'demo'." },
+  });
+  expect(manager.liveRooms()[0]?.participants).toHaveLength(2);
+});
+
+test('join refuses to take over a spawned participant handle', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  expect(await manager.join('room-1', 'worker')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: "@worker is already a spawned participant in 'demo'",
+  });
+});
+
+test('join refuses the reserved human handle and an unknown room', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  expect(await manager.join('room-1', HUMAN)).toMatchObject({ ok: false, code: 'rejected' });
+  expect(await manager.join('nope', 'claude')).toEqual({
+    ok: false,
+    code: 'not_found',
+    message: 'no such room: nope',
+  });
+});
+
+test('a post addressed to an attached participant is queued, not pushed', async () => {
+  const { manager, prompted } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  const before = prompted.length;
+  await manager.postAs('room-1', 'worker', 'review is done', ['claude']);
+  expect(prompted).toHaveLength(before); // nothing to push to
+  const drained = manager.drain('room-1', 'claude');
+  expect(drained).toMatchObject({
+    ok: true,
+    value: { idle: false, capped: false, posts: [{ from: 'worker', text: 'review is done' }] },
+  });
+});
+
+test('drain is destructive and the empty drain is the idle signal', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  await manager.postAs('room-1', 'worker', 'ping', ['claude']);
+
+  expect(manager.drain('room-1', 'claude')).toMatchObject({ ok: true, value: { idle: false } });
+  const working = manager.liveRooms()[0]?.participants.find((p) => p.name === 'claude');
+  expect(working?.idle).toBe(false);
+
+  // Second drain: nothing queued → empty, idle. No separate status verb exists, or needed.
+  expect(manager.drain('room-1', 'claude')).toEqual({
+    ok: true,
+    value: { posts: [], idle: true, capped: false },
+  });
+  const done = manager.liveRooms()[0]?.participants.find((p) => p.name === 'claude');
+  expect(done?.idle).toBe(true);
+});
+
+test('the wake cap stops a runaway sender from waking an attached participant forever', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  const wake = async () => {
+    await manager.postAs('room-1', 'worker', 'again', ['claude']);
+    const result = manager.drain('room-1', 'claude');
+    return result.ok ? result.value : undefined;
+  };
+  for (let turn = 0; turn < DEFAULT_WAKE_CAP; turn += 1) {
+    expect(await wake()).toMatchObject({ idle: false });
+  }
+  // The cap trips: the harness is told nothing (so it may stop), the mail is not eaten.
+  expect(await wake()).toMatchObject({ posts: [], idle: true, capped: true });
+  expect(manager.drain('room-1', 'claude')).toMatchObject({ ok: true, value: { capped: false } });
+});
+
+test('spawned delivery is untouched by the attached branch', async () => {
+  const { manager, prompted } = fixture();
+  await openRoom(manager, [{ name: 'orchestrator' }, { name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  await manager.postAs('room-1', 'orchestrator', 'do X', ['worker']);
+  expect(prompted.at(-1)).toEqual({
+    id: 's-2',
+    text: '[#demo] @orchestrator: do X',
+    from: 'orchestrator',
+  });
+  expect(manager.drain('room-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
+});
+
+test('a post with no addressee defaults to the lead and never fans out to mailboxes', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'orchestrator' }, { name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  await manager.postFromHuman('room-1', 'kick off');
+  expect(manager.drain('room-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
+});
+
+test('drain on an unknown room or participant is not_found, and never on a spawned one', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  expect(manager.drain('nope', 'claude')).toMatchObject({ ok: false, code: 'not_found' });
+  expect(manager.drain('room-1', 'claude')).toEqual({
+    ok: false,
+    code: 'not_found',
+    message: 'no such participant: @claude',
+  });
+  expect(manager.drain('room-1', 'worker')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: '@worker is a spawned participant — kild pushes to it',
+  });
+});
+
+test('closing a room stops the sessions kild owns and never the attached harness', async () => {
+  const { manager, stopped } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  await manager.postAs('room-1', 'worker', 'unread', ['claude']); // mail still queued
+  expect(await manager.close('room-1')).toMatchObject({ ok: true });
+  expect(stopped).toEqual(['s-1']);
+  // The room is gone, so the next drain is not_found — which the hook reads as silence.
+  expect(manager.drain('room-1', 'claude')).toMatchObject({ ok: false, code: 'not_found' });
+});
+
+test('an attached participant counts against room capacity', async () => {
+  const { manager } = fixture();
+  await openRoom(
+    manager,
+    Array.from({ length: 8 }, (_value, index) => ({ name: `worker-${index}`, persona: 'default' })),
+  );
+  expect(await manager.join('room-1', 'claude')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'room capacity exceeded (max 8 participants)',
+  });
+});
+
+test('an attached participant rides the archived snapshot with its kind', async () => {
+  const { manager } = fixture();
+  await openRoom(manager, [{ name: 'worker' }]);
+  await manager.join('room-1', 'claude');
+  await manager.postFromHuman('room-1', 'work');
+  await manager.close('room-1');
+  expect(manager.archived()[0]?.participants).toContainEqual(
+    expect.objectContaining({ name: 'claude', kind: 'attached' }),
+  );
 });

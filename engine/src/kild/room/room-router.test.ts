@@ -1,29 +1,39 @@
 import { expect, test } from 'bun:test';
 
+import { Mailbox } from './attached.ts';
 import {
   formatDelivery,
   type RoomDelivery,
   routeRoomMessage,
   unknownRecipients,
 } from './room-router.ts';
-import type { Room, RoomMessage } from './room-types.ts';
+import type { Room, RoomMessage, RoomParticipant } from './room-types.ts';
+
+/** Participant names prefixed `@` are ATTACHED (kild does not own them). */
+function participant(name: string): RoomParticipant {
+  return name.startsWith('@')
+    ? { name: name.slice(1), kind: 'attached', mailbox: new Mailbox() }
+    : { name, sessionId: `s-${name}`, persona: name };
+}
 
 function fixture(participantNames: string[] = ['orchestrator', 'worker']) {
   const room: Room = {
     id: 'r1',
     name: 'demo',
     cwd: '/tmp',
-    participants: participantNames.map((name) => ({ name, sessionId: `s-${name}`, persona: name })),
+    participants: participantNames.map(participant),
     log: [],
     state: 'running',
   };
   const delivered: Array<{ sessionId: string; from: string; text: string }> = [];
+  const queued: Array<{ name: string; from: string; text: string }> = [];
   const broadcast: RoomMessage[] = [];
   const delivery: RoomDelivery = {
     deliverAsTurn: (sessionId, from, text) => delivered.push({ sessionId, from, text }),
+    queueForAttached: (target, from, text) => queued.push({ name: target.name, from, text }),
     broadcast: (m) => broadcast.push(m),
   };
-  return { room, delivered, broadcast, delivery };
+  return { room, delivered, queued, broadcast, delivery };
 }
 
 function message(from: string, to: string[], text: string): RoomMessage {
@@ -104,13 +114,8 @@ test("the lead's own @human post is terminal — wakes no one", () => {
 });
 
 test('a non-lead @human post does not double-deliver when the lead is already addressed', () => {
-  const { room, delivered } = fixture();
-  const d = {
-    deliverAsTurn: (sessionId: string, from: string, text: string) =>
-      delivered.push({ sessionId, from, text }),
-    broadcast: () => {},
-  };
-  routeRoomMessage(room, message('worker', ['orchestrator', 'human'], '...'), d);
+  const { room, delivered, delivery } = fixture();
+  routeRoomMessage(room, message('worker', ['orchestrator', 'human'], '...'), delivery);
   expect(delivered.map((x) => x.sessionId)).toEqual(['s-orchestrator']); // once, not twice
 });
 
@@ -121,11 +126,7 @@ test('delivers to other addressed participants but never the sender or @human', 
 });
 
 test('no addressee in a SINGLE-participant room → delivered to the sole agent (chats like 1:1)', () => {
-  const { room, delivered } = fixture(['solo']);
-  const delivery: RoomDelivery = {
-    deliverAsTurn: (sessionId, from, text) => delivered.push({ sessionId, from, text }),
-    broadcast: () => {},
-  };
+  const { room, delivered, delivery } = fixture(['solo']);
   routeRoomMessage(room, message('human', [], 'fix the bug'), delivery);
   expect(delivered).toEqual([
     { sessionId: 's-solo', from: 'human', text: '[#demo] @human: fix the bug' },
@@ -157,4 +158,31 @@ test('an implicit reply that @mentions another agent still delivers no turn', ()
 
 test('formatDelivery frames the post with room, sender, and text', () => {
   expect(formatDelivery('demo', 'orchestrator', 'do X')).toBe('[#demo] @orchestrator: do X');
+});
+
+test('a post addressed to an ATTACHED participant queues instead of prompting', () => {
+  const { room, delivered, queued, broadcast, delivery } = fixture(['orchestrator', '@claude']);
+  routeRoomMessage(room, message('orchestrator', ['claude'], 'review is done'), delivery);
+  expect(broadcast).toHaveLength(1);
+  expect(delivered).toEqual([]); // nothing to push to — kild does not own that process
+  // Structured and RAW: how it reads is decided at the drain, not in the router.
+  expect(queued).toEqual([{ name: 'claude', from: 'orchestrator', text: 'review is done' }]);
+});
+
+test('a mixed room routes both ways from one post', () => {
+  const { room, delivered, queued, delivery } = fixture(['orchestrator', 'worker', '@claude']);
+  routeRoomMessage(room, message('orchestrator', ['worker', 'claude'], 'status?'), delivery);
+  expect(delivered).toEqual([
+    { sessionId: 's-worker', from: 'orchestrator', text: '[#demo] @orchestrator: status?' },
+  ]);
+  expect(queued).toEqual([{ name: 'claude', from: 'orchestrator', text: 'status?' }]);
+});
+
+test('a post the attached participant is not addressed in never reaches its mailbox', () => {
+  const { room, queued, delivery } = fixture(['orchestrator', 'worker', '@claude']);
+  // No addressee in a multi-participant room → broadcast only; the mailbox is not a
+  // firehose, or the wake cap would trip on traffic @claude was never asked to read.
+  routeRoomMessage(room, message('worker', [], 'thinking out loud'), delivery);
+  routeRoomMessage(room, message('worker', ['orchestrator'], 'for you only'), delivery);
+  expect(queued).toEqual([]);
 });

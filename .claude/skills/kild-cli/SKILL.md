@@ -34,6 +34,8 @@ from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
 | `kild room log <id>` | Read a room's full message thread (the pull view; `kild rooms` shows only the last posts) |
 | `kild room post <id> <text…>` | Post a message into a live room (steer it) |
 | `kild room close <id>` | Close a live room by id |
+| `kild room join <id> --as <name>` | Register an **attached** participant — a harness kild does not spawn (e.g. the Claude Code session you are in) claiming a `@handle`. Idempotent |
+| `kild room drain <id> --as <name>` | Destructively read that participant's mailbox. Empty = idle. `--format claude-stop` shapes it as a Claude Code `Stop` hook (see `docs/attached-participants.md`) |
 | `kild operator <goal> --detach` | Spawn a detached operator session (opens/steers many rooms), print its id |
 | `kild operator post <id> <text…>` | Steer a running operator session |
 | `kild operator stop <id>` | Stop an operator session |
@@ -67,6 +69,11 @@ Participants come from the project's own agents (`--participants a,b,c`; default
 general-purpose `default` agent). Each gets kild's system prompt plus any skills the
 project's config plugs in — so you can post `use the prp-X skill to …` and the agent
 loads it.
+
+A harness kild does **not** spawn — the Claude Code session you are in — can also hold a
+handle in the room: `kild room join "$ID" --as claude` registers it, and it collects mail
+by draining at its own turn boundary rather than being pushed to. See
+`docs/attached-participants.md` for the mailbox rules and the `Stop`-hook wiring.
 
 ## Config — plug in skills/agents, base branch, and a model catalog
 

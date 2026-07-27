@@ -1,11 +1,15 @@
-import { HUMAN, type Room, type RoomMessage } from './room-types.ts';
+import { type AttachedParticipant, HUMAN, type Room, type RoomMessage } from './room-types.ts';
 
 /** The side-effects routing needs, injected so the router stays decoupled from the
  *  SessionManager and the WS layer (and unit-testable on its own). */
 export interface RoomDelivery {
-  /** Deliver a post to a participant as a new turn (prompt its session). `from` is
-   *  the sender, passed structured so the participant can reply to it. */
+  /** Deliver a post to a SPAWNED participant as a new turn (prompt its session). `from`
+   *  is the sender, passed structured so the participant can reply to it. */
   deliverAsTurn: (sessionId: string, from: string, text: string) => void;
+  /** Queue a post for an ATTACHED participant. kild does not own its process, so there is
+   *  nothing to prompt: it collects this at its own turn boundary. Structured (`from` +
+   *  the raw text), because how it reads is decided where it is drained, not here. */
+  queueForAttached: (participant: AttachedParticipant, from: string, text: string) => void;
   /** Broadcast a post to all clients so the human (CLI/UI) sees it. */
   broadcast: (message: RoomMessage) => void;
 }
@@ -85,7 +89,12 @@ export function routeRoomMessage(room: Room, message: RoomMessage, delivery: Roo
 
   for (const name of targets) {
     const participant = room.participants.find((p) => p.name === name);
-    if (participant) {
+    if (!participant) continue;
+    // The one branch the attached kind adds: same recipients, same rules — only the
+    // transport differs (push a turn vs queue for the pull).
+    if (participant.kind === 'attached') {
+      delivery.queueForAttached(participant, message.from, message.text);
+    } else {
       delivery.deliverAsTurn(
         participant.sessionId,
         message.from,

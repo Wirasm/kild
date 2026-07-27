@@ -87,6 +87,12 @@ export function formatRoomLogEntry(room: Room, closedAt: Date): string {
   lines.push(`- outcome: ${oneLine(finalNonSystemPost(room), 400)}`);
   for (const decision of room.decisions ?? []) lines.push(formatDecision(decision));
   for (const participant of room.participants) {
+    // An attached participant is a harness kild never owned: no persona, no model it can
+    // vouch for, and nothing to resume.
+    if (participant.kind === 'attached') {
+      lines.push(`- attached @${participant.name}`);
+      continue;
+    }
     const persona = participant.persona ?? 'default';
     const model = participant.model ? `, ${participant.model}` : '';
     const resume = participant.piSessionFile ?? participant.piSessionId;

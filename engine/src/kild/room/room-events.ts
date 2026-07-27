@@ -1,4 +1,4 @@
-import type { Room, RoomMessage } from './room-types.ts';
+import { participantSessionId, type Room, type RoomMessage } from './room-types.ts';
 
 /** Stable fallback when a lifecycle event has no participant/human-authored post to report. */
 export const NO_FINAL_POST = '(no non-system posts recorded)';
@@ -22,7 +22,9 @@ export function openerNotificationTarget(
   room: Pick<Room, 'openedBy' | 'participants'>,
 ): string | undefined {
   if (!room.openedBy) return undefined;
-  return room.participants.some((participant) => participant.sessionId === room.openedBy)
+  return room.participants.some(
+    (participant) => participantSessionId(participant) === room.openedBy,
+  )
     ? undefined
     : room.openedBy;
 }

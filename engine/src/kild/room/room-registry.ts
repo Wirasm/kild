@@ -7,8 +7,8 @@ import {
   participantView,
   type Room,
   type RoomMessage,
-  type RoomParticipant,
   type RoomSummary,
+  type SpawnedParticipant,
 } from './room-types.ts';
 
 /**
@@ -56,10 +56,14 @@ export class RoomRegistry {
   }
 
   /** Find which room + participant a session belongs to — the reverse lookup that
-   *  routes a participant's `message_out` / `invite` back to its room. */
-  locateSession(sessionId: string): { room: Room; participant: RoomParticipant } | undefined {
+   *  routes a participant's `message_out` / `invite` back to its room. Spawned only, by
+   *  construction: a session id is exactly the thing an attached participant does not
+   *  have. */
+  locateSession(sessionId: string): { room: Room; participant: SpawnedParticipant } | undefined {
     for (const room of this.rooms.values()) {
-      const participant = room.participants.find((p) => p.sessionId === sessionId);
+      const participant = room.participants.find(
+        (p): p is SpawnedParticipant => p.kind !== 'attached' && p.sessionId === sessionId,
+      );
       if (participant) return { room, participant };
     }
     return undefined;

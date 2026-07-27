@@ -500,6 +500,26 @@ app.post('/api/rooms/:id/post', async (c) => {
   if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
+// The attached half of the roster: a harness kild does NOT own (a Claude Code session the
+// human is driving) claims a `@handle` and gets a mailbox. Idempotent by name, so a hook
+// or shell alias can call it on every session start.
+app.post('/api/rooms/:id/join', async (c) => {
+  const { name } = await c.req.json<{ name?: unknown }>();
+  if (typeof name !== 'string' || !name.trim()) return c.json({ error: 'name required' }, 400);
+  const result = await roomManager.join(c.req.param('id'), name);
+  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+  return c.json({ ok: true, message: result.value.message });
+});
+// The destructive read of that mailbox, and with it the participant's idle signal (an
+// empty drain = idle). POST, never GET: this MUTATES, so a caching proxy or a retry on a
+// GET would silently eat somebody's messages.
+app.post('/api/rooms/:id/drain', async (c) => {
+  const { name } = await c.req.json<{ name?: unknown }>();
+  if (typeof name !== 'string' || !name.trim()) return c.json({ error: 'name required' }, 400);
+  const result = roomManager.drain(c.req.param('id'), name);
+  if (!result.ok) return c.json({ error: result.message }, roomResultStatus(result));
+  return c.json({ ok: true, ...result.value });
+});
 app.post('/api/rooms/:id/close', async (c) => {
   const { from, sessionId, force } = await c.req.json<{
     from?: unknown;

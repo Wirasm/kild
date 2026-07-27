@@ -13,7 +13,9 @@ import { parseArgs } from 'node:util';
 import { listAgents } from './kild/agents.ts';
 import {
   closeRoom,
+  drainRoom,
   getLiveRooms,
+  joinRoom,
   listSessions,
   openRoom,
   postRoom,
@@ -23,6 +25,7 @@ import {
 } from './kild/operator/engine-client.ts';
 import { compactLiveRooms, formatCompactGitSummary } from './kild/operator/rooms-status.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import { claudeStopOutput } from './kild/room/claude-stop.ts';
 import {
   forceRemoveWorktree,
   listWorktrees,
@@ -44,6 +47,8 @@ const { values, positionals } = parseArgs({
     participants: { type: 'string' }, // `kild room` participants, e.g. orchestrator,coder,reviewer
     detach: { type: 'boolean', default: false }, // `kild room open --detach`: print the id, don't stream
     base: { type: 'string' }, // base branch for the worktree + git-status baseline
+    as: { type: 'string' }, // `kild room join|drain --as <name>`: the attached participant's handle
+    format: { type: 'string' }, // `kild room drain --format claude-stop`: harness hook output
   },
 });
 
@@ -423,7 +428,65 @@ async function room(action: string | undefined, args: string[]): Promise<void> {
     if (!id) throw new Error('usage: kild room close <id>');
     return roomClose(id);
   }
+  if (action === 'join') {
+    const [id] = args;
+    return roomJoin(id);
+  }
+  if (action === 'drain') {
+    const [id] = args;
+    return roomDrain(id);
+  }
   return roomInteractive([action, ...args].filter(Boolean).join(' '));
+}
+
+/** `kild room join <id> --as <name>` — register an ATTACHED participant: a harness kild
+ *  does not own (the Claude Code session you are driving) claiming a `@handle` in the
+ *  room. Nothing is spawned; the handle is addressable immediately. Idempotent. */
+async function roomJoin(id: string | undefined): Promise<void> {
+  const name = values.as;
+  if (!id || !name) throw new Error('usage: kild room join <id> --as <name>');
+  const result = await joinRoom(id, name);
+  console.log(json ? JSON.stringify(result, null, 2) : result.message);
+}
+
+/**
+ * `kild room drain <id> --as <name> [--format claude-stop]` — destructively read that
+ * participant's mailbox. An empty drain is also its idle signal; there is no status verb.
+ *
+ * With `--format claude-stop` this IS a Claude Code Stop hook's entire body, so it obeys
+ * the hook contract absolutely: print the block JSON when mail is waiting, print **nothing
+ * at all** when it is not, and **exit 0 either way** — including when the engine is down,
+ * the room is gone, or the handle was never joined. A hook that cannot reach kild must
+ * never stop the operator from finishing a turn. Without the flag it is an ordinary CLI
+ * verb and failures are ordinary loud errors.
+ */
+async function roomDrain(id: string | undefined): Promise<void> {
+  const claudeStop = values.format === 'claude-stop';
+  const name = values.as;
+  if (!id || !name) {
+    if (claudeStop) return; // misconfigured hook → silence, never a blocked turn
+    throw new Error('usage: kild room drain <id> --as <name> [--format claude-stop]');
+  }
+  if (values.format !== undefined && !claudeStop) {
+    throw new Error(`unknown --format: ${values.format} (supported: claude-stop)`);
+  }
+
+  let drained: Awaited<ReturnType<typeof drainRoom>>;
+  try {
+    drained = await drainRoom(id, name);
+  } catch (err) {
+    if (!claudeStop) throw err;
+    return; // engine down / unknown room / timeout — degrade to silence
+  }
+
+  if (claudeStop) {
+    const output = claudeStopOutput({ roomId: id, participant: name, posts: drained.posts });
+    if (output) console.log(JSON.stringify(output));
+    return;
+  }
+  if (json) return void console.log(JSON.stringify(drained, null, 2));
+  for (const post of drained.posts) console.log(`${post.from}: ${post.text}`);
+  if (drained.posts.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
 }
 
 /** `kild room log <id>` — read a live room's full thread (the pull view; `kild rooms`
