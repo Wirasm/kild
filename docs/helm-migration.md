@@ -175,6 +175,84 @@ Connect to `/ws` as before. Frame names changed.
 `UiEvent` payloads are unchanged — `text`, `tool_start`, `stats`, `model`, `pi_session`,
 `agent_end`, `session_end`, `error` all keep their shapes.
 
+## The reshape — the final surface
+
+Landed after the router commit. This is what helm ports against.
+
+### Listing split into cheap and costly
+
+`GET /api/kilds` used to compute git status per kild — and once orphan trees began
+enumerating, per orphan too — and returned every message log alongside. Measured on an
+8-worktree fixture: **57 git invocations, ~110ms**. On a 116-worktree machine that
+extrapolates to ~813 per call.
+
+| Route | Carries |
+|---|---|
+| `GET /api/kilds` | **cheap.** `id`, `name`, `cwd`, `worktree?`, `base?`, `orphan?`, `agents[]` (`handle`, `ownership`, `persona`, `model`, `idle`, `stopped`). **No `git`, no `log`, no `totals`.** 1 git call total, at any worktree count |
+| `GET /api/kilds/status` | **costly.** The above plus `git` (`branch`, `ahead`, `behind`, `dirty`, `uncommittedFiles`, `changedFiles[]`, `conflictsWithBase`), `totals`, per-agent `tokens`/`cost`/`piSession*`, `landedSha` |
+| `GET /api/kilds/:id` | one kild with git, **no log** |
+| `GET /api/kilds/:id/messages?since=<seq>` | the log, as its own resource |
+
+**Poll them on different cadences.** That is the entire point — the sidebar can refresh
+identity and attention constantly and ask for git only when it renders it.
+
+`?state=live|orphan` works on both. **`?state=reclaimable` is `/status`-only** — it reads
+`ahead`, so the cheap route returns `400` naming where to ask rather than silently paying.
+
+### Messages have a monotonic `seq`
+
+`ts` is `Date.now()` and can go backwards, so it never worked as a cursor. `seq` is strictly
+increasing within a kild, assigned from the log's own tail so it survives reload, and rides
+WS `{message}` frames — so a client can distinguish new from replay.
+
+`?since=<seq>` is **exclusive**: pass the last seq you saw. Works on archived kilds too.
+Archives written before `seq` existed decode by position.
+
+**Logs are gone from every listing payload.** If helm read the thread off the kild list, it
+now reads `/messages`.
+
+### One address per agent
+
+Deleted: `POST /api/agents`, `POST /api/agents/:id/prompt`, `POST /api/agents/:id/stop`,
+`GET /api/agents/:id/transcript`.
+
+- **`POST /api/kilds/:id/agents`** — spawn into a kild. New, and it *answers*: spawning was
+  WS-only and fire-and-forget, so a caller could never learn it failed.
+- **`DELETE /api/kilds/:id/agents/:handle`** — stop one agent, kild keeps running. The agent
+  stays on the roster marked `stopped`, so its transcript stays addressable.
+- **`GET /api/kilds/:id/agents/:handle/transcript`** — the only transcript route.
+- **Prompting an owned agent is sending it a message.** `POST /api/kilds/:id/messages` is
+  the one delivery path.
+- `GET /api/agents` **survives** — it is the inventory of live processes on no roster
+  (one-shot `kild run`), which no kild can answer.
+
+### Worktrees folded in
+
+Deleted: `GET|DELETE /api/worktrees`, `POST /api/worktrees/prune`.
+
+`GET /api/kilds` **enumerates `kild/*` from git**, not the registry — so trees stranded by
+previous engine runs finally have an id. They appear as kilds with `orphan: true`, no
+agents, no log, and **`id` = worktree name**. A worktree kild did not create is never listed.
+
+**`DELETE /api/kilds/:id?force=true`** is the disposal verb, and the guard is **authored
+commits, not a clean tree**. Commits in `base..HEAD` refuse; uncommitted files are discarded
+and *listed* in the response. **The branch always survives** (`branchKept: true`), which is
+what makes `force` safe. An unresolvable base refuses rather than guessing.
+
+Prune is now a filter: `GET /api/kilds/status?state=reclaimable`, then delete what you mean.
+Nothing is removed behind your back.
+
+### Land is two verbs
+
+- **`GET /api/kilds/:id/land`** — dry run. Reports `wouldMerge`, `commits`, `files`,
+  `collides`. **Touches nothing** (verified: HEAD, refs and status identical after).
+- **`POST /api/kilds/:id/land`** — merges toward base, returns the merge `sha`. Returns
+  `409` *with the full result* when it did not merge, never a `200 merged:false`.
+
+It merges in the project's main checkout and **refuses if that checkout is not on base or is
+dirty**, rather than updating refs behind it. So land fails while you have another branch
+out — deliberate, but it will surface in the UI.
+
 ## Checklist
 
 - [ ] Pin to the pre-rename kild commit
@@ -186,6 +264,19 @@ Connect to `/ws` as before. Frame names changed.
 - [ ] Delete open-decisions rendering
 - [ ] Delete any `posted` attention logic; keep `idle`
 - [ ] Drop `force` from the stop call
+
+**Reshape:**
+
+- [ ] Poll `GET /api/kilds` (cheap) for identity/roster/attention; `GET /api/kilds/status` on a slower cadence for git and cost
+- [ ] Stop reading logs from listings — use `GET /api/kilds/:id/messages`
+- [ ] Adopt `seq` as the cursor; `?since=` is exclusive; drop any `ts` ordering
+- [ ] `?state=reclaimable` only on `/status`
+- [ ] Swap `/api/agents/:id/*` for `/api/kilds/:id/agents/:handle`; prompting becomes a message
+- [ ] Replace `/api/worktrees` with `GET /api/kilds` + `DELETE /api/kilds/:id`
+- [ ] Render `orphan: true` kilds (this is where the stranded trees appear)
+- [ ] Add the land gate against `GET`/`POST .../land`, and handle the `409`-with-result case
+- [ ] Handle land's refusal when the main checkout is off-base or dirty
+- [ ] Derive `collidesWith` client-side from `status`'s `changedFiles[]` — it is not a server field
 - [ ] Un-pin
 
 ## Attribution: `from` is already engine-derived
