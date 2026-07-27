@@ -1,61 +1,60 @@
 import { randomUUID } from 'node:crypto';
-
-import { listAgents } from '../agents.ts';
-import { configuredMemoryDir, configuredMemorySynthesis } from '../config.ts';
-import { appendRoomLog, roomTranscriptPath, synthesisPrompt } from '../memory.ts';
-import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../sessions.ts';
-import { resolveBaseBranch, worktreePath } from '../worktree.ts';
-import { roomGitStatus } from '../worktree-status.ts';
-import { Mailbox, type MailboxDrain } from './attached.ts';
+import { type AgentCallbacks, agentManager, type SpawnRequest } from './agent-manager.ts';
+import { configuredMemoryDir, configuredMemorySynthesis } from './config.ts';
+import { Inbox, type InboxDrain } from './inbox.ts';
 import {
   finalNonSystemPost,
   formatOperatorNotification,
   humanPostEvent,
   openerNotificationTarget,
-} from './room-events.ts';
+} from './kild-events.ts';
 import {
-  ensureRoomCanAddParticipant,
-  ensureRoomCanCloseFromOperator,
-  ensureRoomCanCloseFromParticipant,
-  ensureRoomCanHalt,
-  ensureRoomCanPost,
-  transitionRoomState,
-} from './room-lifecycle.ts';
-import { RoomRegistry } from './room-registry.ts';
-import { type RoomDelivery, routeRoomMessage, unknownRecipients } from './room-router.ts';
+  ensureKildCanHalt,
+  ensureKildCanSend,
+  ensureKildCanSpawnAgent,
+  ensureKildCanStopFromAgent,
+  ensureKildCanStopFromOperator,
+  transitionKildState,
+} from './kild-lifecycle.ts';
+import { KildRegistry } from './kild-registry.ts';
+import { type Delivery, routeMessage, unknownRecipients } from './kild-router.ts';
 import {
-  type ArchivedRoom,
-  type CloseRoomOut,
+  type AgentSpec,
+  type ArchivedKild,
+  agentProcessId,
+  agentView,
   type CommandResult,
+  costTotals,
   HUMAN,
-  type InviteOut,
-  type LiveRoomStatus,
-  type MessageOut,
-  type OpenRoomSpec,
-  type OpenRoomSuccess,
-  type ParticipantSpec,
-  participantSessionId,
-  participantView,
-  type Room,
-  type RoomActionSuccess,
-  type RoomMessage,
-  type RoomOutbound,
-  roomCostTotals,
-} from './room-types.ts';
+  type Kild,
+  type KildActionSuccess,
+  type KildOutbound,
+  type LiveKildStatus,
+  type Message,
+  type NewKildSpec,
+  type NewKildSuccess,
+  type SendOut,
+  type SpawnOut,
+  type StopOut,
+} from './kild-types.ts';
+import { appendKildLog, kildTranscriptPath, synthesisPrompt } from './memory.ts';
+import { listPersonas } from './personas.ts';
+import { resolveBaseBranch, worktreePath } from './worktree.ts';
+import { kildGitStatus } from './worktree-status.ts';
 
-/** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
+/** Soft cap on kild size — a cheap loop/scale guard in v1 (loop control is otherwise
  *  just the human kill switch). */
-const MAX_PARTICIPANTS = 8;
+const MAX_AGENTS = 8;
 
-/** The single chokepoint every room post flows through: one structured trace line so a
- *  whole room reads back as an ordered log (grep `room.post`). Kept dead simple — swap
+/** The single chokepoint every kild message flows through: one structured trace line so a
+ *  whole kild reads back as an ordered log (grep `kild.send`). Kept dead simple — swap
  *  the body for a real logger later without touching call sites. Programmatic tracers
- *  should instead subscribe to the manager (every post is broadcast as a `roomMessage`). */
-function traceRoomPost(roomName: string, message: RoomMessage): void {
+ *  should instead subscribe to the manager (every message is broadcast as a `message`). */
+function traceSend(kildName: string, message: Message): void {
   console.error(
     JSON.stringify({
-      t: 'room.post',
-      room: roomName,
+      t: 'kild.send',
+      kild: kildName,
       from: message.from,
       to: message.to,
       system: message.system ?? false,
@@ -64,23 +63,23 @@ function traceRoomPost(roomName: string, message: RoomMessage): void {
   );
 }
 
-interface SessionRuntime {
+interface AgentRuntime {
   subscribe(
-    fn: (msg: { session: string; event: unknown } | { sessions: unknown[] }) => void,
+    fn: (msg: { agent: string; event: unknown } | { agents: unknown[] }) => void,
   ): () => void;
-  spawn(id: string, req: SpawnRequest, origin?: 'ui' | 'cli', callbacks?: SessionCallbacks): void;
+  spawn(id: string, req: SpawnRequest, origin?: 'ui' | 'cli', callbacks?: AgentCallbacks): void;
   prompt(id: string, text: string, from?: string): boolean;
   stop(id: string): void;
 }
 
-interface RoomManagerDeps {
-  registry?: RoomRegistry;
-  sessions?: SessionRuntime;
-  listAgents?: typeof listAgents;
+interface KildManagerDeps {
+  registry?: KildRegistry;
+  sessions?: AgentRuntime;
+  listPersonas?: typeof listPersonas;
   createId?: () => string;
 }
 
-interface ValidatedParticipantSpec extends ParticipantSpec {
+interface ValidatedAgentSpec extends AgentSpec {
   resolvedPersona?: string;
 }
 
@@ -96,32 +95,32 @@ function fail<T>(
 }
 
 /**
- * Owns live rooms: opens them (one session per participant), routes every post
- * (participant→participant as turns, everything to the human as a broadcast),
- * grows them (the human invite + an agent's `invite_agent`), and closes them (the
- * kill switch). Sits beside the SessionManager — participants ARE sessions, so the
- * SessionManager stays room-agnostic; it only forwards a participant's control
- * lines (`message_out` / `invite`) to the callbacks we hand it.
+ * Owns live kilds: creates them (one session per agent), routes every message
+ * (agent→agent as turns, everything to the human as a broadcast), grows them (the
+ * human's spawn + an agent's `spawn` tool), and stops them (the kill switch). Sits
+ * beside the AgentManager — agents ARE sessions, so the AgentManager stays
+ * kild-agnostic; it only forwards an agent's control lines (`send` / `spawn`) to the
+ * callbacks we hand it.
  */
-export class RoomManager {
-  private readonly registry: RoomRegistry;
-  private readonly sessions: SessionRuntime;
-  private readonly resolveAgents: typeof listAgents;
+export class KildManager {
+  private readonly registry: KildRegistry;
+  private readonly sessions: AgentRuntime;
+  private readonly resolvePersonas: typeof listPersonas;
   private readonly createId: () => string;
-  private readonly subscribers = new Set<(msg: RoomOutbound) => void>();
+  private readonly subscribers = new Set<(msg: KildOutbound) => void>();
 
-  constructor(deps: RoomManagerDeps = {}) {
-    this.registry = deps.registry ?? new RoomRegistry();
-    this.sessions = deps.sessions ?? sessionManager;
-    this.resolveAgents = deps.listAgents ?? listAgents;
+  constructor(deps: KildManagerDeps = {}) {
+    this.registry = deps.registry ?? new KildRegistry();
+    this.sessions = deps.sessions ?? agentManager;
+    this.resolvePersonas = deps.listPersonas ?? listPersonas;
     this.createId = deps.createId ?? randomUUID;
 
-    // Forward each participant's transcript (its UiEvent stream from the session
-    // substrate) to room clients, tagged by room + participant — so UI clients can
-    // render per-participant working detail. The session bus stays internal.
+    // Forward each agent's transcript (its UiEvent stream from the session substrate)
+    // to kild clients, tagged by kild + agent — so UI clients can render per-agent
+    // working detail. The agent bus stays internal.
     this.sessions.subscribe((msg) => {
-      if (!('session' in msg)) return;
-      const located = this.registry.locateSession(msg.session);
+      if (!('agent' in msg)) return;
+      const located = this.registry.locateAgent(msg.agent);
       if (located) {
         // Capture the provider-resolved model so observers see what each agent actually
         // ran on (not just the requested ref — which may have been a default/alias).
@@ -134,491 +133,482 @@ export class RoomManager {
           cost?: number;
         };
         if (event.kind === 'model' && event.provider && event.id) {
-          located.participant.model = `${event.provider}/${event.id}`;
+          located.agent.model = `${event.provider}/${event.id}`;
         }
         // Capture the latest cumulative cost snapshot (emitted at every turn end) so
-        // observers can rank rooms by spend without parsing transcripts. No persistNow:
-        // the next post's write-through snapshot — or close() — carries it to disk.
+        // observers can rank kilds by spend without parsing transcripts. No persistNow:
+        // the next message's write-through snapshot — or stop() — carries it to disk.
         if (
           event.kind === 'stats' &&
           typeof event.tokens === 'number' &&
           typeof event.cost === 'number'
         ) {
-          located.participant.tokens = event.tokens;
-          located.participant.cost = event.cost;
+          located.agent.tokens = event.tokens;
+          located.agent.cost = event.cost;
         }
-        // The pi session identity is the participant's durable terminal-resume handle;
-        // persist it so archived rooms keep it too (there may be no later post to piggyback
-        // the snapshot on).
+        // The pi session identity is the agent's durable terminal-resume handle;
+        // persist it so archived kilds keep it too (there may be no later message to
+        // piggyback the snapshot on).
         if (event.kind === 'pi_session' && event.id) {
-          located.participant.piSessionId = event.id;
-          located.participant.piSessionFile = event.file;
-          this.registry.persistNow(located.room.id);
+          located.agent.piSessionId = event.id;
+          located.agent.piSessionFile = event.file;
+          this.registry.persistNow(located.kild.id);
         }
-        // A finished turn means the participant is waiting — observability only (it rides
-        // ParticipantView so a client can see who is finished), never a prompt.
+        // A finished turn means the agent is waiting — observability only (it rides
+        // AgentView so a client can see who is finished), never a prompt.
         if (event.kind === 'agent_end') {
-          located.participant.idle = true;
+          located.agent.idle = true;
         }
         this.broadcast({
-          room: located.room.id,
-          participant: located.participant.name,
+          kild: located.kild.id,
+          agent: located.agent.handle,
           event: msg.event as never,
         });
       }
     });
   }
 
-  subscribe(fn: (msg: RoomOutbound) => void): () => void {
+  subscribe(fn: (msg: KildOutbound) => void): () => void {
     this.subscribers.add(fn);
-    fn({ rooms: this.registry.summaries() }); // catch the new client up
+    fn({ kilds: this.registry.summaries() }); // catch the new client up
     return () => {
       this.subscribers.delete(fn);
     };
   }
 
-  /** Open a room under a caller-supplied id, spawning a session per participant. */
-  async open(roomId: string, spec: OpenRoomSpec): Promise<CommandResult<OpenRoomSuccess>> {
-    if (this.registry.get(roomId)) {
-      return fail('rejected', `duplicate room id: ${roomId}`);
+  /** Create a kild under a caller-supplied id, spawning a session per agent. */
+  async create(kildId: string, spec: NewKildSpec): Promise<CommandResult<NewKildSuccess>> {
+    if (this.registry.get(kildId)) {
+      return fail('rejected', `duplicate kild id: ${kildId}`);
     }
-    const validated = await this.validateParticipants(spec.cwd, spec.participants, []);
+    const validated = await this.validateAgents(spec.cwd, spec.agents, []);
     if (!validated.ok) return validated;
 
-    const room: Room = {
-      id: roomId,
+    const kild: Kild = {
+      id: kildId,
       name: spec.name,
       cwd: spec.cwd,
       worktree: spec.worktree,
-      // Resolve the base once here — the single chokepoint every opener (CLI, REST, WS,
-      // operator tool) flows through: explicit `base` wins, else the cwd's configured
-      // `baseBranch`, else its current branch, else `main`.
+      // Resolve the base once here — the single chokepoint every creator (CLI, REST, WS)
+      // flows through: explicit `base` wins, else the cwd's configured `baseBranch`, else
+      // its current branch, else `main`.
       base: await resolveBaseBranch(spec.cwd, spec.base),
       openedBy: spec.openedBy,
-      participants: [],
+      agents: [],
       log: [],
       state: 'opening',
     };
-    this.registry.create(room);
+    this.registry.create(kild);
 
-    const spawnedSessionIds: string[] = [];
-    for (const participant of validated.value) {
-      const result = this.spawnParticipant(room, participant, HUMAN);
+    const spawnedAgentIds: string[] = [];
+    for (const agent of validated.value) {
+      const result = this.startAgent(kild, agent, HUMAN);
       if (!result.ok) {
-        this.rollbackOpen(roomId, spawnedSessionIds);
+        this.rollbackCreate(kildId, spawnedAgentIds);
         return result;
       }
-      spawnedSessionIds.push(result.value.sessionId);
+      spawnedAgentIds.push(result.value.agentId);
     }
 
-    const transitioned = transitionRoomState(room, 'running');
+    const transitioned = transitionKildState(kild, 'running');
     if (!transitioned.ok) {
-      this.rollbackOpen(roomId, spawnedSessionIds);
+      this.rollbackCreate(kildId, spawnedAgentIds);
       return transitioned;
     }
 
-    this.broadcast({ rooms: this.registry.summaries() });
-    return ok({ roomId, message: `Room '${spec.name}' opened.` });
+    this.broadcast({ kilds: this.registry.summaries() });
+    return ok({ kildId, message: `Kild '${spec.name}' created.` });
   }
 
-  /** The human posts into the room (kick-off and steering). `to` is optional — omit it
-   *  to address the room lead by default. */
-  async postFromHuman(
-    roomId: string,
+  /** The human sends into the kild (kick-off and steering). `to` is optional — omit it
+   *  to address the kild lead by default. */
+  async sendFromHuman(
+    kildId: string,
     text: string,
     to?: string[],
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    return this.post(roomId, HUMAN, text, { to });
+  ): Promise<CommandResult<KildActionSuccess>> {
+    return this.send(kildId, HUMAN, text, { to });
   }
 
-  /** An operator-side author (e.g. the brain) posts into a room — the agent-driven
-   *  mirror of {@link postFromHuman}, routed identically. This is how the brain
-   *  speaks into the real Room primitive instead of a separate bus. `to` is optional —
-   *  omit it to address the room lead by default. */
-  async postAs(
-    roomId: string,
+  /** An operator-side author (e.g. the brain) sends into a kild — the agent-driven
+   *  mirror of {@link sendFromHuman}, routed identically. This is how the brain
+   *  speaks into the real Kild primitive instead of a separate bus. `to` is optional —
+   *  omit it to address the kild lead by default. */
+  async sendAs(
+    kildId: string,
     from: string,
     text: string,
     to?: string[],
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    return this.post(roomId, from, text, { to });
+  ): Promise<CommandResult<KildActionSuccess>> {
+    return this.send(kildId, from, text, { to });
   }
 
-  /** A room's shared log (empty if the room is unknown) — for demos / inspection. */
-  messages(roomId: string): RoomMessage[] {
-    return this.registry.get(roomId)?.log ?? [];
+  /** A kild's shared log (empty if the kild is unknown) — for demos / inspection. */
+  messageLog(kildId: string): Message[] {
+    return this.registry.get(kildId)?.log ?? [];
   }
 
-  /** Past rooms recovered from disk (read-only logs from previous engine runs). */
-  archived(): ArchivedRoom[] {
+  /** Past kilds recovered from disk (read-only logs from previous engine runs). */
+  archived(): ArchivedKild[] {
     return this.registry.archived();
   }
 
-  /** Live rooms with their logs — for a client joining a room it didn't open (or
+  /** Live kilds with their logs — for a client joining a kild it didn't create (or
    *  reloading), so it can render the conversation so far. */
-  liveRooms(): ArchivedRoom[] {
+  liveKilds(): ArchivedKild[] {
     return this.registry.liveWithLogs();
   }
 
-  /** Live rooms enriched with each room's git/worktree state — the code-state
+  /** Live kilds enriched with each kild's git/worktree state — the code-state
    *  half of observability, so a driving agent can land work and spot collisions.
-   *  Effective dir = the room's worktree if set, else its cwd. Git failures are
-   *  captured per-room (never thrown), so status stays available even mid-conflict. */
-  async liveRoomsStatus(): Promise<LiveRoomStatus[]> {
+   *  Effective dir = the kild's worktree if set, else its cwd. Git failures are
+   *  captured per-kild (never thrown), so status stays available even mid-conflict. */
+  async liveKildsStatus(): Promise<LiveKildStatus[]> {
     return Promise.all(
-      this.registry.liveRoomObjects().map(async (room) => ({
-        id: room.id,
-        name: room.name,
-        worktree: room.worktree,
-        participants: room.participants.map(participantView),
-        state: room.state,
-        log: room.log,
-        totals: roomCostTotals(room.participants),
-        git: await roomGitStatus(room.worktree ? worktreePath(room.worktree) : room.cwd, room.base),
+      this.registry.liveKildObjects().map(async (kild) => ({
+        id: kild.id,
+        name: kild.name,
+        worktree: kild.worktree,
+        agents: kild.agents.map(agentView),
+        state: kild.state,
+        log: kild.log,
+        totals: costTotals(kild.agents),
+        git: await kildGitStatus(kild.worktree ? worktreePath(kild.worktree) : kild.cwd, kild.base),
       })),
     );
   }
 
-  /** The effective room dir (the room's worktree if set, else its cwd) + base of
-   *  ONE live room — the same resolution {@link liveRoomsStatus} uses per room, exposed
-   *  so the review endpoints can drill into a single room without probing every room's
-   *  git state. Live rooms only: an archived room's participants are gone and its
-   *  worktree may be pruned, so there is no working dir to inspect (`invalid_state`);
-   *  an id that was never a room is `not_found`. */
-  roomDir(roomId: string): CommandResult<{ dir: string; base?: string }> {
-    const room = this.registry.get(roomId);
-    if (room) {
-      return ok({ dir: room.worktree ? worktreePath(room.worktree) : room.cwd, base: room.base });
+  /** The effective kild dir (the kild's worktree if set, else its cwd) + base of
+   *  ONE live kild — the same resolution {@link liveKildsStatus} uses per kild, exposed
+   *  so the review endpoints can drill into a single kild without probing every kild's
+   *  git state. Live kilds only: an archived kild's agents are gone and its worktree may
+   *  be pruned, so there is no working dir to inspect (`invalid_state`); an id that was
+   *  never a kild is `not_found`. */
+  kildDir(kildId: string): CommandResult<{ dir: string; base?: string }> {
+    const kild = this.registry.get(kildId);
+    if (kild) {
+      return ok({ dir: kild.worktree ? worktreePath(kild.worktree) : kild.cwd, base: kild.base });
     }
-    if (this.registry.archived().some((archived) => archived.id === roomId)) {
-      return fail('invalid_state', `room ${roomId} is archived; its working dir is gone`);
+    if (this.registry.archived().some((archived) => archived.id === kildId)) {
+      return fail('invalid_state', `kild ${kildId} is archived; its working dir is gone`);
     }
-    return fail('not_found', `no such live room: ${roomId}`);
+    return fail('not_found', `no such live kild: ${kildId}`);
   }
 
-  /** Add a participant to a live room. `invitedBy` is the inviter's name (default
-   *  {@link HUMAN} for the operator's manual invite). */
-  async addParticipant(
-    roomId: string,
-    spec: ParticipantSpec,
+  /** Spawn an agent into a live kild. `invitedBy` is the spawner's handle (default
+   *  {@link HUMAN} for the operator's manual spawn). */
+  async spawnAgent(
+    kildId: string,
+    spec: AgentSpec,
     invitedBy: string = HUMAN,
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
-    const allowed = ensureRoomCanAddParticipant(room);
+  ): Promise<CommandResult<KildActionSuccess>> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const allowed = ensureKildCanSpawnAgent(kild);
     if (!allowed.ok) return allowed;
 
-    const validated = await this.validateParticipants(room.cwd, [spec], room.participants);
+    const validated = await this.validateAgents(kild.cwd, [spec], kild.agents);
     if (!validated.ok) return validated;
 
-    const result = this.spawnParticipant(
-      room,
-      validated.value[0] as ValidatedParticipantSpec,
-      invitedBy,
-    );
+    const result = this.startAgent(kild, validated.value[0] as ValidatedAgentSpec, invitedBy);
     if (!result.ok) return result;
-    this.broadcast({ rooms: this.registry.summaries() });
-    await this.post(roomId, HUMAN, `@${spec.name} joined the room.`, {
+    this.broadcast({ kilds: this.registry.summaries() });
+    await this.send(kildId, HUMAN, `@${spec.handle} joined the kild.`, {
       system: true,
       allowStopped: true,
     });
-    return ok({ message: `Invited @${spec.name} to the room.` });
+    return ok({ message: `Spawned @${spec.handle} into the kild.` });
   }
 
-  /** Register an ATTACHED participant: a harness kild does not own (a Claude Code session
-   *  the human is driving) that wants a `@handle` in this room. Nothing is spawned — the
-   *  participant gets a mailbox and is addressable from the moment it joins.
+  /** Register an ATTACHED agent: a harness kild does not own (a Claude Code session
+   *  the human is driving) that wants a `@handle` in this kild. Nothing is spawned — the
+   *  agent gets an inbox and is addressable from the moment it attaches.
    *
-   *  Idempotent by name: re-joining an existing attached handle is a no-op, so a hook or a
-   *  shell alias can call it on every session start without special-casing. Taking over a
-   *  SPAWNED participant's handle is refused — two transports for one address would make
+   *  Idempotent by handle: re-attaching an existing attached handle is a no-op, so a hook
+   *  or a shell alias can call it on every session start without special-casing. Taking
+   *  over an OWNED agent's handle is refused — two transports for one address would make
    *  delivery ambiguous. */
-  async join(roomId: string, name: string): Promise<CommandResult<RoomActionSuccess>> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
+  async attach(kildId: string, handle: string): Promise<CommandResult<KildActionSuccess>> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
 
-    const handle = name.trim();
-    if (!handle) return fail('rejected', 'participant name required');
-    if (handle === HUMAN) return fail('rejected', `participant name '${HUMAN}' is reserved`);
+    const trimmed = handle.trim();
+    if (!trimmed) return fail('rejected', 'agent handle required');
+    if (trimmed === HUMAN) return fail('rejected', `agent handle '${HUMAN}' is reserved`);
 
-    const existing = room.participants.find((participant) => participant.name === handle);
+    const existing = kild.agents.find((agent) => agent.handle === trimmed);
     if (existing) {
-      if (existing.kind !== 'attached') {
-        return fail('rejected', `@${handle} is already a spawned participant in '${room.name}'`);
+      if (existing.ownership !== 'attached') {
+        return fail('rejected', `@${trimmed} is already an owned agent in '${kild.name}'`);
       }
-      return ok({ message: `@${handle} is already attached to room '${room.name}'.` });
+      return ok({ message: `@${trimmed} is already attached to kild '${kild.name}'.` });
     }
 
-    const allowed = ensureRoomCanAddParticipant(room);
+    const allowed = ensureKildCanSpawnAgent(kild);
     if (!allowed.ok) return allowed;
-    if (room.participants.length + 1 > MAX_PARTICIPANTS) {
-      return fail('rejected', `room capacity exceeded (max ${MAX_PARTICIPANTS} participants)`);
+    if (kild.agents.length + 1 > MAX_AGENTS) {
+      return fail('rejected', `kild capacity exceeded (max ${MAX_AGENTS} agents)`);
     }
 
-    room.participants.push({
-      name: handle,
-      kind: 'attached',
+    kild.agents.push({
+      handle: trimmed,
+      ownership: 'attached',
       invitedBy: HUMAN,
-      // Attached and waiting: it has taken no turn for this room yet.
+      // Attached and waiting: it has taken no turn for this kild yet.
       idle: true,
-      mailbox: new Mailbox(),
+      inbox: new Inbox(),
     });
-    this.registry.persistNow(roomId);
-    this.broadcast({ rooms: this.registry.summaries() });
-    await this.post(roomId, HUMAN, `@${handle} joined the room (attached).`, {
+    this.registry.persistNow(kildId);
+    this.broadcast({ kilds: this.registry.summaries() });
+    await this.send(kildId, HUMAN, `@${trimmed} joined the kild (attached).`, {
       system: true,
       allowStopped: true,
     });
-    return ok({ message: `@${handle} attached to room '${room.name}'.` });
+    return ok({ message: `@${trimmed} attached to kild '${kild.name}'.` });
   }
 
-  /** Destructively read an attached participant's mailbox — the pull half of the inverted
+  /** Destructively read an attached agent's inbox — the pull half of the inverted
    *  transport, called at the harness's own turn boundary.
    *
-   *  This IS the lifecycle signal too: an empty drain marks the participant idle, a
-   *  non-empty one marks it working. There is deliberately no separate status verb — the
-   *  drain the harness already makes on every turn end answers the question for free. */
-  drain(roomId: string, name: string): CommandResult<MailboxDrain> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
-    const participant = room.participants.find((candidate) => candidate.name === name.trim());
-    if (!participant) return fail('not_found', `no such participant: @${name}`);
-    if (participant.kind !== 'attached') {
-      return fail('rejected', `@${participant.name} is a spawned participant — kild pushes to it`);
+   *  This IS the lifecycle signal too: an empty drain marks the agent idle, a non-empty
+   *  one marks it working. There is deliberately no separate status verb — the drain the
+   *  harness already makes on every turn end answers the question for free. */
+  drain(kildId: string, handle: string): CommandResult<InboxDrain> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const agent = kild.agents.find((candidate) => candidate.handle === handle.trim());
+    if (!agent) return fail('not_found', `no such agent: @${handle}`);
+    if (agent.ownership !== 'attached') {
+      return fail('rejected', `@${agent.handle} is an owned agent — kild pushes to it`);
     }
-    const drained = participant.mailbox.drain();
-    participant.idle = drained.idle;
+    const drained = agent.inbox.drain();
+    agent.idle = drained.idle;
     if (drained.capped) {
       // The loop guard tripped. One structured line so a wake loop is visible in the
       // engine log rather than only in the owner's credit bill.
       console.error(
         JSON.stringify({
-          t: 'room.wake_cap',
-          room: room.name,
-          participant: participant.name,
-          pending: participant.mailbox.pending,
+          t: 'kild.wake_cap',
+          kild: kild.name,
+          agent: agent.handle,
+          pending: agent.inbox.pending,
         }),
       );
     }
     return ok(drained);
   }
 
-  /** Stop every participant session — the human kill switch / room teardown. A room
-   *  with history moves straight into the archive and is pushed to clients, so it stays
+  /** Stop every agent session — the human kill switch / kild teardown. A kild with
+   *  history moves straight into the archive and is pushed to clients, so it stays
    *  visible as a read-only transcript without an engine restart. */
-  async close(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
-    const allowed = ensureRoomCanCloseFromOperator(room);
+  async stop(kildId: string): Promise<CommandResult<KildActionSuccess>> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const allowed = ensureKildCanStopFromOperator(kild);
     if (!allowed.ok) return allowed;
-    this.stopSessions(room);
-    const transitioned = transitionRoomState(room, 'closed');
+    this.stopAgents(kild);
+    const transitioned = transitionKildState(kild, 'closed');
     if (!transitioned.ok) return transitioned;
-    const archived = this.registry.remove(roomId);
-    this.notifyOpener(room, {
+    const archived = this.registry.remove(kildId);
+    this.notifyOpener(kild, {
       kind: 'closed',
-      finalPost: finalNonSystemPost(room),
+      finalPost: finalNonSystemPost(kild),
     });
-    if (archived) this.broadcast({ archivedRoom: archived });
-    this.broadcast({ rooms: this.registry.summaries() });
-    if (archived) await this.recordMemory(room);
-    return ok({ message: `Room '${room.name}' closed.` });
+    if (archived) this.broadcast({ archivedKild: archived });
+    this.broadcast({ kilds: this.registry.summaries() });
+    if (archived) await this.recordMemory(kild);
+    return ok({ message: `Kild '${kild.name}' stopped.` });
   }
 
-  /** Manual circuit breaker: stop every participant session but KEEP the room, so its
+  /** Manual circuit breaker: stop every agent session but KEEP the kild, so its
    *  transcript stays visible (read-only). The operator trips this to halt a runaway or
-   *  off-track room without tearing it down (vs {@link close}). */
-  async halt(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
-    const allowed = ensureRoomCanHalt(room);
+   *  off-track kild without tearing it down (vs {@link stop}). */
+  async halt(kildId: string): Promise<CommandResult<KildActionSuccess>> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const allowed = ensureKildCanHalt(kild);
     if (!allowed.ok) return allowed;
-    this.stopSessions(room);
-    const transitioned = transitionRoomState(room, 'halted');
+    this.stopAgents(kild);
+    const transitioned = transitionKildState(kild, 'halted');
     if (!transitioned.ok) return transitioned;
-    await this.post(roomId, HUMAN, 'Room halted by the operator.', {
+    await this.send(kildId, HUMAN, 'Kild halted by the operator.', {
       system: true,
       allowStopped: true,
     });
-    this.notifyOpener(room, {
+    this.notifyOpener(kild, {
       kind: 'halted',
-      finalPost: finalNonSystemPost(room),
+      finalPost: finalNonSystemPost(kild),
     });
-    this.broadcast({ rooms: this.registry.summaries() });
-    return ok({ message: `Room '${room.name}' halted.` });
+    this.broadcast({ kilds: this.registry.summaries() });
+    return ok({ message: `Kild '${kild.name}' halted.` });
   }
 
-  /** Post-close memory hook: append the engine-written log entry (always), then spawn
+  /** Post-stop memory hook: append the engine-written log entry (always), then spawn
    *  the optional synthesis session (config `memory.synthesis`) to distill the transcript
    *  into the memory dir's `MEMORY.md` (config `memory.dir`, default `.kild/`). Memory
-   *  must never break a close — failures are logged loud and swallowed here, at the one
+   *  must never break a stop — failures are logged loud and swallowed here, at the one
    *  boundary where that is the right call. */
-  private async recordMemory(room: Room): Promise<void> {
+  private async recordMemory(kild: Kild): Promise<void> {
     let memoryDir: string;
     try {
-      memoryDir = await configuredMemoryDir(room.cwd);
-      appendRoomLog(room, memoryDir);
+      memoryDir = await configuredMemoryDir(kild.cwd);
+      appendKildLog(kild, memoryDir);
     } catch (err) {
       console.error(
-        `kild: room log append failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
+        `kild: log append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
       );
       return; // no log entry → don't synthesize against a missing input
     }
     try {
-      const synthesis = await configuredMemorySynthesis(room.cwd);
+      const synthesis = await configuredMemorySynthesis(kild.cwd);
       if (!synthesis) return;
       const id = this.createId();
       this.sessions.spawn(id, {
         model: synthesis.model,
-        cwd: room.cwd, // the MAIN checkout — memory files are gitignored, so worktrees never see them
+        cwd: kild.cwd, // the MAIN checkout — memory files are gitignored, so worktrees never see them
         persona: synthesis.persona ?? 'default',
-        label: `memory:${room.name}`,
+        label: `memory:${kild.name}`,
       });
       this.sessions.prompt(
         id,
-        synthesisPrompt(room, roomTranscriptPath(room.id), memoryDir),
+        synthesisPrompt(kild, kildTranscriptPath(kild.id), memoryDir),
         'kild',
       );
     } catch (err) {
       console.error(
-        `kild: memory synthesis spawn failed for '${room.name}': ${err instanceof Error ? err.message : err}`,
+        `kild: memory synthesis spawn failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
       );
     }
   }
 
-  /** Spawn one participant session, wired so its control lines route back here.
-   *  `invitedBy` is the inviter's name (a live participant) or {@link HUMAN} for the
-   *  opener's initial roster — the ground-truth spawn edge + idle-notice target. */
-  private spawnParticipant(
-    room: Room,
-    spec: ValidatedParticipantSpec,
+  /** Spawn one agent session, wired so its control lines route back here. `invitedBy`
+   *  is the spawner's handle (a live agent) or {@link HUMAN} for the creator's initial
+   *  roster — the ground-truth spawn edge + idle-notice target. */
+  private startAgent(
+    kild: Kild,
+    spec: ValidatedAgentSpec,
     invitedBy: string,
-  ): CommandResult<{ sessionId: string }> {
-    const isLead = room.participants.length === 0; // first participant leads the room
-    const sessionId = this.createId();
+  ): CommandResult<{ agentId: string }> {
+    const isLead = kild.agents.length === 0; // first agent leads the kild
+    const agentId = this.createId();
     // Record the requested model now (visible immediately); the session's `model` event
     // upgrades it to the provider-resolved ref once it starts.
-    room.participants.push({
-      name: spec.name,
-      sessionId,
+    kild.agents.push({
+      handle: spec.handle,
+      id: agentId,
       persona: spec.persona,
       model: spec.model,
       invitedBy,
     });
     try {
       this.sessions.spawn(
-        sessionId,
+        agentId,
         {
           model: spec.model,
-          cwd: room.cwd,
+          cwd: kild.cwd,
           persona: spec.resolvedPersona,
-          label: room.name,
-          // Every participant attaches to the room's shared worktree, if any.
-          worktree: room.worktree,
-          // Base branch a brand-new worktree forks from (the first participant creates it).
-          base: room.base,
-          // Opaque to the SessionManager; the worker reads these to register its room
-          // tools (`post_message`, `invite_agent`, and — lead only — `close_room`) and
-          // tag its outbound control lines.
+          label: kild.name,
+          // Every agent attaches to the kild's shared worktree, if any.
+          worktree: kild.worktree,
+          // Base branch a brand-new worktree forks from (the first agent creates it).
+          base: kild.base,
+          // Opaque to the AgentManager; the agent process reads these to register its
+          // kild tools (`send`, `spawn`, and — lead only — `stop`) and tag its outbound
+          // control lines.
           env: {
-            KILD_ROOM: room.id,
-            KILD_PARTICIPANT: spec.name,
-            ...(isLead ? { KILD_ROOM_LEAD: '1' } : {}),
+            KILD_KILD_ID: kild.id,
+            KILD_HANDLE: spec.handle,
+            ...(isLead ? { KILD_LEAD: '1' } : {}),
           },
         },
         'cli',
         {
-          onMessage: (m) => this.handleParticipantMessage(sessionId, m),
-          onInvite: (i) => this.handleInvite(sessionId, i),
-          onCloseRoom: (c) => this.handleCloseRoom(sessionId, c),
+          onSend: (m) => this.handleSend(agentId, m),
+          onSpawn: (s) => this.handleSpawn(agentId, s),
+          onStop: (s) => this.handleStop(agentId, s),
         },
       );
     } catch (err) {
-      room.participants = room.participants.filter(
-        (participant) => participantSessionId(participant) !== sessionId,
-      );
+      kild.agents = kild.agents.filter((agent) => agentProcessId(agent) !== agentId);
       return fail('rejected', err instanceof Error ? err.message : String(err));
     }
-    return ok({ sessionId });
+    return ok({ agentId });
   }
 
-  /** A participant called `post_message`: resolve its room/name and route. */
-  private async handleParticipantMessage(
-    sessionId: string,
-    m: MessageOut,
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    const located = this.registry.locateSession(sessionId);
-    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    return this.post(located.room.id, located.participant.name, m.text, { to: m.to });
+  /** An agent called `send`: resolve its kild/handle and route. */
+  private async handleSend(agentId: string, m: SendOut): Promise<CommandResult<KildActionSuccess>> {
+    const located = this.registry.locateAgent(agentId);
+    if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
+    return this.send(located.kild.id, located.agent.handle, m.text, { to: m.to });
   }
 
-  /** A participant called `invite_agent`: add the named participant to its room. */
-  private async handleInvite(
-    sessionId: string,
-    spec: InviteOut,
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    const located = this.registry.locateSession(sessionId);
-    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    // The inviter is the calling participant — recorded as the new participant's `invitedBy`,
-    // so its idle/done notice routes back here (hierarchical delegation signalling).
-    return this.addParticipant(
-      located.room.id,
-      { name: spec.name, persona: spec.persona, model: spec.model },
-      located.participant.name,
+  /** An agent called `spawn`: add the named agent to its kild. */
+  private async handleSpawn(
+    agentId: string,
+    spec: SpawnOut,
+  ): Promise<CommandResult<KildActionSuccess>> {
+    const located = this.registry.locateAgent(agentId);
+    if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
+    // The spawner is the calling agent — recorded as the new agent's `invitedBy`, so its
+    // idle/done notice routes back here (hierarchical delegation signalling).
+    return this.spawnAgent(
+      located.kild.id,
+      { handle: spec.handle, persona: spec.persona, model: spec.model },
+      located.agent.handle,
     );
   }
 
-  /** The room's lead called `close_room`: notice, then teardown. Only the lead holds
-   *  the tool (worker-side), but enforce it here too — a control line is just stdout,
-   *  so the engine, not the subprocess, is the authority on who may end a room. */
-  private async handleCloseRoom(
-    sessionId: string,
-    closeSpec: CloseRoomOut,
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    const located = this.registry.locateSession(sessionId);
-    if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    const { room, participant } = located;
-    const allowed = ensureRoomCanCloseFromParticipant(room);
+  /** The kild's lead called `stop`: notice, then teardown. Only the lead holds the tool
+   *  (agent-side), but enforce it here too — a control line is just stdout, so the engine,
+   *  not the subprocess, is the authority on who may end a kild. */
+  private async handleStop(
+    agentId: string,
+    stopSpec: StopOut,
+  ): Promise<CommandResult<KildActionSuccess>> {
+    const located = this.registry.locateAgent(agentId);
+    if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
+    const { kild, agent } = located;
+    const allowed = ensureKildCanStopFromAgent(kild);
     if (!allowed.ok) return allowed;
-    const lead = room.participants[0];
-    if (!lead || participantSessionId(lead) !== sessionId) {
-      return fail('rejected', `only the lead may close room '${room.name}'`);
+    const lead = kild.agents[0];
+    if (!lead || agentProcessId(lead) !== agentId) {
+      return fail('rejected', `only the lead may stop kild '${kild.name}'`);
     }
-    await this.post(
-      room.id,
+    await this.send(
+      kild.id,
       HUMAN,
-      `Room closed by @${participant.name}${closeSpec.reason ? `: ${closeSpec.reason}` : '.'}`,
+      `Kild stopped by @${agent.handle}${stopSpec.reason ? `: ${stopSpec.reason}` : '.'}`,
       {
         system: true,
         allowStopped: true,
       },
     );
-    return this.close(room.id);
+    return this.stop(kild.id);
   }
 
-  /** Record + route one post from `from` (a participant name or {@link HUMAN}).
+  /** Record + route one message from `from` (an agent handle or {@link HUMAN}).
    *
    * Addressing is structured, never parsed from prose — the ONE rule: a system notice
-   * targets no one; otherwise an explicit `to` wins; otherwise the post goes to the room
-   * lead (the orchestrator). A typo'd handle is returned as a clean error to the caller
-   * (the calling agent's tool result), so it can correct itself — it is never recorded,
-   * routed, or turned into room spam. */
-  private async post(
-    roomId: string,
+   * targets no one; otherwise an explicit `to` wins; otherwise the message goes to the
+   * kild lead (the orchestrator). A typo'd handle is returned as a clean error to the
+   * caller (the calling agent's tool result), so it can correct itself — it is never
+   * recorded, routed, or turned into kild spam. */
+  private async send(
+    kildId: string,
     from: string,
     text: string,
     opts: { to?: string[]; system?: boolean; allowStopped?: boolean } = {},
-  ): Promise<CommandResult<RoomActionSuccess>> {
-    const room = this.registry.get(roomId);
-    if (!room) return fail('not_found', `no such room: ${roomId}`);
-    const allowed = ensureRoomCanPost(room, { allowHalted: opts.allowStopped });
+  ): Promise<CommandResult<KildActionSuccess>> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const allowed = ensureKildCanSend(kild, { allowHalted: opts.allowStopped });
     if (!allowed.ok) return allowed;
 
-    const lead = room.participants[0]?.name;
+    const lead = kild.agents[0]?.handle;
     const to = opts.system ? [] : opts.to?.length ? opts.to : lead ? [lead] : [];
-    const message: RoomMessage = {
+    const message: Message = {
       id: this.createId(),
-      roomId,
+      kildId,
       from,
       to,
       text,
@@ -626,52 +616,52 @@ export class RoomManager {
       system: opts.system,
     };
 
-    const unknown = unknownRecipients(room, message);
+    const unknown = unknownRecipients(kild, message);
     if (unknown.length > 0) {
-      const known = room.participants.map((participant) => `@${participant.name}`).join(', ');
+      const known = kild.agents.map((agent) => `@${agent.handle}`).join(', ');
       return fail(
         'rejected',
-        `no such participant: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
-          `(in the room: ${known || 'none'})`,
+        `no such agent: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
+          `(in the kild: ${known || 'none'})`,
       );
     }
 
-    traceRoomPost(room.name, message);
-    this.registry.appendMessage(roomId, message);
-    routeRoomMessage(room, message, this.delivery());
+    traceSend(kild.name, message);
+    this.registry.appendMessage(kildId, message);
+    routeMessage(kild, message, this.delivery());
     if (
       !message.system &&
       message.to.includes(HUMAN) &&
-      room.participants.some((participant) => participant.name === message.from)
+      kild.agents.some((agent) => agent.handle === message.from)
     ) {
-      this.notifyOpener(room, humanPostEvent(message));
+      this.notifyOpener(kild, humanPostEvent(message));
     }
-    return ok({ message: 'Posted to the room.', deliveredTo: to.filter((t) => t !== from) });
+    return ok({ message: 'Sent to the kild.', deliveredTo: to.filter((t) => t !== from) });
   }
 
-  private async validateParticipants(
+  private async validateAgents(
     cwd: string,
-    participants: ParticipantSpec[],
-    existing: Array<{ name: string }>,
-  ): Promise<CommandResult<ValidatedParticipantSpec[]>> {
-    if (existing.length + participants.length > MAX_PARTICIPANTS) {
-      return fail('rejected', `room capacity exceeded (max ${MAX_PARTICIPANTS} participants)`);
+    agents: AgentSpec[],
+    existing: Array<{ handle: string }>,
+  ): Promise<CommandResult<ValidatedAgentSpec[]>> {
+    if (existing.length + agents.length > MAX_AGENTS) {
+      return fail('rejected', `kild capacity exceeded (max ${MAX_AGENTS} agents)`);
     }
 
-    const knownPersonas = new Set((await this.resolveAgents(cwd)).map((agent) => agent.name));
-    const seenNames = new Set(existing.map((participant) => participant.name));
-    const validated: ValidatedParticipantSpec[] = [];
+    const knownPersonas = new Set((await this.resolvePersonas(cwd)).map((p) => p.name));
+    const seenHandles = new Set(existing.map((agent) => agent.handle));
+    const validated: ValidatedAgentSpec[] = [];
 
-    for (const spec of participants) {
-      if (spec.name === HUMAN) {
-        return fail('rejected', `participant name '${HUMAN}' is reserved`);
+    for (const spec of agents) {
+      if (spec.handle === HUMAN) {
+        return fail('rejected', `agent handle '${HUMAN}' is reserved`);
       }
-      if (seenNames.has(spec.name)) {
-        return fail('rejected', `duplicate participant: @${spec.name}`);
+      if (seenHandles.has(spec.handle)) {
+        return fail('rejected', `duplicate agent: @${spec.handle}`);
       }
-      seenNames.add(spec.name);
+      seenHandles.add(spec.handle);
 
-      const resolvedPersona = spec.persona ?? spec.name;
+      const resolvedPersona = spec.persona ?? spec.handle;
       if (resolvedPersona !== 'default' && !knownPersonas.has(resolvedPersona)) {
         return fail('rejected', `unknown persona: ${resolvedPersona}`);
       }
@@ -681,50 +671,50 @@ export class RoomManager {
     return ok(validated);
   }
 
-  /** Stop the sessions kild owns. An attached participant has none — its harness belongs
-   *  to the human, and kild must never assume it can end it. */
-  private stopSessions(room: Room): void {
-    for (const participant of room.participants) {
-      const sessionId = participantSessionId(participant);
-      if (sessionId) this.sessions.stop(sessionId);
+  /** Stop the sessions kild owns. An attached agent has none — its harness belongs to
+   *  the human, and kild must never assume it can end it. */
+  private stopAgents(kild: Kild): void {
+    for (const agent of kild.agents) {
+      const agentId = agentProcessId(agent);
+      if (agentId) this.sessions.stop(agentId);
     }
   }
 
-  private rollbackOpen(roomId: string, sessionIds: string[]): void {
-    for (const sessionId of sessionIds) this.sessions.stop(sessionId);
-    this.registry.remove(roomId);
+  private rollbackCreate(kildId: string, agentIds: string[]): void {
+    for (const agentId of agentIds) this.sessions.stop(agentId);
+    this.registry.remove(kildId);
   }
 
-  /** Best-effort direct notification. It deliberately bypasses room posting/routing so an
-   *  operator prompt can never become a room message or trigger an agent reply loop. */
-  private notifyOpener(room: Room, event: Parameters<typeof formatOperatorNotification>[1]): void {
-    const target = openerNotificationTarget(room);
+  /** Best-effort direct notification. It deliberately bypasses kild send/routing so an
+   *  operator prompt can never become a kild message or trigger an agent reply loop. */
+  private notifyOpener(kild: Kild, event: Parameters<typeof formatOperatorNotification>[1]): void {
+    const target = openerNotificationTarget(kild);
     if (!target) return;
-    this.sessions.prompt(target, formatOperatorNotification(room.name, event), 'kild');
+    this.sessions.prompt(target, formatOperatorNotification(kild.name, event), 'kild');
   }
 
-  private delivery(): RoomDelivery {
+  private delivery(): Delivery {
     return {
-      deliverAsTurn: (sessionId, from, text) => {
-        // A delivered turn reactivates the participant: it is no longer waiting.
-        const located = this.registry.locateSession(sessionId);
-        if (located) located.participant.idle = false;
-        this.sessions.prompt(sessionId, text, from);
+      deliverAsTurn: (agentId, from, text) => {
+        // A delivered turn reactivates the agent: it is no longer waiting.
+        const located = this.registry.locateAgent(agentId);
+        if (located) located.agent.idle = false;
+        this.sessions.prompt(agentId, text, from);
       },
-      // The attached counterpart of the stdin push: queue it and let the participant
-      // collect it. `idle` deliberately does NOT flip here — the harness really is idle
-      // until it takes its next turn; the drain is what moves it.
-      queueForAttached: (participant, from, text) => {
-        participant.mailbox.enqueue({ from, text, ts: Date.now() });
+      // The attached counterpart of the stdin push: queue it and let the agent collect
+      // it. `idle` deliberately does NOT flip here — the harness really is idle until it
+      // takes its next turn; the drain is what moves it.
+      queueForAttached: (agent, from, text) => {
+        agent.inbox.enqueue({ from, text, ts: Date.now() });
       },
-      broadcast: (message) => this.broadcast({ roomMessage: message }),
+      broadcast: (message) => this.broadcast({ message }),
     };
   }
 
-  private broadcast(msg: RoomOutbound): void {
+  private broadcast(msg: KildOutbound): void {
     for (const fn of this.subscribers) fn(msg);
   }
 }
 
-/** Engine-wide singleton, mirroring {@link sessionManager}. */
-export const roomManager = new RoomManager();
+/** Engine-wide singleton, mirroring {@link agentManager}. */
+export const kildManager = new KildManager();

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { compactLiveRooms, formatCompactGitSummary } from './rooms-status.ts';
+import { compactLiveKilds, formatCompactGitSummary } from './kilds-status.ts';
 
 test('formatCompactGitSummary returns empty for absent status', () => {
   expect(formatCompactGitSummary()).toEqual('');
@@ -54,41 +54,41 @@ test('formatCompactGitSummary appends dirty and conflict markers', () => {
   ).toEqual(' · feature-x +2/-0 dirty CONFLICTS');
 });
 
-test('a live room with no log compacts to an empty post list', () => {
+test('a live kild with no log compacts to an empty post list', () => {
   expect(
-    compactLiveRooms([
+    compactLiveKilds([
       {
-        id: 'room-1',
+        id: 'kild-1',
         name: 'ops',
-        participants: [{ name: 'brain', persona: 'brain' }],
+        agents: [{ handle: 'brain', persona: 'brain' }],
         log: [],
       },
     ]),
   ).toEqual([
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [{ name: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', persona: 'brain' }],
       posts: [],
     },
   ]);
 });
 
-test('a live room keeps only the last two posts and preserves order', () => {
-  const rooms = [
+test('a live kild keeps only the last two posts and preserves order', () => {
+  const kilds = [
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [{ name: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', persona: 'brain' }],
       log: [
-        { id: 'm1', roomId: 'room-1', from: 'human', to: ['brain'], text: 'one', ts: 1 },
-        { id: 'm2', roomId: 'room-1', from: 'brain', to: ['human'], text: 'two', ts: 2 },
-        { id: 'm3', roomId: 'room-1', from: 'human', to: ['brain'], text: 'three', ts: 3 },
+        { id: 'm1', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'one', ts: 1 },
+        { id: 'm2', kildId: 'kild-1', from: 'brain', to: ['human'], text: 'two', ts: 2 },
+        { id: 'm3', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'three', ts: 3 },
       ],
     },
   ];
 
-  const compact = compactLiveRooms(rooms);
+  const compact = compactLiveKilds(kilds);
   expect(compact[0]?.posts.map((message) => message.id)).toEqual(['m2', 'm3']);
 });
 
@@ -104,11 +104,11 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
     changedFiles: ['src/a.ts', 'src/b.ts'],
     conflictsWithBase: null,
   };
-  const compact = compactLiveRooms([
+  const compact = compactLiveKilds([
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [{ name: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', persona: 'brain' }],
       log: [],
       git,
     },
@@ -128,18 +128,18 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
   expect(compact[0]?.git).not.toHaveProperty('changedFiles');
 });
 
-test('a live room without git status has no git key', () => {
-  const compact = compactLiveRooms([
-    { id: 'room-1', name: 'ops', participants: [{ name: 'brain', persona: 'brain' }], log: [] },
+test('a live kild without git status has no git key', () => {
+  const compact = compactLiveKilds([
+    { id: 'kild-1', name: 'ops', agents: [{ handle: 'brain', persona: 'brain' }], log: [] },
   ]);
   expect(compact[0]).not.toHaveProperty('git');
 });
 
-test('collisions: two rooms that touch the same file each name the other', () => {
+test('collisions: two kilds that touch the same file each name the other', () => {
   const mk = (id: string, name: string, changedFiles: string[]) => ({
     id,
     name,
-    participants: [{ name: 'worker', persona: 'worker' }],
+    agents: [{ handle: 'coder', persona: 'coder' }],
     log: [],
     git: {
       path: `/tmp/${name}`,
@@ -153,49 +153,49 @@ test('collisions: two rooms that touch the same file each name the other', () =>
       conflictsWithBase: null,
     },
   });
-  const compact = compactLiveRooms([
+  const compact = compactLiveKilds([
     mk('r1', 'auth', ['src/auth.ts', 'src/shared.ts']),
     mk('r2', 'billing', ['src/billing.ts', 'src/shared.ts']),
     mk('r3', 'docs', ['README.md']),
   ]);
   const byId = Object.fromEntries(compact.map((r) => [r.id, r]));
-  expect(byId.r1?.collidesWith).toEqual([{ room: 'billing', files: ['src/shared.ts'] }]);
-  expect(byId.r2?.collidesWith).toEqual([{ room: 'auth', files: ['src/shared.ts'] }]);
+  expect(byId.r1?.collidesWith).toEqual([{ kild: 'billing', files: ['src/shared.ts'] }]);
+  expect(byId.r2?.collidesWith).toEqual([{ kild: 'auth', files: ['src/shared.ts'] }]);
   expect(byId.r3).not.toHaveProperty('collidesWith');
 });
 
-test('per-participant attention + cost ride the compact view, with a room totals rollup', () => {
-  const compact = compactLiveRooms([
+test('per-agent attention + cost ride the compact view, with a kild totals rollup', () => {
+  const compact = compactLiveKilds([
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [
-        { name: 'worker', idle: true, tokens: 3400, cost: 1.25 },
-        { name: 'reviewer', tokens: 600, cost: 0.25 },
+      agents: [
+        { handle: 'coder', idle: true, tokens: 3400, cost: 1.25 },
+        { handle: 'reviewer', tokens: 600, cost: 0.25 },
       ],
       log: [],
     },
   ]);
-  expect(compact[0]?.participants).toEqual([
-    { name: 'worker', idle: true, tokens: 3400, cost: 1.25 },
-    { name: 'reviewer', tokens: 600, cost: 0.25 },
+  expect(compact[0]?.agents).toEqual([
+    { handle: 'coder', idle: true, tokens: 3400, cost: 1.25 },
+    { handle: 'reviewer', tokens: 600, cost: 0.25 },
   ]);
   expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
 });
 
-test('a room whose participants have no stats gets no totals key', () => {
-  const compact = compactLiveRooms([
-    { id: 'room-1', name: 'ops', participants: [{ name: 'worker' }], log: [] },
+test('a kild whose agents have no stats gets no totals key', () => {
+  const compact = compactLiveKilds([
+    { id: 'kild-1', name: 'ops', agents: [{ handle: 'coder' }], log: [] },
   ]);
   expect(compact[0]).not.toHaveProperty('totals');
 });
 
 test('server-computed totals on the live status are preferred over recomputing', () => {
-  const compact = compactLiveRooms([
+  const compact = compactLiveKilds([
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [{ name: 'worker', tokens: 100, cost: 0.1 }],
+      agents: [{ handle: 'coder', tokens: 100, cost: 0.1 }],
       log: [],
       totals: { tokens: 4000, cost: 1.5 },
     },
@@ -203,18 +203,18 @@ test('server-computed totals on the live status are preferred over recomputing',
   expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
 });
 
-test('compaction copies participant and post arrays without mutating the source room', () => {
-  const rooms = [
+test('compaction copies agent and post arrays without mutating the source kild', () => {
+  const kilds = [
     {
-      id: 'room-1',
+      id: 'kild-1',
       name: 'ops',
-      participants: [{ name: 'brain', persona: 'brain' }],
-      log: [{ id: 'm1', roomId: 'room-1', from: 'human', to: ['brain'], text: 'one', ts: 1 }],
+      agents: [{ handle: 'brain', persona: 'brain' }],
+      log: [{ id: 'm1', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'one', ts: 1 }],
     },
   ];
 
-  const compact = compactLiveRooms(rooms);
-  expect(compact[0]?.participants).not.toBe(rooms[0]?.participants);
-  expect(compact[0]?.posts).not.toBe(rooms[0]?.log);
-  expect(rooms[0]?.log.map((message) => message.id)).toEqual(['m1']);
+  const compact = compactLiveKilds(kilds);
+  expect(compact[0]?.agents).not.toBe(kilds[0]?.agents);
+  expect(compact[0]?.posts).not.toBe(kilds[0]?.log);
+  expect(kilds[0]?.log.map((message) => message.id)).toEqual(['m1']);
 });

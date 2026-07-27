@@ -2,43 +2,43 @@ import { type ChildProcess, spawn } from 'node:child_process';
 
 import type { UiEvent } from './events.ts';
 import type {
-  CloseRoomOut,
+  CommandAck,
   CommandResult,
-  InviteOut,
-  MessageOut,
-  RoomActionSuccess,
-  RoomCommandAck,
-} from './room/room-types.ts';
-import { readSkillsProfile, skillsProfileForWorker } from './skills-profile.ts';
+  KildActionSuccess,
+  SendOut,
+  SpawnOut,
+  StopOut,
+} from './kild-types.ts';
+import { readSkillsProfile, skillsProfileForAgent } from './skills-profile.ts';
 import { worktreePath, worktreeRef } from './worktree.ts';
 
 export interface SpawnRequest {
   model?: string;
   cwd?: string;
   persona?: string;
-  /** Session label shown in listings (e.g. the room name, or 'operator'). Never a
-   *  registry project name — purely display. */
+  /** Session label shown in listings (e.g. the kild name). Never a registry project
+   *  name — purely display. */
   label?: string;
   /** Worktree *name* (not path). Absent → run in the project's main checkout.
-   *  Present → the worker ensures `kild/<name>` and runs the agent there. Two
-   *  sessions naming the same worktree share its tree (attach); different names
-   *  split. The worker creates-or-attaches from `cwd` (the repo). */
+   *  Present → the agent ensures `kild/<name>` and runs there. Two sessions naming
+   *  the same worktree share its tree (attach); different names split. The agent
+   *  creates-or-attaches from `cwd` (the repo). */
   worktree?: string;
   /** Base branch a brand-new worktree forks from (e.g. `dev`). Ignored when attaching to
    *  an existing tree. Absent → the checkout's current HEAD. */
   base?: string;
-  /** Absolute path of an existing pi session file to fork from. The worker copies its
+  /** Absolute path of an existing pi session file to fork from. The agent copies its
    *  full history into a brand-new session file (frozen snapshot) — the source file is
    *  never written, so the original session cannot be polluted or corrupted. */
   forkFrom?: string;
-  /** Extra environment for the worker — opaque to the manager. Room participants use
-   *  it to carry `KILD_ROOM` / `KILD_PARTICIPANT`; it never overrides the `KILD_*`
+  /** Extra environment for the agent process — opaque to the manager. Agents in a kild
+   *  use it to carry `KILD_KILD_ID` / `KILD_HANDLE`; it never overrides the `KILD_*`
    *  vars the manager itself sets. */
   env?: Record<string, string>;
 }
 
-/** Metadata UI clients show for a session — including ones the CLI started. */
-export interface SessionInfo {
+/** Metadata UI clients show for an agent — including ones the CLI started. */
+export interface AgentInfo {
   id: string;
   model?: string;
   cwd?: string;
@@ -48,9 +48,9 @@ export interface SessionInfo {
   origin: 'ui' | 'cli';
   /** The selected worktree's name (echoed for the worktrees-in-use cross-check). */
   worktree?: string;
-  /** `kild/<name>` ref, when the session runs in a worktree (else undefined). */
+  /** `kild/<name>` ref, when the agent runs in a worktree (else undefined). */
   branch?: string;
-  /** Deterministic on-disk worktree path, when the session runs in a worktree. */
+  /** Deterministic on-disk worktree path, when the agent runs in a worktree. */
   worktreePath?: string;
   /** The underlying pi session id — reopen this agent in a terminal with
    *  `pi --session <piSessionFile ?? piSessionId>`. */
@@ -60,53 +60,53 @@ export interface SessionInfo {
 }
 
 /** A message broadcast to every connected client. */
-export type Outbound = { session: string; event: UiEvent } | { sessions: SessionInfo[] };
+export type Outbound = { agent: string; event: UiEvent } | { agents: AgentInfo[] };
 
 type MaybePromise<T> = T | Promise<T>;
 
-// Deliberately captured at engine startup rather than per spawn. A worker inherits the
-// engine environment, so PiSession removes it below and selectively restores it only
-// for room participants.
+// Deliberately captured at engine startup rather than per spawn. An agent process
+// inherits the engine environment, so PiSession removes it below and selectively
+// restores it only for agents in a kild.
 const SKILLS_PROFILE = readSkillsProfile(process.env.KILD_SKILLS_PROFILE);
 
-/** The manager-owned `KILD_*` worker environment for a spawn request. Layered on top
+/** The manager-owned `KILD_*` agent environment for a spawn request. Layered on top
  *  of `req.env`, so a request can never override the manager's own vars. Pure —
- *  exported for tests (the request→env plumbing without spawning a worker). */
-export function workerEnv(
+ *  exported for tests (the request→env plumbing without spawning an agent). */
+export function agentEnv(
   id: string,
   req: SpawnRequest,
   skillsProfile: string | undefined,
 ): Record<string, string> {
   return {
-    KILD_ROLE: 'worker',
+    KILD_ROLE: 'agent',
     KILD_MODEL: req.model ?? '',
     KILD_CWD: req.cwd ?? process.cwd(),
     KILD_PERSONA: req.persona ?? '',
-    // Session identity is manager-owned: operator tools use it to identify room openers.
+    // Session identity is manager-owned: REST callers use it to identify kild creators.
     KILD_SESSION_ID: id,
-    // The worktree *name*; the worker ensures it from KILD_CWD (the repo).
+    // The worktree *name*; the agent ensures it from KILD_CWD (the repo).
     KILD_WORKTREE: req.worktree ?? '',
     // Base branch a brand-new worktree forks from (empty → current HEAD).
     KILD_BASE: req.base ?? '',
     // pi session file to fork this session from (empty → fresh session).
     KILD_FORK_SESSION: req.forkFrom ?? '',
-    // A profile is a room capability assignment, not inherited worker state.
+    // A profile is a kild capability assignment, not inherited agent state.
     KILD_SKILLS_PROFILE: skillsProfile ?? '',
   };
 }
 
-/** Control-line callbacks for a session's worker — used by the RoomManager to route
- *  a participant's `post_message` / `invite_agent` back into its room. A bare
- *  (non-room) session passes none, so the control lines are simply never emitted. */
-export interface SessionCallbacks {
-  onMessage?: (m: MessageOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
-  onInvite?: (i: InviteOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
-  onCloseRoom?: (c: CloseRoomOut) => MaybePromise<CommandResult<RoomActionSuccess>>;
+/** Control-line callbacks for an agent process — used by the KildManager to route an
+ *  agent's `send` / `spawn` back into its kild. A bare (non-kild) session passes none,
+ *  so the control lines are simply never emitted. */
+export interface AgentCallbacks {
+  onSend?: (m: SendOut) => MaybePromise<CommandResult<KildActionSuccess>>;
+  onSpawn?: (s: SpawnOut) => MaybePromise<CommandResult<KildActionSuccess>>;
+  onStop?: (s: StopOut) => MaybePromise<CommandResult<KildActionSuccess>>;
 }
 
 /**
- * One agent session = one worker subprocess (see `worker.ts`). The worker is the
- * same binary re-invoked with `KILD_ROLE=worker`; we talk to it over its stdio:
+ * One agent session = one subprocess (see `agent.ts`). The subprocess is the same
+ * binary re-invoked with `KILD_ROLE=agent`; we talk to it over its stdio:
  * `UiEvent` JSONL out, prompt/stop JSONL in.
  */
 class PiSession {
@@ -117,15 +117,15 @@ class PiSession {
     id: string,
     req: SpawnRequest,
     onEvent: (event: UiEvent) => void,
-    callbacks?: SessionCallbacks,
+    callbacks?: AgentCallbacks,
   ) {
     const { KILD_SKILLS_PROFILE: _inheritedSkillsProfile, ...parentEnv } = process.env;
-    const skillsProfile = skillsProfileForWorker(req.env?.KILD_ROOM, SKILLS_PROFILE);
+    const skillsProfile = skillsProfileForAgent(req.env?.KILD_KILD_ID, SKILLS_PROFILE);
     this.child = spawn(process.argv[0] as string, process.argv.slice(1), {
       env: {
         ...parentEnv,
-        ...req.env, // extra worker env (e.g. room membership); our KILD_* win below
-        ...workerEnv(id, req, skillsProfile),
+        ...req.env, // extra agent env (e.g. kild membership); our KILD_* win below
+        ...agentEnv(id, req, skillsProfile),
       },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -138,30 +138,30 @@ class PiSession {
         const line = raw.trim();
         if (!line) continue;
         let parsed:
-          | (Partial<MessageOut> & { kind: 'message_out' })
-          | (Partial<InviteOut> & { kind: 'invite' })
-          | (Partial<CloseRoomOut> & { kind: 'close_room' })
+          | (Partial<SendOut> & { kind: 'send' })
+          | (Partial<SpawnOut> & { kind: 'spawn' })
+          | (Partial<StopOut> & { kind: 'stop' })
           | (UiEvent & { kind: UiEvent['kind'] });
         try {
           parsed = JSON.parse(line) as typeof parsed;
         } catch {
-          continue; // non-JSON line from the worker (a stray log); ignore.
+          continue; // non-JSON line from the agent (a stray log); ignore.
         }
-        // A room participant's `post_message` / `invite_agent` arrive as control lines
-        // routed back to its room, not the transcript. Everything else is a UiEvent.
-        if (parsed.kind === 'message_out') {
-          void this.acknowledge(parsed.requestId, callbacks?.onMessage?.(parsed as MessageOut));
-        } else if (parsed.kind === 'invite' && parsed.name) {
-          void this.acknowledge(parsed.requestId, callbacks?.onInvite?.(parsed as InviteOut));
-        } else if (parsed.kind === 'close_room') {
-          void this.acknowledge(parsed.requestId, callbacks?.onCloseRoom?.(parsed as CloseRoomOut));
+        // An agent's `send` / `spawn` arrive as control lines routed back to its kild,
+        // not the transcript. Everything else is a UiEvent.
+        if (parsed.kind === 'send') {
+          void this.acknowledge(parsed.requestId, callbacks?.onSend?.(parsed as SendOut));
+        } else if (parsed.kind === 'spawn' && parsed.handle) {
+          void this.acknowledge(parsed.requestId, callbacks?.onSpawn?.(parsed as SpawnOut));
+        } else if (parsed.kind === 'stop') {
+          void this.acknowledge(parsed.requestId, callbacks?.onStop?.(parsed as StopOut));
         } else if (parsed.kind) {
           onEvent(parsed as UiEvent);
         }
       }
     });
     this.child.on('error', (err) =>
-      onEvent({ kind: 'error', message: `worker failed: ${err.message}` }),
+      onEvent({ kind: 'error', message: `agent failed: ${err.message}` }),
     );
     this.child.on('exit', () => onEvent({ kind: 'session_end' }));
   }
@@ -175,7 +175,7 @@ class PiSession {
     this.child.kill();
   }
 
-  /** Hard-kill the worker (no graceful stop handshake) — for engine shutdown,
+  /** Hard-kill the agent process (no graceful stop handshake) — for engine shutdown,
    *  where we just need children gone before the process exits. */
   kill(): void {
     this.child.kill();
@@ -183,36 +183,36 @@ class PiSession {
 
   private async acknowledge(
     requestId: string | undefined,
-    pending: MaybePromise<CommandResult<RoomActionSuccess>> | undefined,
+    pending: MaybePromise<CommandResult<KildActionSuccess>> | undefined,
   ): Promise<void> {
     if (!requestId) return;
     const result =
       (await pending) ??
-      ({ ok: false, code: 'rejected', message: 'room command unavailable' } as const);
-    const ack: RoomCommandAck = { type: 'room_command_result', requestId, result };
+      ({ ok: false, code: 'rejected', message: 'kild command unavailable' } as const);
+    const ack: CommandAck = { type: 'command_result', requestId, result };
     this.child.stdin?.write(`${JSON.stringify(ack)}\n`);
   }
 }
 
 /**
- * The engine's single owner of all live sessions. Each session is an isolated
- * subprocess, so sessions run concurrently and a crash takes down only its own
+ * The engine's single owner of all live agents. Each agent is an isolated
+ * subprocess, so agents run concurrently and a crash takes down only its own
  * process. Every client (UI-client WS connections, and the CLI) subscribes to the
- * same broadcast, so a session started anywhere is visible everywhere.
+ * same broadcast, so an agent started anywhere is visible everywhere.
  */
-export class SessionManager {
-  private readonly sessions = new Map<string, { session: PiSession; info: SessionInfo }>();
+export class AgentManager {
+  private readonly sessions = new Map<string, { session: PiSession; info: AgentInfo }>();
   private readonly subscribers = new Set<(msg: Outbound) => void>();
 
   subscribe(fn: (msg: Outbound) => void): () => void {
     this.subscribers.add(fn);
-    fn({ sessions: this.list() }); // catch the new client up
+    fn({ agents: this.list() }); // catch the new client up
     return () => {
       this.subscribers.delete(fn);
     };
   }
 
-  list(): SessionInfo[] {
+  list(): AgentInfo[] {
     return [...this.sessions.values()].map((s) => s.info);
   }
 
@@ -233,10 +233,10 @@ export class SessionManager {
     id: string,
     req: SpawnRequest,
     origin: 'ui' | 'cli' = 'ui',
-    callbacks?: SessionCallbacks,
+    callbacks?: AgentCallbacks,
   ): void {
     if (this.sessions.has(id)) return;
-    const info: SessionInfo = {
+    const info: AgentInfo = {
       id,
       model: req.model,
       cwd: req.cwd,
@@ -254,10 +254,10 @@ export class SessionManager {
         info.worktreePath = worktreePath(req.worktree);
       } catch (err) {
         this.broadcast({
-          session: id,
+          agent: id,
           event: { kind: 'error', message: err instanceof Error ? err.message : String(err) },
         });
-        this.broadcast({ session: id, event: { kind: 'session_end' } });
+        this.broadcast({ agent: id, event: { kind: 'session_end' } });
         return;
       }
     }
@@ -270,21 +270,21 @@ export class SessionManager {
         if (event.kind === 'pi_session') {
           info.piSessionId = event.id;
           info.piSessionFile = event.file;
-          this.broadcast({ sessions: this.list() });
+          this.broadcast({ agents: this.list() });
         }
-        this.broadcast({ session: id, event });
+        this.broadcast({ agent: id, event });
         if (event.kind === 'session_end') {
           this.sessions.delete(id);
-          this.broadcast({ sessions: this.list() });
+          this.broadcast({ agents: this.list() });
         }
       },
       callbacks,
     );
     this.sessions.set(id, { session, info });
-    this.broadcast({ sessions: this.list() });
+    this.broadcast({ agents: this.list() });
   }
 
-  /** Returns false for a dead/missing session so callers can silently drop best-effort signals. */
+  /** Returns false for a dead/missing agent so callers can silently drop best-effort signals. */
   prompt(id: string, text: string, from?: string): boolean {
     const entry = this.sessions.get(id);
     if (!entry) return false;
@@ -301,11 +301,11 @@ export class SessionManager {
     // only via merge-prune. See worktree.ts:pruneMergedWorktrees.
     entry.session.stop();
     this.sessions.delete(id);
-    this.broadcast({ sessions: this.list() });
+    this.broadcast({ agents: this.list() });
   }
 
-  /** Kill every worker subprocess. Called on engine shutdown so a `--watch`
-   *  reload (or Ctrl-C) never orphans workers (they'd otherwise reparent to init). */
+  /** Kill every agent subprocess. Called on engine shutdown so a `--watch`
+   *  reload (or Ctrl-C) never orphans them (they'd otherwise reparent to init). */
   shutdown(): void {
     for (const { session } of this.sessions.values()) session.kill();
   }
@@ -316,4 +316,4 @@ export class SessionManager {
 }
 
 /** Engine-wide singleton. */
-export const sessionManager = new SessionManager();
+export const agentManager = new AgentManager();

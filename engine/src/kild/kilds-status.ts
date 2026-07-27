@@ -1,13 +1,13 @@
 import {
-  type LiveRoomStatus,
-  type ParticipantView,
-  type RoomCostTotals,
-  type RoomMessage,
-  roomCostTotals,
-} from './room/room-types.ts';
-import type { RoomGitStatus } from './worktree-status.ts';
+  type AgentView,
+  type CostTotals,
+  costTotals,
+  type LiveKildStatus,
+  type Message,
+} from './kild-types.ts';
+import type { KildGitStatus } from './worktree-status.ts';
 
-/** The director's compact view of a room's git state: a summary, not the full
+/** The director's compact view of a kild's git state: a summary, not the full
  *  changed-file list. Per the pull-not-push discipline, the director sees a COUNT plus
  *  the actionable collisions; the full list stays in the pull/human layer. `path` is
  *  kept — a driving agent needs it to `cd` in and land the work. */
@@ -24,71 +24,71 @@ export interface CompactGitStatus {
   error?: string;
 }
 
-/** One-line git summary shared by room list and detail displays. */
+/** One-line git summary shared by kild list and detail displays. */
 export function formatCompactGitSummary(git?: CompactGitStatus): string {
   if (!git) return '';
   return ` · ${git.branch ?? '?'} +${git.ahead}/-${git.behind}${git.dirty ? ' dirty' : ''}${git.conflictsWithBase ? ' CONFLICTS' : ''}`;
 }
 
-/** One overlap: `room` also changed `files`. The specific overlapping files ARE the
+/** One overlap: `kild` also changed `files`. The specific overlapping files ARE the
  *  actionable signal (which is why they're surfaced compactly, unlike the full list). */
-export interface RoomCollision {
-  room: string;
+export interface KildCollision {
+  kild: string;
   files: string[];
 }
 
-export interface CompactRoomStatus {
+export interface CompactKildStatus {
   id: string;
   name: string;
-  participants: ParticipantView[];
-  posts: RoomMessage[];
-  /** The room's git/worktree summary — code state, not just conversation. */
+  agents: AgentView[];
+  posts: Message[];
+  /** The kild's git/worktree summary — code state, not just conversation. */
   git?: CompactGitStatus;
-  /** Other live rooms that touch the same files — a merge collision waiting to
-   *  happen. Empty/absent when this room collides with none. */
-  collidesWith?: RoomCollision[];
-  /** Room cost rollup (tokens + USD) summed over participants — absent until at least
-   *  one participant has reported `stats`. Per-participant figures ride `participants`. */
-  totals?: RoomCostTotals;
+  /** Other live kilds that touch the same files — a merge collision waiting to
+   *  happen. Empty/absent when this kild collides with none. */
+  collidesWith?: KildCollision[];
+  /** Kild cost rollup (tokens + USD) summed over agents — absent until at least
+   *  one agent has reported `stats`. Per-agent figures ride `agents`. */
+  totals?: CostTotals;
 }
 
 /** Full changed-file list → a count for the compact view. `path` and the rest ride
  *  through; only the potentially-large file list is dropped (pull it if you need it). */
-function toCompactGit(git: RoomGitStatus): CompactGitStatus {
+function toCompactGit(git: KildGitStatus): CompactGitStatus {
   const { changedFiles, ...rest } = git;
   return { ...rest, changedFileCount: changedFiles.length };
 }
 
-/** Cross-room collisions: for each room, the other live rooms that changed any of
+/** Cross-kild collisions: for each kild, the other live kilds that changed any of
  *  the same files (committed vs base). Pure — computed once over the enriched set. */
-export function computeCollisions(rooms: LiveRoomStatus[]): Map<string, RoomCollision[]> {
-  const result = new Map<string, RoomCollision[]>();
-  for (const a of rooms) {
+export function computeCollisions(kilds: LiveKildStatus[]): Map<string, KildCollision[]> {
+  const result = new Map<string, KildCollision[]>();
+  for (const a of kilds) {
     const aFiles = new Set(a.git?.changedFiles ?? []);
     if (aFiles.size === 0) continue;
-    const collisions: RoomCollision[] = [];
-    for (const b of rooms) {
+    const collisions: KildCollision[] = [];
+    for (const b of kilds) {
       if (b.id === a.id) continue;
       const shared = (b.git?.changedFiles ?? []).filter((file) => aFiles.has(file));
-      if (shared.length > 0) collisions.push({ room: b.name, files: shared });
+      if (shared.length > 0) collisions.push({ kild: b.name, files: shared });
     }
     if (collisions.length > 0) result.set(a.id, collisions);
   }
   return result;
 }
 
-export function compactLiveRooms(liveRooms: LiveRoomStatus[]): CompactRoomStatus[] {
-  const collisions = computeCollisions(liveRooms);
-  return liveRooms.map((room) => {
-    const totals = room.totals ?? roomCostTotals(room.participants);
+export function compactLiveKilds(liveKilds: LiveKildStatus[]): CompactKildStatus[] {
+  const collisions = computeCollisions(liveKilds);
+  return liveKilds.map((kild) => {
+    const totals = kild.totals ?? costTotals(kild.agents);
     return {
-      id: room.id,
-      name: room.name,
-      participants: room.participants.map((participant) => ({ ...participant })),
-      posts: room.log.slice(-2),
+      id: kild.id,
+      name: kild.name,
+      agents: kild.agents.map((agent) => ({ ...agent })),
+      posts: kild.log.slice(-2),
       ...(totals ? { totals } : {}),
-      ...(room.git ? { git: toCompactGit(room.git) } : {}),
-      ...(collisions.has(room.id) ? { collidesWith: collisions.get(room.id) } : {}),
+      ...(kild.git ? { git: toCompactGit(kild.git) } : {}),
+      ...(collisions.has(kild.id) ? { collidesWith: collisions.get(kild.id) } : {}),
     };
   });
 }

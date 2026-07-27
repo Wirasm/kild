@@ -2,18 +2,18 @@ import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
 // execFile (no shell) mirrors worktree.ts: `dir`/`base` may originate from an
-// LLM-driven room selector, so shell interpolation would be RCE. This module
-// is pure observability — a driving agent reads each room's git state through
+// LLM-driven kild selector, so shell interpolation would be RCE. This module
+// is pure observability — a driving agent reads each kild's git state through
 // it — so every git failure is captured in `error`, NEVER thrown: a status probe must
 // not be able to crash its caller.
 const execFile = promisify(execFileCb);
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** The git state of one room directory, relative to a base branch. Every field
+/** The git state of one kild directory, relative to a base branch. Every field
  *  has a safe default so a probe failure still yields a well-formed object (see
- *  {@link roomGitStatus}); the failure detail lands in `error`. */
-export interface RoomGitStatus {
+ *  {@link kildGitStatus}); the failure detail lands in `error`. */
+export interface KildGitStatus {
   path: string; // the dir inspected
   branch: string | null;
   base: string; // base branch compared against (default: main)
@@ -50,13 +50,13 @@ export async function resolveDefaultBase(dir: string): Promise<string> {
   return 'main';
 }
 
-/** Inspect one room directory's git state relative to `base` (default: the
+/** Inspect one kild directory's git state relative to `base` (default: the
  *  remote default branch, else `main`). Never throws: a non-git dir, a missing base
  *  ref, or any git error returns a well-formed object with `error` set and safe
  *  defaults so a driving agent can surface the state without crashing. */
-export async function roomGitStatus(dir: string, base?: string): Promise<RoomGitStatus> {
+export async function kildGitStatus(dir: string, base?: string): Promise<KildGitStatus> {
   const resolvedBase = base ?? (await resolveDefaultBase(dir));
-  const status: RoomGitStatus = {
+  const status: KildGitStatus = {
     path: dir,
     branch: null,
     base: resolvedBase,

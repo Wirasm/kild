@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { SessionManager as PiSessionManager } from '@earendil-works/pi-coding-agent';
 
-// The worker's fork-spawn (KILD_FORK_SESSION) rests on one SDK guarantee:
+// The agent's fork-spawn (KILD_FORK_SESSION) rests on one SDK guarantee:
 // SessionManager.forkFrom copies the source session's history into a brand-new
 // session file and NEVER writes the source — so a fork can be prompted freely
 // without polluting or corrupting the original. These tests pin that contract

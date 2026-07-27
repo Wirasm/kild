@@ -3,21 +3,21 @@ import path from 'node:path';
 
 import { kildHome, resolvePluginPaths } from './config.ts';
 
-/** A reusable role (a persona): a name + system prompt, read from convention dirs.
- *  The on-disk dir names (`.pi/agents`, `.claude/agents`, `.kild/agents`) are upstream
- *  pi/Claude convention and deliberately NOT renamed to "personas" — kild only reads
- *  what those ecosystems already write. Mirror of kild-core::agent. */
-export interface Agent {
+/** A reusable persona: a name + system prompt, read from convention dirs. The on-disk
+ *  dir names (`.pi/agents`, `.claude/agents`, `.kild/agents`) are upstream pi/Claude
+ *  convention and deliberately NOT renamed to "personas" — kild only reads what those
+ *  ecosystems already write. Mirror of kild-core::agent. */
+export interface Persona {
   name: string;
   /** From frontmatter `description:` — the discovery signal an orchestrator reads
-   *  to know what an agent is for. Empty string when the file has none. */
+   *  to know what a persona is for. Empty string when the file has none. */
   description: string;
   systemPrompt: string;
 }
 
-export const DEFAULT_AGENT = 'default';
+export const DEFAULT_PERSONA = 'default';
 
-async function agentDirs(projectRoot?: string): Promise<string[]> {
+async function personaDirs(projectRoot?: string): Promise<string[]> {
   const dirs: string[] = [];
   if (projectRoot) {
     dirs.push(path.join(projectRoot, '.kild/agents'));
@@ -45,7 +45,7 @@ function splitFrontmatter(content: string): { frontmatter: string; body: string 
   return { frontmatter: '', body: content.trim() };
 }
 
-/** Strip a leading YAML frontmatter block (if any) — the agent's system prompt. */
+/** Strip a leading YAML frontmatter block (if any) — the persona's system prompt. */
 export function stripFrontmatter(content: string): string {
   return splitFrontmatter(content).body;
 }
@@ -65,11 +65,11 @@ function frontmatterDescription(frontmatter: string): string {
 }
 
 /** Built-in `default` + every `<name>.md` across convention dirs (first wins). */
-export async function listAgents(projectRoot?: string): Promise<Agent[]> {
-  const agents: Agent[] = [{ name: DEFAULT_AGENT, description: '', systemPrompt: '' }];
-  const seen = new Set<string>([DEFAULT_AGENT]);
+export async function listPersonas(projectRoot?: string): Promise<Persona[]> {
+  const personas: Persona[] = [{ name: DEFAULT_PERSONA, description: '', systemPrompt: '' }];
+  const seen = new Set<string>([DEFAULT_PERSONA]);
 
-  for (const dir of await agentDirs(projectRoot)) {
+  for (const dir of await personaDirs(projectRoot)) {
     let entries: string[];
     try {
       entries = await fs.readdir(dir);
@@ -84,18 +84,18 @@ export async function listAgents(projectRoot?: string): Promise<Agent[]> {
       if (content === null) continue;
       seen.add(name);
       const { frontmatter, body } = splitFrontmatter(content);
-      agents.push({ name, description: frontmatterDescription(frontmatter), systemPrompt: body });
+      personas.push({ name, description: frontmatterDescription(frontmatter), systemPrompt: body });
     }
   }
-  return agents;
+  return personas;
 }
 
-/** The instructions to layer for a chosen agent (null = pi's own default). */
-export async function resolveAgentInstructions(
+/** The instructions to layer for a chosen persona (null = pi's own default). */
+export async function resolvePersonaInstructions(
   name: string,
   projectRoot?: string,
 ): Promise<string | null> {
-  if (name === DEFAULT_AGENT) return null;
-  const agent = (await listAgents(projectRoot)).find((a) => a.name === name);
-  return agent?.systemPrompt ? agent.systemPrompt : null;
+  if (name === DEFAULT_PERSONA) return null;
+  const persona = (await listPersonas(projectRoot)).find((p) => p.name === name);
+  return persona?.systemPrompt ? persona.systemPrompt : null;
 }

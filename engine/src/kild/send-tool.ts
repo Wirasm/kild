@@ -2,38 +2,38 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
 /**
- * The agent-facing side of a room: a `post_message` tool a worker registers (only
- * when it runs as a room participant). Calling it is the ONLY way a participant's
- * words reach the other participants or the human — we never scrape the agent's
- * prose, which is the failure mode of pi's coms-net POC. The transport is injected:
- * the worker passes an `emit` that writes a `message_out` control line to the engine.
+ * The agent-facing side of a kild: a `send` tool an agent registers (only when it runs
+ * in a kild). Calling it is the ONLY way an agent's words reach the other agents or the
+ * human — we never scrape the agent's prose, which is the failure mode of pi's coms-net
+ * POC. The transport is injected: the agent process passes an `emit` that writes a `send`
+ * control line to the engine.
  *
  * Addressing is a structured `to` list, NOT parsed from the message text — so a
  * message body can contain `@decorator` / `@media` / an email without misrouting, and
  * a non-Claude model that forgets sigil syntax still delivers (the engine defaults an
- * omitted `to` to the room lead). Reaching another participant (delivering them a turn)
- * requires calling this tool — an agent's ordinary prose is never posted for it.
+ * omitted `to` to the kild lead). Reaching another agent (delivering them a turn)
+ * requires calling this tool — an agent's ordinary prose is never sent for it.
  */
-export function createPostMessageTool(
+export function createSendTool(
   emit: (text: string, to?: string[]) => Promise<string>,
 ): ToolDefinition {
   return {
-    name: 'post_message',
-    label: 'Post Message',
+    name: 'send',
+    label: 'Send',
     description:
-      'Post a message to the room so other agents and the human can read it. ' +
+      'Send a message into the kild so other agents and the human can read it. ' +
       'Set `to` to the handles you are addressing (e.g. `["coder"]`, or `["human"]` ' +
-      'for the operator) — those participants are prompted with your message. Omit `to` ' +
-      'to address the room lead by default. This is the ONLY way others see your ' +
+      'for the operator) — those agents are prompted with your message. Omit `to` ' +
+      'to address the kild lead by default. This is the ONLY way others see your ' +
       'message — your normal output is private to you.',
-    promptSnippet: 'post_message — speak in the room; set `to` to the handles you address',
+    promptSnippet: 'send — speak in the kild; set `to` to the handles you address',
     parameters: Type.Object({
       text: Type.String({ description: 'The message body.' }),
       to: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            'Handles to address, e.g. ["coder"] or ["human"]. Those participants are ' +
-            'prompted with this message. Omit to address the room lead.',
+            'Handles to address, e.g. ["coder"] or ["human"]. Those agents are ' +
+            'prompted with this message. Omit to address the kild lead.',
         }),
       ),
     }),

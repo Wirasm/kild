@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listAgents, stripFrontmatter } from './agents.ts';
+import { listPersonas, stripFrontmatter } from './personas.ts';
 
 test('strips a leading YAML frontmatter block', () => {
   expect(
@@ -43,9 +43,9 @@ test('discovers scoped global agents before home Claude agents', async () => {
     process.env.HOME = home;
     process.env.KILD_HOME = scopedHome;
 
-    const agents = await listAgents(projectRoot);
+    const personas = await listPersonas(projectRoot);
 
-    expect(agents.map((agent) => agent.name)).toEqual([
+    expect(personas.map((persona) => persona.name)).toEqual([
       'default',
       'project',
       'claude',
@@ -53,8 +53,12 @@ test('discovers scoped global agents before home Claude agents', async () => {
       'global',
       'home',
     ]);
-    expect(agents.find((agent) => agent.name === 'claude')?.systemPrompt).toBe('project claude');
-    expect(agents.find((agent) => agent.name === 'global')?.systemPrompt).toBe('scoped global');
+    expect(personas.find((persona) => persona.name === 'claude')?.systemPrompt).toBe(
+      'project claude',
+    );
+    expect(personas.find((persona) => persona.name === 'global')?.systemPrompt).toBe(
+      'scoped global',
+    );
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;

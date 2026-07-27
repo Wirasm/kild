@@ -1,28 +1,28 @@
-import type { MailboxPost } from './room/attached.ts';
-import type { LiveRoomStatus, ParticipantSpec } from './room/room-types.ts';
+import type { InboxMessage } from './inbox.ts';
+import type { AgentSpec, LiveKildStatus } from './kild-types.ts';
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
 
-export interface OpenRoomRequest {
+export interface NewKildRequest {
   name: string;
   cwd?: string;
   project?: string;
   worktree?: string;
-  participants: ParticipantSpec[];
+  agents: AgentSpec[];
   kickoff: string;
   /** Base branch for the worktree + git-status baseline (default: checkout's branch). */
   base?: string;
-  /** Live session that opened the room; ordinary REST callers omit this. */
+  /** Live session that created the kild; ordinary REST callers omit this. */
   openedBy?: string;
 }
 
-export interface OpenRoomResponse {
+export interface NewKildResponse {
   ok: true;
   id: string;
   message: string;
 }
 
-export interface RoomActionResponse {
+export interface KildActionResponse {
   ok: true;
   message: string;
 }
@@ -36,25 +36,25 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function openRoom(req: OpenRoomRequest): Promise<OpenRoomResponse> {
-  return engineFetch('/api/rooms', {
+export async function newKild(req: NewKildRequest): Promise<NewKildResponse> {
+  return engineFetch('/api/kilds', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(req),
   });
 }
 
-/** `to` names the participants being addressed, exactly as the in-room `post_message`
- *  tool does. Omit it to reach the room lead — the long-standing default, unchanged.
- *  Without it a caller outside a room could only ever reach the lead, so an attached
- *  participant was addressable by agents but not by the human. */
-export async function postRoom(
-  roomId: string,
+/** `to` names the agents being addressed, exactly as the in-kild `send` tool does. Omit
+ *  it to reach the kild lead — the long-standing default, unchanged. Without it a caller
+ *  outside a kild could only ever reach the lead, so an attached agent was addressable by
+ *  agents but not by the human. */
+export async function sendMessage(
+  kildId: string,
   text: string,
   sessionId?: string,
   to?: string[],
-): Promise<RoomActionResponse> {
-  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/post`, {
+): Promise<KildActionResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -65,32 +65,32 @@ export async function postRoom(
   });
 }
 
-export async function closeRoom(roomId: string, sessionId?: string): Promise<RoomActionResponse> {
-  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/close`, {
+export async function stopKild(kildId: string, sessionId?: string): Promise<KildActionResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/stop`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ...(sessionId ? { sessionId } : {}) }),
   });
 }
 
-export async function getLiveRooms(): Promise<LiveRoomStatus[]> {
-  return engineFetch('/api/rooms/live');
+export async function getLiveKilds(): Promise<LiveKildStatus[]> {
+  return engineFetch('/api/kilds');
 }
 
-/** Register an attached participant — a harness kild does not own claiming a `@handle`.
- *  Idempotent by name: re-joining is a no-op, not an error. */
-export async function joinRoom(roomId: string, name: string): Promise<RoomActionResponse> {
-  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/join`, {
+/** Register an attached agent — a harness kild does not own claiming a `@handle`.
+ *  Idempotent by handle: re-attaching is a no-op, not an error. */
+export async function attachAgent(kildId: string, handle: string): Promise<KildActionResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/agents/attach`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ handle }),
   });
 }
 
-export interface DrainRoomResponse {
+export interface DrainInboxResponse {
   ok: true;
-  posts: MailboxPost[];
-  /** True when this drain reported nothing — the attached participant's idle signal. */
+  posts: InboxMessage[];
+  /** True when this drain reported nothing — the attached agent's idle signal. */
   idle: boolean;
   /** True when the engine's wake cap withheld mail. The caller is told nothing either way. */
   capped: boolean;
@@ -101,54 +101,54 @@ export interface DrainRoomResponse {
  *  a blink, not a stall. */
 const DRAIN_TIMEOUT_MS = 1500;
 
-/** Destructively read an attached participant's mailbox. Throws on any failure — the
+/** Destructively read an attached agent's inbox. Throws on any failure — the
  *  hook-shaped caller is the one that decides failure means silence. */
-export async function drainRoom(roomId: string, name: string): Promise<DrainRoomResponse> {
-  return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/drain`, {
+export async function drainInbox(kildId: string, handle: string): Promise<DrainInboxResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/inbox/drain`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ handle }),
     signal: AbortSignal.timeout(DRAIN_TIMEOUT_MS),
   });
 }
 
-export interface SpawnSessionRequest {
+export interface SpawnAgentRequest {
   persona?: string;
   model?: string;
   cwd?: string;
   worktree?: string;
   base?: string;
-  /** Session label shown in listings (e.g. a room name). Display only. */
+  /** Session label shown in listings (e.g. a kild name). Display only. */
   label?: string;
-  /** Absolute pi session file to fork from — the spawned session starts from a frozen
+  /** Absolute pi session file to fork from — the spawned agent starts from a frozen
    *  copy of its history (a new session file; the source is never written). */
   forkFrom?: string;
   /** Initial prompt delivered right after spawn. */
   prompt?: string;
 }
 
-/** Spawn a detached session through the engine; returns its id. */
-export async function spawnSession(req: SpawnSessionRequest): Promise<{ ok: true; id: string }> {
-  return engineFetch('/api/sessions', {
+/** Spawn a detached agent through the engine; returns its id. */
+export async function spawnAgent(req: SpawnAgentRequest): Promise<{ ok: true; id: string }> {
+  return engineFetch('/api/agents', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(req),
   });
 }
 
-export async function promptSession(id: string, text: string): Promise<{ ok: boolean }> {
-  return engineFetch(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
+export async function promptAgent(id: string, text: string): Promise<{ ok: boolean }> {
+  return engineFetch(`/api/agents/${encodeURIComponent(id)}/prompt`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text }),
   });
 }
 
-export async function stopSession(id: string): Promise<{ ok: boolean }> {
-  return engineFetch(`/api/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+export async function stopAgent(id: string): Promise<{ ok: boolean }> {
+  return engineFetch(`/api/agents/${encodeURIComponent(id)}/stop`, { method: 'POST' });
 }
 
-export interface SessionSummary {
+export interface AgentSummary {
   id: string;
   persona?: string;
   model?: string;
@@ -156,6 +156,6 @@ export interface SessionSummary {
   cwd?: string;
 }
 
-export async function listSessions(): Promise<SessionSummary[]> {
-  return engineFetch('/api/sessions');
+export async function listAgents(): Promise<AgentSummary[]> {
+  return engineFetch('/api/agents');
 }

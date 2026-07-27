@@ -5,61 +5,61 @@ import {
   formatOperatorNotification,
   NO_FINAL_POST,
   openerNotificationTarget,
-} from './room-events.ts';
-import type { Room, RoomMessage } from './room-types.ts';
+} from './kild-events.ts';
+import type { Kild, Message } from './kild-types.ts';
 
-function room(overrides: Partial<Room> = {}): Room {
+function kild(overrides: Partial<Kild> = {}): Kild {
   return {
-    id: 'room-1',
+    id: 'kild-1',
     name: 'ops',
     cwd: '/tmp',
     openedBy: 'brain-session',
-    participants: [{ name: 'worker', sessionId: 'worker-session', persona: 'worker' }],
+    agents: [{ handle: 'agent', id: 'agent-session', persona: 'agent' }],
     log: [],
     state: 'running',
     ...overrides,
   };
 }
 
-function message(text: string, system = false): RoomMessage {
-  return { id: text, roomId: 'room-1', from: 'worker', to: [], text, ts: 0, system };
+function message(text: string, system = false): Message {
+  return { id: text, kildId: 'kild-1', from: 'agent', to: [], text, ts: 0, system };
 }
 
-test('formats a clearly labeled participant post to @human', () => {
+test('formats a clearly labeled agent message to @human', () => {
   expect(
     formatOperatorNotification('ops', {
       kind: 'human_post',
-      from: 'worker',
+      from: 'agent',
       text: '@human need a gate decision',
     }),
   ).toBe(
-    "[kild operator notification] Room 'ops': @worker posted to @human: @human need a gate decision",
+    "[kild operator notification] Kild 'ops': @agent sent to @human: @human need a gate decision",
   );
 });
 
-test('formats halt and close with the final non-system post', () => {
+test('formats halt and stop with the final non-system post', () => {
   expect(
     formatOperatorNotification('ops', { kind: 'halted', finalPost: 'implementation committed' }),
   ).toBe(
-    "[kild operator notification] Room 'ops' was halted. Final non-system post: implementation committed",
+    "[kild operator notification] Kild 'ops' was halted. Final non-system post: implementation committed",
   );
   expect(
     formatOperatorNotification('ops', { kind: 'closed', finalPost: 'implementation committed' }),
   ).toBe(
-    "[kild operator notification] Room 'ops' was closed and archived. Final non-system post: implementation committed",
+    "[kild operator notification] Kild 'ops' was stopped and archived. Final non-system post: implementation committed",
   );
 });
 
 test('uses the final non-system post and the exact sentinel when none exists', () => {
   expect(
-    finalNonSystemPost(room({ log: [message('work complete'), message('Room halted', true)] })),
+    finalNonSystemPost(kild({ log: [message('work complete'), message('Kild halted', true)] })),
   ).toBe('work complete');
-  expect(finalNonSystemPost(room({ log: [message('Room halted', true)] }))).toBe(NO_FINAL_POST);
+  expect(finalNonSystemPost(kild({ log: [message('Kild halted', true)] }))).toBe(NO_FINAL_POST);
   expect(NO_FINAL_POST).toBe('(no non-system posts recorded)');
 });
 
-test('targets only a non-participant opener', () => {
-  expect(openerNotificationTarget(room())).toBe('brain-session');
-  expect(openerNotificationTarget(room({ openedBy: undefined }))).toBeUndefined();
-  expect(openerNotificationTarget(room({ openedBy: 'worker-session' }))).toBeUndefined();
+test('targets only a non-agent opener', () => {
+  expect(openerNotificationTarget(kild())).toBe('brain-session');
+  expect(openerNotificationTarget(kild({ openedBy: undefined }))).toBeUndefined();
+  expect(openerNotificationTarget(kild({ openedBy: 'agent-session' }))).toBeUndefined();
 });

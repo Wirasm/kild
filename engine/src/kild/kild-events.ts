@@ -1,44 +1,43 @@
-import { participantSessionId, type Room, type RoomMessage } from './room-types.ts';
+import { agentProcessId, type Kild, type Message } from './kild-types.ts';
 
-/** Stable fallback when a lifecycle event has no participant/human-authored post to report. */
+/** Stable fallback when a lifecycle event has no agent/human-authored message to report. */
 export const NO_FINAL_POST = '(no non-system posts recorded)';
 
-export type RoomOperatorEvent =
+export type KildOperatorEvent =
   | { kind: 'human_post'; from: string; text: string }
   | { kind: 'halted'; finalPost: string }
   | { kind: 'closed'; finalPost: string };
 
-/** The final meaningful room post — engine notices are lifecycle metadata, not work output. */
-export function finalNonSystemPost(room: Pick<Room, 'log'>): string {
-  for (let index = room.log.length - 1; index >= 0; index -= 1) {
-    const message = room.log[index];
+/** The final meaningful kild message — engine notices are lifecycle metadata, not work
+ *  output. */
+export function finalNonSystemPost(kild: Pick<Kild, 'log'>): string {
+  for (let index = kild.log.length - 1; index >= 0; index -= 1) {
+    const message = kild.log[index];
     if (message && !message.system) return message.text;
   }
   return NO_FINAL_POST;
 }
 
-/** Return the opener only when it is outside the room, avoiding self-directed room turns. */
+/** Return the creator only when it is outside the kild, avoiding self-directed turns. */
 export function openerNotificationTarget(
-  room: Pick<Room, 'openedBy' | 'participants'>,
+  kild: Pick<Kild, 'openedBy' | 'agents'>,
 ): string | undefined {
-  if (!room.openedBy) return undefined;
-  return room.participants.some(
-    (participant) => participantSessionId(participant) === room.openedBy,
-  )
+  if (!kild.openedBy) return undefined;
+  return kild.agents.some((agent) => agentProcessId(agent) === kild.openedBy)
     ? undefined
-    : room.openedBy;
+    : kild.openedBy;
 }
 
-/** A direct SessionManager prompt, deliberately distinct from a RoomMessage/room delivery. */
-export function formatOperatorNotification(roomName: string, event: RoomOperatorEvent): string {
-  const label = `[kild operator notification] Room '${roomName}'`;
+/** A direct AgentManager prompt, deliberately distinct from a Message/kild delivery. */
+export function formatOperatorNotification(kildName: string, event: KildOperatorEvent): string {
+  const label = `[kild operator notification] Kild '${kildName}'`;
   if (event.kind === 'human_post') {
-    return `${label}: @${event.from} posted to @human: ${event.text}`;
+    return `${label}: @${event.from} sent to @human: ${event.text}`;
   }
-  const state = event.kind === 'halted' ? 'was halted' : 'was closed and archived';
+  const state = event.kind === 'halted' ? 'was halted' : 'was stopped and archived';
   return `${label} ${state}. Final non-system post: ${event.finalPost}`;
 }
 
-export function humanPostEvent(message: RoomMessage): RoomOperatorEvent {
+export function humanPostEvent(message: Message): KildOperatorEvent {
   return { kind: 'human_post', from: message.from, text: message.text };
 }

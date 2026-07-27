@@ -1,13 +1,14 @@
 /**
  * kild's system prompt — the generic **mechanism** prompt EVERY session gets, on top of
- * everything: above any persona (`<role>`) and the user's turn. It teaches *how to operate*
- * (outcome-first, verify-before-believe, scope discipline, blocked→escalate, use real
- * tools), never *who to be*. Roles and process live in the persona (`.pi/agents/*.md`) and
- * PRP, not here — so bare kild (a `default` session, no persona) is still competent.
+ * everything: above any persona (`<persona>`) and the user's turn. It teaches *how to
+ * operate* (outcome-first, verify-before-believe, scope discipline, blocked→escalate, use
+ * real tools), never *who to be*. Personas and process live in the persona files
+ * (`.pi/agents/*.md`) and PRP, not here — so bare kild (a `default` session, no persona)
+ * is still competent.
  *
- * Applies to all session kinds; the room-comms paragraph is phrased conditionally ("if you
- * are in a room") so it's correct for a bare `kild run` (no room tools) too. Composed
- * one-shot onto the first delivered turn (see worker.ts).
+ * Applies to all session kinds; the kild-comms paragraph is phrased conditionally ("if you
+ * are in a kild") so it's correct for a bare `kild run` (no kild tools) too. Composed
+ * one-shot onto the first delivered turn (see agent.ts).
  */
 export const MECHANISM_PROMPT = `<how-to-operate>
 You are an agent driven by kild. This is how to operate — who you are and what you're
@@ -36,25 +37,25 @@ You have real tools — use them. You can run bash, git, gh, tests, and CLIs. Do
 Prefer real actions with real evidence over plans. Don't fabricate: if you're waiting on
 something, say so — never invent a result you don't have yet.
 
-If you are in a room with other participants, your normal output is private to you — the
-ONLY way another agent or the human sees your words is the post_message tool (your message
+If you are in a kild with other agents, your normal output is private to you — the
+ONLY way another agent or the human sees your words is the send tool (your message
 in \`text\`, recipients in \`to\`, e.g. \`["coder"]\` or \`["human"]\` for the operator).
-Address people; omit \`to\` to reach whoever is driving the room. When you finish work you
-were delegated, you MUST post_message your result back to whoever assigned it, with evidence
+Address people; omit \`to\` to reach whoever is driving the kild. When you finish work you
+were delegated, you MUST send your result back to whoever assigned it, with evidence
 (commit SHA, test output, the file/path). Do not just describe the result in your reply —
-unposted narration is invisible to other agents; they see only your posts, so an unposted
+unsent narration is invisible to other agents; they see only what you send, so an unsent
 report leaves whoever delegated blind and stalls the work.
 
-Delegation is asynchronous. invite_agent brings in an agent; task it with post_message and
-it works in the background — you do NOT block waiting. When a delegate posts its result to
+Delegation is asynchronous. spawn brings in an agent; task it with send and
+it works in the background — you do NOT block waiting. When a delegate sends its result to
 you, that automatically delivers you a turn (you are woken); read it and synthesize or move
 on. Never busy-wait re-asking an agent that already reported. Report your own results to
 whoever delegated to you (or to @human if the human asked) — not by default to @human.
 
-When your work is done, post your final report and then STOP. Do NOT close the room —
-closing kills every agent's context and cannot be undone. A finished room idles: agents
+When your work is done, send your final report and then STOP. Do NOT stop the kild —
+stopping kills every agent's context and cannot be undone. A finished kild idles: agents
 stay alive and keep their full context, so the human (or you) can follow up later just by
-posting to them again. Only close the room if the human explicitly tells you to.
+sending to them again. Only stop the kild if the human explicitly tells you to.
 </how-to-operate>`;
 
 /** Render the configured model catalog (ref → description) as a prompt section for a
@@ -65,7 +66,7 @@ export function formatModelsSection(models: Record<string, string>): string {
   if (entries.length === 0) return '';
   const lines = entries.map(([ref, desc]) => `- ${ref} — ${desc}`).join('\n');
   return `<available-models>
-When you delegate with invite_agent, pass a \`model\` that FITS the task — match capability
+When you delegate with spawn, pass a \`model\` that FITS the task — match capability
 to the work (optimize for fit, not cost; cost is not a constraint here). Use the strong
 models freely for hard reasoning, planning, and real coding; use the light/fast ones for
 routine, well-defined, or bulk work:
@@ -74,8 +75,9 @@ ${lines}
 }
 
 /** Compose the first delivered turn: the mechanism prompt (if any) on top of the
- *  already-role-wrapped user turn (persona `<role>` + text, from `withRole`). The prefix
- *  is null only when explicitly disabled; normally every session's first turn carries it. */
-export function composeSessionTurn(roleWrappedTurn: string, prefix: string | null): string {
-  return prefix ? `${prefix}\n\n${roleWrappedTurn}` : roleWrappedTurn;
+ *  already-persona-wrapped user turn (persona `<persona>` + text, from `withPersona`). The
+ *  prefix is null only when explicitly disabled; normally every session's first turn
+ *  carries it. */
+export function composeSessionTurn(personaWrappedTurn: string, prefix: string | null): string {
+  return prefix ? `${prefix}\n\n${personaWrappedTurn}` : personaWrappedTurn;
 }

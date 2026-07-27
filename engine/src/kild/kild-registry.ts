@@ -1,151 +1,150 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { kildHome } from '../config.ts';
+import { kildHome } from './config.ts';
 import {
-  type ArchivedRoom,
-  participantView,
-  type Room,
-  type RoomMessage,
-  type RoomSummary,
-  type SpawnedParticipant,
-} from './room-types.ts';
+  type ArchivedKild,
+  agentView,
+  type Kild,
+  type KildSummary,
+  type Message,
+  type OwnedAgent,
+} from './kild-types.ts';
 
 /**
- * In-memory store of live rooms, with write-through persistence of each room's
- * conversation log to `$KILD_HOME/rooms/<id>.json`. Live behaviour (delivery/
+ * In-memory store of live kilds, with write-through persistence of each kild's
+ * conversation log to `$KILD_HOME/kilds/<id>.json`. Live behaviour (delivery/
  * broadcast) lives in the router/manager — this only holds state and the on-disk
  * mirror.
  *
- * Persistence is **history only**: on construction we load past rooms into a
- * separate `archive` map. A participant is a worker subprocess that dies with the
- * engine, so a restored room has no live participants — it is a read-only transcript,
- * never a resumable session. We write only rooms that have at least one message, so
- * empty/never-used rooms leave no history clutter.
+ * Persistence is **history only**: on construction we load past kilds into a
+ * separate `archive` map. An owned agent is a subprocess that dies with the engine,
+ * so a restored kild has no live agents — it is a read-only transcript, never a
+ * resumable session. We write only kilds that have at least one message, so
+ * empty/never-used kilds leave no history clutter.
  */
-export class RoomRegistry {
-  private readonly rooms = new Map<string, Room>();
-  /** Past rooms recovered from disk at startup (read-only logs). */
-  private readonly archive = new Map<string, ArchivedRoom>();
-  private readonly dir = path.join(kildHome(), 'rooms');
+export class KildRegistry {
+  private readonly kilds = new Map<string, Kild>();
+  /** Past kilds recovered from disk at startup (read-only logs). */
+  private readonly archive = new Map<string, ArchivedKild>();
+  private readonly dir = path.join(kildHome(), 'kilds');
 
   constructor() {
     this.loadArchive();
   }
 
-  create(room: Room): void {
-    this.rooms.set(room.id, room);
+  create(kild: Kild): void {
+    this.kilds.set(kild.id, kild);
   }
 
-  get(roomId: string): Room | undefined {
-    return this.rooms.get(roomId);
+  get(kildId: string): Kild | undefined {
+    return this.kilds.get(kildId);
   }
 
-  /** Drop the live room. If it had any history, move it into the in-memory archive
+  /** Drop the live kild. If it had any history, move it into the in-memory archive
    *  immediately (and return the snapshot) so it shows as read-only history without
    *  waiting for the next engine start. Persist the final archived snapshot too, so a
    *  halted→closed transition survives restart/reload. */
-  remove(roomId: string): ArchivedRoom | undefined {
-    const room = this.rooms.get(roomId);
-    this.rooms.delete(roomId);
-    if (!room || room.log.length === 0) return undefined;
-    const archived = this.snapshot(room, room.state);
-    this.archive.set(room.id, archived);
+  remove(kildId: string): ArchivedKild | undefined {
+    const kild = this.kilds.get(kildId);
+    this.kilds.delete(kildId);
+    if (!kild || kild.log.length === 0) return undefined;
+    const archived = this.snapshot(kild, kild.state);
+    this.archive.set(kild.id, archived);
     this.saveArchived(archived);
     return archived;
   }
 
-  /** Find which room + participant a session belongs to — the reverse lookup that
-   *  routes a participant's `message_out` / `invite` back to its room. Spawned only, by
-   *  construction: a session id is exactly the thing an attached participant does not
-   *  have. */
-  locateSession(sessionId: string): { room: Room; participant: SpawnedParticipant } | undefined {
-    for (const room of this.rooms.values()) {
-      const participant = room.participants.find(
-        (p): p is SpawnedParticipant => p.kind !== 'attached' && p.sessionId === sessionId,
+  /** Find which kild + agent a session belongs to — the reverse lookup that routes an
+   *  agent's `send` / `spawn` back to its kild. Owned only, by construction: a session id
+   *  is exactly the thing an attached agent does not have. */
+  locateAgent(agentId: string): { kild: Kild; agent: OwnedAgent } | undefined {
+    for (const kild of this.kilds.values()) {
+      const agent = kild.agents.find(
+        (a): a is OwnedAgent => a.ownership !== 'attached' && a.id === agentId,
       );
-      if (participant) return { room, participant };
+      if (agent) return { kild, agent };
     }
     return undefined;
   }
 
-  appendMessage(roomId: string, message: RoomMessage): void {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
-    room.log.push(message);
-    this.save(room); // write-through: the log (and current participant snapshot) to disk
+  appendMessage(kildId: string, message: Message): void {
+    const kild = this.kilds.get(kildId);
+    if (!kild) return;
+    kild.log.push(message);
+    this.save(kild); // write-through: the log (and current agent snapshot) to disk
   }
 
-  /** Re-persist a room's snapshot after out-of-band metadata changes (e.g. a participant's
-   *  pi session identity arriving after the last post). No-op for message-less rooms. */
-  persistNow(roomId: string): void {
-    const room = this.rooms.get(roomId);
-    if (room) this.save(room);
+  /** Re-persist a kild's snapshot after out-of-band metadata changes (e.g. an agent's
+   *  pi session identity arriving after the last message). No-op for message-less kilds. */
+  persistNow(kildId: string): void {
+    const kild = this.kilds.get(kildId);
+    if (kild) this.save(kild);
   }
 
-  summaries(): RoomSummary[] {
-    return [...this.rooms.values()].map((r) => ({
-      id: r.id,
-      name: r.name,
-      worktree: r.worktree,
-      participants: r.participants.map(participantView),
-      state: r.state,
-      stopped: r.state === 'halted',
+  summaries(): KildSummary[] {
+    return [...this.kilds.values()].map((k) => ({
+      id: k.id,
+      name: k.name,
+      worktree: k.worktree,
+      agents: k.agents.map(agentView),
+      state: k.state,
+      stopped: k.state === 'halted',
     }));
   }
 
-  /** Full live Room objects (with cwd + worktree) — the manager needs these to compute
-   *  per-room git status, which the ArchivedRoom snapshot deliberately drops. */
-  liveRoomObjects(): Room[] {
-    return [...this.rooms.values()];
+  /** Full live Kild objects (with cwd + worktree) — the manager needs these to compute
+   *  per-kild git status, which the ArchivedKild snapshot deliberately drops. */
+  liveKildObjects(): Kild[] {
+    return [...this.kilds.values()];
   }
 
-  /** Live rooms with their full logs — lets a client joining mid-room (or after a
+  /** Live kilds with their full logs — lets a client joining mid-kild (or after a
    *  refresh) load the conversation so far. Same shape as an archived snapshot. */
-  liveWithLogs(): ArchivedRoom[] {
-    return [...this.rooms.values()].map((r) => ({
-      id: r.id,
-      name: r.name,
-      worktree: r.worktree,
-      participants: r.participants.map(participantView),
-      state: r.state,
-      log: r.log,
-      cwd: r.cwd,
-      base: r.base,
+  liveWithLogs(): ArchivedKild[] {
+    return [...this.kilds.values()].map((k) => ({
+      id: k.id,
+      name: k.name,
+      worktree: k.worktree,
+      agents: k.agents.map(agentView),
+      state: k.state,
+      log: k.log,
+      cwd: k.cwd,
+      base: k.base,
     }));
   }
 
-  /** Past rooms (read-only logs) recovered from disk at startup. */
-  archived(): ArchivedRoom[] {
+  /** Past kilds (read-only logs) recovered from disk at startup. */
+  archived(): ArchivedKild[] {
     return [...this.archive.values()];
   }
 
-  /** Serialise a room's history. Rooms with no messages are not worth persisting. */
-  private save(room: Room): void {
-    if (room.log.length === 0) return;
-    this.persist(room.id, this.snapshot(room, room.state));
+  /** Serialise a kild's history. Kilds with no messages are not worth persisting. */
+  private save(kild: Kild): void {
+    if (kild.log.length === 0) return;
+    this.persist(kild.id, this.snapshot(kild, kild.state));
   }
 
-  private snapshot(room: Room, state: ArchivedRoom['state']): ArchivedRoom {
+  private snapshot(kild: Kild, state: ArchivedKild['state']): ArchivedKild {
     return {
-      id: room.id,
-      name: room.name,
-      worktree: room.worktree,
-      participants: room.participants.map(participantView),
+      id: kild.id,
+      name: kild.name,
+      worktree: kild.worktree,
+      agents: kild.agents.map(agentView),
       state,
-      log: room.log,
-      cwd: room.cwd,
-      base: room.base,
+      log: kild.log,
+      cwd: kild.cwd,
+      base: kild.base,
     };
   }
 
-  private saveArchived(room: ArchivedRoom): void {
-    this.persist(room.id, room);
+  private saveArchived(kild: ArchivedKild): void {
+    this.persist(kild.id, kild);
   }
 
-  private persist(roomId: string, data: ArchivedRoom): void {
+  private persist(kildId: string, data: ArchivedKild): void {
     fs.mkdirSync(this.dir, { recursive: true });
-    const target = path.join(this.dir, `${roomId}.json`);
+    const target = path.join(this.dir, `${kildId}.json`);
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
       fs.writeFileSync(temp, JSON.stringify(data));
@@ -157,7 +156,7 @@ export class RoomRegistry {
         // Prefer the original persistence failure if temp cleanup also fails.
       }
       throw new Error(
-        `kild: failed to persist room ${roomId}: ${err instanceof Error ? err.message : err}`,
+        `kild: failed to persist kild ${kildId}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }
@@ -167,12 +166,12 @@ export class RoomRegistry {
     try {
       files = fs.readdirSync(this.dir);
     } catch {
-      return; // no rooms dir yet → no history
+      return; // no history dir yet → no history
     }
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedRoom;
+        const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedKild;
         if (data?.id) this.archive.set(data.id, { ...data, state: data.state ?? 'closed' });
       } catch {
         // a corrupt/partial history file must not crash startup; skip it
