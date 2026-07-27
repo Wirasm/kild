@@ -19,10 +19,10 @@ export function formatDelivery(roomName: string, from: string, text: string): st
   return `[#${roomName}] @${from}: ${text}`;
 }
 
-/** Return resolved addressees that cannot receive a post in this room. Engine notices
- * and implicit replies are never user-addressed, so they cannot yield a warning. */
+/** Return resolved addressees that cannot receive a post in this room. Engine notices are
+ * never user-addressed, so they cannot yield a warning. */
 export function unknownRecipients(room: Room, message: RoomMessage): string[] {
-  if (message.system || message.implicit) return [];
+  if (message.system) return [];
   const participants = new Set(room.participants.map((participant) => participant.name));
   return message.to.filter((recipient) => recipient !== HUMAN && !participants.has(recipient));
 }
@@ -49,24 +49,15 @@ export function unknownRecipients(room: Room, message: RoomMessage): string[] {
  *   a single-agent room reaches the agent, and it chats like a 1:1 session;
  * - no addressee + multiple participants → broadcast only (no turn).
  *
- * **Notices and implicit replies broadcast but never deliver a turn.** A notice is
- * engine-generated (a participant joining, the room halting): the operator should see it,
- * but it addresses no one — waking an agent with it is noise at best and, for a halt,
- * the opposite of the intent.
- *
- * **Implicit replies broadcast but never deliver a turn.** An implicit reply is an
- * agent's turn-final narration auto-posted because it did not call `post_message`. If
- * we delivered those as turns, two agents would ping-pong forever — each delivered turn
- * produces narration that is delivered back, so "I'll stay quiet" becomes a message
- * that prompts the other agent. Prompting another agent therefore requires an *explicit*
- * `post_message` (@mention) — exactly what the room agent prompts instruct ("no one sees
- * your normal output — only what you post"). The human still sees the narration (it's
- * broadcast); it just doesn't drive another turn.
+ * **Notices broadcast but never deliver a turn.** A notice is engine-generated (a
+ * participant joining, the room halting): the operator should see it, but it addresses
+ * no one — waking an agent with it is noise at best and, for a halt, the opposite of
+ * the intent.
  */
 export function routeRoomMessage(room: Room, message: RoomMessage, delivery: RoomDelivery): void {
   delivery.broadcast(message);
-  // Narration and engine notices are shown to the human, never delivered as a turn.
-  if (message.implicit || message.system) return;
+  // Engine notices are shown to the human, never delivered as a turn.
+  if (message.system) return;
 
   const targets = message.to.filter((t) => t !== HUMAN && t !== message.from);
   if (targets.length === 0 && room.participants.length === 1) {

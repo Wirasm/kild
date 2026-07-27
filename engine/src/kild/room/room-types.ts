@@ -1,7 +1,6 @@
 import type { UiEvent } from '../events.ts';
 import type { RoomGitStatus } from '../worktree-status.ts';
 import type { Mailbox } from './attached.ts';
-import type { RoomDecision } from './room-decisions.ts';
 
 /**
  * Room domain — the operator-facing primitive: a set of participants (agent
@@ -26,8 +25,8 @@ export const HUMAN = 'human';
  *  unchanged (see {@link ArchivedRoom}). */
 export type ParticipantKind = 'spawned' | 'attached';
 
-/** Everything both participant kinds carry — identity plus the report-and-idle state the
- *  room lifecycle is built on. */
+/** Everything both participant kinds carry — identity plus the idle state observers
+ *  read. */
 interface RoomParticipantBase {
   /** The `@mention` handle — equals the participant's name (e.g. `orchestrator`). */
   name: string;
@@ -44,15 +43,9 @@ interface RoomParticipantBase {
   invitedBy?: string;
   /** True when the participant has finished a turn and is waiting. Set on `agent_end` for
    *  a spawned participant and by an EMPTY drain for an attached one, cleared when work
-   *  arrives. Dedups the idle failsafe to one check per active→idle transition, and rides
-   *  {@link ParticipantView} so observers can rank finished-and-waiting rooms without
-   *  parsing logs. */
+   *  arrives. Rides {@link ParticipantView} so observers can rank finished-and-waiting
+   *  rooms without parsing logs. */
   idle?: boolean;
-  /** True once this participant made an EXPLICIT post_message since its last activation.
-   *  If it goes idle with this still false, it finished without reporting — the failsafe
-   *  nudges it to post. Reset when a new turn is delivered. Rides {@link ParticipantView}
-   *  with `idle` (idle+posted = finished AND reported). */
-  posted?: boolean;
   /** Latest cumulative token count for this participant's session, captured from its
    *  `stats` UiEvents (emitted at each turn end). */
   tokens?: number;
@@ -111,8 +104,6 @@ export interface ParticipantView {
   piSessionFile?: string;
   /** Attention state: finished a turn and waiting for input (see {@link RoomParticipant.idle}). */
   idle?: boolean;
-  /** Attention state: reported via an explicit delivered post this activation. */
-  posted?: boolean;
   /** Latest cumulative session token count (from `stats` UiEvents). */
   tokens?: number;
   /** Latest cumulative session cost in USD (from `stats` UiEvents). */
@@ -131,7 +122,6 @@ export function participantView(participant: RoomParticipant): ParticipantView {
     piSessionId: attached ? undefined : participant.piSessionId,
     piSessionFile: attached ? undefined : participant.piSessionFile,
     idle: participant.idle,
-    posted: participant.posted,
     tokens: participant.tokens,
     cost: participant.cost,
   };
@@ -167,9 +157,6 @@ export interface RoomMessage {
   text: string;
   /** Epoch millis, stamped by the engine on receipt. */
   ts: number;
-  /** True when this is an agent's turn-final text auto-posted as its reply (it did
-   *  not call `post_message` itself). */
-  implicit?: boolean;
   /** True for engine-generated notices (e.g. a participant joining). */
   system?: boolean;
 }
@@ -196,9 +183,6 @@ export interface Room {
   log: RoomMessage[];
   /** Canonical lifecycle state for this room. */
   state: RoomLifecycleState;
-  /** Keyed decision ledger folded from `needs-decision[key]:` / `resolved[key]` post
-   *  markers (see room-decisions). Optional so out-of-scope fixtures stay untouched. */
-  decisions?: RoomDecision[];
 }
 
 /** A participant to spawn into a room. */
@@ -247,8 +231,6 @@ export interface ArchivedRoom {
    *  older history files and out-of-scope fixtures continue to type-check. */
   state?: RoomLifecycleState;
   log: RoomMessage[];
-  /** Keyed decision ledger (see room-decisions). Optional: older history files predate it. */
-  decisions?: RoomDecision[];
   /** Project directory the room ran in — persisted so archived rooms stay attributable
    *  to their project after the worktree is pruned. Optional: older files predate it. */
   cwd?: string;
@@ -277,8 +259,7 @@ export type RoomErrorCode = 'not_found' | 'invalid_state' | 'rejected';
 export interface RoomActionSuccess {
   message: string;
   /** For posts: the resolved recipients other than the sender (the human counts — it is
-   *  the operator channel). Empty = the post reached no one, e.g. a self-addressed post;
-   *  the idle failsafe treats such a post as not-a-report. */
+   *  the operator channel). Empty = the post reached no one, e.g. a self-addressed post. */
   deliveredTo?: string[];
 }
 
@@ -304,9 +285,8 @@ export interface MessageOut {
   text: string;
   /** Explicit addressees (structured, never parsed from the text). Omitted by the tool
    *  path when the agent didn't address anyone — the manager then defaults to the room
-   *  lead. The implicit-reply path sets it to the turn's sender. */
+   *  lead. */
   to?: string[];
-  implicit?: boolean;
 }
 
 /** Worker→engine control line: an agent called `invite_agent` to pull in another. */

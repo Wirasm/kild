@@ -67,29 +67,11 @@ function room(cwd: string, overrides: Partial<Room> = {}): Room {
   };
 }
 
-test('the log entry carries goal, outcome, decisions, resume handles, worktree — pure facts', () => {
-  const entry = formatRoomLogEntry(
-    room('/p', {
-      decisions: [
-        {
-          key: 'api-shape',
-          summary: 'REST or RPC?',
-          openedBy: 'worker',
-          openedAt: 1,
-          resolvedBy: 'human',
-          resolvedAt: 2,
-          note: 'REST',
-        },
-        { key: 'auth', summary: 'token TTL?', openedBy: 'worker', openedAt: 3 },
-      ],
-    }),
-    new Date('2026-07-24T12:00:00Z'),
-  );
+test('the log entry carries goal, outcome, resume handles, worktree — pure facts', () => {
+  const entry = formatRoomLogEntry(room('/p'), new Date('2026-07-24T12:00:00Z'));
   expect(entry).toContain('## 2026-07-24 — fix-auth (room-1)');
   expect(entry).toContain('- goal: Fix the auth bug');
   expect(entry).toContain('- outcome: Done: commit abc123, tests green');
-  expect(entry).toContain('→ resolved by @human: REST');
-  expect(entry).toContain('decision UNRESOLVED at close: auth');
   expect(entry).toContain(
     '- agent @worker (worker, openai-codex/gpt-5.6-sol) — pi --session /sessions/aaaa-bbbb.jsonl',
   );

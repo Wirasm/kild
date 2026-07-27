@@ -1,4 +1,3 @@
-import { openDecisions, type RoomDecision } from './room/room-decisions.ts';
 import {
   type LiveRoomStatus,
   type ParticipantView,
@@ -48,9 +47,6 @@ export interface CompactRoomStatus {
   /** Other live rooms that touch the same files — a merge collision waiting to
    *  happen. Empty/absent when this room collides with none. */
   collidesWith?: RoomCollision[];
-  /** Unresolved keyed decisions — each needs an operator call before this room can close.
-   *  Absent when none are open (the normal case). */
-  openDecisions?: RoomDecision[];
   /** Room cost rollup (tokens + USD) summed over participants — absent until at least
    *  one participant has reported `stats`. Per-participant figures ride `participants`. */
   totals?: RoomCostTotals;
@@ -84,7 +80,6 @@ export function computeCollisions(rooms: LiveRoomStatus[]): Map<string, RoomColl
 export function compactLiveRooms(liveRooms: LiveRoomStatus[]): CompactRoomStatus[] {
   const collisions = computeCollisions(liveRooms);
   return liveRooms.map((room) => {
-    const open = openDecisions(room);
     const totals = room.totals ?? roomCostTotals(room.participants);
     return {
       id: room.id,
@@ -94,7 +89,6 @@ export function compactLiveRooms(liveRooms: LiveRoomStatus[]): CompactRoomStatus
       ...(totals ? { totals } : {}),
       ...(room.git ? { git: toCompactGit(room.git) } : {}),
       ...(collisions.has(room.id) ? { collidesWith: collisions.get(room.id) } : {}),
-      ...(open.length > 0 ? { openDecisions: open } : {}),
     };
   });
 }

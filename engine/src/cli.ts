@@ -370,7 +370,7 @@ async function roomLog(id: string): Promise<void> {
   if (!room) throw new Error(`no such live room: ${id}`);
   if (json) return void console.log(JSON.stringify(room.log, null, 2));
   for (const m of room.log) {
-    const tag = m.system ? ' [sys]' : m.implicit ? ' [narration]' : '';
+    const tag = m.system ? ' [sys]' : '';
     console.log(`${m.from} → [${m.to.join(', ')}]${tag}: ${m.text}`);
   }
 }
@@ -417,7 +417,7 @@ async function roomShow(id: string): Promise<void> {
   }
   console.log('log:');
   for (const message of room.log) {
-    const tag = message.system ? ' [sys]' : message.implicit ? ' [narration]' : '';
+    const tag = message.system ? ' [sys]' : '';
     console.log(`${message.from} → [${message.to.join(', ')}]${tag}: ${message.text}`);
   }
 }
