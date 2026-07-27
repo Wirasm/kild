@@ -6,6 +6,7 @@
  * stderr, non-zero exit on failure.
  */
 import { spawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -110,11 +111,29 @@ async function project(action: string | undefined, args: string[]): Promise<void
   }
 }
 
-/** Resolve the `--project` flag: a registered name wins, else treat it as a path
- *  (made absolute — the engine's REST `path` params only accept absolute paths). */
+/** `--project` is a name-or-path union: a registered project's name, or a path to a
+ *  directory. Resolve the name first, then fall back to treating the value as a path —
+ *  but only if that path actually exists.
+ *
+ *  Without the existence check a bare unregistered NAME resolves against the cwd, so
+ *  `--project helm` run from `…/sild/helm` became `…/sild/helm/helm`. Nothing downstream
+ *  verified it, so the room opened, its worktree could not be created, no agent ever
+ *  spawned, and the command still exited 0 with a room id. A delegation that silently
+ *  does nothing is worse than one that fails. */
 async function resolveProjectFlag(): Promise<string | undefined> {
   if (!values.project) return undefined;
-  return (await findProject(values.project))?.path ?? path.resolve(values.project);
+  const registered = await findProject(values.project);
+  if (registered) return registered.path;
+
+  const asPath = path.resolve(values.project);
+  if (existsSync(asPath) && statSync(asPath).isDirectory()) return asPath;
+
+  const known = (await loadProjects()).map((p) => p.name);
+  throw new Error(
+    `unknown project: ${values.project} — not registered, and ${asPath} is not a directory.` +
+      (known.length ? ` Registered: ${known.join(', ')}.` : '') +
+      ' Pass a path, or register it with `kild project add <name> <path>`.',
+  );
 }
 
 async function agent(action: string | undefined, args: string[]): Promise<void> {

@@ -442,6 +442,15 @@ app.post('/api/rooms', async (c) => {
     if (!path.isAbsolute(body.cwd)) {
       return c.json({ error: `cwd must be absolute: ${body.cwd}` }, 400);
     }
+    // Absolute is not enough: a caller that resolved an unregistered NAME against its
+    // own cwd sends a well-formed path to a directory that does not exist. That opened
+    // a room whose worktree could not be created and whose participants never spawned —
+    // and the caller got a room id and a success. Refuse here so the failure is the
+    // caller's, not a room that quietly does nothing.
+    const dir = await fs.stat(body.cwd).catch(() => null);
+    if (!dir?.isDirectory()) {
+      return c.json({ error: `cwd is not an existing directory: ${body.cwd}` }, 400);
+    }
     cwd = body.cwd;
   } else {
     return c.json({ error: 'cwd (absolute path) or project (registered name) required' }, 400);
