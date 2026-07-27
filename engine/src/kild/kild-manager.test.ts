@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentCallbacks } from './agent-manager.ts';
 import { DEFAULT_WAKE_CAP } from './inbox.ts';
-import { KildManager } from './kild-manager.ts';
+import { formatDelivery, KildManager } from './kild-manager.ts';
 import { KildRegistry } from './kild-registry.ts';
-import { type AgentSpec, HUMAN } from './kild-types.ts';
+import type { AgentSpec } from './kild-types.ts';
 import { worktreePath } from './worktree.ts';
 
 let tmp: string;
@@ -70,14 +70,13 @@ function fixture(options?: {
   return { manager, spawned, stopped, callbacks, prompted, emitAgent };
 }
 
-async function newKild(
-  manager: KildManager,
-  agents: AgentSpec[],
-  kildId: string = 'kild-1',
-  openedBy?: string,
-) {
-  return manager.create(kildId, { name: 'demo', cwd: tmp, agents, openedBy });
+async function newKild(manager: KildManager, agents: AgentSpec[], kildId: string = 'kild-1') {
+  return manager.create(kildId, { name: 'demo', cwd: tmp, agents });
 }
+
+/** Every send names its sender and its recipients — there is no other shape. */
+const send = (manager: KildManager, to: string[], text: string, from = 'human') =>
+  manager.send('kild-1', from, to, text);
 
 test('rejects a duplicate kild id and preserves the existing kild', async () => {
   const { manager } = fixture();
@@ -88,15 +87,6 @@ test('rejects a duplicate kild id and preserves the existing kild', async () => 
     message: 'duplicate kild id: kild-1',
   });
   expect(manager.liveKilds().map((kild) => kild.id)).toEqual(['kild-1']);
-});
-
-test('rejects the reserved human agent handle', async () => {
-  const { manager } = fixture();
-  expect(await newKild(manager, [{ handle: HUMAN }])).toEqual({
-    ok: false,
-    code: 'rejected',
-    message: `agent handle '${HUMAN}' is reserved`,
-  });
 });
 
 test('rejects duplicate agent handles within one create spec', async () => {
@@ -147,7 +137,7 @@ test("accepts explicit persona:'default' as the generic escape hatch", async () 
   expect(spawned).toEqual([{ id: 's-1', persona: 'default' }]);
 });
 
-test('create transitions the kild from opening to running', async () => {
+test('create registers the kild live with its roster — presence is the whole liveness signal', async () => {
   const { manager } = fixture();
   expect(await newKild(manager, [{ handle: 'coder' }])).toMatchObject({ ok: true });
   const kilds = manager.liveKilds();
@@ -155,7 +145,6 @@ test('create transitions the kild from opening to running', async () => {
   expect(kilds[0]).toMatchObject({
     id: 'kild-1',
     name: 'demo',
-    state: 'running',
     agents: [{ handle: 'coder' }],
     log: [],
   });
@@ -172,20 +161,44 @@ test('rolls back already spawned agents when a later spawn fails', async () => {
   expect(manager.liveKilds()).toEqual([]);
 });
 
+// ── Directed send: the sender names the recipients, always ───────────────────────────
+
 test('send returns not_found for an unknown kild', async () => {
   const { manager } = fixture();
-  expect(await manager.sendFromHuman('missing', 'hello')).toEqual({
+  expect(await manager.send('missing', 'human', ['coder'], 'hello')).toEqual({
     ok: false,
     code: 'not_found',
     message: 'no such kild: missing',
   });
 });
 
-test('send to an unknown recipient returns rejected and is not recorded (no kild spam)', async () => {
+test('a send that names no recipient is REJECTED — never a default, never a broadcast', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  expect(await send(manager, [], 'who is this for?')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'a message must name at least one recipient',
+  });
+  // Not recorded, and nobody was woken "just in case".
+  expect(manager.messageLog('kild-1')).toEqual([]);
+  expect(prompted).toEqual([]);
+});
+
+test('a solo kild gets no free pass — an unaddressed send is still rejected', async () => {
+  // The old 1:1 rule made "exactly one agent" mean "obviously that agent". Convenience
+  // like that belongs in a client; the engine answers the same way at every size.
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  expect(await send(manager, [], 'fix the bug')).toMatchObject({ ok: false, code: 'rejected' });
+  expect(prompted).toEqual([]);
+});
+
+test('send to an unknown recipient returns rejected naming the roster, and is not recorded', async () => {
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  // Addressing is structured: a typo'd handle is a clean error to the caller...
-  expect(await manager.sendFromHuman('kild-1', 'hello', ['planner'])).toEqual({
+  // A typo'd handle is a clean error to the caller...
+  expect(await send(manager, ['planner'], 'hello')).toEqual({
     ok: false,
     code: 'rejected',
     message: 'no such agent: @planner (in the kild: @coder)',
@@ -194,62 +207,73 @@ test('send to an unknown recipient returns rejected and is not recorded (no kild
   expect(manager.messageLog('kild-1')).toEqual([]);
 });
 
-test('an untargeted send defaults to the kild lead', async () => {
+test('`human` is not a recipient the engine knows — it is an address like any other', async () => {
+  // Nothing is reserved and nothing is virtual: to be reachable as @human you attach a
+  // handle called `human`. Otherwise the roster says so.
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  expect(await manager.send('kild-1', 'coder', ['human'], 'done')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'no such agent: @human (in the kild: @coder)',
+  });
+});
+
+test('a named recipient is prompted, and only that one', async () => {
   const { manager, prompted } = fixture();
   await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
-
-  // No explicit `to` → delivered to the lead (coder = s-1), not dropped as "addressed nobody".
-  expect(await manager.sendAs('kild-1', 'brain', 'gate approved')).toEqual({
+  expect(await manager.send('kild-1', 'brain', ['reviewer'], 'gate approved')).toEqual({
     ok: true,
-    value: { message: 'Sent to the kild.', deliveredTo: ['coder'] },
+    value: { message: 'Sent to the kild.', deliveredTo: ['reviewer'] },
   });
-  expect(prompted).toEqual([{ id: 's-1', text: '[#demo] @brain: gate approved', from: 'brain' }]);
+  expect(prompted).toEqual([{ id: 's-2', text: '[#demo] @brain: gate approved', from: 'brain' }]);
   expect(manager.messageLog('kild-1').map((message) => message.text)).toEqual(['gate approved']);
 });
 
-test('halt returns invalid_state when the kild is already halted', async () => {
-  const { manager } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  expect(await manager.halt('kild-1')).toMatchObject({ ok: true });
-  expect(await manager.halt('kild-1')).toEqual({
+test('one message reaches every recipient it names', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  expect(await manager.send('kild-1', 'brain', ['coder', 'reviewer'], 'status?')).toMatchObject({
+    ok: true,
+    value: { deliveredTo: ['coder', 'reviewer'] },
+  });
+  expect(prompted.map((p) => p.id)).toEqual(['s-1', 's-2']);
+  // Recorded once, addressed to both — one message, two deliveries.
+  expect(manager.messageLog('kild-1')).toHaveLength(1);
+  expect(manager.messageLog('kild-1')[0]?.to).toEqual(['coder', 'reviewer']);
+});
+
+test('a sender is never delivered its own message, even when it names itself', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  await manager.send('kild-1', 'coder', ['coder', 'reviewer'], 'thinking aloud');
+  expect(prompted).toEqual([{ id: 's-2', text: '[#demo] @coder: thinking aloud', from: 'coder' }]);
+});
+
+test('an agent send with an empty `to` is rejected at the control line too', async () => {
+  const { manager, callbacks } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  expect(await callbacks.get('s-1')?.onSend?.({ kind: 'send', to: [], text: 'anyone?' })).toEqual({
     ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is already halted",
+    code: 'rejected',
+    message: 'a message must name at least one recipient',
   });
 });
 
-test('spawnAgent returns invalid_state once a kild is halted', async () => {
-  const { manager } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
-  expect(await manager.spawnAgent('kild-1', { handle: 'reviewer' })).toEqual({
-    ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is halted",
-  });
+test('formatDelivery frames the message with kild, sender, and text', () => {
+  expect(formatDelivery('demo', 'orchestrator', 'do X')).toBe('[#demo] @orchestrator: do X');
 });
 
-test('halt transitions the kild to halted in live kild snapshots', async () => {
-  const { manager } = fixture();
+test('spawning an agent records no message — a roster change is an event, not a post', async () => {
+  const { manager, prompted } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  expect(await manager.halt('kild-1')).toMatchObject({ ok: true });
-  const kilds = manager.liveKilds();
-  expect(kilds).toHaveLength(1);
-  expect(kilds[0]).toMatchObject({
-    id: 'kild-1',
-    name: 'demo',
-    state: 'halted',
-    agents: [{ handle: 'coder' }],
-  });
-  expect(kilds[0]?.log).toHaveLength(1);
-  expect(kilds[0]?.log[0]).toMatchObject({
-    kildId: 'kild-1',
-    from: 'human',
-    to: [],
-    text: 'Kild halted by the operator.',
-    system: true,
-  });
+  expect(await manager.spawnAgent('kild-1', { handle: 'reviewer' })).toMatchObject({ ok: true });
+  expect(manager.messageLog('kild-1')).toEqual([]);
+  expect(prompted).toEqual([]);
+  expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['coder', 'reviewer']);
 });
+
+// ── Stop: the one teardown verb ──────────────────────────────────────────────────────
 
 test('stop returns not_found for an unknown kild', async () => {
   const { manager } = fixture();
@@ -260,129 +284,32 @@ test('stop returns not_found for an unknown kild', async () => {
   });
 });
 
-test('send returns invalid_state for halted kilds', async () => {
-  const { manager } = fixture();
+test('stop archives a kild with history and takes it out of the live set', async () => {
+  const { manager, stopped } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
-  expect(await manager.sendAs('kild-1', 'brain', 'still there?')).toEqual({
-    ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is halted",
-  });
-});
-
-test('agent send returns invalid_state for halted kilds', async () => {
-  const { manager, callbacks } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
-  const result = await callbacks.get('s-1')?.onSend?.({ kind: 'send', text: '@human hi' });
-  expect(result).toEqual({
-    ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is halted",
-  });
-});
-
-test('agent spawn returns invalid_state for halted kilds', async () => {
-  const { manager, callbacks } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
-  const result = await callbacks
-    .get('s-1')
-    ?.onSpawn?.({ kind: 'spawn', handle: 'reviewer', persona: 'reviewer' });
-  expect(result).toEqual({
-    ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is halted",
-  });
-});
-
-test('agent stop returns invalid_state for halted kilds', async () => {
-  const { manager, callbacks } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
-  const result = await callbacks.get('s-1')?.onStop?.({ kind: 'stop' });
-  expect(result).toEqual({
-    ok: false,
-    code: 'invalid_state',
-    message: "kild 'demo' is halted",
-  });
-});
-
-test('notifies a live non-agent opener about an agent message to @human without re-entering the kild', async () => {
-  const { manager, callbacks, prompted } = fixture();
-  await newKild(manager, [{ handle: 'coder' }], 'kild-1', 'brain-session');
-
-  await callbacks.get('s-1')?.onSend?.({ kind: 'send', text: 'approve the gate?', to: ['human'] });
-
-  expect(prompted).toEqual([
-    {
-      id: 'brain-session',
-      from: 'kild',
-      text: "[kild operator notification] Kild 'demo': @coder sent to @human: approve the gate?",
-    },
-  ]);
-  expect(manager.messageLog('kild-1').map((message) => message.text)).toEqual([
-    'approve the gate?',
-  ]);
-});
-
-test('does not notify an opener that is a kild agent', async () => {
-  const { manager, callbacks, prompted } = fixture();
-  await newKild(manager, [{ handle: 'coder' }], 'kild-1', 's-1');
-
-  await callbacks.get('s-1')?.onSend?.({ kind: 'send', text: '@human approve?' });
-
-  expect(prompted).toEqual([]);
-});
-
-test('notifies a live non-agent opener on halt and stop with the final non-system post', async () => {
-  const { manager, prompted } = fixture();
-  await newKild(manager, [{ handle: 'coder' }], 'kild-1', 'brain-session');
-  await manager.sendFromHuman('kild-1', '@coder implementation committed');
-  prompted.splice(0); // discard ordinary kild delivery; assertions below are opener notifications only
-  await manager.halt('kild-1');
-  await manager.stop('kild-1');
-
-  expect(prompted).toEqual([
-    {
-      id: 'brain-session',
-      from: 'kild',
-      text: "[kild operator notification] Kild 'demo' was halted. Final non-system post: @coder implementation committed",
-    },
-    {
-      id: 'brain-session',
-      from: 'kild',
-      text: "[kild operator notification] Kild 'demo' was stopped and archived. Final non-system post: @coder implementation committed",
-    },
-  ]);
-});
-
-test('stop transitions a halted kild to archived closed state', async () => {
-  const { manager } = fixture();
-  await newKild(manager, [{ handle: 'coder' }]);
-  await manager.halt('kild-1');
+  await send(manager, ['coder'], 'ship it');
   expect(await manager.stop('kild-1')).toEqual({
     ok: true,
     value: { message: "Kild 'demo' stopped." },
   });
+  expect(stopped).toEqual(['s-1']);
   expect(manager.liveKilds()).toEqual([]);
   const archived = manager.archived();
   expect(archived).toHaveLength(1);
-  expect(archived[0]).toMatchObject({
-    id: 'kild-1',
-    name: 'demo',
-    state: 'closed',
-    agents: [{ handle: 'coder' }],
+  expect(archived[0]).toMatchObject({ id: 'kild-1', name: 'demo', agents: [{ handle: 'coder' }] });
+  expect(archived[0]?.log.map((m) => m.text)).toEqual(['ship it']);
+});
+
+test('any agent may stop the kild — there is no rank that owns teardown', async () => {
+  const { manager, callbacks, stopped } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  // s-2 was spawned second; under the old model only s-1 could have done this.
+  expect(await callbacks.get('s-2')?.onStop?.({ kind: 'stop', reason: 'goal complete' })).toEqual({
+    ok: true,
+    value: { message: "Kild 'demo' stopped." },
   });
-  expect(archived[0]?.log).toHaveLength(1);
-  expect(archived[0]?.log[0]).toMatchObject({
-    kildId: 'kild-1',
-    from: 'human',
-    to: [],
-    text: 'Kild halted by the operator.',
-    system: true,
-  });
+  expect(stopped).toEqual(['s-1', 's-2']);
+  expect(manager.liveKilds()).toEqual([]);
 });
 
 // ── pi session identity: the terminal-resume handle ──────────────────────────────────
@@ -390,7 +317,7 @@ test('stop transitions a halted kild to archived closed state', async () => {
 test('a pi_session event lands on the agent and rides the live view', async () => {
   const { manager, emitAgent } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  await manager.sendFromHuman('kild-1', 'kick off'); // give the kild history to persist
+  await send(manager, ['coder'], 'kick off'); // give the kild history to persist
   emitAgent('s-1', {
     kind: 'pi_session',
     id: 'aaaa-bbbb',
@@ -407,7 +334,7 @@ test('a pi_session event lands on the agent and rides the live view', async () =
 test('pi session handles survive into the archived snapshot', async () => {
   const { manager, emitAgent } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  await manager.sendFromHuman('kild-1', 'kick off');
+  await send(manager, ['coder'], 'kick off');
   emitAgent('s-1', { kind: 'pi_session', id: 'aaaa-bbbb', file: '/tmp/s.jsonl' });
   await manager.stop('kild-1');
 
@@ -431,7 +358,7 @@ test('idle rides the live view — finished-and-waiting without parsing logs', a
   expect(reviewer?.idle).toBeUndefined();
 
   // A delivered turn reactivates: idle clears in the view too.
-  await manager.sendFromHuman('kild-1', 'one more thing', ['coder']);
+  await send(manager, ['coder'], 'one more thing');
   expect(manager.liveKilds()[0]?.agents[0]).toMatchObject({
     handle: 'coder',
     idle: false,
@@ -466,7 +393,7 @@ test('a kild with no stats yet carries no totals (no zero-noise)', async () => {
 test('agent costs survive into the archived snapshot', async () => {
   const { manager, emitAgent } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  await manager.sendFromHuman('kild-1', 'kick off'); // history so close archives it
+  await send(manager, ['coder'], 'kick off'); // history so close archives it
   emitAgent('s-1', { kind: 'stats', tokens: 900, cost: 0.33, context_pct: null });
   await manager.stop('kild-1');
 
@@ -479,7 +406,7 @@ test('stopping a kild with history appends its engine-written entry to .kild/LOG
   const { manager } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
-  await manager.sendFromHuman('kild-1', 'ship the fix');
+  await send(manager, ['coder'], 'ship the fix');
   await manager.stop('kild-1');
 
   const log = fs.readFileSync(path.join(project, '.kild', 'LOG.md'), 'utf8');
@@ -498,7 +425,7 @@ test('memory.synthesis config spawns a synthesis session in the MAIN checkout af
     }),
   );
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
-  await manager.sendFromHuman('kild-1', 'ship the fix');
+  await send(manager, ['coder'], 'ship the fix');
   const before = spawned.length;
   await manager.stop('kild-1');
 
@@ -512,7 +439,7 @@ test('without memory.synthesis config, stop spawns nothing extra', async () => {
   const { manager, spawned } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
-  await manager.sendFromHuman('kild-1', 'ship the fix');
+  await send(manager, ['coder'], 'ship the fix');
   const before = spawned.length;
   await manager.stop('kild-1');
   expect(spawned.length).toBe(before);
@@ -559,7 +486,7 @@ test('kildDir on an unknown kild is not_found', () => {
 test('kildDir on a closed (archived) kild is invalid_state', async () => {
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  await manager.sendFromHuman('kild-1', 'hello'); // history → the close archives it
+  await send(manager, ['coder'], 'hello'); // history → the close archives it
   await manager.stop('kild-1');
   expect(manager.kildDir('kild-1')).toEqual({
     ok: false,
@@ -572,15 +499,15 @@ test('archived snapshots keep cwd and base so history stays project-attributable
   const { manager } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'attrproj-'));
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
-  await manager.sendFromHuman('kild-1', 'work');
+  await send(manager, ['coder'], 'work');
   await manager.stop('kild-1');
   expect(manager.archived()[0]).toMatchObject({ cwd: project });
 });
 
 // ── Attached agents ───────────────────────────────────────────────────────────
 // kild registers these but never spawns them, so delivery inverts: it queues, and the
-// harness pulls at its own turn boundary. Everything upstream — recipient resolution,
-// the lead default, the ledger — is unchanged.
+// harness pulls at its own turn boundary. Addressing is identical — an attached agent is
+// named in `to` exactly like an owned one; only the transport differs.
 
 test('attach registers an attached agent that is addressable but never spawned', async () => {
   const { manager, spawned } = fixture();
@@ -627,14 +554,27 @@ test('attach refuses to take over an owned agent handle', async () => {
   });
 });
 
-test('attach refuses the reserved human handle and an unknown kild', async () => {
+test('attach refuses a blank handle and an unknown kild', async () => {
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
-  expect(await manager.attach('kild-1', HUMAN)).toMatchObject({ ok: false, code: 'rejected' });
+  expect(await manager.attach('kild-1', '  ')).toMatchObject({ ok: false, code: 'rejected' });
   expect(await manager.attach('nope', 'claude')).toEqual({
     ok: false,
     code: 'not_found',
     message: 'no such kild: nope',
+  });
+});
+
+test('a human-driven harness attaches under any handle it likes — nothing is reserved', async () => {
+  // The human is not a participant the engine knows about; it becomes addressable the
+  // same way every other external harness does.
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  expect(await manager.attach('kild-1', 'human')).toMatchObject({ ok: true });
+  await manager.send('kild-1', 'coder', ['human'], 'need a call on the schema');
+  expect(manager.drain('kild-1', 'human')).toMatchObject({
+    ok: true,
+    value: { posts: [{ from: 'coder', text: 'need a call on the schema' }] },
   });
 });
 
@@ -643,7 +583,7 @@ test('a message addressed to an attached agent is queued, not pushed', async () 
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
   const before = prompted.length;
-  await manager.sendAs('kild-1', 'coder', 'review is done', ['claude']);
+  await manager.send('kild-1', 'coder', ['claude'], 'review is done');
   expect(prompted).toHaveLength(before); // nothing to push to
   const drained = manager.drain('kild-1', 'claude');
   expect(drained).toMatchObject({
@@ -656,7 +596,7 @@ test('drain is destructive and the empty drain is the idle signal', async () => 
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  await manager.sendAs('kild-1', 'coder', 'ping', ['claude']);
+  await manager.send('kild-1', 'coder', ['claude'], 'ping');
 
   expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { idle: false } });
   const working = manager.liveKilds()[0]?.agents.find((p) => p.handle === 'claude');
@@ -676,7 +616,7 @@ test('the wake cap stops a runaway sender from waking an attached agent forever'
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
   const wake = async () => {
-    await manager.sendAs('kild-1', 'coder', 'again', ['claude']);
+    await manager.send('kild-1', 'coder', ['claude'], 'again');
     const result = manager.drain('kild-1', 'claude');
     return result.ok ? result.value : undefined;
   };
@@ -692,7 +632,7 @@ test('owned delivery is untouched by the attached branch', async () => {
   const { manager, prompted } = fixture();
   await newKild(manager, [{ handle: 'orchestrator' }, { handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  await manager.sendAs('kild-1', 'orchestrator', 'do X', ['coder']);
+  await manager.send('kild-1', 'orchestrator', ['coder'], 'do X');
   expect(prompted.at(-1)).toEqual({
     id: 's-2',
     text: '[#demo] @orchestrator: do X',
@@ -701,12 +641,31 @@ test('owned delivery is untouched by the attached branch', async () => {
   expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
 });
 
-test('a message with no addressee defaults to the lead and never fans out to inboxes', async () => {
+test('an inbox only ever sees messages that named it — it is not a firehose', async () => {
+  // If unaddressed traffic reached inboxes the wake cap would trip on messages the
+  // attached agent was never asked to read.
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'orchestrator' }, { handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  await manager.sendFromHuman('kild-1', 'kick off');
+  await send(manager, ['orchestrator'], 'kick off');
+  await manager.send('kild-1', 'orchestrator', ['coder'], 'for you only');
   expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
+});
+
+test('one message splits across both transports: pushed to owned, queued to attached', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }, { handle: 'coder' }]);
+  await manager.attach('kild-1', 'claude');
+  await manager.send('kild-1', 'orchestrator', ['coder', 'claude'], 'status?');
+  expect(prompted.at(-1)).toEqual({
+    id: 's-2',
+    text: '[#demo] @orchestrator: status?',
+    from: 'orchestrator',
+  });
+  expect(manager.drain('kild-1', 'claude')).toMatchObject({
+    ok: true,
+    value: { posts: [{ from: 'orchestrator', text: 'status?' }] },
+  });
 });
 
 test('drain on an unknown kild or agent is not_found, and never on an owned one', async () => {
@@ -729,7 +688,7 @@ test('stopping a kild stops the sessions kild owns and never the attached harnes
   const { manager, stopped } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  await manager.sendAs('kild-1', 'coder', 'unread', ['claude']); // mail still queued
+  await manager.send('kild-1', 'coder', ['claude'], 'unread'); // mail still queued
   expect(await manager.stop('kild-1')).toMatchObject({ ok: true });
   expect(stopped).toEqual(['s-1']);
   // The kild is gone, so the next drain is not_found — which the hook reads as silence.
@@ -756,7 +715,7 @@ test('an attached agent rides the archived snapshot with its ownership', async (
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
-  await manager.sendFromHuman('kild-1', 'work');
+  await send(manager, ['coder'], 'work');
   await manager.stop('kild-1');
   expect(manager.archived()[0]?.agents).toContainEqual(
     expect.objectContaining({ handle: 'claude', ownership: 'attached' }),

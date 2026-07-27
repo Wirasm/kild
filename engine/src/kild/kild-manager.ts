@@ -2,22 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type AgentCallbacks, agentManager, type SpawnRequest } from './agent-manager.ts';
 import { configuredMemoryDir, configuredMemorySynthesis } from './config.ts';
 import { Inbox, type InboxDrain } from './inbox.ts';
-import {
-  finalNonSystemPost,
-  formatOperatorNotification,
-  humanPostEvent,
-  openerNotificationTarget,
-} from './kild-events.ts';
-import {
-  ensureKildCanHalt,
-  ensureKildCanSend,
-  ensureKildCanSpawnAgent,
-  ensureKildCanStopFromAgent,
-  ensureKildCanStopFromOperator,
-  transitionKildState,
-} from './kild-lifecycle.ts';
 import { KildRegistry } from './kild-registry.ts';
-import { type Delivery, routeMessage, unknownRecipients } from './kild-router.ts';
 import {
   type AgentSpec,
   type ArchivedKild,
@@ -25,7 +10,6 @@ import {
   agentView,
   type CommandResult,
   costTotals,
-  HUMAN,
   type Kild,
   type KildActionSuccess,
   type KildOutbound,
@@ -57,10 +41,22 @@ function traceSend(kildName: string, message: Message): void {
       kild: kildName,
       from: message.from,
       to: message.to,
-      system: message.system ?? false,
       chars: message.text.length,
     }),
   );
+}
+
+/** How a delivered message reads to the agent receiving it: who, where, what. */
+export function formatDelivery(kildName: string, from: string, text: string): string {
+  return `[#${kildName}] @${from}: ${text}`;
+}
+
+/** Named recipients that are not in this kild's roster. The one addressing question the
+ *  engine still answers, and it answers it with "no" — the sender names recipients, so
+ *  the only thing left to check is whether those names exist. */
+function unknownRecipients(kild: Kild, to: string[]): string[] {
+  const handles = new Set(kild.agents.map((agent) => agent.handle));
+  return to.filter((recipient) => !handles.has(recipient));
 }
 
 interface AgentRuntime {
@@ -95,10 +91,16 @@ function fail<T>(
 }
 
 /**
- * Owns live kilds: creates them (one session per agent), routes every message
- * (agent→agent as turns, everything to the human as a broadcast), grows them (the
- * human's spawn + an agent's `spawn` tool), and stops them (the kill switch). Sits
- * beside the AgentManager — agents ARE sessions, so the AgentManager stays
+ * Owns live kilds: creates them (one session per agent), delivers every message to the
+ * recipients its sender named, grows them (`spawn` / `attach`), and stops them.
+ *
+ * **Addressing is the sender's job, never the engine's.** `send` takes a `to` and
+ * delivers to exactly those handles — there is no default recipient, no rank, and no
+ * rule that turns an unaddressed message into an addressed one. An empty `to` is a
+ * rejection. That is the whole of what used to be a router: the question "who is this
+ * for?" has one answer, given at the call site.
+ *
+ * Sits beside the AgentManager — agents ARE sessions, so the AgentManager stays
  * kild-agnostic; it only forwards an agent's control lines (`send` / `spawn`) to the
  * callbacks we hand it.
  */
@@ -193,16 +195,14 @@ export class KildManager {
       // flows through: explicit `base` wins, else the cwd's configured `baseBranch`, else
       // its current branch, else `main`.
       base: await resolveBaseBranch(spec.cwd, spec.base),
-      openedBy: spec.openedBy,
       agents: [],
       log: [],
-      state: 'opening',
     };
     this.registry.create(kild);
 
     const spawnedAgentIds: string[] = [];
     for (const agent of validated.value) {
-      const result = this.startAgent(kild, agent, HUMAN);
+      const result = this.startAgent(kild, agent);
       if (!result.ok) {
         this.rollbackCreate(kildId, spawnedAgentIds);
         return result;
@@ -210,40 +210,11 @@ export class KildManager {
       spawnedAgentIds.push(result.value.agentId);
     }
 
-    const transitioned = transitionKildState(kild, 'running');
-    if (!transitioned.ok) {
-      this.rollbackCreate(kildId, spawnedAgentIds);
-      return transitioned;
-    }
-
     this.broadcast({ kilds: this.registry.summaries() });
     return ok({ kildId, message: `Kild '${spec.name}' created.` });
   }
 
-  /** The human sends into the kild (kick-off and steering). `to` is optional — omit it
-   *  to address the kild lead by default. */
-  async sendFromHuman(
-    kildId: string,
-    text: string,
-    to?: string[],
-  ): Promise<CommandResult<KildActionSuccess>> {
-    return this.send(kildId, HUMAN, text, { to });
-  }
-
-  /** An operator-side author (e.g. the brain) sends into a kild — the agent-driven
-   *  mirror of {@link sendFromHuman}, routed identically. This is how the brain
-   *  speaks into the real Kild primitive instead of a separate bus. `to` is optional —
-   *  omit it to address the kild lead by default. */
-  async sendAs(
-    kildId: string,
-    from: string,
-    text: string,
-    to?: string[],
-  ): Promise<CommandResult<KildActionSuccess>> {
-    return this.send(kildId, from, text, { to });
-  }
-
-  /** A kild's shared log (empty if the kild is unknown) — for demos / inspection. */
+  /** A kild's message history (empty if the kild is unknown) — for demos / inspection. */
   messageLog(kildId: string): Message[] {
     return this.registry.get(kildId)?.log ?? [];
   }
@@ -270,7 +241,6 @@ export class KildManager {
         name: kild.name,
         worktree: kild.worktree,
         agents: kild.agents.map(agentView),
-        state: kild.state,
         log: kild.log,
         totals: costTotals(kild.agents),
         git: await kildGitStatus(kild.worktree ? worktreePath(kild.worktree) : kild.cwd, kild.base),
@@ -295,17 +265,16 @@ export class KildManager {
     return fail('not_found', `no such live kild: ${kildId}`);
   }
 
-  /** Spawn an agent into a live kild. `invitedBy` is the spawner's handle (default
-   *  {@link HUMAN} for the operator's manual spawn). */
+  /** Spawn an agent into a live kild. `invitedBy` is the spawning agent's handle, absent
+   *  when the operator spawns directly. Observers learn about the new roster from the
+   *  `{kilds}` broadcast — a join is an event, not a message anyone was sent. */
   async spawnAgent(
     kildId: string,
     spec: AgentSpec,
-    invitedBy: string = HUMAN,
+    invitedBy?: string,
   ): Promise<CommandResult<KildActionSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
-    const allowed = ensureKildCanSpawnAgent(kild);
-    if (!allowed.ok) return allowed;
 
     const validated = await this.validateAgents(kild.cwd, [spec], kild.agents);
     if (!validated.ok) return validated;
@@ -313,10 +282,6 @@ export class KildManager {
     const result = this.startAgent(kild, validated.value[0] as ValidatedAgentSpec, invitedBy);
     if (!result.ok) return result;
     this.broadcast({ kilds: this.registry.summaries() });
-    await this.send(kildId, HUMAN, `@${spec.handle} joined the kild.`, {
-      system: true,
-      allowStopped: true,
-    });
     return ok({ message: `Spawned @${spec.handle} into the kild.` });
   }
 
@@ -334,7 +299,6 @@ export class KildManager {
 
     const trimmed = handle.trim();
     if (!trimmed) return fail('rejected', 'agent handle required');
-    if (trimmed === HUMAN) return fail('rejected', `agent handle '${HUMAN}' is reserved`);
 
     const existing = kild.agents.find((agent) => agent.handle === trimmed);
     if (existing) {
@@ -344,8 +308,6 @@ export class KildManager {
       return ok({ message: `@${trimmed} is already attached to kild '${kild.name}'.` });
     }
 
-    const allowed = ensureKildCanSpawnAgent(kild);
-    if (!allowed.ok) return allowed;
     if (kild.agents.length + 1 > MAX_AGENTS) {
       return fail('rejected', `kild capacity exceeded (max ${MAX_AGENTS} agents)`);
     }
@@ -353,17 +315,12 @@ export class KildManager {
     kild.agents.push({
       handle: trimmed,
       ownership: 'attached',
-      invitedBy: HUMAN,
       // Attached and waiting: it has taken no turn for this kild yet.
       idle: true,
       inbox: new Inbox(),
     });
     this.registry.persistNow(kildId);
     this.broadcast({ kilds: this.registry.summaries() });
-    await this.send(kildId, HUMAN, `@${trimmed} joined the kild (attached).`, {
-      system: true,
-      allowStopped: true,
-    });
     return ok({ message: `@${trimmed} attached to kild '${kild.name}'.` });
   }
 
@@ -398,49 +355,20 @@ export class KildManager {
     return ok(drained);
   }
 
-  /** Stop every agent session — the human kill switch / kild teardown. A kild with
-   *  history moves straight into the archive and is pushed to clients, so it stays
-   *  visible as a read-only transcript without an engine restart. */
+  /** Stop every agent session and archive the kild — the one teardown verb (there is no
+   *  separate halt: a kild is live while it is in the registry and stopped once it is
+   *  archived). A kild with history is pushed to clients as an archived snapshot, so it
+   *  stays visible as a read-only transcript without an engine restart. The worktree is
+   *  never touched — code outlives the agents that wrote it. */
   async stop(kildId: string): Promise<CommandResult<KildActionSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
-    const allowed = ensureKildCanStopFromOperator(kild);
-    if (!allowed.ok) return allowed;
     this.stopAgents(kild);
-    const transitioned = transitionKildState(kild, 'closed');
-    if (!transitioned.ok) return transitioned;
     const archived = this.registry.remove(kildId);
-    this.notifyOpener(kild, {
-      kind: 'closed',
-      finalPost: finalNonSystemPost(kild),
-    });
     if (archived) this.broadcast({ archivedKild: archived });
     this.broadcast({ kilds: this.registry.summaries() });
     if (archived) await this.recordMemory(kild);
     return ok({ message: `Kild '${kild.name}' stopped.` });
-  }
-
-  /** Manual circuit breaker: stop every agent session but KEEP the kild, so its
-   *  transcript stays visible (read-only). The operator trips this to halt a runaway or
-   *  off-track kild without tearing it down (vs {@link stop}). */
-  async halt(kildId: string): Promise<CommandResult<KildActionSuccess>> {
-    const kild = this.registry.get(kildId);
-    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
-    const allowed = ensureKildCanHalt(kild);
-    if (!allowed.ok) return allowed;
-    this.stopAgents(kild);
-    const transitioned = transitionKildState(kild, 'halted');
-    if (!transitioned.ok) return transitioned;
-    await this.send(kildId, HUMAN, 'Kild halted by the operator.', {
-      system: true,
-      allowStopped: true,
-    });
-    this.notifyOpener(kild, {
-      kind: 'halted',
-      finalPost: finalNonSystemPost(kild),
-    });
-    this.broadcast({ kilds: this.registry.summaries() });
-    return ok({ message: `Kild '${kild.name}' halted.` });
   }
 
   /** Post-stop memory hook: append the engine-written log entry (always), then spawn
@@ -481,15 +409,14 @@ export class KildManager {
     }
   }
 
-  /** Spawn one agent session, wired so its control lines route back here. `invitedBy`
-   *  is the spawner's handle (a live agent) or {@link HUMAN} for the creator's initial
-   *  roster — the ground-truth spawn edge + idle-notice target. */
+  /** Spawn one agent session, wired so its control lines come back here. `invitedBy` is
+   *  the spawning agent's handle, absent for the creator's initial roster — the
+   *  ground-truth spawn edge. It confers nothing: every agent in a kild is a peer. */
   private startAgent(
     kild: Kild,
     spec: ValidatedAgentSpec,
-    invitedBy: string,
+    invitedBy?: string,
   ): CommandResult<{ agentId: string }> {
-    const isLead = kild.agents.length === 0; // first agent leads the kild
     const agentId = this.createId();
     // Record the requested model now (visible immediately); the session's `model` event
     // upgrades it to the provider-resolved ref once it starts.
@@ -513,12 +440,10 @@ export class KildManager {
           // Base branch a brand-new worktree forks from (the first agent creates it).
           base: kild.base,
           // Opaque to the AgentManager; the agent process reads these to register its
-          // kild tools (`send`, `spawn`, and — lead only — `stop`) and tag its outbound
-          // control lines.
+          // kild tools (`send`, `spawn`, `stop`) and tag its outbound control lines.
           env: {
             KILD_KILD_ID: kild.id,
             KILD_HANDLE: spec.handle,
-            ...(isLead ? { KILD_LEAD: '1' } : {}),
           },
         },
         'cli',
@@ -535,11 +460,11 @@ export class KildManager {
     return ok({ agentId });
   }
 
-  /** An agent called `send`: resolve its kild/handle and route. */
+  /** An agent called `send`: resolve its kild/handle and deliver. */
   private async handleSend(agentId: string, m: SendOut): Promise<CommandResult<KildActionSuccess>> {
     const located = this.registry.locateAgent(agentId);
     if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
-    return this.send(located.kild.id, located.agent.handle, m.text, { to: m.to });
+    return this.send(located.kild.id, located.agent.handle, m.to, m.text);
   }
 
   /** An agent called `spawn`: add the named agent to its kild. */
@@ -558,65 +483,39 @@ export class KildManager {
     );
   }
 
-  /** The kild's lead called `stop`: notice, then teardown. Only the lead holds the tool
-   *  (agent-side), but enforce it here too — a control line is just stdout, so the engine,
-   *  not the subprocess, is the authority on who may end a kild. */
+  /** An agent called `stop`: tear the kild down. Any agent in the kild may do it —
+   *  there are no ranks, so there is no rank to check. */
   private async handleStop(
     agentId: string,
-    stopSpec: StopOut,
+    _stopSpec: StopOut,
   ): Promise<CommandResult<KildActionSuccess>> {
     const located = this.registry.locateAgent(agentId);
     if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
-    const { kild, agent } = located;
-    const allowed = ensureKildCanStopFromAgent(kild);
-    if (!allowed.ok) return allowed;
-    const lead = kild.agents[0];
-    if (!lead || agentProcessId(lead) !== agentId) {
-      return fail('rejected', `only the lead may stop kild '${kild.name}'`);
-    }
-    await this.send(
-      kild.id,
-      HUMAN,
-      `Kild stopped by @${agent.handle}${stopSpec.reason ? `: ${stopSpec.reason}` : '.'}`,
-      {
-        system: true,
-        allowStopped: true,
-      },
-    );
-    return this.stop(kild.id);
+    return this.stop(located.kild.id);
   }
 
-  /** Record + route one message from `from` (an agent handle or {@link HUMAN}).
+  /**
+   * Record + deliver one message from `from` to the handles in `to`.
    *
-   * Addressing is structured, never parsed from prose — the ONE rule: a system notice
-   * targets no one; otherwise an explicit `to` wins; otherwise the message goes to the
-   * kild lead (the orchestrator). A typo'd handle is returned as a clean error to the
-   * caller (the calling agent's tool result), so it can correct itself — it is never
-   * recorded, routed, or turned into kild spam. */
-  private async send(
+   * `to` is what the SENDER named. The engine adds nothing to it and infers nothing for
+   * it: an empty list is a rejection, not a broadcast and not a default. The only
+   * addressing question left is whether those handles exist — a typo comes back as a
+   * clean error naming the roster, so the caller (an agent's tool result, a CLI user) can
+   * correct itself. Such a message is never recorded, never delivered, never kild spam.
+   */
+  async send(
     kildId: string,
     from: string,
+    to: string[],
     text: string,
-    opts: { to?: string[]; system?: boolean; allowStopped?: boolean } = {},
   ): Promise<CommandResult<KildActionSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
-    const allowed = ensureKildCanSend(kild, { allowHalted: opts.allowStopped });
-    if (!allowed.ok) return allowed;
+    if (to.length === 0) {
+      return fail('rejected', 'a message must name at least one recipient');
+    }
 
-    const lead = kild.agents[0]?.handle;
-    const to = opts.system ? [] : opts.to?.length ? opts.to : lead ? [lead] : [];
-    const message: Message = {
-      id: this.createId(),
-      kildId,
-      from,
-      to,
-      text,
-      ts: Date.now(),
-      system: opts.system,
-    };
-
-    const unknown = unknownRecipients(kild, message);
+    const unknown = unknownRecipients(kild, to);
     if (unknown.length > 0) {
       const known = kild.agents.map((agent) => `@${agent.handle}`).join(', ');
       return fail(
@@ -626,17 +525,40 @@ export class KildManager {
       );
     }
 
+    const message: Message = { id: this.createId(), kildId, from, to, text, ts: Date.now() };
     traceSend(kild.name, message);
     this.registry.appendMessage(kildId, message);
-    routeMessage(kild, message, this.delivery());
-    if (
-      !message.system &&
-      message.to.includes(HUMAN) &&
-      kild.agents.some((agent) => agent.handle === message.from)
-    ) {
-      this.notifyOpener(kild, humanPostEvent(message));
-    }
+    this.broadcast({ message });
+    this.deliver(kild, message);
     return ok({ message: 'Sent to the kild.', deliveredTo: to.filter((t) => t !== from) });
+  }
+
+  /**
+   * The whole of delivery: for each named recipient, push or queue.
+   *
+   * Two branches, and they differ only in transport — an `owned` agent is a process kild
+   * can prompt, an `attached` one is a harness that pulls from its inbox. The single
+   * exception is the sender: an agent is never delivered its own message.
+   */
+  private deliver(kild: Kild, message: Message): void {
+    for (const handle of message.to) {
+      if (handle === message.from) continue;
+      const agent = kild.agents.find((candidate) => candidate.handle === handle);
+      if (!agent) continue;
+      if (agent.ownership === 'attached') {
+        // `idle` deliberately does NOT flip here — the harness really is idle until it
+        // takes its next turn; the drain is what moves it.
+        agent.inbox.enqueue({ from: message.from, text: message.text, ts: Date.now() });
+      } else {
+        // A delivered turn reactivates the agent: it is no longer waiting.
+        agent.idle = false;
+        this.sessions.prompt(
+          agent.id,
+          formatDelivery(kild.name, message.from, message.text),
+          message.from,
+        );
+      }
+    }
   }
 
   private async validateAgents(
@@ -653,9 +575,6 @@ export class KildManager {
     const validated: ValidatedAgentSpec[] = [];
 
     for (const spec of agents) {
-      if (spec.handle === HUMAN) {
-        return fail('rejected', `agent handle '${HUMAN}' is reserved`);
-      }
       if (seenHandles.has(spec.handle)) {
         return fail('rejected', `duplicate agent: @${spec.handle}`);
       }
@@ -683,32 +602,6 @@ export class KildManager {
   private rollbackCreate(kildId: string, agentIds: string[]): void {
     for (const agentId of agentIds) this.sessions.stop(agentId);
     this.registry.remove(kildId);
-  }
-
-  /** Best-effort direct notification. It deliberately bypasses kild send/routing so an
-   *  operator prompt can never become a kild message or trigger an agent reply loop. */
-  private notifyOpener(kild: Kild, event: Parameters<typeof formatOperatorNotification>[1]): void {
-    const target = openerNotificationTarget(kild);
-    if (!target) return;
-    this.sessions.prompt(target, formatOperatorNotification(kild.name, event), 'kild');
-  }
-
-  private delivery(): Delivery {
-    return {
-      deliverAsTurn: (agentId, from, text) => {
-        // A delivered turn reactivates the agent: it is no longer waiting.
-        const located = this.registry.locateAgent(agentId);
-        if (located) located.agent.idle = false;
-        this.sessions.prompt(agentId, text, from);
-      },
-      // The attached counterpart of the stdin push: queue it and let the agent collect
-      // it. `idle` deliberately does NOT flip here — the harness really is idle until it
-      // takes its next turn; the drain is what moves it.
-      queueForAttached: (agent, from, text) => {
-        agent.inbox.enqueue({ from, text, ts: Date.now() });
-      },
-      broadcast: (message) => this.broadcast({ message }),
-    };
   }
 
   private broadcast(msg: KildOutbound): void {

@@ -23,6 +23,7 @@ import {
   resolveNewKildActor,
   resolveSendActor,
   resolveStopActor,
+  UNATTRIBUTED,
 } from './kild/rest-attribution.ts';
 import { readSessionTranscript } from './kild/session-transcript.ts';
 import {
@@ -142,6 +143,33 @@ function agentSpecs(input: unknown): AgentSpec[] | null {
     });
   }
   return agents;
+}
+
+/** A `to` payload: an array of handles naming at least one recipient. The engine never
+ *  defaults a recipient, so absent/empty is a client error, never "everyone" or "the
+ *  first agent". */
+function recipients(input: unknown): { ok: true; to: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(input) || input.some((handle) => typeof handle !== 'string')) {
+    return { ok: false, error: 'to must be an array of agent handles' };
+  }
+  if (input.length === 0) return { ok: false, error: 'to must name at least one agent' };
+  return { ok: true, to: input as string[] };
+}
+
+/** `kickoff: {to, text}` — the first message into a new kild, addressed like any other. */
+function kickoffSpec(
+  input: unknown,
+): { ok: true; to: string[]; text: string } | { ok: false; error: string } {
+  if (typeof input !== 'object' || input === null) {
+    return { ok: false, error: 'kickoff must be an object: {to: [handle], text}' };
+  }
+  const { to, text } = input as { to?: unknown; text?: unknown };
+  if (typeof text !== 'string' || !text.trim()) {
+    return { ok: false, error: 'kickoff.text required' };
+  }
+  const parsed = recipients(to);
+  if (!parsed.ok) return { ok: false, error: `kickoff.${parsed.error}` };
+  return { ok: true, to: parsed.to, text };
 }
 
 function envRecord(input: unknown): Record<string, string> | undefined {
@@ -399,9 +427,10 @@ app.post('/api/kilds', async (c) => {
     openedBy?: unknown;
   }>();
   if (typeof body.name !== 'string') return c.json({ error: 'name required' }, 400);
-  if (typeof body.kickoff !== 'string' || !body.kickoff.trim()) {
-    return c.json({ error: 'kickoff required' }, 400);
-  }
+  // The kickoff is an ordinary directed message, so it names its recipients like any
+  // other: `{to: ["coder"], text: "…"}`. There is no agent it falls through to.
+  const kickoff = kickoffSpec(body.kickoff);
+  if (!kickoff.ok) return c.json({ error: kickoff.error }, 400);
   if (body.cwd !== undefined && typeof body.cwd !== 'string')
     return c.json({ error: 'cwd must be a string' }, 400);
   if (body.project !== undefined && typeof body.project !== 'string') {
@@ -468,23 +497,17 @@ app.post('/api/kilds', async (c) => {
     agents,
     worktree: body.worktree,
     base: typeof body.base === 'string' ? body.base : undefined,
-    openedBy: body.openedBy,
   });
   if (!created.ok) return c.json({ error: created.message }, kildResultStatus(created));
-  // Addressing is structured now: the manager defaults an untargeted send to the kild
-  // lead, so the kickoff reaches the orchestrator without munging the text.
-  const sent = attribution.value.human
-    ? await kildManager.sendFromHuman(id, body.kickoff)
-    : await kildManager.sendAs(id, attribution.value.actor, body.kickoff);
+  const sent = await kildManager.send(id, attribution.value, kickoff.to, kickoff.text);
   if (!sent.ok) {
     await kildManager.stop(id);
     return c.json({ error: sent.message }, kildResultStatus(sent));
   }
   return c.json({ ok: true, id: created.value.kildId, message: created.value.message });
 });
-// `to` is the structured recipient list the in-kild `send` tool already takes —
-// exposed here so a caller outside the kild (the CLI, a script, helm) can address a
-// specific agent instead of always falling through to the kild lead. Addressing is
+// `to` is the same structured recipient list the in-kild `send` tool takes, and it is
+// REQUIRED here for the same reason: the engine never infers a recipient. Addressing is
 // never parsed from the message text, so `@handle` in `text` remains just text.
 app.post('/api/kilds/:id/messages', async (c) => {
   const { text, from, sessionId, to } = await c.req.json<{
@@ -498,22 +521,15 @@ app.post('/api/kilds/:id/messages', async (c) => {
     return c.json({ error: 'from must be a string' }, 400);
   if (sessionId !== undefined && typeof sessionId !== 'string')
     return c.json({ error: 'sessionId must be a string' }, 400);
-  if (to !== undefined && (!Array.isArray(to) || to.some((t) => typeof t !== 'string')))
-    return c.json({ error: 'to must be an array of agent handles' }, 400);
-  // An empty array would read as "addressed to nobody" while behaving as "addressed to
-  // the lead" — reject it rather than silently doing something else.
-  if (Array.isArray(to) && to.length === 0)
-    return c.json({ error: 'to must name at least one agent' }, 400);
-  const recipients = to as string[] | undefined;
+  const addressed = recipients(to);
+  if (!addressed.ok) return c.json({ error: addressed.error }, 400);
   const id = c.req.param('id');
   const attribution = resolveSendActor(
     { from: typeof from === 'string' ? from : undefined, sessionId },
     agentManager,
   );
   if (!attribution.ok) return c.json({ error: attribution.message }, kildResultStatus(attribution));
-  const result = attribution.value.human
-    ? await kildManager.sendFromHuman(id, text, recipients)
-    : await kildManager.sendAs(id, attribution.value.actor, text, recipients);
+  const result = await kildManager.send(id, attribution.value, addressed.to, text);
   if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
@@ -618,13 +634,12 @@ type ClientMessage =
       worktree?: string;
       base?: string;
     }
-  | { type: 'kild_send'; id: string; text: string }
+  | { type: 'kild_send'; id: string; to: string[]; text: string }
   | {
       type: 'kild_spawn';
       id: string;
       agent: { handle: string; persona?: string; model?: string };
     }
-  | { type: 'kild_halt'; id: string }
   | { type: 'kild_stop'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
@@ -660,11 +675,12 @@ function parseClientMessage(data: string): ClientMessage | null {
     if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
     return m as ClientMessage;
   }
-  if (m.type === 'kild_send' && typeof m.text === 'string') return m as ClientMessage;
+  if (m.type === 'kild_send' && typeof m.text === 'string' && recipients(m.to).ok) {
+    return m as ClientMessage;
+  }
   if (m.type === 'kild_spawn' && typeof m.agent === 'object' && m.agent !== null) {
     return m as ClientMessage;
   }
-  if (m.type === 'kild_halt') return m as ClientMessage;
   if (m.type === 'kild_stop') return m as ClientMessage;
   return null;
 }
@@ -727,11 +743,11 @@ app.get(
             }),
           );
         } else if (msg.type === 'kild_send') {
-          enqueue(`kild_send ${msg.id}`, () => kildManager.sendFromHuman(msg.id, msg.text));
+          enqueue(`kild_send ${msg.id}`, () =>
+            kildManager.send(msg.id, UNATTRIBUTED, msg.to, msg.text),
+          );
         } else if (msg.type === 'kild_spawn') {
           enqueue(`kild_spawn ${msg.id}`, () => kildManager.spawnAgent(msg.id, msg.agent));
-        } else if (msg.type === 'kild_halt') {
-          enqueue(`kild_halt ${msg.id}`, () => kildManager.halt(msg.id));
         } else if (msg.type === 'kild_stop') {
           enqueue(`kild_stop ${msg.id}`, () => kildManager.stop(msg.id));
         }

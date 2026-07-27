@@ -35,7 +35,11 @@ function newKild(body: unknown): Promise<Response> {
   );
 }
 
-const base = { name: 'r', kickoff: 'do a thing', agents: [{ handle: 'agent' }] };
+const base = {
+  name: 'r',
+  kickoff: { to: ['agent'], text: 'do a thing' },
+  agents: [{ handle: 'agent' }],
+};
 
 test('an absolute cwd that does not exist is refused', async () => {
   const missing = path.join(os.tmpdir(), `kild-not-here-${Date.now()}`);

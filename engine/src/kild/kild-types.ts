@@ -3,15 +3,14 @@ import type { Inbox } from './inbox.ts';
 import type { KildGitStatus } from './worktree-status.ts';
 
 /**
- * Kild domain — the operator-facing primitive: a set of agents (agent instances +
- * the human) exchanging Messages on one shared log. A single-agent "session" is just
- * a 1-agent Kild. Pure types; no behaviour (state lives in the registry, routing in
- * the router, lifecycle in the manager).
+ * Kild domain — the operator-facing primitive: a set of agents exchanging directed
+ * Messages. A single-agent "session" is just a 1-agent Kild. Pure types; no behaviour
+ * (state lives in the registry, delivery in the manager).
+ *
+ * Every message names its recipients. There is no privileged sender, no privileged
+ * recipient, and no rank: a human-driven harness attaches and gets an ordinary handle
+ * like any other agent.
  */
-
-/** Reserved agent handle for the human operator. Messages to `@human` surface
- *  in UI clients/CLI only — there is no session to deliver a turn to. */
-export const HUMAN = 'human';
 
 /** How kild reaches an agent.
  *
@@ -36,9 +35,8 @@ interface AgentBase {
    *  provider-resolved `provider/id` once the session reports it. Lets an observer see
    *  which model each agent used in a run. */
   model?: string;
-  /** Who spawned this agent — the spawning agent's handle, or {@link HUMAN} for the
-   *  creator's initial roster. Ground-truth spawn edge (vs inferring it from the log)
-   *  and the routing target for its idle/done notice. */
+  /** Who spawned this agent — the spawning agent's handle, absent for the creator's
+   *  initial roster. Ground-truth spawn edge (vs inferring it from the log). */
   invitedBy?: string;
   /** True when the agent has finished a turn and is waiting. Set on `agent_end` for an
    *  owned agent and by an EMPTY drain for an attached one, cleared when work arrives.
@@ -78,8 +76,8 @@ export interface AttachedAgent extends AgentBase {
   inbox: Inbox;
 }
 
-/** An agent in a kild, of either ownership. The human is a virtual agent — never
- *  in this list. */
+/** An agent in a kild, of either ownership. This list is the complete roster: an
+ *  address that is not in it does not exist. */
 export type Agent = OwnedAgent | AttachedAgent;
 
 /** The kild session behind an agent, or `undefined` when kild does not own its
@@ -145,26 +143,23 @@ export function costTotals(
   };
 }
 
-/** A single message on a kild's shared log — the conversation unit. */
+/** One directed communication: a sender, its named recipients, and the text. There is
+ *  no engine-generated message kind — roster changes and teardown are events, not
+ *  entries on this log. */
 export interface Message {
   id: string;
   kildId: string;
-  /** Handle of the sender, or {@link HUMAN}. */
+  /** Handle of the sender. */
   from: string;
-  /** Resolved addressee handles (empty = broadcast to all, no turn delivered). */
+  /** The recipients the SENDER named. Never empty, never inferred. */
   to: string[];
   text: string;
   /** Epoch millis, stamped by the engine on receipt. */
   ts: number;
-  /** True for engine-generated notices (e.g. an agent joining). */
-  system?: boolean;
 }
 
-/** The canonical kild lifecycle — transitions are enforced centrally by the kild
- *  manager/lifecycle helper rather than inferred from booleans or registry presence. */
-export type KildLifecycleState = 'opening' | 'running' | 'halted' | 'closed';
-
-/** A live kild: agents + a shared message log + a workspace. */
+/** A live kild: agents + their message history + a workspace. Liveness is registry
+ *  presence — in the registry it is live, archived it is stopped. */
 export interface Kild {
   id: string;
   name: string;
@@ -176,12 +171,8 @@ export interface Kild {
    *  measured against (so ahead/behind and changed files reflect this kild's own
    *  work, not everything the base is ahead of `main`). */
   base?: string;
-  /** Session that created this kild. It is notified only when it is not an agent in it. */
-  openedBy?: string;
   agents: Agent[];
   log: Message[];
-  /** Canonical lifecycle state for this kild. */
-  state: KildLifecycleState;
 }
 
 /** An agent to spawn into a kild. */
@@ -201,23 +192,15 @@ export interface NewKildSpec {
   /** Base branch for the worktree + git-status baseline (default: the checkout's current
    *  branch). Editable via `.kild/config.json` `baseBranch` or the `--base` CLI flag. */
   base?: string;
-  /** Creator session identity from a session-aware REST caller; absent for ordinary
-   *  REST callers. */
-  openedBy?: string;
 }
 
-/** Lightweight kild descriptor for client lists. */
+/** Lightweight kild descriptor for client lists. Its presence in a `{kilds}` broadcast
+ *  IS the liveness signal — there is no state field to consult. */
 export interface KildSummary {
   id: string;
   name: string;
   worktree?: string;
   agents: AgentView[];
-  /** Canonical lifecycle state when surfaced by kild-owned producers. Optional so
-   *  out-of-scope fixtures/consumers do not need coordinated edits in this slice. */
-  state?: KildLifecycleState;
-  /** True when the operator has halted the kild (sessions stopped, kept read-only).
-   *  Derived compatibility field for existing non-kild consumers. */
-  stopped?: boolean;
 }
 
 /** A kild recovered from disk after an engine restart — its conversation log with no
@@ -227,9 +210,6 @@ export interface ArchivedKild {
   name: string;
   worktree?: string;
   agents: AgentView[];
-  /** Canonical lifecycle state when persisted by kild-owned producers. Optional so
-   *  older history files and out-of-scope fixtures continue to type-check. */
-  state?: KildLifecycleState;
   log: Message[];
   /** Project directory the kild ran in — persisted so archived kilds stay attributable
    *  to their project after the worktree is pruned. Optional: older files predate it. */
@@ -258,9 +238,8 @@ export type KildErrorCode = 'not_found' | 'invalid_state' | 'rejected';
 
 export interface KildActionSuccess {
   message: string;
-  /** For sends: the resolved recipients other than the sender (the human counts — it is
-   *  the operator channel). Empty = the message reached no one, e.g. a self-addressed
-   *  send. */
+  /** For sends: the named recipients other than the sender. Empty = the message reached
+   *  no one, e.g. a self-addressed send. */
   deliveredTo?: string[];
 }
 
@@ -284,10 +263,9 @@ export interface SendOut {
   kind: 'send';
   requestId?: string;
   text: string;
-  /** Explicit addressees (structured, never parsed from the text). Omitted by the tool
-   *  path when the agent didn't address anyone — the manager then defaults to the kild
-   *  lead. */
-  to?: string[];
+  /** The recipients the sending agent named (structured, never parsed from the text).
+   *  Required: the engine never infers a recipient, so an empty list is a rejection. */
+  to: string[];
 }
 
 /** Agent→engine control line: an agent called `spawn` to pull in another. */
@@ -299,7 +277,7 @@ export interface SpawnOut {
   model?: string;
 }
 
-/** Agent→engine control line: the kild lead called `stop`. */
+/** Agent→engine control line: an agent called `stop`. */
 export interface StopOut {
   kind: 'stop';
   requestId?: string;

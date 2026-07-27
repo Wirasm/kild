@@ -12,7 +12,7 @@
 /** One unread message waiting for an attached agent. Structured, not pre-formatted:
  *  how it reads is the caller's business (a notice naming the sender, or the body). */
 export interface InboxMessage {
-  /** Handle of the sender, or the human handle. */
+  /** Handle of the sender. */
   from: string;
   /** The message text, exactly as recorded on the kild log. */
   text: string;
