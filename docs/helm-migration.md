@@ -63,6 +63,25 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 `GET|DELETE /api/worktrees` · `POST /api/worktrees/prune` · `POST /api/open` ·
 `POST /api/open-url`
 
+**Why `/api/worktrees` survives alongside `/api/kilds`,** given a kild *is* a worktree: a
+worktree outlives the kild that created it. An archived kild's tree is still on disk, and
+listing or pruning a tree whose kild is long gone has to work when there is no kild to ask
+about. So `/api/kilds` is the **live** view (workstreams with agents in them) and
+`/api/worktrees` is the **disk** view (what exists on the filesystem, reclaimable or not).
+They are two lifetimes, not two names for one thing.
+
+### Known duplication, to be resolved before you migrate
+
+`GET /api/agents/:id/transcript` and `GET /api/kilds/:id/agents/:handle/transcript` are two
+routes to the same resource — one keyed by machine `id`, one by kild-scoped `handle`. That is
+the old participant-vs-session split surviving the rename in new clothes, and it is the exact
+shape that let "who is this addressed to?" hide for so long.
+
+**Resolution:** `handle` is an *addressing* concept — it names a recipient for `send`. It is not
+a routing key. One canonical resource family keyed by `id` (`/api/agents/:id/...`) wins, and the
+kild payload already carries the `id`→`handle` mapping in its `agents[]`. The kild-scoped
+transcript route is removed in the follow-up commit; do not build against it.
+
 ## Payload shapes
 
 ### Agent (was participant)
@@ -103,7 +122,13 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 - **`decisions` is gone.** The `needs-decision[key]` ledger was a protocol the engine parsed out
   of message prose; it moved to PRP. If helm rendered open decisions, remove it.
 - **`stopped` is gone** — it was a derived mirror of `state === 'halted'`. Read `state`.
-- `git` and `totals` are unchanged, including `collidesWith`.
+- `git` and `totals` are unchanged.
+
+**`collidesWith` is not on the wire — and never was.** Cross-kild collision detection is
+computed by `computeCollisions()` inside `compactLiveKilds()`, which is the **CLI's** compact
+view. `GET /api/kilds` does not carry the field. What it *does* carry is `git.changedFiles`, the
+full per-kild changed-file list, which is everything needed to derive collisions client-side.
+Deriving them in helm from `git.changedFiles` is the correct approach, not a workaround.
 
 ### Request body changes
 
@@ -155,6 +180,14 @@ Connect to `/ws` as before. Frame names changed.
 - [ ] Delete any `posted` attention logic; keep `idle`
 - [ ] Drop `force` from the stop call
 - [ ] Un-pin
+
+## Attribution: `from` is already engine-derived
+
+Worth stating because it reads like an open item and is not. `from` is **not** client-supplied
+attribution — supplying it is a hard rejection (`rest-attribution.ts`: *"from is not allowed;
+actor identity is engine-derived"*). The actor is resolved from the caller's `sessionId`, or is
+the human when no session is given. The field survives in the request schema only so that a
+client passing it gets a loud error instead of being silently ignored.
 
 ## What is *not* changing (yet)
 
