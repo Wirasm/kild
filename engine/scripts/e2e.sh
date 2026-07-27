@@ -14,6 +14,8 @@
 #
 #   Usage:  ./scripts/e2e.sh          (exit 0 = every check passed)
 set -u
+# Absolute, resolved BEFORE any cd: $0 is relative to the invocation dir, which we leave.
+ENGINE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SH="$(mktemp -d)"   # a fresh rig each run: stale worktrees would masquerade as findings
 PORT="${KILD_E2E_PORT:-4611}"   # never 4517; override if something else holds it
 E=http://localhost:$PORT
@@ -44,7 +46,7 @@ cat > "$REPO/.kild/config.json" <<JSON
 { "hooks": { "onClose": { "command": ["sh","-c","echo fired kild={{name}} ledger=\$KILD_CLOSE_LEDGER_PATH > $RIG/hook.log"] } } }
 JSON
 
-cd "$(dirname "$0")/.."
+cd "$ENGINE_DIR"
 KILD_PORT=$PORT bun run src/server.ts > "$RIG/engine.log" 2>&1 &
 EPID=$!
 for i in $(seq 1 40); do curl -sf $E/api/health >/dev/null 2>&1 && break; sleep 0.4; done
@@ -102,6 +104,10 @@ DR=$(curl -s -X POST $E/api/kilds/$ID/inbox/drain -H 'content-type: application/
 chk "attached inbox drains both messages"      "$DR" "second"
 DR2=$(curl -s -X POST $E/api/kilds/$ID/inbox/drain -H 'content-type: application/json' -d '{"handle":"honryo"}')
 chk "second drain reports idle"                "$DR2" '"idle":true'
+LIVE=$(curl -s "$E/api/kilds")
+chk "ownership axis on a live kild's agents"    "$LIVE" "ownership"
+chk "the attached harness is owned by nobody"   "$LIVE" '"ownership":"attached"'
+chk "the spawned agent is owned"                "$LIVE" '"ownership":"owned"'  
 
 echo "══ 5. messages are their own cursored resource"
 M=$(curl -s "$E/api/kilds/$ID/messages")
@@ -156,7 +162,7 @@ chkno "no state field on the archive"          "$(curl -s $E/api/kilds/archive)"
 echo "══ 10. no HUMAN, no lead, no lifecycle in the wire"
 ALL="$L$S$M$(curl -s $E/api/kilds/archive)"
 chkno "no 'stopped' kild-level lifecycle flag" "$ALL" '"stopped":true,"state"'
-chk "ownership axis on a live kild's agents"     "$(curl -s $E/api/kilds)" "ownership"
+# (ownership is asserted in section 4, while a live kild still has agents)
 
 kill $EPID 2>/dev/null; wait $EPID 2>/dev/null
 echo ""

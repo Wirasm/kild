@@ -365,7 +365,7 @@ test('liveIdentities carries identity and roster only — no cost, no log, no gi
     agents: [
       {
         handle: 'coder',
-        ownership: undefined,
+        ownership: 'owned',
         persona: undefined,
         model: undefined,
         idle: undefined,
@@ -761,12 +761,15 @@ test('attach registers an attached agent that is addressable but never spawned',
   ]);
 });
 
-test('the roster reports the ownership, and an attached agent carries no pi handles', async () => {
+test('the roster STATES the ownership for both kinds, and an attached agent carries no pi handles', async () => {
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   await manager.attach('kild-1', 'claude');
   const [coder, claude] = manager.liveKilds()[0]?.agents ?? [];
-  expect(coder?.ownership).toBeUndefined(); // absent means owned — no wire churn
+  // `ownership` is the field a client switches on, so it is always present. It used to be
+  // omitted for owned agents on the reasoning that absent means owned — which made
+  // `ownership === 'owned'` false for every owned agent.
+  expect(coder).toMatchObject({ ownership: 'owned' });
   expect(claude).toMatchObject({ ownership: 'attached' });
   expect(claude?.piSessionFile).toBeUndefined();
 });
