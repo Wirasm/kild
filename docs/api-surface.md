@@ -95,7 +95,13 @@ retrofitting attribution afterwards means touching every route twice.
 **Split cheap identity from costly status.** `GET /api/kilds` today computes git status for
 every kild on every call, forcing a slow cadence on a query that is mostly identity. Split:
 `/api/kilds` returns identity, tree edges, agents and `idle` for free; `/api/kilds/status`
-returns ahead/behind, dirty, cost and `collidesWith` on its own cadence.
+returns ahead/behind, dirty and cost on its own cadence.
+
+**Correction:** an earlier draft of this section said `/api/kilds/status` would return
+`collidesWith`. It does not, and no server route ever did. Collisions are a *cross-kild
+derivation* over `changedFiles` — `computeCollisions()` in `kilds-status.ts`, client-side.
+What `/status` serves is the `changedFiles[]` that makes the derivation possible. (Same
+error the migration guide made; see the `collidesWith` note there.)
 
 **Give messages a monotonic `seq`.** `ts` is `Date.now()` and can go backwards, so it cannot be
 a cursor. Add `seq` and let clients page with `?since=<seq>`.
