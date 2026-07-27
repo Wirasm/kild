@@ -109,9 +109,16 @@ export async function kildMessages(kildId: string, since?: number): Promise<Mess
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`);
 }
 
+export interface AttachResponse extends KildActionResponse {
+  /** Bearer token for this (kild, handle): send it as `Authorization: Bearer <token>` and
+   *  the engine attributes the message to this handle instead of the unattributed label.
+   *  Stable across re-attaches, and gone when the kild stops. */
+  token: string;
+}
+
 /** Register an attached agent — a harness kild does not own claiming a `@handle`.
- *  Idempotent by handle: re-attaching is a no-op, not an error. */
-export async function attachAgent(kildId: string, handle: string): Promise<KildActionResponse> {
+ *  Idempotent by handle: re-attaching is a no-op returning the same token, not an error. */
+export async function attachAgent(kildId: string, handle: string): Promise<AttachResponse> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/agents/attach`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { type AgentCallbacks, agentManager, type SpawnRequest } from './agent-manager.ts';
+import { type AttachIdentity, type AttachSuccess, AttachTokens } from './attach-token.ts';
 import { configuredCloseHook, configuredMemoryDir } from './config.ts';
 import { type KildCloseEvent, runCloseHook } from './hooks.ts';
 import { Inbox, type InboxDrain } from './inbox.ts';
@@ -115,6 +116,8 @@ export class KildManager {
   private readonly resolvePersonas: typeof listPersonas;
   private readonly createId: () => string;
   private readonly subscribers = new Set<(msg: KildOutbound) => void>();
+  /** Attach credentials for the live kilds — minted here, dropped when a kild stops. */
+  private readonly tokens = new AttachTokens();
 
   constructor(deps: KildManagerDeps = {}) {
     this.registry = deps.registry ?? new KildRegistry();
@@ -385,15 +388,44 @@ export class KildManager {
     return ok({ message: `Spawned @${spec.handle} into the kild.` });
   }
 
+  // ── Attribution ─────────────────────────────────────────────────────────────
+  // A message's `from` is the sender's HANDLE, and a handle is kild-level knowledge: it is
+  // an agent's membership of a kild, not a property of the session substrate. Both
+  // credentials are therefore resolved here rather than by asking the agent manager for a
+  // persona — which named the wrong thing (two agents on one persona were
+  // indistinguishable) and asked the wrong layer.
+
+  /** The handle the agent running this kild session speaks as.
+   *
+   *  Rejects a session that is in no live kild: an agent kild spawned outside a kild has no
+   *  handle, and there is nothing to invent one from. If it wants a name on a kild's log it
+   *  attaches for one. */
+  handleForSession(sessionId: string): CommandResult<string> {
+    const located = this.registry.locateAgent(sessionId);
+    if (!located) return fail('rejected', `unknown session: ${sessionId}`);
+    return ok(located.agent.handle);
+  }
+
+  /** The (kild, handle) a bearer token stands for — undefined when nothing minted it. */
+  identifyToken(token: string): AttachIdentity | undefined {
+    return this.tokens.identify(token);
+  }
+
   /** Register an ATTACHED agent: a harness kild does not own (a Claude Code session
    *  the human is driving) that wants a `@handle` in this kild. Nothing is spawned — the
    *  agent gets an inbox and is addressable from the moment it attaches.
    *
-   *  Idempotent by handle: re-attaching an existing attached handle is a no-op, so a hook
-   *  or a shell alias can call it on every session start without special-casing. Taking
+   *  It also gets a TOKEN: the credential that makes it attributable when it sends, since
+   *  it has no kild session to be recognised by (see {@link AttachTokens}). Attaching is the
+   *  one moment a harness becomes addressable, so it is the one moment it can be given an
+   *  identity.
+   *
+   *  Idempotent by handle: re-attaching an existing attached handle is a no-op returning the
+   *  SAME token, so a hook or a shell alias can call it on every session start without
+   *  special-casing and without invalidating the token the session already holds. Taking
    *  over an OWNED agent's handle is refused — two transports for one address would make
    *  delivery ambiguous. */
-  async attach(kildId: string, handle: string): Promise<CommandResult<KildActionSuccess>> {
+  async attach(kildId: string, handle: string): Promise<CommandResult<AttachSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
 
@@ -405,7 +437,10 @@ export class KildManager {
       if (existing.ownership !== 'attached') {
         return fail('rejected', `@${trimmed} is already an owned agent in '${kild.name}'`);
       }
-      return ok({ message: `@${trimmed} is already attached to kild '${kild.name}'.` });
+      return ok({
+        message: `@${trimmed} is already attached to kild '${kild.name}'.`,
+        token: this.tokens.mint(kildId, trimmed),
+      });
     }
 
     if (kild.agents.length + 1 > MAX_AGENTS) {
@@ -421,7 +456,10 @@ export class KildManager {
     });
     this.registry.persistNow(kildId);
     this.broadcast({ kilds: this.registry.summaries() });
-    return ok({ message: `@${trimmed} attached to kild '${kild.name}'.` });
+    return ok({
+      message: `@${trimmed} attached to kild '${kild.name}'.`,
+      token: this.tokens.mint(kildId, trimmed),
+    });
   }
 
   /** Destructively read an attached agent's inbox — the pull half of the inverted
@@ -464,6 +502,9 @@ export class KildManager {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
     this.stopAgents(kild);
+    // Attach tokens live with the kild and die with it: an archived kild has no addressable
+    // handles, so a credential naming one would outlive the only thing it meant.
+    this.tokens.forget(kildId);
     const archived = this.registry.remove(kildId);
     if (archived) this.broadcast({ archivedKild: archived });
     this.broadcast({ kilds: this.registry.summaries() });
