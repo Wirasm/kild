@@ -1,0 +1,717 @@
+<title>kild — the agent-centric model</title>
+<style>
+  :root {
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+
+    /* light theme (default) */
+    --ground: #ECEEF1;
+    --surface: #FFFFFF;
+    --surface-2: #F4F6F8;
+    --ink: #14181F;
+    --ink-soft: #4C5464;
+    --ink-faint: #838D9C;
+    --line: #DBE0E7;
+    --line-strong: #C6CCD6;
+
+    --mech: #0E6E78;      /* kild / mechanism */
+    --mech-bg: #0e6e781a;
+    --prp: #8A6410;       /* PRP / intelligence */
+    --prp-bg: #8a641018;
+    --seal: #C0402A;      /* honryo / human authority */
+    --seal-bg: #c0402a16;
+
+    --measure: 68ch;
+    --shell: 1080px;
+    --radius: 4px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0D1015;
+      --surface: #14181F;
+      --surface-2: #1A1F28;
+      --ink: #E7EAEF;
+      --ink-soft: #9BA5B3;
+      --ink-faint: #626C7B;
+      --line: #262D38;
+      --line-strong: #333C49;
+
+      --mech: #46B8C2;
+      --mech-bg: #46b8c220;
+      --prp: #DBA842;
+      --prp-bg: #dba84220;
+      --seal: #E86B4E;
+      --seal-bg: #e86b4e1f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0D1015;
+    --surface: #14181F;
+    --surface-2: #1A1F28;
+    --ink: #E7EAEF;
+    --ink-soft: #9BA5B3;
+    --ink-faint: #626C7B;
+    --line: #262D38;
+    --line-strong: #333C49;
+    --mech: #46B8C2;
+    --mech-bg: #46b8c220;
+    --prp: #DBA842;
+    --prp-bg: #dba84220;
+    --seal: #E86B4E;
+    --seal-bg: #e86b4e1f;
+  }
+  :root[data-theme="light"] {
+    --ground: #ECEEF1;
+    --surface: #FFFFFF;
+    --surface-2: #F4F6F8;
+    --ink: #14181F;
+    --ink-soft: #4C5464;
+    --ink-faint: #838D9C;
+    --line: #DBE0E7;
+    --line-strong: #C6CCD6;
+    --mech: #0E6E78;
+    --mech-bg: #0e6e781a;
+    --prp: #8A6410;
+    --prp-bg: #8a641018;
+    --seal: #C0402A;
+    --seal-bg: #c0402a16;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .wrap { max-width: var(--shell); margin: 0 auto; padding: 0 28px; }
+  .measure { max-width: var(--measure); }
+
+  a { color: var(--mech); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--mech) 35%, transparent); }
+  a:hover { border-bottom-color: var(--mech); }
+  a:focus-visible, .idx a:focus-visible { outline: 2px solid var(--seal); outline-offset: 3px; border-radius: 2px; }
+
+  code, .mono { font-family: var(--font-mono); }
+  code {
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    padding: 0.08em 0.36em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(var(--ground), var(--ground)) padding-box,
+      repeating-linear-gradient(0deg, transparent 0 27px, color-mix(in srgb, var(--mech) 8%, transparent) 27px 28px),
+      repeating-linear-gradient(90deg, transparent 0 27px, color-mix(in srgb, var(--mech) 8%, transparent) 27px 28px);
+    background-color: var(--ground);
+  }
+  .masthead .wrap { padding-top: 58px; padding-bottom: 46px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 22px;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .eyebrow .sep { color: var(--line-strong); }
+
+  h1 {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: clamp(2.1rem, 5.4vw, 3.1rem);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    margin: 0 0 26px;
+    text-wrap: balance;
+  }
+  h1 .lc { color: var(--ink); }
+
+  .thesis {
+    font-family: var(--font-serif);
+    font-size: clamp(1.24rem, 2.5vw, 1.62rem);
+    line-height: 1.42;
+    color: var(--ink);
+    max-width: 30ch;
+    margin: 0 0 30px;
+    text-wrap: balance;
+  }
+  .thesis em { font-style: normal; color: var(--seal); }
+  .thesis .m { color: var(--mech); font-style: normal; }
+  .thesis .p { color: var(--prp); font-style: normal; }
+
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 10px 26px;
+    font-family: var(--font-mono); font-size: 0.74rem;
+    color: var(--ink-soft); letter-spacing: 0.02em;
+    border-top: 1px solid var(--line); padding-top: 20px;
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- layer legend ---------- */
+  .legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .legend > div { padding: 20px 22px; border-right: 1px solid var(--line); }
+  .legend > div:last-child { border-right: none; }
+  .legend .lyr { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .legend .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+  .legend h3 { margin: 0 0 6px; font-family: var(--font-mono); font-size: 1.02rem; font-weight: 600; }
+  .legend p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.5; }
+  .l-mech .dot { background: var(--mech); } .l-mech .lyr { color: var(--mech); }
+  .l-prp  .dot { background: var(--prp); }  .l-prp  .lyr { color: var(--prp); }
+  .l-seal .dot { background: var(--seal); } .l-seal .lyr { color: var(--seal); }
+
+  /* ---------- section index ---------- */
+  .idx { margin: 0; padding: 26px 0 4px; }
+  .idx ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .idx li { background: var(--surface); }
+  .idx a { display: flex; gap: 14px; align-items: baseline; padding: 12px 18px; border: none; color: var(--ink); font-size: 0.94rem; }
+  .idx a:hover { background: var(--surface-2); }
+  .idx .n { font-family: var(--font-mono); font-size: 0.76rem; color: var(--mech); letter-spacing: 0.04em; flex: none; width: 2.4em; }
+
+  /* ---------- sections ---------- */
+  section { padding: 62px 0 8px; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 26px; }
+  .sec-head .n { font-family: var(--font-mono); font-size: 0.82rem; color: var(--mech); letter-spacing: 0.06em; padding-top: 4px; flex: none; }
+  h2 { font-family: var(--font-mono); font-weight: 600; font-size: clamp(1.4rem, 3vw, 1.9rem); letter-spacing: -0.015em; margin: 0; line-height: 1.1; text-wrap: balance; }
+  h2 + .lede { margin-top: 14px; }
+  .lede { font-size: 1.06rem; color: var(--ink-soft); }
+  p { margin: 0 0 18px; }
+  p.measure, .measure p { max-width: var(--measure); }
+
+  h3.sub { font-family: var(--font-mono); font-size: 0.96rem; font-weight: 600; letter-spacing: 0.01em; margin: 38px 0 14px; color: var(--ink); }
+  h3.sub .tag { font-size: 0.72rem; color: var(--ink-faint); font-weight: 500; }
+
+  .note { font-size: 0.9rem; color: var(--ink-soft); }
+  strong { color: var(--ink); font-weight: 600; }
+  .seal-t { color: var(--seal); font-weight: 600; }
+  .mech-t { color: var(--mech); font-weight: 600; }
+  .prp-t  { color: var(--prp); font-weight: 600; }
+
+  /* ---------- primitive cards ---------- */
+  .prims { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin: 8px 0 4px; }
+  .prim { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; border-top: 2px solid var(--edge, var(--mech)); }
+  .prim .kw { font-family: var(--font-mono); font-weight: 600; font-size: 1.02rem; margin-bottom: 4px; }
+  .prim .eq { font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-faint); margin-bottom: 12px; }
+  .prim p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.5; }
+  .prim.e-mech { --edge: var(--mech); } .prim.e-prp { --edge: var(--prp); } .prim.e-seal { --edge: var(--seal); }
+  .prim .kw .badge { font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; vertical-align: middle; margin-left: 8px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+  .b-mech { background: var(--mech-bg); color: var(--mech); }
+  .b-prp  { background: var(--prp-bg);  color: var(--prp); }
+  .b-seal { background: var(--seal-bg); color: var(--seal); }
+
+  /* ---------- code blocks ---------- */
+  .code { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; margin: 0 0 20px; }
+  .code .bar { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); background: var(--surface-2); }
+  .code .bar .role { margin-left: auto; text-transform: none; letter-spacing: 0.02em; }
+  pre { margin: 0; padding: 18px 20px; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.72; color: var(--ink); tab-size: 2; }
+  pre .cm { color: var(--ink-faint); }
+  pre .kw { color: var(--seal); }
+  pre .ty { color: var(--mech); }
+  pre .st { color: var(--prp); }
+  pre .fn { color: var(--ink); font-weight: 600; }
+  pre .del { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink-faint) 60%, transparent); }
+
+  /* ---------- diagram ---------- */
+  .diagram { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px 26px; margin: 6px 0 8px; overflow-x: auto; }
+  .stack { display: flex; flex-direction: column; gap: 0; min-width: 540px; max-width: 720px; margin: 0 auto; }
+  .band { border: 1px solid var(--bd, var(--line)); border-radius: var(--radius); background: var(--bg, var(--surface-2)); padding: 16px 20px; position: relative; }
+  .band + .band { margin-top: 26px; }
+  .band + .band::before { content: ""; position: absolute; top: -26px; left: 50%; width: 1px; height: 26px; background: var(--line-strong); }
+  .band + .band::after { content: "▼"; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--ink-faint); background: var(--surface); padding: 0 3px; }
+  .band .role { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--rc, var(--ink-faint)); margin-bottom: 6px; }
+  .band .name { font-family: var(--font-mono); font-weight: 600; font-size: 1.0rem; }
+  .band .desc { font-size: 0.86rem; color: var(--ink-soft); margin-top: 3px; }
+  .band.b-seal { --bd: color-mix(in srgb, var(--seal) 45%, var(--line)); --bg: var(--seal-bg); --rc: var(--seal); }
+  .band.b-mech { --bd: color-mix(in srgb, var(--mech) 45%, var(--line)); --bg: var(--mech-bg); --rc: var(--mech); }
+  .band.b-prp  { --bd: color-mix(in srgb, var(--prp) 45%, var(--line)); --bg: var(--prp-bg); --rc: var(--prp); }
+  .band .split { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .band .node { flex: 1 1 150px; border: 1px dashed var(--line-strong); border-radius: 3px; padding: 10px 12px; background: var(--surface); }
+  .band .node .name { font-size: 0.86rem; }
+  .band .node .desc { font-size: 0.78rem; margin-top: 2px; }
+  .side { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); text-align: center; padding: 4px 0; }
+
+  /* worktree tree */
+  .tree { font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.95; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; overflow-x: auto; }
+  .tree .b { color: var(--ink-faint); }
+  .tree .k { color: var(--mech); font-weight: 600; }
+  .tree .a { color: var(--seal); }
+  .tree .c { color: var(--ink-soft); }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0 20px; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 11px 15px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-faint); background: var(--surface-2); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.mono, th.mono { font-family: var(--font-mono); font-size: 0.82rem; }
+  td .was { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: color-mix(in srgb,var(--ink-faint) 55%, transparent); }
+  td .arrow { color: var(--mech); padding: 0 6px; }
+  .disp { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; white-space: nowrap; display: inline-block; }
+  .d-keep { background: var(--mech-bg); color: var(--mech); }
+  .d-move { background: var(--prp-bg); color: var(--prp); }
+  .d-die  { background: color-mix(in srgb, var(--ink-faint) 15%, transparent); color: var(--ink-faint); }
+  .d-new  { background: var(--seal-bg); color: var(--seal); }
+
+  /* ---------- callout ---------- */
+  .callout { border: 1px solid var(--line); border-left: 3px solid var(--seal); background: var(--surface); border-radius: var(--radius); padding: 18px 20px; margin: 4px 0 22px; }
+  .callout .h { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--seal); margin-bottom: 8px; }
+  .callout p { margin: 0; font-size: 0.94rem; color: var(--ink-soft); }
+  .callout.mech { border-left-color: var(--mech); } .callout.mech .h { color: var(--mech); }
+
+  /* ---------- decisions ---------- */
+  .decisions { display: grid; gap: 12px; margin: 4px 0; counter-reset: dec; }
+  .dec { display: flex; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+  .dec::before { counter-increment: dec; content: "Q" counter(dec); font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--seal); flex: none; padding-top: 1px; }
+  .dec .body { flex: 1; }
+  .dec .q { font-weight: 600; color: var(--ink); margin-bottom: 4px; font-size: 0.96rem; }
+  .dec .a { font-size: 0.9rem; color: var(--ink-soft); }
+  .dec .a b { color: var(--mech); font-weight: 600; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--line); margin-top: 60px; padding: 40px 0 70px; }
+  footer .restate { font-family: var(--font-serif); font-size: 1.16rem; line-height: 1.5; max-width: 54ch; color: var(--ink); margin: 0 0 22px; text-wrap: balance; }
+  footer .restate .m { color: var(--mech); } footer .restate .p { color: var(--prp); } footer .restate .s { color: var(--seal); }
+  footer .prov { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.02em; line-height: 1.7; }
+
+  ul.clean { list-style: none; padding: 0; margin: 0 0 18px; display: grid; gap: 9px; }
+  ul.clean li { padding-left: 22px; position: relative; font-size: 0.96rem; color: var(--ink-soft); }
+  ul.clean li::before { content: "─"; position: absolute; left: 0; color: var(--mech); font-family: var(--font-mono); }
+  ul.clean li b { color: var(--ink); }
+
+  @media (max-width: 720px) {
+    body { font-size: 16px; }
+    .legend, .idx ol { grid-template-columns: 1fr; }
+    .legend > div { border-right: none; border-bottom: 1px solid var(--line); }
+    .legend > div:last-child { border-bottom: none; }
+    .sec-head { flex-direction: column; gap: 4px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { animation: rise 0.6s cubic-bezier(.2,.7,.3,1) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap reveal">
+    <p class="eyebrow">
+      <span>kild</span><span class="sep">/</span><span>architecture design brief</span>
+      <span class="sep">·</span><span>v0 proposal</span>
+    </p>
+    <h1><span class="lc">Agents as agents.</span><br>The smallest primitives<br>that hold.</h1>
+    <p class="thesis"><span class="m">kild</span> ships mechanism. <span class="p">PRP</span> ships intelligence. The agent CLI is the <em>honryo</em>.</p>
+    <div class="meta-row">
+      <span><b>Repo</b> &nbsp;wirasm/kild</span>
+      <span><b>Intelligence</b> &nbsp;wirasm/prp</span>
+      <span><b>Runtime</b> &nbsp;pi (earendil-works)</span>
+      <span><b>Status</b> &nbsp;design, pre-demolition</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- LAYER LEGEND -->
+  <div style="padding-top:34px">
+    <div class="legend">
+      <div class="l-mech">
+        <div class="lyr"><span class="dot"></span>Layer · mechanism</div>
+        <h3>kild</h3>
+        <p>Isolation, process supervision, message routing, observability, the control seat. One inhabitant type: the agent. Knows nothing of process or persona.</p>
+      </div>
+      <div class="l-prp">
+        <div class="lyr"><span class="dot"></span>Layer · intelligence</div>
+        <h3>PRP</h3>
+        <p>How work is done: personas, plan→implement→review, gates, the honryo authority and the trained deference that gives it weight. Invisible to the engine.</p>
+      </div>
+      <div class="l-seal">
+        <div class="lyr"><span class="dot"></span>Actor · authority</div>
+        <h3>honryo</h3>
+        <p>An agent wearing human-authority intelligence — in practice the CLI a human drives (Claude Code). Attached, addressable, holds the seat. Never the root of it.</p>
+      </div>
+    </div>
+    <p class="note" style="margin-top:12px">Colour carries meaning throughout this document: <span class="mech-t">teal = kild / mechanism</span>, <span class="prp-t">ochre = PRP / intelligence</span>, <span class="seal-t">cinnabar = honryo / human authority</span>.</p>
+  </div>
+
+  <!-- INDEX -->
+  <nav class="idx" aria-label="Contents">
+    <ol>
+      <li><a href="#s0"><span class="n">§00</span><span>The reframe — what changed in the thinking</span></a></li>
+      <li><a href="#s1"><span class="n">§01</span><span>Primitives</span></a></li>
+      <li><a href="#s2"><span class="n">§02</span><span>Data model</span></a></li>
+      <li><a href="#s3"><span class="n">§03</span><span>Architecture map</span></a></li>
+      <li><a href="#s4"><span class="n">§04</span><span>Boundaries — who knows what</span></a></li>
+      <li><a href="#s5"><span class="n">§05</span><span>How they talk</span></a></li>
+      <li><a href="#s6"><span class="n">§06</span><span>API design — the control plane</span></a></li>
+      <li><a href="#s7"><span class="n">§07</span><span>Agent tools &amp; CLI surface</span></a></li>
+      <li><a href="#s8"><span class="n">§08</span><span>Migration — keep / move / die</span></a></li>
+      <li><a href="#s9"><span class="n">§09</span><span>Open decisions &amp; build notes</span></a></li>
+    </ol>
+  </nav>
+
+  <!-- §00 -->
+  <section id="s0">
+    <div class="sec-head"><span class="n">§00</span><h2>The reframe</h2></div>
+    <div class="measure">
+      <p class="lede">Today kild's primitive is the <strong>Room</strong> — and the Room is an opinionated, human-centric, hierarchical group chat baked into the engine. That violates kild's own rule (“ship mechanism, never intelligence”). The reframe makes the primitive the <strong>agent</strong>, and pushes every opinion up into PRP.</p>
+      <p>The tell was in the bug history: “who is this addressed to?” has bitten three separate places. That is not carelessness — it is the wrong primitive screaming. A shared broadcast log forces the engine to <em>guess</em> recipients. Directed message-passing removes the question entirely: the sender names the recipient, full stop.</p>
+      <p>The whole redesign is one substitution, applied everywhere:</p>
+      <ul class="clean">
+        <li><b>Room → kild.</b> A kild <em>is</em> a git worktree — the isolated workstream. Membership is “who is in this tree,” not a social construct with its own lifecycle.</li>
+        <li><b>Participant tiers → one agent.</b> No operator / lead / worker ranks. An agent is an agent; roles are personas PRP hands out, invisible to the router.</li>
+        <li><b>@human → honryo.</b> The human stops being a participant and becomes an <em>attached agent</em> holding the seat. Authority is a role flesh or a trained proxy can carry.</li>
+        <li><b>Broadcast chat → directed messages.</b> An agent reaches another only by an explicit <code>send</code> into its inbox. No leads, no implicit replies, no ping-pong.</li>
+      </ul>
+      <div class="callout">
+        <div class="h">The one line</div>
+        <p>Delete the org chart from the engine. Ship <code>spawn</code> + <code>send</code> + isolation + observability + a seat. Let the personas be the team.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- §01 -->
+  <section id="s1">
+    <div class="sec-head"><span class="n">§01</span><h2>Primitives</h2></div>
+    <p class="lede measure">Six things. Three nouns, three verbs. Everything the engine ships reduces to these; everything else is intelligence.</p>
+    <div class="prims">
+      <div class="prim e-mech">
+        <div class="kw">kild <span class="badge b-mech">noun</span></div>
+        <div class="eq">= worktree = workstream</div>
+        <p>An isolated git worktree and the agents working in it. The unit of parallel work. The root checkout is <code>kild-0</code>; children fork from a base branch. “Room” survives only as the rendered view of a kild.</p>
+      </div>
+      <div class="prim e-mech">
+        <div class="kw">agent <span class="badge b-mech">noun</span></div>
+        <div class="eq">= harness + model + persona</div>
+        <p>The sole inhabitant type. One mechanism axis: <code>owned</code> (kild runs the process) or <code>attached</code> (an external harness kild addresses but never spawns). Role is intelligence — the engine can't see it.</p>
+      </div>
+      <div class="prim e-seal">
+        <div class="kw">honryo <span class="badge b-seal">role</span></div>
+        <div class="eq">= agent + human authority</div>
+        <p>An <code>attached</code> agent wearing human-authority intelligence. The human's CLI (Claude Code). Registered so it is addressable — workers <code>send</code> home to it — but its process is the human's, not kild's.</p>
+      </div>
+      <div class="prim e-mech">
+        <div class="kw">spawn() <span class="badge b-mech">verb</span></div>
+        <div class="eq">into: kild &nbsp;|&nbsp; fork: base</div>
+        <p>Any agent creates one or many. <code>into</code> a kild = a collaborator sharing the tree. <code>fork</code> a base = a child kild with a new tree. One verb, one axis — collapses <code>open_room</code> + <code>invite_agent</code>.</p>
+      </div>
+      <div class="prim e-mech">
+        <div class="kw">send() <span class="badge b-mech">verb</span></div>
+        <div class="eq">to: [handle] → inbox</div>
+        <p>A directed message to named recipients' inboxes, delivered as a turn. The <em>only</em> way an agent's words reach another. No broadcast, no default-to-lead. Collapses <code>post_message</code> + <code>post_room</code>.</p>
+      </div>
+      <div class="prim e-seal">
+        <div class="kw">seat <span class="badge b-seal">capability</span></div>
+        <div class="eq">spawn · stop · kill · guardrails</div>
+        <p>Hard authority: the unforgeable powers, plus engine guardrails (refuse a push to <code>main</code>, cap spend, hard-halt). Held by the real human. Grantable to a honryo as a client; never delegable at the root.</p>
+      </div>
+    </div>
+    <p class="note measure" style="margin-top:20px"><code>observe</code> and <code>land</code> round out the verb set — <code>observe</code> is the read side (event stream + git/cost state), <code>land</code> merges a child kild toward its base. Both are pure mechanism; see §05.</p>
+  </section>
+
+  <!-- §02 -->
+  <section id="s2">
+    <div class="sec-head"><span class="n">§02</span><h2>Data model</h2></div>
+    <p class="lede measure">Three types. What's <span class="mech-t">kept</span> is mechanism; the annotations mark what was <span class="prp-t">intelligence</span> and leaves, and what <span style="color:var(--ink-faint)">dies</span> outright.</p>
+
+    <div class="code">
+      <div class="bar"><span>engine/src/kild/kild-types.ts</span><span class="role">was room-types.ts · Room</span></div>
+<pre><span class="cm">// The unit: a kild = an isolated workstream = a git worktree.</span>
+<span class="kw">interface</span> <span class="ty">Kild</span> {
+  id: <span class="ty">string</span>
+  name: <span class="ty">string</span>
+  cwd: <span class="ty">string</span>            <span class="cm">// project root the tree derives from</span>
+  worktree?: <span class="ty">string</span>      <span class="cm">// kild/&lt;name&gt;; absent = the root checkout (kild-0)</span>
+  base?: <span class="ty">string</span>          <span class="cm">// parent branch this tree forked from — the tree edge</span>
+  parent?: <span class="ty">string</span>        <span class="cm">// parent kild id — the recursion edge; absent = root</span>
+  agents: <span class="ty">Agent</span>[]        <span class="cm">// inhabitants (owned + attached)</span>
+  log: <span class="ty">Message</span>[]         <span class="cm">// message record — a "room" is just this, projected</span>
+
+  <span class="del">state: RoomLifecycleState   // opening|running|halted|closed — DIES (intelligence)</span>
+  <span class="del">decisions: RoomDecision[]   // needs-decision ledger      — MOVES to PRP</span>
+  <span class="cm">// no "lead" — participants[0] was never a mechanism fact</span>
+}</pre>
+    </div>
+
+    <div class="code">
+      <div class="bar"><span>Agent</span><span class="role">was RoomParticipant</span></div>
+<pre><span class="cm">// The sole inhabitant. ONE mechanism axis (ownership). Role is intelligence.</span>
+<span class="kw">interface</span> <span class="ty">Agent</span> {
+  handle: <span class="ty">string</span>              <span class="cm">// @name — addressable</span>
+  ownership: <span class="st">'owned'</span> | <span class="st">'attached'</span>  <span class="cm">// MECHANISM: does kild run the process?</span>
+  persona?: <span class="ty">string</span>            <span class="cm">// from PRP; kild never interprets it</span>
+  model?: <span class="ty">string</span>
+  spawnedBy?: <span class="ty">string</span>          <span class="cm">// spawner handle (or the seat) — recursion edge</span>
+  inbox: <span class="ty">Message</span>[]           <span class="cm">// directed messages awaiting a turn</span>
+
+  <span class="cm">// owned only — kild owns the subprocess:</span>
+  sessionId?: <span class="ty">string</span>
+  piSessionId?: <span class="ty">string</span>        <span class="cm">// durable terminal-resume handle</span>
+
+  <span class="del">idle / posted           // report-and-idle failsafe — MOVES to PRP</span>
+}</pre>
+    </div>
+
+    <div class="code">
+      <div class="bar"><span>Message</span><span class="role">was RoomMessage</span></div>
+<pre><span class="kw">interface</span> <span class="ty">Message</span> {
+  id: <span class="ty">string</span>
+  kildId: <span class="ty">string</span>
+  from: <span class="ty">string</span>              <span class="cm">// sender handle</span>
+  to: <span class="ty">string</span>[]              <span class="cm">// explicit recipients — the sender always names them</span>
+  text: <span class="ty">string</span>
+  ts: <span class="ty">number</span>
+
+  <span class="del">implicit?  // turn-final narration auto-post — DIES (no broadcast to compensate for)</span>
+  <span class="del">system?    // engine notice — DIES; observers derive joins/leaves from the event stream</span>
+}</pre>
+    </div>
+
+    <div class="callout mech">
+      <div class="h">What this removes</div>
+      <p>No <code>HUMAN</code> constant. No lifecycle state machine. No lead. No <code>implicit</code> replies, no <code>to</code>-defaulting, no decision ledger in the engine. Authority is not a field — it lives in PRP and in the seat, never in the row.</p>
+    </div>
+  </section>
+
+  <!-- §03 -->
+  <section id="s3">
+    <div class="sec-head"><span class="n">§03</span><h2>Architecture map</h2></div>
+    <p class="lede measure">Top to bottom: the human, the honryo that acts for them, the engine that supervises isolation, and the owned agents doing the work. PRP feeds intelligence in from the side; pi is the runtime underneath.</p>
+
+    <div class="diagram">
+      <div class="stack">
+        <div class="side">holds the seat · flesh &amp; keyboard</div>
+        <div class="band b-seal">
+          <div class="role">human</div>
+          <div class="name">operator of the engine</div>
+          <div class="desc">Root of hard authority — kill switch, guardrails. Not a participant. Drives everything through one CLI.</div>
+        </div>
+        <div class="band b-seal">
+          <div class="role">honryo · attached agent</div>
+          <div class="name">Claude Code + PRP honryo persona</div>
+          <div class="desc">Registered &amp; addressable; process owned by the human, not kild. Granted seat powers as a client. Carries <em>soft</em> authority by trained deference.</div>
+        </div>
+        <div class="band b-mech">
+          <div class="role">kild engine · REST + WS · localhost:4517</div>
+          <div class="name">mechanism</div>
+          <div class="desc">Worktree isolation · process supervision · message routing to inboxes · observability (events, cost, git) · the control seat &amp; guardrails.</div>
+          <div class="split">
+            <div class="node"><div class="name">owned agent</div><div class="desc">worker in kild/A — push to stdin</div></div>
+            <div class="node"><div class="name">owned agent</div><div class="desc">worker in kild/B — its own tree</div></div>
+            <div class="node"><div class="name">owned agent</div><div class="desc">spawns a grandchild kild…</div></div>
+          </div>
+        </div>
+        <div class="side">↑ personas &amp; process injected via config paths only ↑</div>
+        <div class="band b-prp">
+          <div class="role">PRP · intelligence · wirasm/prp</div>
+          <div class="name">personas · skills · gates · honryo protocol</div>
+          <div class="desc">Discovered by agents through generic paths (<code>plugins</code>, <code>memory.dir</code>, <code>~/.agents/skills</code>). The engine never reads it.</div>
+        </div>
+        <div class="band b-mech">
+          <div class="role">pi · agent runtime · upstream</div>
+          <div class="name">models · sessions · tools · context · auth</div>
+          <div class="desc">Only the engine knows pi exists; pi never knows what a kild is.</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="sub">The worktree tree <span class="tag">— recursion bottoms out at the repo root</span></h3>
+    <p class="measure">Every agent lives in <em>some</em> kild, including the coordinator: the main checkout is <code>kild-0</code>, and spawning either shares a tree or forks a child. Work lands by merging a child's branch toward its parent's base.</p>
+    <div class="tree">
+<span class="k">kild-0</span>  <span class="c">main checkout · honryo sits here, spawns &amp; lands</span>
+<span class="b">├─</span> <span class="a">@honryo</span>        <span class="c">attached · Claude Code</span>
+<span class="b">├─</span> <span class="k">kild/auth</span>     <span class="c">fork(base: main)</span>
+<span class="b">│   ├─</span> <span class="a">@coder</span>    <span class="c">owned</span>
+<span class="b">│   └─</span> <span class="a">@reviewer</span> <span class="c">owned · into: kild/auth (shares the tree)</span>
+<span class="b">└─</span> <span class="k">kild/api</span>      <span class="c">fork(base: main) · parallel, isolated</span>
+    <span class="b">└─</span> <span class="k">kild/api-migration</span>  <span class="c">grandchild · fork(base: kild/api)</span>
+        <span class="b">└─</span> <span class="a">@coder</span>  <span class="c">owned</span>
+    </div>
+  </section>
+
+  <!-- §04 -->
+  <section id="s4">
+    <div class="sec-head"><span class="n">§04</span><h2>Boundaries</h2></div>
+    <p class="lede measure">The layers connect through narrow, deliberate seams. A violation of any of these is a bug, not a style choice.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Boundary</th><th>The rule</th><th>Enforced by</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">pi ↔ engine</td><td>Only the engine knows pi exists. pi shapes are translated into kild domain types in one place; nothing above sees them.</td><td class="mono">engine only</td></tr>
+          <tr><td class="mono">kild ↔ PRP</td><td>kild ships mechanism, never intelligence. No personas, no process prompts — only the single generic mechanism prompt. PRP arrives via config paths.</td><td class="mono">config paths</td></tr>
+          <tr><td class="mono">role ↔ engine</td><td>honryo vs worker is <em>intelligence</em>. The router must never special-case a role the way it once special-cased <code>participants[0]</code>.</td><td class="mono">no engine flag</td></tr>
+          <tr><td class="mono">soft ↔ hard authority</td><td>Soft authority (who leads, when to report, gate this) is trained deference in PRP. Hard authority (spawn/stop/kill/guardrails) is the seat, in mechanism.</td><td class="mono">seat = client</td></tr>
+          <tr><td class="mono">addressing</td><td>Recipients are a structured list the sender provides. Never parsed from prose. There is exactly one answer to “addressed to whom?” — the <code>to</code> field.</td><td class="mono">send(to)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <div class="h">Hold this line hardest</div>
+      <p>Do not delete <code>HUMAN</code> and add <code>HONRYO</code>. That just renames the privileged-participant mistake. The engine knows agents, kilds, edges, messages, and who holds the seat — nothing about what a honryo <em>is</em>. “Defer to this agent” is a fact PRP asserts and personas honour by training.</p>
+    </div>
+  </section>
+
+  <!-- §05 -->
+  <section id="s5">
+    <div class="sec-head"><span class="n">§05</span><h2>How they talk</h2></div>
+    <p class="lede measure">Five operations. Everything the honryo or a worker does is one of these; the transport differs only by ownership.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Op</th><th>What happens</th><th>Transport detail</th></tr></thead>
+        <tbody>
+          <tr><td class="mono mech-t">spawn</td><td>Create an owned agent <code>into</code> a kild (share tree) or <code>fork</code> a child kild (new worktree from base). Any agent may call it; recursion is uniform.</td><td>engine creates the worktree, spawns the pi worker subprocess</td></tr>
+          <tr><td class="mono mech-t">send</td><td>Deliver a directed message to each named recipient's inbox as a turn. The sole path between agents.</td><td><b>owned:</b> push a prompt to stdin · <b>attached:</b> queue in the inbox, pulled</td></tr>
+          <tr><td class="mono mech-t">observe</td><td>Subscribe to the event stream (text, tool calls, stats) tagged by kild+agent; list kilds with git &amp; cost state.</td><td>WS broadcast · REST snapshot</td></tr>
+          <tr><td class="mono seal-t">stop</td><td>Seat power: halt an agent or a whole kild; sessions end, the record stays read-only. Worktrees persist.</td><td>SIGTERM the subprocess; keep the tree</td></tr>
+          <tr><td class="mono mech-t">land</td><td>Merge a child kild's branch toward its base. Mechanism provides the merge + collision report; the <em>decision</em> to land is a PRP gate.</td><td>git merge/rebase; prune the merged tree</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout mech">
+      <div class="h">The inbox unifies the two transports</div>
+      <p>Every agent has one <code>inbox</code>. For an <span class="mech-t">owned</span> agent the engine drains it by writing to the subprocess's stdin (push). For an <span class="seal-t">attached</span> honryo, kild can't push — the CLI pulls at its own turn boundary (the Claude Code Stop-hook drains it). Same data structure, two drain modes. This is the one place the <code>owned/attached</code> axis is load-bearing.</p>
+    </div>
+  </section>
+
+  <!-- §06 -->
+  <section id="s6">
+    <div class="sec-head"><span class="n">§06</span><h2>API design</h2></div>
+    <p class="lede measure">One transport-neutral control plane on <code>localhost:4517</code>. The honryo drives the same REST/WS any UI client drives — there is no privileged operator channel. Mapped against what exists today.</p>
+
+    <h3 class="sub">REST — the command surface</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Does</th><th>Replaces</th></tr></thead>
+        <tbody>
+          <tr><td class="mono seal-t">POST /api/kilds</td><td>Open a kild — fork a worktree from <code>base</code>. Returns the id.</td><td class="mono"><span class="was">room_open / openRoom</span></td></tr>
+          <tr><td class="mono">POST /api/kilds/:id/agents</td><td>Spawn an <code>owned</code> agent into the kild (handle, persona, model).</td><td class="mono"><span class="was">invite_agent / room_add</span></td></tr>
+          <tr><td class="mono seal-t">POST /api/kilds/:id/agents/attach</td><td>Register an <code>attached</code> agent — the honryo. Idempotent; addressable at once.</td><td class="mono"><span class="was">joinRoom (room join)</span></td></tr>
+          <tr><td class="mono">POST /api/kilds/:id/messages</td><td>Send — <code>{ from, to[], text }</code> into recipients' inboxes.</td><td class="mono"><span class="was">postRoom / room_post</span></td></tr>
+          <tr><td class="mono">GET /api/kilds/:id/inbox?as=</td><td>Drain an attached agent's inbox (the pull side).</td><td class="mono"><span class="was">drainRoom (room drain)</span></td></tr>
+          <tr><td class="mono">GET /api/kilds</td><td>List + observe: participants, git status, cost rollup, collisions.</td><td class="mono"><span class="was">getLiveRooms / rooms_status</span></td></tr>
+          <tr><td class="mono">GET /api/kilds/:id</td><td>One kild — detail + full message log.</td><td class="mono"><span class="was">room show / room log</span></td></tr>
+          <tr><td class="mono d-new">POST /api/kilds/:id/land</td><td>Merge toward base; return the collision/merge report.</td><td class="mono">new — was implicit prune</td></tr>
+          <tr><td class="mono seal-t">POST /api/kilds/:id/stop</td><td>Seat: stop agents, keep read-only. Worktree survives.</td><td class="mono"><span class="was">closeRoom / room_close</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">WS — the event stream <span class="tag">/ws</span></h3>
+    <ul class="clean">
+      <li><b>subscribe</b> → catch-up snapshot of live kilds, then live <code>{ kild, agent, event }</code> UiEvents (text / tool_start / stats / *_end).</li>
+      <li><b>kild list updates</b> pushed on every spawn / stop / cost change — the observability half.</li>
+      <li>The WS <em>command</em> verbs (<code>room_open</code>, <code>room_post</code>, <code>spawn</code>, <code>prompt</code>, <code>stop</code>) collapse into the REST surface above; WS becomes read-mostly. One command shape, many readers.</li>
+    </ul>
+  </section>
+
+  <!-- §07 -->
+  <section id="s7">
+    <div class="sec-head"><span class="n">§07</span><h2>Agent tools &amp; CLI surface</h2></div>
+
+    <h3 class="sub">Agent tools <span class="tag">— what an owned worker registers</span></h3>
+    <p class="measure">Down from six tools across two tiers to two verbs. Mechanism only — the tool descriptions carry no process, just how to reach the primitive.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Shape</th><th>Collapses</th></tr></thead>
+        <tbody>
+          <tr><td class="mono mech-t">spawn</td><td class="mono">spawn(agent, into: id | fork: base)</td><td class="mono"><span class="was">invite_agent</span> + <span class="was">open_room</span></td></tr>
+          <tr><td class="mono mech-t">send</td><td class="mono">send(to: [handle], text)</td><td class="mono"><span class="was">post_message</span> + <span class="was">post_room</span></td></tr>
+          <tr><td class="mono">land <span class="note">(opt.)</span></td><td class="mono">land(kild) — behind a PRP gate</td><td class="mono"><span class="was">close_room</span> → seat/land</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">CLI surface <span class="tag">— the honryo drives kild over bash (kild-cli skill)</span></h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Command</th><th>Does</th><th>Was</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">kild open &lt;goal&gt; --base --worktree</td><td>Fork a kild, print its id</td><td class="mono"><span class="was">kild room open</span></td></tr>
+          <tr><td class="mono">kild spawn &lt;kild&gt; --agent &lt;persona&gt;</td><td>Add an owned agent</td><td class="mono"><span class="was">/invite</span></td></tr>
+          <tr><td class="mono seal-t">kild attach &lt;kild&gt; --as &lt;handle&gt;</td><td>Register this CLI as the honryo</td><td class="mono"><span class="was">kild room join</span></td></tr>
+          <tr><td class="mono">kild send &lt;kild&gt; --to a,b &lt;text&gt;</td><td>Directed message</td><td class="mono"><span class="was">kild room post</span></td></tr>
+          <tr><td class="mono">kild inbox &lt;kild&gt; --as &lt;h&gt; --format claude-stop</td><td>Pull the honryo's inbox (Stop hook)</td><td class="mono"><span class="was">kild room drain</span></td></tr>
+          <tr><td class="mono">kild ls · kild show &lt;id&gt;</td><td>Observe: git, cost, collisions</td><td class="mono"><span class="was">kild rooms / room show</span></td></tr>
+          <tr><td class="mono d-new">kild land &lt;id&gt;</td><td>Merge child toward base</td><td class="mono">new</td></tr>
+          <tr><td class="mono seal-t">kild stop &lt;id&gt;</td><td>Seat: halt the kild</td><td class="mono"><span class="was">kild room close</span></td></tr>
+          <tr><td class="mono d-die">kild operator …</td><td>The operator tier — deleted entirely</td><td class="mono">gone</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note measure"><code>kild project</code>, <code>kild agent</code> (persona discovery), <code>kild worktree</code>, and <code>kild run</code> (a one-shot single-agent kild) stay as-is.</p>
+  </section>
+
+  <!-- §08 -->
+  <section id="s8">
+    <div class="sec-head"><span class="n">§08</span><h2>Migration — keep / move / die</h2></div>
+    <p class="lede measure">The demolition, file by file. <span class="disp d-keep">keep</span> is load-bearing mechanism; <span class="disp d-move">move</span> is intelligence that belongs in PRP; <span class="disp d-die">die</span> is deleted; <span class="disp d-new">new</span> is added.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>File / concept</th><th></th><th>Disposition</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">worktree.ts · worktree-status.ts</td><td class="note">the jewel — isolation &amp; collision detection</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">sessions.ts</td><td class="note">SessionManager / PiSession — process supervision</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">events.ts</td><td class="note">UiEvent stream — observability</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">room-registry.ts</td><td class="note">state store → kild-registry</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">attached.ts (Mailbox)</td><td class="note">the honryo pull transport → the inbox</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">git-review.ts</td><td class="note">diff/land mechanism</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">mechanism-prompt.ts</td><td class="note">the one shipped prompt — trim to spawn/send only</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">room-decisions.ts</td><td class="note">needs-decision / resolved ledger — a protocol</td><td><span class="disp d-move">move</span></td></tr>
+          <tr><td class="mono">idle / posted failsafe</td><td class="note">“nudge if it went idle without reporting” — a norm</td><td><span class="disp d-move">move</span></td></tr>
+          <tr><td class="mono">.pi/agents/orchestrator · worker · brain</td><td class="note">personas are PRP/project data, not engine</td><td><span class="disp d-move">move</span></td></tr>
+          <tr><td class="mono">room-router.ts</td><td class="note">lead rule, @human-wakes-lead, implicit reply, 1:1 default — all the addressing choreography</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">HUMAN constant</td><td class="note">honryo is just an attached agent</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">kild/operator/*</td><td class="note">the operator tier — Claude Code drives REST directly</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">RoomLifecycleState</td><td class="note">opening/running/halted/closed as engine concept</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">KILD_OPERATOR env · brain persona plumbing</td><td class="note">no privileged operator session</td><td class="mono"><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">POST /api/kilds/:id/land</td><td class="note">explicit merge-toward-base + report</td><td><span class="disp d-new">new</span></td></tr>
+          <tr><td class="mono">seat guardrails</td><td class="note">push-protection, spend cap, hard-halt</td><td><span class="disp d-new">new</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- §09 -->
+  <section id="s9">
+    <div class="sec-head"><span class="n">§09</span><h2>Open decisions &amp; build notes</h2></div>
+    <p class="lede measure">Seven calls to make before the demolition. Each has a leaning; none is settled.</p>
+    <div class="decisions">
+      <div class="dec"><div class="body"><div class="q">Naming: <code>kild</code> is the product and the unit.</div><div class="a">“Open a kild” reads fine, but the collision needs a deliberate ruling so docs don't wobble. <b>Lean:</b> accept it; the unit is “a kild,” the system is “kild.”</div></div></div>
+      <div class="dec"><div class="body"><div class="q">What guardrails does the seat enforce?</div><div class="a">The only place mechanism enforces safety. <b>Lean:</b> refuse pushes to protected branches, a per-kild spend cap, and a hard-halt — a small fixed set, not a policy engine.</div></div></div>
+      <div class="dec"><div class="body"><div class="q">Who may trigger <code>land</code>, and against what gate?</div><div class="a">Merge is mechanism; the decision is PRP. <b>Lean:</b> any agent can request a land; the engine runs the merge + collision report; the honryo/PRP gate authorises it.</div></div></div>
+      <div class="dec"><div class="body"><div class="q">Unify the inbox across owned &amp; attached?</div><div class="a">One <code>inbox</code>, two drain modes (push to stdin vs pull by hook). <b>Lean:</b> yes — it's the one clean home for the <code>owned/attached</code> axis.</div></div></div>
+      <div class="dec"><div class="body"><div class="q">Do <code>system</code> notices survive?</div><div class="a">Joins/leaves/stops as log rows, or derived from the event stream? <b>Lean:</b> drop them from the log; observers reconstruct from events. Keeps <code>Message</code> pure.</div></div></div>
+      <div class="dec"><div class="body"><div class="q">Is the per-kild <code>log</code> stored or projected?</div><div class="a">If messages are directed to inboxes, the log is “all messages where kildId == x.” <b>Lean:</b> keep a per-kild index for cheap observability; treat it as a projection, not a source of truth.</div></div></div>
+      <div class="dec"><div class="body"><div class="q">How deep does recursion go, and how do sibling collisions surface?</div><div class="a">Grandchildren fork from a child's branch; <code>worktree-status.collidesWith</code> already computes sibling overlap. <b>Lean:</b> no depth cap; surface collisions in <code>observe</code> and block <code>land</code> on unresolved overlap.</div></div></div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="restate">The engine ships isolation, supervision, messaging, observability, and a control seat — one inhabitant type on two mechanism axes. <span class="p">PRP</span> ships all intelligence, including the honryo and the trained deference that gives it weight. <span class="s">The agent CLI is the honryo</span> — attached, seat-holding, human-steered.</p>
+    <p class="prov">derived from the kild × PRP × pi design conversation · 2026-07-27 · a proposal, not a merge · wirasm/kild → branch claude/buzz-block-kild-comparison</p>
+  </footer>
+
+</div>
