@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+
 import { type AgentCallbacks, agentManager, type SpawnRequest } from './agent-manager.ts';
-import { configuredMemoryDir, configuredMemorySynthesis } from './config.ts';
+import { configuredCloseHook, configuredMemoryDir } from './config.ts';
+import { type KildCloseEvent, runCloseHook } from './hooks.ts';
 import { Inbox, type InboxDrain } from './inbox.ts';
 import { KildRegistry } from './kild-registry.ts';
 import {
@@ -21,7 +24,7 @@ import {
   type SpawnOut,
   type StopOut,
 } from './kild-types.ts';
-import { appendKildLog, kildTranscriptPath, synthesisPrompt } from './memory.ts';
+import { appendKildLog, collectLedgerFacts, kildTranscriptPath } from './memory.ts';
 import { listPersonas } from './personas.ts';
 import { resolveBaseBranch, worktreePath } from './worktree.ts';
 import { kildGitStatus } from './worktree-status.ts';
@@ -367,44 +370,60 @@ export class KildManager {
     const archived = this.registry.remove(kildId);
     if (archived) this.broadcast({ archivedKild: archived });
     this.broadcast({ kilds: this.registry.summaries() });
-    if (archived) await this.recordMemory(kild);
+    if (archived) await this.close(kild);
     return ok({ message: `Kild '${kild.name}' stopped.` });
   }
 
-  /** Post-stop memory hook: append the engine-written log entry (always), then spawn
-   *  the optional synthesis session (config `memory.synthesis`) to distill the transcript
-   *  into the memory dir's `MEMORY.md` (config `memory.dir`, default `.kild/`). Memory
-   *  must never break a stop — failures are logged loud and swallowed here, at the one
-   *  boundary where that is the right call. */
-  private async recordMemory(kild: Kild): Promise<void> {
-    let memoryDir: string;
+  /**
+   * The close lifecycle: write the ledger entry, emit the close event, run the declared
+   * hook. All three are mechanism — the engine states facts and fires what config
+   * declares; it has no opinion about what should be made of them.
+   *
+   * A stop must never fail because of any of this, so every failure is logged loud and
+   * swallowed here, at the one boundary where that is the right call.
+   */
+  private async close(kild: Kild): Promise<void> {
+    const dir = kild.worktree ? worktreePath(kild.worktree) : kild.cwd;
+    const memoryDir = await configuredMemoryDir(kild.cwd);
+    const ledgerPath = path.join(memoryDir, 'LOG.md');
     try {
-      memoryDir = await configuredMemoryDir(kild.cwd);
-      appendKildLog(kild, memoryDir);
+      // Facts at the moment of stopping — after this the worktree can be landed or
+      // pruned and the answers change.
+      appendKildLog(kild, memoryDir, await collectLedgerFacts(dir, kild.base));
     } catch (err) {
       console.error(
-        `kild: log append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
+        `kild: ledger append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
       );
-      return; // no log entry → don't synthesize against a missing input
     }
+
+    const event: KildCloseEvent = {
+      kildId: kild.id,
+      name: kild.name,
+      cwd: kild.cwd,
+      worktree: kild.worktree,
+      base: kild.base,
+      transcriptPath: kildTranscriptPath(kild.id),
+      ledgerPath,
+    };
+    this.broadcast({ kildClosed: event });
+
     try {
-      const synthesis = await configuredMemorySynthesis(kild.cwd);
-      if (!synthesis) return;
-      const id = this.createId();
-      this.sessions.spawn(id, {
-        model: synthesis.model,
-        cwd: kild.cwd, // the MAIN checkout — memory files are gitignored, so worktrees never see them
-        persona: synthesis.persona ?? 'default',
-        label: `memory:${kild.name}`,
+      const hook = await configuredCloseHook(kild.cwd);
+      if (!hook) return;
+      // Not awaited: a hook is someone else's work, and a slow one must not hold a stop
+      // open. Its own failures are already captured inside.
+      void runCloseHook(hook, event, (spec, prompt) => {
+        const id = this.createId();
+        this.sessions.spawn(id, spec);
+        this.sessions.prompt(id, prompt, 'kild');
+      }).catch((err) => {
+        console.error(
+          `kild: onClose hook failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
+        );
       });
-      this.sessions.prompt(
-        id,
-        synthesisPrompt(kild, kildTranscriptPath(kild.id), memoryDir),
-        'kild',
-      );
     } catch (err) {
       console.error(
-        `kild: memory synthesis spawn failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
+        `kild: onClose hook failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
       );
     }
   }

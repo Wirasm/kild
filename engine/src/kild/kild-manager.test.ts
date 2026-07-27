@@ -400,9 +400,9 @@ test('agent costs survive into the archived snapshot', async () => {
   expect(manager.archived()[0]?.agents[0]).toMatchObject({ tokens: 900, cost: 0.33 });
 });
 
-// ── memory hook: engine-written log on close, optional synthesis spawn ────────────────
+// ── close lifecycle: the ledger entry, the close event, the declared hook ─────────────
 
-test('stopping a kild with history appends its engine-written entry to .kild/LOG.md', async () => {
+test('stopping a kild with history appends its factual entry to .kild/LOG.md', async () => {
   const { manager } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
@@ -412,16 +412,55 @@ test('stopping a kild with history appends its engine-written entry to .kild/LOG
   const log = fs.readFileSync(path.join(project, '.kild', 'LOG.md'), 'utf8');
   expect(log).toContain('demo (kild-1)');
   expect(log).toContain('- goal: ship the fix');
+  // Facts only — never the tail of the message log.
+  expect(log).not.toContain('outcome');
+  expect(log).toContain('- landed: ');
+  expect(log).toContain('- code: ');
 });
 
-test('memory.synthesis config spawns a synthesis session in the MAIN checkout after stop', async () => {
+test('stop emits a close event carrying the facts the engine holds', async () => {
+  const { manager } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
+  const closed: Array<Record<string, unknown>> = [];
+  manager.subscribe((msg) => {
+    if ('kildClosed' in msg) closed.push(msg.kildClosed as unknown as Record<string, unknown>);
+  });
+  await manager.create('kild-1', {
+    name: 'demo',
+    cwd: project,
+    agents: [{ handle: 'coder' }],
+    worktree: 'demo',
+  });
+  await send(manager, ['coder'], 'ship the fix');
+  await manager.stop('kild-1');
+
+  expect(closed).toHaveLength(1);
+  expect(closed[0]).toMatchObject({
+    kildId: 'kild-1',
+    name: 'demo',
+    cwd: project,
+    worktree: 'demo',
+    ledgerPath: path.join(project, '.kild', 'LOG.md'),
+  });
+  expect(String(closed[0]?.transcriptPath)).toContain('kild-1.json');
+});
+
+test('a declared hooks.onClose agent is spawned in the MAIN checkout with its facts', async () => {
   const { manager, spawned, prompted } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
   fs.mkdirSync(path.join(project, '.kild'), { recursive: true });
   fs.writeFileSync(
     path.join(project, '.kild', 'config.json'),
     JSON.stringify({
-      memory: { synthesis: { model: 'openai-codex/gpt-5.6-sol', persona: 'default' } },
+      hooks: {
+        onClose: {
+          agent: {
+            model: 'openai-codex/gpt-5.6-sol',
+            persona: 'default',
+            prompt: 'distill {{transcriptPath}} next to {{ledgerPath}}',
+          },
+        },
+      },
     }),
   );
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });
@@ -430,12 +469,13 @@ test('memory.synthesis config spawns a synthesis session in the MAIN checkout af
   await manager.stop('kild-1');
 
   expect(spawned.length).toBe(before + 1);
-  const synthesisPromptDelivered = prompted.find((p) => p.text.includes('[kild memory synthesis]'));
-  expect(synthesisPromptDelivered?.from).toBe('kild');
-  expect(synthesisPromptDelivered?.text).toContain('.kild/MEMORY.md');
+  const hookPrompt = prompted.find((p) => p.text.startsWith('distill '));
+  expect(hookPrompt?.from).toBe('kild');
+  expect(hookPrompt?.text).toContain('kild-1.json');
+  expect(hookPrompt?.text).toContain(path.join(project, '.kild', 'LOG.md'));
 });
 
-test('without memory.synthesis config, stop spawns nothing extra', async () => {
+test('without a declared hooks.onClose, stop spawns nothing extra', async () => {
   const { manager, spawned } = fixture();
   const project = fs.mkdtempSync(path.join(tmp, 'memproj-'));
   await manager.create('kild-1', { name: 'demo', cwd: project, agents: [{ handle: 'coder' }] });

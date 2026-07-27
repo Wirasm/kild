@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configuredMemoryDir, resolvePluginPaths } from './config.ts';
+import { configuredCloseHook, configuredMemoryDir, resolvePluginPaths } from './config.ts';
 
 let tmp: string;
 let prevHome: string | undefined;
@@ -90,6 +90,39 @@ test('project memory.dir wins over global; global applies when the project sets 
   const bare = path.join(tmp, 'proj-mem-bare');
   fs.mkdirSync(bare, { recursive: true });
   expect(await configuredMemoryDir(bare)).toBe('/global/store');
+});
+
+test('hooks.onClose is read back verbatim — the engine never interprets it', async () => {
+  const proj = path.join(tmp, 'proj-hook');
+  const hook = {
+    agent: {
+      model: 'openai-codex/gpt-5.6-sol',
+      persona: 'archivist',
+      prompt: 'read {{ledgerPath}}',
+    },
+  };
+  writeProjectConfig(proj, { hooks: { onClose: hook } });
+  expect(await configuredCloseHook(proj)).toEqual(hook);
+});
+
+test('a project hooks.onClose replaces the global one; global applies when absent', async () => {
+  fs.writeFileSync(
+    path.join(process.env.KILD_HOME as string, 'config.json'),
+    JSON.stringify({ hooks: { onClose: { command: ['global-hook'] } } }),
+  );
+  const proj = path.join(tmp, 'proj-hook-merge');
+  writeProjectConfig(proj, { hooks: { onClose: { command: ['project-hook'] } } });
+  expect(await configuredCloseHook(proj)).toEqual({ command: ['project-hook'] });
+
+  const bare = path.join(tmp, 'proj-hook-bare');
+  fs.mkdirSync(bare, { recursive: true });
+  expect(await configuredCloseHook(bare)).toEqual({ command: ['global-hook'] });
+});
+
+test('no declared hook is undefined — close then emits its event and runs nothing', async () => {
+  const proj = path.join(tmp, 'proj-nohook');
+  fs.mkdirSync(proj, { recursive: true });
+  expect(await configuredCloseHook(proj)).toBeUndefined();
 });
 
 test('missing or malformed config yields nothing and never throws', async () => {

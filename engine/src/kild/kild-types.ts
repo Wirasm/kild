@@ -1,4 +1,5 @@
 import type { UiEvent } from './events.ts';
+import type { KildCloseEvent } from './hooks.ts';
 import type { Inbox } from './inbox.ts';
 import type { KildGitStatus } from './worktree-status.ts';
 
@@ -254,6 +255,10 @@ export type KildOutbound =
   /** A kild that just stopped with history — pushed so clients show it as read-only
    *  history immediately, without refetching the archive or restarting. */
   | { archivedKild: ArchivedKild }
+  /** The close lifecycle event: the facts the engine holds about a kild that just
+   *  stopped, emitted alongside whatever `hooks.onClose` runs — so a subscribed client
+   *  or harness can react to the same moment on the same facts. */
+  | { kildClosed: KildCloseEvent }
   /** An agent's transcript event (its UiEvent stream), tagged by kild+agent. */
   | { kild: string; agent: string; event: UiEvent };
 
