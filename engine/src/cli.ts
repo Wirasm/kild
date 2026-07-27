@@ -16,11 +16,14 @@ import {
   attachAgent,
   disposeKild,
   drainInbox,
-  getLiveKilds,
+  getKild,
+  kildMessages,
+  kildsStatus,
   type LandResponse,
   landKild,
   landPreview,
   listAgents,
+  listKilds,
   newKild,
   sendMessage,
   spawnKildAgent,
@@ -47,6 +50,8 @@ const { values, positionals } = parseArgs({
     format: { type: 'string' }, // `kild inbox --format claude-stop`: harness hook output
     to: { type: 'string' }, // `kild send --to a,b`: the agents addressed
     state: { type: 'string' }, // `kild ls --state live|orphan|reclaimable`
+    git: { type: 'boolean', default: false }, // `kild ls --git`: pay for git/cost state
+    since: { type: 'string' }, // `kild log --since <seq>`: only messages after that cursor
     execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
   },
 });
@@ -285,35 +290,47 @@ async function kildInbox(id: string | undefined): Promise<void> {
   if (drained.posts.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
 }
 
-/** `kild log <id>` — read a live kild's full thread (the pull view; `kild ls`
- *  shows only the last couple posts). Pull the whole conversation on demand. */
-async function kildLog(id: string): Promise<void> {
-  const kild = (await getLiveKilds()).find((r) => r.id === id);
-  if (!kild) throw new Error(`no such live kild: ${id}`);
-  if (json) return void console.log(JSON.stringify(kild.log, null, 2));
-  for (const m of kild.log) console.log(`${m.from} → [${m.to.join(', ')}]: ${m.text}`);
+/** `--since <seq>` as a message cursor. A non-number is a usage error, never "from the
+ *  start" — a silently-ignored cursor replays the whole log as if it were new. */
+function parseSince(): number | undefined {
+  if (values.since === undefined) return undefined;
+  const since = Number(values.since);
+  if (!Number.isInteger(since) || since < 0) {
+    throw new Error(`--since must be a non-negative message seq, got: ${values.since}`);
+  }
+  return since;
 }
 
-/** `kild show <id>` — one live kild's complete coordination and code-state context. */
+/** `kild log <id> [--since <seq>]` — a kild's message thread, from `/messages`. Works for
+ *  an archived kild too (its log is the read-only record). `--since` is the cursor: pass the
+ *  last `seq` you saw to get only what arrived after it. */
+async function kildLog(id: string): Promise<void> {
+  const messages = await kildMessages(id, parseSince());
+  if (json) return void console.log(JSON.stringify(messages, null, 2));
+  for (const m of messages) console.log(`${m.seq}\t${m.from} → [${m.to.join(', ')}]: ${m.text}`);
+}
+
+/** `kild show <id>` — one kild's complete coordination and code-state context: the detail
+ *  route (identity + git + cost) plus its log, which is a second resource by design. */
 async function kildShow(id: string): Promise<void> {
-  const liveKilds = await getLiveKilds();
-  const kild = liveKilds.find((candidate) => candidate.id === id);
-  if (!kild) throw new Error(`no such live kild: ${id}`);
-  const compact = compactLiveKilds(liveKilds).find((candidate) => candidate.id === id);
-  if (!compact) throw new Error(`no such live kild: ${id}`);
+  // The detail route is what decides whether this kild exists; a missing LOG does not mean a
+  // missing kild — an orphan tree is a kild with nothing ever said in it.
+  const kild = await getKild(id);
+  const messages = await kildMessages(id).catch(() => []);
+  const compact = compactLiveKilds([kild])[0];
+  if (!compact) throw new Error(`no such kild: ${id}`);
 
   const detail = {
     id: compact.id,
     name: compact.name,
     agents: compact.agents,
     ...(compact.git ? { git: compact.git } : {}),
-    ...(compact.collidesWith ? { collidesWith: compact.collidesWith } : {}),
     worktree: kild.worktree,
-    log: kild.log,
+    log: messages,
   };
   if (json) return void console.log(JSON.stringify(detail, null, 2));
 
-  console.log(`${kild.id}\t${kild.name}`);
+  console.log(`${kild.id}\t${kild.name}${kild.orphan ? '\t(orphan tree, no kild record)' : ''}`);
   console.log(`worktree: ${kild.worktree ?? '(none)'}`);
   console.log('agents:');
   for (const agent of compact.agents) {
@@ -326,32 +343,33 @@ async function kildShow(id: string): Promise<void> {
       `git${formatCompactGitSummary(compact.git)} · changed files: ${compact.git.changedFileCount}${compact.git.error ? ` · error: ${compact.git.error}` : ''}`,
     );
   }
-  if (compact.collidesWith?.length) {
-    console.log('collisions:');
-    for (const collision of compact.collidesWith) {
-      console.log(`  ${collision.kild}: ${collision.files.join(', ')}`);
-    }
-  }
   console.log('log:');
-  for (const message of kild.log) {
-    console.log(`${message.from} → [${message.to.join(', ')}]: ${message.text}`);
+  for (const message of messages) {
+    console.log(`${message.seq}\t${message.from} → [${message.to.join(', ')}]: ${message.text}`);
   }
 }
 
 /**
- * `kild ls [--state live|orphan|reclaimable] [--project <p>]` — the kild collection with
- * its code-state observability.
+ * `kild ls [--state live|orphan|reclaimable] [--git] [--project <p>]` — the kild collection.
  *
  * This lists kilds **and the `kild/*` worktrees git reports**: a tree left by an earlier
  * engine run appears as an `orphan` kild with no agents and no log, addressed by its
  * worktree name. That name is what `kild rm` / `kild land` take, so a stranded tree is
  * reachable again.
+ *
+ * FAST by default: identity and roster only, from the cheap route — no git, whatever the
+ * machine's worktree count. `--git` (and `--state reclaimable`, which is itself a git
+ * question) opt into `/api/kilds/status` and pay for branch/ahead/behind/dirty/conflicts and
+ * cross-kild collisions.
  */
 async function kildList(): Promise<void> {
   const repo = await resolveProjectFlag();
-  const live = await getLiveKilds({ state: values.state, repo });
-  const kilds = compactLiveKilds(live);
-  const orphaned = new Set(live.filter((kild) => kild.orphan).map((kild) => kild.id));
+  const withGit = values.git || values.state === 'reclaimable';
+  if (!withGit) return kildListCheap(repo);
+
+  const statuses = await kildsStatus({ state: values.state, repo });
+  const kilds = compactLiveKilds(statuses);
+  const orphaned = new Set(statuses.filter((kild) => kild.orphan).map((kild) => kild.id));
   if (json) {
     return void console.log(
       JSON.stringify(
@@ -367,16 +385,33 @@ async function kildList(): Promise<void> {
       console.log(`${r.id}\t(orphan tree, no kild record)${formatCompactGitSummary(r.git)}`);
       continue;
     }
-    const parts = r.agents
-      .map(
-        (p) => `${p.model ? `${p.handle}:${p.model}` : p.handle}${p.stopped ? ' (stopped)' : ''}`,
-      )
-      .join(', ');
     const col = r.collidesWith?.length
       ? ` · collides: ${r.collidesWith.map((c) => `${c.kild}(${c.files.length})`).join(', ')}`
       : '';
-    console.log(`${r.id}\t${r.name} [${parts}]${formatCompactGitSummary(r.git)}${col}`);
+    console.log(`${r.id}\t${r.name} [${roster(r.agents)}]${formatCompactGitSummary(r.git)}${col}`);
   }
+}
+
+/** The default `kild ls`: identity only, and therefore no git subprocesses at all. */
+async function kildListCheap(repo: string | undefined): Promise<void> {
+  const kilds = await listKilds({ state: values.state, repo });
+  if (json) return void console.log(JSON.stringify(kilds, null, 2));
+  if (kilds.length === 0) return void console.error('no kilds');
+  for (const kild of kilds) {
+    if (kild.orphan) {
+      console.log(`${kild.id}\t(orphan tree, no kild record)`);
+      continue;
+    }
+    const tree = kild.worktree ? ` · ${kild.worktree}` : '';
+    console.log(`${kild.id}\t${kild.name} [${roster(kild.agents)}]${tree}`);
+  }
+}
+
+/** One kild's roster, as `kild ls` prints it. */
+function roster(agents: Array<{ handle: string; model?: string; stopped?: boolean }>): string {
+  return agents
+    .map((a) => `${a.model ? `${a.handle}:${a.model}` : a.handle}${a.stopped ? ' (stopped)' : ''}`)
+    .join(', ');
 }
 
 /** `kild spawn <id> --as <handle> [--persona p] [--model m]` — add an agent to a live
@@ -493,7 +528,8 @@ function soleRecipient(handles: string[], where: string): string[] {
 async function kildSend(id: string, text: string): Promise<void> {
   let to = parseTo();
   if (!to) {
-    const kild = (await getLiveKilds()).find((candidate) => candidate.id === id);
+    // The cheap listing carries the roster, which is all a sole-recipient resolution needs.
+    const kild = (await listKilds({ state: 'live' })).find((candidate) => candidate.id === id);
     if (!kild) throw new Error(`no such live kild: ${id}`);
     to = soleRecipient(
       kild.agents.map((agent) => agent.handle),

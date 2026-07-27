@@ -93,43 +93,56 @@ export function agentProcessId(agent: Agent): string | undefined {
   return agent.ownership === 'attached' ? undefined : agent.id;
 }
 
-/** An agent as surfaced to observers (kild lists, status, archive) — identity plus the
- *  model it ran on. No kild process id (that's an internal handle); the PI session
- *  identity IS exposed — it's the durable handle for reopening the agent in a terminal. */
-export interface AgentView {
+/** An agent as the CHEAP half of the listing surfaces it: who it is, what it runs as, and
+ *  whether it is waiting. Every field is in-memory roster state — reading it costs nothing,
+ *  which is the whole point of the split (see {@link KildIdentity}). */
+export interface AgentIdentity {
   handle: string;
   /** Omitted for an owned agent (the default), `'attached'` for one kild does not own —
    *  so a roster stops implying every agent is a process kild can steer. */
   ownership?: Ownership;
   persona?: string;
   model?: string;
-  piSessionId?: string;
-  piSessionFile?: string;
   /** Attention state: finished a turn and waiting for input (see {@link AgentBase.idle}). */
   idle?: boolean;
-  /** Latest cumulative session token count (from `stats` UiEvents). */
-  tokens?: number;
-  /** Latest cumulative session cost in USD (from `stats` UiEvents). */
-  cost?: number;
   /** True once the agent's session was stopped individually (see {@link AgentBase.stopped}). */
   stopped?: boolean;
 }
 
-/** The one mapping from a live agent to its observer view — every list/status/
- *  archive producer uses this so new view fields appear everywhere at once. */
-export function agentView(agent: Agent): AgentView {
-  const attached = agent.ownership === 'attached';
+/** An agent as surfaced to observers that pay for detail (kild status, archive) — identity
+ *  plus what the session cost and the PI session identity, the durable handle for reopening
+ *  the agent in a terminal. No kild process id (that's an internal handle). */
+export interface AgentView extends AgentIdentity {
+  piSessionId?: string;
+  piSessionFile?: string;
+  /** Latest cumulative session token count (from `stats` UiEvents). */
+  tokens?: number;
+  /** Latest cumulative session cost in USD (from `stats` UiEvents). */
+  cost?: number;
+}
+
+/** The one mapping from a live agent to its cheap roster view. */
+export function agentIdentity(agent: Agent): AgentIdentity {
   return {
     handle: agent.handle,
     ownership: agent.ownership,
     persona: agent.persona,
     model: agent.model,
+    idle: agent.idle,
+    stopped: agent.stopped,
+  };
+}
+
+/** The one mapping from a live agent to its detailed observer view — every status/
+ *  archive producer uses this so new view fields appear everywhere at once. */
+export function agentView(agent: Agent): AgentView {
+  const attached = agent.ownership === 'attached';
+  return {
+    ...agentIdentity(agent),
     piSessionId: attached ? undefined : agent.piSessionId,
     piSessionFile: attached ? undefined : agent.piSessionFile,
-    idle: agent.idle,
     tokens: agent.tokens,
     cost: agent.cost,
-    stopped: agent.stopped,
   };
 }
 
@@ -163,9 +176,18 @@ export interface Message {
   /** The recipients the SENDER named. Never empty, never inferred. */
   to: string[];
   text: string;
-  /** Epoch millis, stamped by the engine on receipt. */
+  /** Epoch millis, stamped by the engine on receipt. Wall-clock, so it can go BACKWARDS
+   *  (NTP, DST, a clock the user set) — never use it as a cursor; that is {@link seq}. */
   ts: number;
+  /** The message cursor: strictly increasing within a kild, assigned by the registry from
+   *  the log's own tail, never reused. Persisted with the log, so it survives a reload —
+   *  which is what makes `?since=<seq>` a real cursor rather than a guess. */
+  seq: number;
 }
+
+/** A message before the registry stamps its cursor. `seq` belongs to the log's order, so
+ *  only the thing that owns the log may assign it (see {@link Message.seq}). */
+export type MessageDraft = Omit<Message, 'seq'>;
 
 /** A live kild: agents + their message history + a workspace. Liveness is registry
  *  presence — in the registry it is live, archived it is stopped. */
@@ -233,18 +255,57 @@ export interface ArchivedKild {
   landedSha?: string;
 }
 
-/** A live kild enriched with its git/worktree state — the code-state half of
- *  observability, so a driving agent can land work and avoid collisions. Git is
- *  live-only (never persisted); computed on demand when serving live-kild status. */
-export interface LiveKildStatus extends ArchivedKild {
-  git?: KildGitStatus;
-  /** Kild cost rollup summed over agents — absent until stats have arrived. */
-  totals?: CostTotals;
+/**
+ * A kild's identity and structure — the CHEAP half of the listing.
+ *
+ * Everything here is already in memory (or falls out of the one
+ * `git worktree list --porcelain` the enumeration needs anyway), so listing every kild on
+ * the machine costs a constant number of git invocations rather than one batch per kild.
+ * Git state, cost and the message log are the other half ({@link KildStatus},
+ * `GET /api/kilds/:id/messages`) precisely because they are not free.
+ */
+export interface KildIdentity {
+  id: string;
+  name: string;
+  /** Project directory the agents run in (their cwd) — the repo an orphan tree belongs to. */
+  cwd: string;
+  worktree?: string;
+  /** Base branch this kild measures against. Absent for an orphan: its record is gone, so
+   *  nothing recorded a base and only git could guess one. */
+  base?: string;
+  agents: AgentIdentity[];
   /** True for a kild that exists only as a `kild/*` worktree on disk: enumerated from
    *  git because its kild record is gone (an older engine run, lost state). It has no
    *  agents and no log, and is addressed by its WORKTREE NAME — without this it would
    *  have no id at all, which is how trees became permanently unreclaimable. */
   orphan?: boolean;
+}
+
+/** A kild's identity enriched with everything that costs something to know: its
+ *  git/worktree state (the code-state half of observability, so a driving agent can land
+ *  work and avoid collisions) and what it has spent. Git is live-only (never persisted);
+ *  computed on demand when serving status. Carries NO log — that is its own cursored
+ *  resource. */
+export interface KildStatus extends KildIdentity {
+  agents: AgentView[];
+  git?: KildGitStatus;
+  /** Kild cost rollup summed over agents — absent until stats have arrived. */
+  totals?: CostTotals;
+  /** Merge commit this kild's branch landed as (see {@link Kild.landedSha}). */
+  landedSha?: string;
+}
+
+/** The identity half of one live kild — the single mapping every cheap-listing producer
+ *  uses, mirroring {@link agentIdentity}. */
+export function kildIdentity(kild: Kild): KildIdentity {
+  return {
+    id: kild.id,
+    name: kild.name,
+    cwd: kild.cwd,
+    worktree: kild.worktree,
+    base: kild.base,
+    agents: kild.agents.map(agentIdentity),
+  };
 }
 
 /** Typed kild-domain result: every command either succeeds with a value or fails with

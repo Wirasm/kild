@@ -41,10 +41,10 @@ One word per concept. See `docs/VOCABULARY.md`.
 | Command | What it does |
 |---|---|
 | `kild run [opts] <prompt…>` | Run one agent on a prompt to completion, print the result |
-| `kild ls [--state s] [--project p]` | List kilds with code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-kild collisions). **Includes `kild/*` worktrees with no live kild** — abandoned trees show as `(orphan tree, no kild record)`, addressed by worktree name. `--state live\|orphan\|reclaimable` |
+| `kild ls [--state s] [--git] [--project p]` | List kilds. **Fast by default**: identity + roster only, no git at any worktree count. `--git` adds code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-kild collisions) and costs a git batch per kild. **Includes `kild/*` worktrees with no live kild** — abandoned trees show as `(orphan tree, no kild record)`, addressed by worktree name. `--state live\|orphan\|reclaimable` (`reclaimable` reads ahead/behind, so it implies `--git`) |
 | `kild new <goal> --detach [opts]` | Create a kild, print its id, return. Omit `--detach` for an interactive session |
-| `kild log <id>` | Read a kild's full message thread (`kild ls` shows only the last messages) |
-| `kild show <id>` | One kild in detail: agents, git state, collisions, full log |
+| `kild log <id> [--since <seq>]` | Read a kild's message thread. Each message carries a monotonic `seq`; `--since` is an **exclusive cursor** — pass the last seq you saw to get only what arrived after it. Works on a **stopped/archived** kild too (its log is the read-only record). Listings never carry messages |
+| `kild show <id>` | One live-or-orphan kild in detail: agents, git state, full log |
 | `kild send <id> <text…> --to a,b` | Send a message to named recipients in a live kild. **There is no lead and no default** — the engine never infers a recipient. `--to` is only omittable when the kild has exactly one agent, and the CLI then resolves that handle and sends it explicitly |
 | `kild spawn <id> --as <handle>` | Add an agent to a live kild (`--persona`, `--model`). Errors are reported — an unknown persona or duplicate handle fails loudly |
 | `kild stop <id>` | Stop a live kild by id. With `--as <handle>` stops **that one agent** and leaves the kild running |
@@ -72,7 +72,8 @@ Add `--json` to any command for machine-readable output on stdout.
 `--project <name|path>` · `--persona <name>` · `--model <ref>` · `--worktree <name>` ·
 `--base <branch>` · `--agents a,b,c` (for `kild new`) · `--to a,b` (for `kild send`) ·
 `--as <handle>` (for `attach`/`inbox`/`spawn`, and `stop` to stop one agent) ·
-`--state live|orphan|reclaimable` (for `kild ls`) · `--execute` (for `kild land`) ·
+`--state live|orphan|reclaimable` · `--git` (both for `kild ls`) · `--since <seq>` (for
+`kild log`) · `--execute` (for `kild land`) ·
 `--detach` · `--force` · `--json`
 
 ## Driving kilds (multi-agent units of parallel work)
@@ -82,8 +83,10 @@ A **kild** is an isolated workspace where one or more agents collaborate. Unlike
 
 ```bash
 ID=$(kild new "Build feature X" --detach --project myproj --worktree feat-x)
-kild ls                       # live kilds + git/collision state (the glance)
-kild log "$ID"                # the full conversation
+kild ls                       # the glance: kilds + rosters (fast — no git)
+kild ls --git                 # + branch, ahead/behind, dirty, conflicts, collisions
+kild log "$ID"                # the full conversation (each line prefixed by its seq)
+kild log "$ID" --since 12     # only what arrived after seq 12
 kild send "$ID" "use the prp-implement skill to implement plan Y"
 kild send "$ID" --to reviewer "check the auth path"   # address one agent
 kild stop "$ID"               # end it
@@ -148,8 +151,8 @@ Conventions when you drive kild:
   against — the base: `--base <branch>` wins, else `.kild/config.json` `baseBranch`, else
   the checkout's current branch. On a repo whose trunk is `dev`, set `{"baseBranch":"dev"}`
   so ahead/behind and collisions reflect only this kild's work.
-- **Observe & land.** `kild ls` shows each kild's branch, ahead/behind, dirty, conflicts,
-  and cross-kild file collisions. `kild land <id>` previews the merge without touching
+- **Observe & land.** `kild ls --git` shows each kild's branch, ahead/behind, dirty,
+  conflicts, and cross-kild file collisions (plain `kild ls` skips git and stays fast). `kild land <id>` previews the merge without touching
   anything; `kild land <id> --execute` performs it and prints the sha (recorded on the kild,
   so the ledger names the commit).
 - **Clean up.** `kild rm <id>` frees a tree. It refuses while the branch carries commits the
@@ -215,7 +218,7 @@ Two agents on one repo in isolation, then review + clean up:
 kild run --project myapp --worktree fix-auth --json "Fix the auth bug." 2>/dev/null &
 kild run --project myapp --worktree add-logs --json "Add request logging." 2>/dev/null &
 wait
-kild ls --project myapp --json           # both trees, with their git state
+kild ls --project myapp --git --json     # both trees, with their git state
 kild land fix-auth                       # dry run: what would merge, what collides
 kild land fix-auth --execute             # merge it, print the sha
 kild rm fix-auth                         # free the tree (the branch stays)

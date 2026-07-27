@@ -15,8 +15,10 @@ import {
   costTotals,
   type Kild,
   type KildActionSuccess,
+  type KildIdentity,
   type KildOutbound,
-  type LiveKildStatus,
+  type KildStatus,
+  kildIdentity,
   type Message,
   type NewKildSpec,
   type NewKildSuccess,
@@ -217,9 +219,21 @@ export class KildManager {
     return ok({ kildId, message: `Kild '${spec.name}' created.` });
   }
 
-  /** A kild's message history (empty if the kild is unknown) — for demos / inspection. */
-  messageLog(kildId: string): Message[] {
-    return this.registry.get(kildId)?.log ?? [];
+  /**
+   * A kild's log as its own resource, cursored by {@link Message.seq}. The ONE reader of a
+   * kild's messages — there is no second, log-shaped view riding a listing.
+   *
+   * Works for an ARCHIVED kild too: its log is the whole of what it still is, and a
+   * read-only record that could not be read would be no record at all. Undefined
+   * distinguishes "no such kild" from "a kild with nothing to say".
+   *
+   * `since` is exclusive — pass back the last `seq` you saw and get only what arrived
+   * after it. Omit it for the whole log.
+   */
+  messages(kildId: string, since?: number): Message[] | undefined {
+    const log = this.registry.log(kildId);
+    if (!log) return undefined;
+    return since === undefined ? log : log.filter((message) => message.seq > since);
   }
 
   /** Past kilds recovered from disk (read-only logs from previous engine runs). */
@@ -233,25 +247,39 @@ export class KildManager {
     return this.registry.liveWithLogs();
   }
 
+  /** Live kilds as identity + structure only — no git, no cost, no log, and therefore no
+   *  subprocesses. This is what a client polling a list of kilds should read. */
+  liveIdentities(): KildIdentity[] {
+    return this.registry.liveIdentities();
+  }
+
   /** Live kilds enriched with each kild's git/worktree state — the code-state
    *  half of observability, so a driving agent can land work and spot collisions.
-   *  Effective dir = the kild's worktree if set, else its cwd. Git failures are
-   *  captured per-kild (never thrown), so status stays available even mid-conflict. */
-  async liveKildsStatus(): Promise<LiveKildStatus[]> {
-    return Promise.all(
-      this.registry.liveKildObjects().map(async (kild) => ({
-        id: kild.id,
-        name: kild.name,
-        worktree: kild.worktree,
-        cwd: kild.cwd,
-        base: kild.base,
-        landedSha: kild.landedSha,
-        agents: kild.agents.map(agentView),
-        log: kild.log,
-        totals: costTotals(kild.agents),
-        git: await kildGitStatus(kild.worktree ? worktreePath(kild.worktree) : kild.cwd, kild.base),
-      })),
-    );
+   *  COSTLY: a batch of git invocations per kild, which is why it is its own route on its
+   *  own cadence rather than riding the listing. */
+  async liveKildsStatus(): Promise<KildStatus[]> {
+    return Promise.all(this.registry.liveKildObjects().map((kild) => this.statusOf(kild)));
+  }
+
+  /** ONE live kild's status — the same enrichment {@link liveKildsStatus} does per kild,
+   *  exposed so addressing a single kild does not probe every other kild's git state.
+   *  Undefined when no live kild has that id. */
+  async liveKildStatus(kildId: string): Promise<KildStatus | undefined> {
+    const kild = this.registry.get(kildId);
+    return kild ? this.statusOf(kild) : undefined;
+  }
+
+  /** Identity + the costly half for one live kild. Effective dir = the kild's worktree if
+   *  set, else its cwd. Git failures are captured per-kild (never thrown), so status stays
+   *  available even mid-conflict. */
+  private async statusOf(kild: Kild): Promise<KildStatus> {
+    return {
+      ...kildIdentity(kild),
+      landedSha: kild.landedSha,
+      agents: kild.agents.map(agentView),
+      totals: costTotals(kild.agents),
+      git: await kildGitStatus(kild.worktree ? worktreePath(kild.worktree) : kild.cwd, kild.base),
+    };
   }
 
   /** The effective kild dir (the kild's worktree if set, else its cwd) + base of
@@ -613,9 +641,19 @@ export class KildManager {
       );
     }
 
-    const message: Message = { id: this.createId(), kildId, from, to, text, ts: Date.now() };
+    // The registry stamps `seq` as it appends, and the STAMPED message is what gets
+    // broadcast — so a WS `{message}` frame carries the same cursor a later
+    // `GET …/messages?since=` will report, and a client can tell new from replay.
+    const message = this.registry.appendMessage(kildId, {
+      id: this.createId(),
+      kildId,
+      from,
+      to,
+      text,
+      ts: Date.now(),
+    });
+    if (!message) return fail('not_found', `no such kild: ${kildId}`);
     traceSend(kild.name, message);
-    this.registry.appendMessage(kildId, message);
     this.broadcast({ message });
     this.deliver(kild, message);
     return ok({ message: 'Sent to the kild.', deliveredTo: to.filter((t) => t !== from) });

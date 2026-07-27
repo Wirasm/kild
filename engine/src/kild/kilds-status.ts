@@ -1,10 +1,4 @@
-import {
-  type AgentView,
-  type CostTotals,
-  costTotals,
-  type LiveKildStatus,
-  type Message,
-} from './kild-types.ts';
+import { type AgentView, type CostTotals, costTotals, type KildStatus } from './kild-types.ts';
 import type { KildGitStatus } from './worktree-status.ts';
 
 /** The director's compact view of a kild's git state: a summary, not the full
@@ -41,7 +35,6 @@ export interface CompactKildStatus {
   id: string;
   name: string;
   agents: AgentView[];
-  posts: Message[];
   /** The kild's git/worktree summary — code state, not just conversation. */
   git?: CompactGitStatus;
   /** Other live kilds that touch the same files — a merge collision waiting to
@@ -61,7 +54,7 @@ function toCompactGit(git: KildGitStatus): CompactGitStatus {
 
 /** Cross-kild collisions: for each kild, the other live kilds that changed any of
  *  the same files (committed vs base). Pure — computed once over the enriched set. */
-export function computeCollisions(kilds: LiveKildStatus[]): Map<string, KildCollision[]> {
+export function computeCollisions(kilds: KildStatus[]): Map<string, KildCollision[]> {
   const result = new Map<string, KildCollision[]>();
   for (const a of kilds) {
     const aFiles = new Set(a.git?.changedFiles ?? []);
@@ -77,15 +70,14 @@ export function computeCollisions(kilds: LiveKildStatus[]): Map<string, KildColl
   return result;
 }
 
-export function compactLiveKilds(liveKilds: LiveKildStatus[]): CompactKildStatus[] {
-  const collisions = computeCollisions(liveKilds);
-  return liveKilds.map((kild) => {
+export function compactLiveKilds(kildStatuses: KildStatus[]): CompactKildStatus[] {
+  const collisions = computeCollisions(kildStatuses);
+  return kildStatuses.map((kild) => {
     const totals = kild.totals ?? costTotals(kild.agents);
     return {
       id: kild.id,
       name: kild.name,
       agents: kild.agents.map((agent) => ({ ...agent })),
-      posts: kild.log.slice(-2),
       ...(totals ? { totals } : {}),
       ...(kild.git ? { git: toCompactGit(kild.git) } : {}),
       ...(collisions.has(kild.id) ? { collidesWith: collisions.get(kild.id) } : {}),
