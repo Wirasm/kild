@@ -5,7 +5,6 @@ import path from 'node:path';
 
 import {
   appendRoomLog,
-  fleetMemorySection,
   formatRoomLogEntry,
   projectMemorySection,
   synthesisPrompt,
@@ -156,16 +155,6 @@ test('projectMemorySection reads an external memory dir and names its actual pat
   const section = projectMemorySection(project, external);
   expect(section).toContain('Lives outside the repo.');
   expect(section).toContain(`(${path.join(external, 'MEMORY.md')})`);
-});
-
-test('fleetMemorySection reads $KILD_HOME/MAIN_MEMORY.md and is empty when absent', () => {
-  expect(fleetMemorySection()).toBe('');
-  fs.mkdirSync(process.env.KILD_HOME as string, { recursive: true });
-  fs.writeFileSync(
-    path.join(process.env.KILD_HOME as string, 'MAIN_MEMORY.md'),
-    '- projA — the API',
-  );
-  expect(fleetMemorySection()).toContain('projA — the API');
 });
 
 test('the synthesis charter names the transcript, the memory file, and the constraints', () => {

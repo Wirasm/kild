@@ -326,10 +326,9 @@ app.get('/api/sessions/:id/transcript', async (c) => {
 // ── Sessions ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions', (c) => c.json(sessionManager.list()));
 
-// Spawn a detached session (e.g. a `kild operator` session) — the CLI/scripts drive this
-// over REST instead of holding a WS open. `operator: true` grants the room-control tools.
-// `forkFrom` spawns the session from a frozen copy of an existing pi session file: the
-// fork gets a NEW session file and never writes the source.
+// Spawn a detached session — the CLI/scripts drive this over REST instead of holding a
+// WS open. `forkFrom` spawns the session from a frozen copy of an existing pi session
+// file: the fork gets a NEW session file and never writes the source.
 app.post('/api/sessions', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     persona?: string;
@@ -338,7 +337,6 @@ app.post('/api/sessions', async (c) => {
     worktree?: string;
     base?: string;
     label?: string;
-    operator?: boolean;
     prompt?: string;
     forkFrom?: unknown;
   };
@@ -362,7 +360,6 @@ app.post('/api/sessions', async (c) => {
       base: body.base,
       label: body.label,
       forkFrom: body.forkFrom,
-      env: body.operator ? { KILD_OPERATOR: '1' } : undefined,
     },
     'cli',
   );

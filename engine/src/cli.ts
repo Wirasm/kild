@@ -20,13 +20,10 @@ import {
   listSessions,
   openRoom,
   postRoom,
-  promptSession,
-  spawnSession,
-  stopSession,
-} from './kild/operator/engine-client.ts';
-import { compactLiveRooms, formatCompactGitSummary } from './kild/operator/rooms-status.ts';
+} from './kild/engine-client.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 import { claudeStopOutput } from './kild/room/claude-stop.ts';
+import { compactLiveRooms, formatCompactGitSummary } from './kild/rooms-status.ts';
 import {
   forceRemoveWorktree,
   listWorktrees,
@@ -80,12 +77,10 @@ async function dispatch(): Promise<void> {
       return room(action, rest);
     case 'rooms':
       return roomsList();
-    case 'operator':
-      return operator(action, rest);
     case 'sessions':
       return sessionsList();
     default:
-      console.error('usage: kild <project|agent|worktree|run|room|rooms|operator|sessions> …');
+      console.error('usage: kild <project|agent|worktree|run|room|rooms|sessions> …');
       process.exit(2);
   }
 }
@@ -247,27 +242,7 @@ async function run(prompt: string): Promise<void> {
   return (await engineRunning()) ? runViaEngine(prompt) : runViaWorker(prompt);
 }
 
-/** `kild operator <ls|post|stop>` + `kild operator <goal> [--detach]` — an operator
- *  session holds the room-control tools and opens and steers MANY rooms. `--detach` and the
- *  subcommands make it drivable from scripts; a bare goal stays interactive. */
-async function operator(action: string | undefined, args: string[]): Promise<void> {
-  if (action === 'ls') return sessionsList();
-  if (action === 'post') {
-    const [id, ...text] = args;
-    if (!id || text.length === 0) throw new Error('usage: kild operator post <id> <text…>');
-    const res = await promptSession(id, text.join(' '));
-    return void (json ? console.log(JSON.stringify(res)) : console.error('posted'));
-  }
-  if (action === 'stop') {
-    const [id] = args;
-    if (!id) throw new Error('usage: kild operator stop <id>');
-    await stopSession(id);
-    return void (json ? console.log('{"ok":true}') : console.error('stopped'));
-  }
-  return operatorInteractive([action, ...args].filter(Boolean).join(' '));
-}
-
-/** `kild sessions` / `kild operator ls` — list live sessions (operator sessions + runs). */
+/** `kild sessions` — list live sessions. */
 async function sessionsList(): Promise<void> {
   const sessions = await listSessions();
   if (json) return void console.log(JSON.stringify(sessions, null, 2));
@@ -275,127 +250,6 @@ async function sessionsList(): Promise<void> {
   for (const s of sessions) {
     console.log(`${s.id}\t${s.persona ?? 'default'}${s.model ? ` (${s.model})` : ''}`);
   }
-}
-
-async function operatorInteractive(goal: string): Promise<void> {
-  if (values.worktree) {
-    throw new Error('kild operator does not support --worktree; use kild room or kild run instead');
-  }
-  if (!goal) throw new Error('usage: kild operator <goal…> [--detach] [--project <p>]');
-  if (values.detach) {
-    const cwd = (await resolveProjectFlag()) ?? process.cwd();
-    const res = await spawnSession({
-      persona: values.agent ?? 'default',
-      model: values.model,
-      cwd,
-      label: values.project ?? 'operator',
-      operator: true,
-      prompt: goal,
-    });
-    return void console.log(json ? JSON.stringify(res, null, 2) : res.id);
-  }
-  if (!(await engineRunning())) {
-    throw new Error(`engine not running at ${ENGINE} — start it: cd engine && bun run dev`);
-  }
-
-  const cwd = (await resolveProjectFlag()) ?? process.cwd();
-  const id = crypto.randomUUID();
-  const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let stopping = false;
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      ws.close();
-      if (err) reject(err);
-      else resolve();
-    };
-    const stop = () => {
-      if (stopping) return;
-      stopping = true;
-      try {
-        ws.send(JSON.stringify({ type: 'stop', id }));
-      } catch {
-        finish();
-        return;
-      }
-      setTimeout(() => finish(), 200);
-    };
-
-    process.on('SIGINT', () => {
-      if (!json) console.error('\n\x1b[2m— stopping operator session —\x1b[0m');
-      stop();
-    });
-
-    if (!json) {
-      process.stdin.setEncoding('utf8');
-      process.stdin.on('data', (chunk: string) => {
-        for (const raw of chunk.split('\n')) {
-          const text = raw.trim();
-          if (!text) continue;
-          ws.send(JSON.stringify({ type: 'prompt', id, text }));
-        }
-      });
-    }
-
-    ws.addEventListener('open', () => {
-      ws.send(
-        JSON.stringify({
-          type: 'spawn',
-          id,
-          // The operator session's persona comes from the project (`--agent <name>`); with
-          // none, it's the `default` general-purpose session (kild's system prompt) plus the
-          // operator room-control tools. kild ships no `brain` role of its own.
-          persona: values.agent ?? 'default',
-          cwd,
-          model: values.model,
-          worktree: values.worktree,
-          label: values.project ?? 'operator',
-          env: { KILD_OPERATOR: '1' },
-        }),
-      );
-      ws.send(JSON.stringify({ type: 'prompt', id, text: goal }));
-      if (!json) {
-        const persona = values.agent ? ` (${values.agent})` : '';
-        const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
-        console.error(
-          `\x1b[2m# operator${persona}${where} · type to prompt · Ctrl-C to stop\x1b[0m`,
-        );
-      }
-    });
-
-    ws.addEventListener('message', (e) => {
-      const msg = JSON.parse(String((e as { data: unknown }).data)) as {
-        session?: string;
-        event?: { kind: string; [k: string]: unknown };
-      };
-      if (msg.session !== id || !msg.event) return;
-      const ev = msg.event;
-      if (ev.kind === 'text') {
-        if (!json) process.stdout.write(String(ev.delta ?? ''));
-      } else if (ev.kind === 'tool_start') {
-        process.stderr.write(`\x1b[2m🔧 ${ev.name}\x1b[0m\n`);
-      } else if (ev.kind === 'stats') {
-        if (!json) {
-          process.stderr.write(
-            `\x1b[2m───── tokens=${Number(ev.tokens ?? 0)}  cost=$${Number(ev.cost ?? 0).toFixed(4)}\x1b[0m\n`,
-          );
-        }
-      } else if (ev.kind === 'error') {
-        finish(new Error(String(ev.message ?? 'engine error')));
-      } else if (ev.kind === 'session_end') {
-        finish();
-      }
-    });
-    ws.addEventListener('close', () => {
-      if (!settled && !stopping) {
-        finish(new Error('connection to the engine closed before the operator session completed'));
-      }
-    });
-    ws.addEventListener('error', () => finish(new Error('engine socket error')));
-  });
 }
 
 /**

@@ -17,12 +17,8 @@ import {
   formatModelsSection,
   MECHANISM_PROMPT,
 } from './kild/mechanism-prompt.ts';
-import { fleetMemorySection, projectMemorySection } from './kild/memory.ts';
+import { projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withRole } from './kild/models.ts';
-import { createOperatorCloseRoomTool } from './kild/operator/close-room-tool.ts';
-import { createOpenRoomTool } from './kild/operator/open-room-tool.ts';
-import { createPostRoomTool } from './kild/operator/post-room-tool.ts';
-import { createRoomsStatusTool } from './kild/operator/rooms-status-tool.ts';
 import { createCloseRoomTool } from './kild/room/close-room-tool.ts';
 import { createInviteAgentTool } from './kild/room/invite-agent-tool.ts';
 import { createPostMessageTool } from './kild/room/post-message-tool.ts';
@@ -49,7 +45,6 @@ export async function runWorker(): Promise<never> {
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inRoom = !!process.env.KILD_ROOM;
   const isRoomLead = process.env.KILD_ROOM_LEAD === '1';
-  const operatorEnabled = process.env.KILD_OPERATOR === '1';
   const skillsProfile = process.env.KILD_SKILLS_PROFILE || undefined;
   const forkFrom = process.env.KILD_FORK_SESSION || undefined;
 
@@ -98,8 +93,8 @@ export async function runWorker(): Promise<never> {
     const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
     // A room participant gets `post_message` + `invite_agent`; the room's LEAD also
-    // gets `close_room` (ending the room is the lead's explicit act). An operator-enabled
-    // non-room session instead gets the engine REST room-control tools.
+    // gets `close_room` (ending the room is the lead's explicit act). A non-room session
+    // gets no custom tools.
     const customTools = inRoom
       ? [
           createPostMessageTool(async (text, to) => {
@@ -111,14 +106,7 @@ export async function runWorker(): Promise<never> {
             ? [createCloseRoomTool((spec) => emitRoomCommand({ kind: 'close_room', ...spec }))]
             : []),
         ]
-      : operatorEnabled
-        ? [
-            createOpenRoomTool(),
-            createPostRoomTool(),
-            createRoomsStatusTool(),
-            createOperatorCloseRoomTool(),
-          ]
-        : undefined;
+      : undefined;
     // Skills: an explicit room capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
     // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
     // PLUS the config-declared skill dirs, so an invited agent can load `prp-implement` when
@@ -199,18 +187,13 @@ export async function runWorker(): Promise<never> {
   // Every session gets the generic mechanism guide (how to operate) on top of everything,
   // above the persona — so even a bare `default` session is competent. One-shot: it rides
   // only the first delivered turn. The room-comms part is conditional inside the prompt.
-  // A delegating session (room or operator) also gets the configured model catalog so it
-  // can pick a model per fan-out agent.
-  const modelsSection =
-    inRoom || operatorEnabled ? formatModelsSection(await configuredModels(cwd)) : '';
-  // Persistent memory rides the first turn: operator sessions get the operator's
-  // cross-project memory; every session gets the project's curated memory + direction,
-  // read from the resolved memory dir (config `memory.dir`, default `.kild/` — gitignored,
-  // so worktree checkouts never carry the default-dir files).
-  const memorySections = [
-    operatorEnabled ? fleetMemorySection() : '',
-    projectMemorySection(cwd, await configuredMemoryDir(cwd)),
-  ]
+  // A delegating (in-room) session also gets the configured model catalog so it can pick
+  // a model per fan-out agent.
+  const modelsSection = inRoom ? formatModelsSection(await configuredModels(cwd)) : '';
+  // Persistent memory rides the first turn: every session gets the project's curated
+  // memory + direction, read from the resolved memory dir (config `memory.dir`, default
+  // `.kild/` — gitignored, so worktree checkouts never carry the default-dir files).
+  const memorySections = [projectMemorySection(cwd, await configuredMemoryDir(cwd))]
     .filter(Boolean)
     .join('\n\n');
   let sessionPrefix: string | null = [MECHANISM_PROMPT, modelsSection, memorySections]

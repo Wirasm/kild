@@ -1,12 +1,12 @@
-import { openDecisions, type RoomDecision } from '../room/room-decisions.ts';
+import { openDecisions, type RoomDecision } from './room/room-decisions.ts';
 import {
   type LiveRoomStatus,
   type ParticipantView,
   type RoomCostTotals,
   type RoomMessage,
   roomCostTotals,
-} from '../room/room-types.ts';
-import type { RoomGitStatus } from '../worktree-status.ts';
+} from './room/room-types.ts';
+import type { RoomGitStatus } from './worktree-status.ts';
 
 /** The director's compact view of a room's git state: a summary, not the full
  *  changed-file list. Per the pull-not-push discipline, the director sees a COUNT plus
