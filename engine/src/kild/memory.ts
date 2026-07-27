@@ -136,15 +136,6 @@ export function projectMemorySection(projectCwd: string, dir: string): string {
   return `<project-memory>\n${parts.join('\n\n')}\n</project-memory>`;
 }
 
-/** The fleet-memory prompt section (`$KILD_HOME/MAIN_MEMORY.md`) for operator
- *  sessions that steer many projects. ("Fleet" here is the tolerated memory-scope
- *  sense — cross-project — not a capability name.) Empty string when absent. */
-export function fleetMemorySection(): string {
-  const memory = readCapped(path.join(kildHome(), 'MAIN_MEMORY.md'));
-  if (!memory) return '';
-  return `<fleet-memory>\nYour cross-project fleet memory ($KILD_HOME/MAIN_MEMORY.md):\n${memory}\n</fleet-memory>`;
-}
-
 /** The synthesis session's task charter — mechanism only (what inputs, what file, what
  *  constraints); its judgment/voice comes from the configured persona, not from here.
  *  `dir` is the resolved memory dir — the charter must name the ACTUAL paths, or the

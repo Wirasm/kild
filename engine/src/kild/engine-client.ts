@@ -1,5 +1,5 @@
-import type { MailboxPost } from '../room/attached.ts';
-import type { LiveRoomStatus, ParticipantSpec } from '../room/room-types.ts';
+import type { MailboxPost } from './room/attached.ts';
+import type { LiveRoomStatus, ParticipantSpec } from './room/room-types.ts';
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
 
@@ -122,18 +122,16 @@ export interface SpawnSessionRequest {
   cwd?: string;
   worktree?: string;
   base?: string;
-  /** Session label shown in listings (e.g. 'operator', a room name). Display only. */
+  /** Session label shown in listings (e.g. a room name). Display only. */
   label?: string;
-  /** Grant the operator room-control tools (open/post/status/close rooms). */
-  operator?: boolean;
   /** Absolute pi session file to fork from — the spawned session starts from a frozen
    *  copy of its history (a new session file; the source is never written). */
   forkFrom?: string;
-  /** Initial prompt delivered right after spawn (e.g. the operator session's goal). */
+  /** Initial prompt delivered right after spawn. */
   prompt?: string;
 }
 
-/** Spawn a detached session (e.g. a detached operator) through the engine; returns its id. */
+/** Spawn a detached session through the engine; returns its id. */
 export async function spawnSession(req: SpawnSessionRequest): Promise<{ ok: true; id: string }> {
   return engineFetch('/api/sessions', {
     method: 'POST',
