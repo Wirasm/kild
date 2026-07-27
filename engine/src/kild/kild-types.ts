@@ -98,9 +98,15 @@ export function agentProcessId(agent: Agent): string | undefined {
  *  which is the whole point of the split (see {@link KildIdentity}). */
 export interface AgentIdentity {
   handle: string;
-  /** Omitted for an owned agent (the default), `'attached'` for one kild does not own —
-   *  so a roster stops implying every agent is a process kild can steer. */
-  ownership?: Ownership;
+  /** ALWAYS present on the wire — `'owned'` when kild runs the process, `'attached'` when a
+   *  harness it does not own holds the handle.
+   *
+   *  It was previously omitted for owned agents, on the reasoning that absent means owned.
+   *  That made the one field a client switches on optional, so `agent.ownership === 'owned'`
+   *  was false for every owned agent and every consumer needed a `?? 'owned'` it had to
+   *  remember. An implicit default on a discriminant is the same mistake as the lead default
+   *  this restructure deleted: the engine knows the answer, so it should say it. */
+  ownership: Ownership;
   persona?: string;
   model?: string;
   /** Attention state: finished a turn and waiting for input (see {@link AgentBase.idle}). */
@@ -125,7 +131,9 @@ export interface AgentView extends AgentIdentity {
 export function agentIdentity(agent: Agent): AgentIdentity {
   return {
     handle: agent.handle,
-    ownership: agent.ownership,
+    // Resolved, never passed through: the stored field is optional for older persisted
+    // rosters, but the view states it outright.
+    ownership: agent.ownership ?? 'owned',
     persona: agent.persona,
     model: agent.model,
     idle: agent.idle,

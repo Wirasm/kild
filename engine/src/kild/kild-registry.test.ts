@@ -50,7 +50,9 @@ test('a fresh registry loads past kilds into the archive (read-only) with their 
   const found = reg.archived().find((a) => a.id === 'kild-a');
   expect(found).toBeDefined();
   expect(found?.log.map((m) => m.text)).toEqual(['hello']);
-  expect(found?.agents).toEqual([{ handle: 'agent', persona: 'agent' }]);
+  // `ownership` is resolved, not passed through: the archive on disk predates the field, and
+  // the view states it outright rather than leaving a client to infer it from absence.
+  expect(found?.agents).toEqual([{ handle: 'agent', ownership: 'owned', persona: 'agent' }]);
   // Archived kilds are history only — they are NOT live in-memory kilds.
   expect(reg.get('kild-a')).toBeUndefined();
 });
