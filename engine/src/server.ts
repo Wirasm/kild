@@ -617,6 +617,7 @@ app.post('/api/kilds/:id/agents', async (c) => {
     persona?: unknown;
     model?: unknown;
     invitedBy?: unknown;
+    forkFrom?: unknown;
   };
   if (typeof body.handle !== 'string' || !body.handle.trim()) {
     return c.json({ error: 'handle required' }, 400);
@@ -630,12 +631,27 @@ app.post('/api/kilds/:id/agents', async (c) => {
   if (body.invitedBy !== undefined && typeof body.invitedBy !== 'string') {
     return c.json({ error: 'invitedBy must be a string' }, 400);
   }
+  // `forkFrom` seeds the new agent from a COPY of an existing pi session file — the way to
+  // branch off a conversation, including a LIVE one, since the source is never written.
+  // Validated here rather than deeper: a path that is not a file is a client mistake, and
+  // the agent process would otherwise fail after spawning, which reads as a spawn that
+  // half-worked.
+  if (body.forkFrom !== undefined) {
+    if (typeof body.forkFrom !== 'string' || !body.forkFrom.trim()) {
+      return c.json({ error: 'forkFrom must be a pi session file path' }, 400);
+    }
+    const stat = await fs.stat(body.forkFrom).catch(() => null);
+    if (!stat?.isFile()) {
+      return c.json({ error: `forkFrom is not an existing session file: ${body.forkFrom}` }, 400);
+    }
+  }
   const result = await kildManager.spawnAgent(
     c.req.param('id'),
     {
       handle: body.handle.trim(),
       persona: body.persona,
       model: body.model,
+      forkFrom: typeof body.forkFrom === 'string' ? body.forkFrom : undefined,
     },
     body.invitedBy,
   );

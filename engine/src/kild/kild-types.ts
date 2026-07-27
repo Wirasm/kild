@@ -215,6 +215,12 @@ export interface AgentSpec {
   handle: string;
   persona?: string;
   model?: string;
+  /** Absolute path of an existing pi session file to seed this agent from. The agent COPIES
+   *  that file's history into a brand-new session file, so the source is never written and
+   *  two writers on one conversation are impossible — which is what makes forking a LIVE
+   *  agent's session safe. A fork is a snapshot: it diverges from the moment it is taken and
+   *  does not follow the original. */
+  forkFrom?: string;
 }
 
 /** Spec to create a kild: who the agents are and where they run. */
