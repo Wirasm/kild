@@ -1,13 +1,13 @@
 ---
 name: kild-cli
 description: |
-  Drive the kild CLI: one-shot pi coding agents (`kild run`), multi-agent rooms
-  (`kild room open/post/log/close`, `kild rooms`), detached operator sessions, and
-  project/agent/worktree management.
+  Drive the kild CLI: one-shot pi coding agents (`kild run`), multi-agent kilds
+  (`kild new/send/log/stop`, `kild ls`), attached harnesses, and
+  project/persona/worktree management.
 
   USE THIS SKILL to: delegate a task to a sub-agent ("use kild to…", "spawn an
-  agent to…"), run/steer/observe multi-agent rooms, or manage kild projects,
-  agents, and worktrees.
+  agent to…"), run/steer/observe multi-agent kilds, or manage kild projects,
+  personas, and worktrees.
 
   Scriptable: results on stdout (`--json` for machine-readable), progress/errors
   on stderr, non-zero exit = failure. Installed globally as `kild` (bun link in
@@ -16,66 +16,81 @@ description: |
 
 # kild CLI
 
-`kild` runs **pi** coding agents in your projects. It is the scriptable interface
-an agent can drive over the Bash tool. It is installed globally: run `kild <args>`
-from anywhere (installed with `bun link` from `engine/`; source `engine/src/cli.ts`).
-`kild run` is **one-shot**: it starts an agent, lets it work to completion, and
-prints the result. For **live, multi-agent, steerable** work, drive **rooms**
-from the CLI (`kild room open --detach` / `rooms` / `room log` / `room post` /
-`room close`) — see "Driving rooms" below.
+`kild` runs **pi** coding agents in your projects. It is the scriptable interface an
+agent can drive over the Bash tool. Installed globally: run `kild <args>` from
+anywhere (`bun link` from `engine/`; source `engine/src/cli.ts`).
+
+`kild run` is **one-shot**: it starts an agent, lets it work to completion, and prints
+the result. For **live, multi-agent, steerable** work, drive a **kild**
+(`kild new --detach` / `ls` / `log` / `send` / `stop`) — see "Driving kilds" below.
+
+## Vocabulary
+
+One word per concept. See `docs/VOCABULARY.md`.
+
+- **kild** — a git worktree and the agents working in it. The unit of isolated,
+  parallel work. Also the name of the tool; "a kild" is the unit.
+- **agent** — one running agent process. The only inhabitant type.
+- **persona** — a markdown file that shapes what an agent is. `.pi/agents/*.md`,
+  `.claude/agents/*.md`. The dir is called `agents/` by upstream convention; the
+  *contents* are personas.
+- **handle** — an agent's `@name`, addressable inside its kild.
 
 ## Command reference
 
 | Command | What it does |
 |---|---|
-| `kild run [opts] <prompt…>` | Run an agent on a prompt to completion, print the result |
-| `kild rooms` | List live rooms with their code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-room collisions) |
-| `kild room open <goal> --detach [opts]` | Open a room, print its id, return (no streaming). Omit `--detach` for an interactive session |
-| `kild room log <id>` | Read a room's full message thread (the pull view; `kild rooms` shows only the last posts) |
-| `kild room post <id> <text…>` | Post a message into a live room (steer it) |
-| `kild room close <id>` | Close a live room by id |
-| `kild room join <id> --as <name>` | Register an **attached** participant — a harness kild does not spawn (e.g. the Claude Code session you are in) claiming a `@handle`. Idempotent |
-| `kild room drain <id> --as <name>` | Destructively read that participant's mailbox. Empty = idle. `--format claude-stop` shapes it as a Claude Code `Stop` hook (see `docs/attached-participants.md`) |
-| `kild operator <goal> --detach` | Spawn a detached operator session (opens/steers many rooms), print its id |
-| `kild operator post <id> <text…>` | Steer a running operator session |
-| `kild operator stop <id>` | Stop an operator session |
-| `kild sessions` | List live sessions (operator sessions + runs) |
+| `kild run [opts] <prompt…>` | Run one agent on a prompt to completion, print the result |
+| `kild ls` | List live kilds with code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-kild collisions) |
+| `kild new <goal> --detach [opts]` | Create a kild, print its id, return. Omit `--detach` for an interactive session |
+| `kild log <id>` | Read a kild's full message thread (`kild ls` shows only the last messages) |
+| `kild show <id>` | One kild in detail: agents, git state, collisions, full log |
+| `kild send <id> <text…> [--to a,b]` | Send a message into a live kild. `--to` names recipients; omit to reach the kild's lead |
+| `kild stop <id>` | Stop a live kild by id |
+| `kild attach <id> --as <handle>` | Register an **attached** agent — a harness kild does not spawn (e.g. the Claude Code session you are in) claiming a `@handle`. Idempotent |
+| `kild inbox <id> --as <handle>` | Destructively read that agent's inbox. Empty = idle. `--format claude-stop` shapes it as a Claude Code `Stop` hook |
+| `kild agents` | List live agents |
 | `kild project ls` | List registered projects |
 | `kild project add <name> <path>` | Register a project directory (`~` is expanded) |
 | `kild project rm <name>` | Remove a project |
-| `kild agent ls [--project <dir>]` | List available agents (built-in `default` + convention dirs + config plugins) |
-| `kild agent show <name> [--project <dir>]` | Print an agent's resolved system prompt |
+| `kild persona ls [--project <dir>]` | List available personas (built-in `default` + convention dirs + config plugins) |
+| `kild persona show <name> [--project <dir>]` | Print a persona's resolved system prompt |
 | `kild worktree ls --project <p>` | List the project's `kild/*` worktrees |
 | `kild worktree rm <name> --project <p>` | Remove a worktree (frees disk; the `kild/<name>` branch persists) |
-| `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only; dirty/in-use ones are kept) |
+| `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only) |
 
 Add `--json` to any command for machine-readable output on stdout.
 
-## Driving rooms (multi-agent units of parallel work) from the CLI
+### Flags
 
-A **room** is a shared workspace where one or more agents collaborate. Unlike `run`
-(one-shot, single agent), a room is steerable and multi-agent — and it is now fully
-CLI-drivable (no UI required):
+`--project <name|path>` · `--persona <name>` · `--model <ref>` · `--worktree <name>` ·
+`--base <branch>` · `--agents a,b,c` (for `kild new`) · `--to a,b` (for `kild send`) ·
+`--as <handle>` (for `attach`/`inbox`) · `--detach` · `--force` · `--json`
+
+## Driving kilds (multi-agent units of parallel work)
+
+A **kild** is an isolated workspace where one or more agents collaborate. Unlike `run`
+(one-shot, single agent), a kild is steerable and multi-agent:
 
 ```bash
-ID=$(kild room open "Build feature X" --detach --project myproj)  # → prints room id
-kild rooms                        # live rooms + git/collision state (the glance)
-kild room log "$ID"               # the full conversation
-kild room post "$ID" "use the prp-implement skill to implement plan Y"  # steer / delegate
-kild room close "$ID"             # end it
+ID=$(kild new "Build feature X" --detach --project myproj --worktree feat-x)
+kild ls                       # live kilds + git/collision state (the glance)
+kild log "$ID"                # the full conversation
+kild send "$ID" "use the prp-implement skill to implement plan Y"
+kild send "$ID" --to reviewer "check the auth path"   # address one agent
+kild stop "$ID"               # end it
 ```
 
-Participants come from the project's own agents (`--participants a,b,c`; default: one
-general-purpose `default` agent). Each gets kild's system prompt plus any skills the
-project's config plugs in — so you can post `use the prp-X skill to …` and the agent
+Agents come from the project's own personas (`--agents a,b,c`; default: one
+general-purpose `default` agent). Each gets kild's mechanism prompt plus any skills the
+project's config plugs in — so you can send `use the prp-X skill to …` and the agent
 loads it.
 
 A harness kild does **not** spawn — the Claude Code session you are in — can also hold a
-handle in the room: `kild room join "$ID" --as claude` registers it, and it collects mail
-by draining at its own turn boundary rather than being pushed to. See
-`docs/attached-participants.md` for the mailbox rules and the `Stop`-hook wiring.
+handle: `kild attach "$ID" --as claude` registers it, and it collects mail by draining
+at its own turn boundary rather than being pushed to.
 
-## Config — plug in skills/agents, base branch, and a model catalog
+## Config — plug in skills/personas, base branch, and a model catalog
 
 `.kild/config.json` (project) and `$KILD_HOME/config.json` (global, merged; project wins):
 
@@ -93,137 +108,115 @@ by draining at its own turn boundary rather than being pushed to. See
 
 - `plugins` — dirs laid out like a Claude Code plugin (`agents/` + `skills/`); absolute or
   `~/…` paths load from anywhere. Also `agentPaths` / `skillPaths` for explicit dirs.
-- `baseBranch` — default base for worktrees + git status (see below).
-- `models` — a `provider/model` → description catalog. It's appended to a **delegating**
-  session's system prompt, so an orchestrator knows which model to pass to `invite_agent`
-  for each fan-out agent (strong model for hard reasoning, cheap for bulk).
+- `baseBranch` — default base for worktrees + git status.
+- `models` — a `provider/model` → description catalog, appended to a **delegating**
+  session's system prompt so it knows which model to pass to `spawn` per fan-out agent.
 
-## Delegation is asynchronous (idle failsafe)
+## Delegation is asynchronous
 
-Inside a room, `invite_agent` + `post_message` is fire-and-forget: you delegate and keep
-going; a delegate's posted result wakes you automatically. Don't busy-wait re-asking. If a
-delegate finishes a turn **without** posting, kild nudges *it* to report — so a forgotten
-post can't silently stall the run.
+Inside a kild, `spawn` + `send` is fire-and-forget: you delegate and keep going; a
+delegate's message wakes you automatically. Don't busy-wait re-asking an agent that
+already replied.
 
-## Worktrees — isolate every room (you name them)
+**Reaching another agent requires an explicit `send`.** Your normal output is private —
+narration is not delivered to anyone. If you finish delegated work without sending your
+result, whoever delegated is left waiting. The engine does not chase you: reporting is
+your responsibility (and your persona's), not a mechanism that nudges.
 
-`--worktree <name>` runs the room (or `kild run`) in an isolated git worktree on branch
+## Worktrees — every kild is one (you name them)
+
+`--worktree <name>` runs the kild (or `kild run`) in an isolated git worktree on branch
 `kild/<name>`; kild adds the `kild/` prefix, **you choose the suffix**. There is no
-auto-naming — if you omit `--worktree`, the work happens in the project's **main
-checkout** with no isolation.
+auto-naming — omit `--worktree` and the work happens in the project's **main checkout**
+with no isolation.
 
 Conventions when you drive kild:
 
-- **One room = one worktree.** Give every room/run its own `--worktree`, named for
-  the task: `--worktree fix-2247`, `--worktree feat-dark-mode`. Never run two independent
-  rooms in the same tree — their edits collide.
+- **One kild = one worktree.** Name it for the task: `--worktree fix-2247`,
+  `--worktree feat-dark-mode`. Never run two independent kilds in the same tree.
 - **Reuse the name to share a tree.** Two sessions naming the SAME `--worktree` attach to
-  the one tree (e.g. a reviewer joining a coder's room). Different names split.
+  one tree (e.g. a reviewer joining a coder's kild). Different names split.
 - **Base branch.** New worktrees fork from — and git status/collisions are measured
-  against — the base branch: `--base <branch>` wins, else `.kild/config.json` `baseBranch`,
-  else the checkout's current branch. On a repo whose trunk is `dev`, set
-  `{"baseBranch":"dev"}` (or pass `--base dev`) so ahead/behind and collisions reflect
-  only this room's work.
-- **Observe & land.** `kild rooms` shows each room's branch, ahead/behind, dirty,
-  conflicts, and cross-room file collisions; the agent lands the work with normal
-  git/gh (commit, push, PR) inside its worktree.
-- **Clean up.** After merging, `kild worktree rm <name> --project <p>` frees the tree;
-  `kild worktree prune --project <p>` removes trees whose branch merged into base.
+  against — the base: `--base <branch>` wins, else `.kild/config.json` `baseBranch`, else
+  the checkout's current branch. On a repo whose trunk is `dev`, set `{"baseBranch":"dev"}`
+  so ahead/behind and collisions reflect only this kild's work.
+- **Observe & land.** `kild ls` shows each kild's branch, ahead/behind, dirty, conflicts,
+  and cross-kild file collisions; the agent lands work with normal git/gh inside its tree.
+- **Clean up.** `kild worktree rm <name> --project <p>` frees a tree; `prune` removes trees
+  whose branch merged into base. **Note:** prune only reclaims *merged and clean* trees, so
+  abandoned work accumulates — see `docs/worktree-disposal.md`.
 
 ## The output contract
 
 - **stdout** — the result. Plain text by default; with `--json`, a JSON value.
-- **stderr** — progress (tool activity), the model line, and stats. Ignore it for
-  parsing (`2>/dev/null`).
-- **exit code** — `0` on success, non-zero on failure (the error message is on
-  stderr). Always check it.
+- **stderr** — progress (tool activity), the model line, and stats. Ignore for parsing
+  (`2>/dev/null`).
+- **exit code** — `0` on success, non-zero on failure. Always check it.
 
 ## `kild run`
 
 ```
-kild run [--project <name>] [--agent <name>] [--model <pattern>] [--worktree <name>] <prompt…>
+kild run [--project <name>] [--persona <name>] [--model <ref>] [--worktree <name>] <prompt…>
 ```
 
-- **cwd** — defaults to the **current directory** (the agent works wherever you
-  are). `--project <name>` instead runs in a registered project's path. So the
-  common pattern is `cd <some-dir> && kild run …`.
-- **`--agent <name>`** — layer a named system prompt on pi's default (a specialized
-  role). Omit for the plain `default` agent. List options with `kild agent ls`.
-- **`--model <pattern>`** — e.g. `claude-opus-4-8`, `claude-haiku-4-5`. Omit to use
-  pi's configured default.
-- **`--worktree <name>`** — run the agent in an isolated `kild/<name>` **git
-  worktree** instead of the project dir, so concurrent agents on one repo don't
-  collide. Created if missing, **attached** if it already exists (two runs with the
-  same name share a tree). Omit to run in the main checkout. The worktree **persists**
-  after the run — review/merge `kild/<name>`, then `kild worktree rm <name>`.
+- **cwd** — defaults to the **current directory**. `--project <name>` instead runs in a
+  registered project's path. Common pattern: `cd <some-dir> && kild run …`.
+- **`--persona <name>`** — layer a named system prompt on pi's default. Omit for the plain
+  `default` persona. List options with `kild persona ls`.
+- **`--model <ref>`** — e.g. `claude-opus-4-8`, `claude-haiku-4-5`. Omit for pi's default.
+- **`--worktree <name>`** — run in an isolated `kild/<name>` worktree. Created if missing,
+  **attached** if it exists. The worktree **persists** after the run.
 
-### `--json` result shape (`RunOutcome`)
+### `--json` result shape
 
 ```json
 {
-  "model": "anthropic / claude-haiku-4-5",
+  "model": "anthropic/claude-haiku-4-5",
   "text": "the agent's full reply",
-  "tools": [{ "name": "bash", "ok": true }],
   "tokens": 8092,
-  "cost": 0.00176,
-  "context_pct": 4.0
+  "cost": 0.00176
 }
 ```
-
-`model`, `tokens`, `cost`, and `context_pct` may be `null` if pi did not report
-them. `text` is the concatenated assistant reply. `tools` lists each tool call in
-order with whether it succeeded.
 
 ## Examples
 
 Run a one-shot task and capture just the answer:
 
 ```bash
-kild run --json "Summarize what this repo does in two sentences." 2>/dev/null \
-  | jq -r .text
+kild run --json "Summarize what this repo does in two sentences." 2>/dev/null | jq -r .text
 ```
 
-Delegate to a specialized agent in a registered project:
+Delegate to a specialized persona in a registered project:
 
 ```bash
-kild run --project myapp --agent planner --json \
+kild run --project myapp --persona planner --json \
   "Draft an implementation plan for adding OAuth login." 2>/dev/null | jq -r .text
 ```
 
-Run in a specific directory (e.g. a worktree) with a fast model:
-
-```bash
-cd /path/to/worktree
-kild run --model claude-haiku-4-5 "Run the tests and report failures."
-```
-
-Run two agents on one repo in isolation, then review + clean up their branches:
+Two agents on one repo in isolation, then review + clean up:
 
 ```bash
 kild run --project myapp --worktree fix-auth --json "Fix the auth bug." 2>/dev/null &
 kild run --project myapp --worktree add-logs --json "Add request logging." 2>/dev/null &
 wait
-kild worktree ls --project myapp --json   # each on its own kild/<name>
-# after reviewing/merging kild/fix-auth:
+kild worktree ls --project myapp --json
 kild worktree rm fix-auth --project myapp
 ```
 
-Register a project, then list agents available to it:
+Register a project, then list its personas:
 
 ```bash
 kild project add myapp ~/projects/myapp
-kild agent ls --project ~/projects/myapp --json | jq -r '.[].name'
+kild persona ls --project ~/projects/myapp --json | jq -r '.[].name'
 ```
 
 ## Notes
 
-- **Agents are files.** An agent named `<name>` is a `<name>.md` file (its body is
-  the system prompt) found in a project's `.kild/agents/`, `.claude/agents/`, or
-  `.pi/agents/`, or globally in `~/.config/kild/agents/` or `~/.claude/agents/`.
-  The built-in `default` agent uses pi's own prompt. To add an agent, drop a file —
-  kild only reads them.
-- **One-shot only.** `kild run` blocks until the agent finishes. For a long task,
-  expect it to take a while; tool progress streams to stderr so you can see it
-  working. There is no way yet to attach to or steer a running agent from the CLI.
-- **Errors are explicit.** An unknown project/agent, an unreadable agent file, or a
-  pi spawn failure prints to stderr and exits non-zero — never silently degrades.
+- **Personas are files.** A persona named `<name>` is a `<name>.md` file (its body is the
+  system prompt) in a project's `.kild/agents/`, `.claude/agents/`, or `.pi/agents/`, or
+  globally in `~/.config/kild/agents/` or `~/.claude/agents/`. The built-in `default` uses
+  pi's own prompt. To add one, drop a file — kild only reads them.
+- **`kild run` is one-shot.** It blocks until the agent finishes; tool progress streams to
+  stderr. To steer an agent mid-flight, use a kild and `kild send`.
+- **Errors are explicit.** An unknown project/persona, an unreadable persona file, or a pi
+  spawn failure prints to stderr and exits non-zero — never silently degrades.
