@@ -115,6 +115,7 @@
   .callout .h { font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.1em; text-transform:uppercase;
                 color:var(--seal); margin-bottom:8px; }
   .callout p { margin:0; font-size:0.94rem; color:var(--ink-soft); }
+  .seal-t { color:var(--seal); font-weight:600; }
   .callout.mech { border-left-color:var(--mech); } .callout.mech .h { color:var(--mech); }
 
   /* shrink bars */
@@ -282,7 +283,7 @@
       <table>
         <thead><tr><th>Item</th><th class="num">Lines</th><th>Verdict</th><th></th></tr></thead>
         <tbody>
-          <tr><td class="mono">pi-extension/index.ts</td><td class="num">727</td><td><strong>The biggest reshape.</strong> Today it makes a <em>pi</em> session "the operator": <code>operatorGuide()</code>, <code>&lt;kild-operator&gt;</code>, <code>kild_open_room</code>, <code>@human</code>, needs-decision. Rebuild on spawn/send/attach/inbox.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">pi-extension/index.ts</td><td class="num">727<br>→ ~400</td><td><strong>The biggest reshape — and it stays.</strong> Reframed from "the operator tier for pi" to the pi implementation of the attached-harness contract (§06).</td><td><span class="disp d-reshape">reshape</span></td></tr>
           <tr><td class="mono">hooks/claude-stop</td><td class="num">40</td><td>The attached-honryo integration. Keep; retarget <code>kild room drain</code> → <code>kild inbox</code>.</td><td><span class="disp d-keep">keep</span></td></tr>
           <tr><td class="mono">VISION.md</td><td class="num">58</td><td><strong>Already speaks the new model</strong> — "Fracture the Honryū", "the Tōryō — one director", "kild ships mechanism". The vision was right; the implementation drifted.</td><td><span class="disp d-keep">keep</span></td></tr>
           <tr><td class="mono">HANDOVER.md</td><td class="num">—</td><td>Supersede the room-patching roadmap — slices 5 &amp; 6 are subsumed by this teardown.</td><td><span class="disp d-reshape">reshape</span></td></tr>
@@ -292,12 +293,41 @@
         </tbody>
       </table>
     </div>
-    <div class="callout"><div class="h">Decide before rebuilding</div><p>With Claude Code as the honryo driving the CLI plus <code>hooks/claude-stop</code>, is the 727-line pi extension still needed — or does it collapse into "pi is just another attached harness"? Answering this first could turn the biggest reshape into a delete.</p></div>
+  </section>
+
+  <!-- 06 contract -->
+  <section>
+    <div class="sec-head"><span class="n">§06</span><h2>The attached-harness contract</h2></div>
+    <p class="lede measure">The pi extension is kept and rebuilt — but reframed. It is not "the operator tier for pi"; it is <em>the pi implementation of the attached-harness contract</em>, exactly peer to Claude Code's.</p>
+    <p class="measure">The engine defines one contract for any harness it does not own: <strong>attach</strong> a handle to a kild (addressable immediately, nothing spawned) · <strong>drain</strong> its inbox at its own turn boundary · <strong>act</strong> through the same spawn / send / observe / land API every client uses.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Harness</th><th>attach + drain</th><th>act</th></tr></thead>
+        <tbody>
+          <tr><td class="mono seal-t">Claude Code</td><td class="mono"><code>hooks/claude-stop</code> — Stop hook</td><td class="mono"><code>kild</code> CLI over bash (kild-cli skill)</td></tr>
+          <tr><td class="mono">pi</td><td class="mono">the extension's WS event bridge, natively at the turn boundary</td><td class="mono"><code>kild_*</code> native tools</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="measure">pi's is the <em>better</em> integration — a native turn-boundary drain instead of a shell hook — which is exactly why the extension earns its keep. A third harness later is a third implementation of the same contract, not a third mechanism in the engine.</p>
+
+    <h3 class="sub">Rebuild of <code>pi-extension/index.ts</code> <span class="tag">— 727 → ~400</span></h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Disposition</th><th>What</th></tr></thead>
+        <tbody>
+          <tr><td><span class="disp d-die">delete</span></td><td><code>operatorGuide()</code> / the <code>&lt;kild-operator&gt;</code> prompt injection (intelligence — PRP supplies the honryo persona, not the extension) · <code>operator: true</code> session spawning · the <code>needs-decision</code>/<code>resolved</code> vocabulary · <code>@human</code> reporting semantics · the historical <code>kild_fleet_*</code> aliases</td></tr>
+          <tr><td><span class="disp d-reshape">rebuild</span></td><td>Tools mirror the CLI verbs 1:1 — <code>kild_open</code> (fork a kild) · <code>kild_spawn</code> (into a kild, the default) · <code>kild_send</code> · <code>kild_attach</code> · <code>kild_inbox</code> · <code>kild_ls</code> · <code>kild_show</code> · <code>kild_land</code> · <code>kild_stop</code></td></tr>
+          <tr><td><span class="disp d-keep">keep</span></td><td>The REST/WS client · <code>bootId</code> restart detection · the event bridge pushing kild events into the pi session — <em>that bridge is pi's inbox drain</em></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout mech"><div class="h">Mechanism only</div><p>The extension ships tool definitions plus the event bridge — nothing else. Any pi session can therefore be a honryo: it becomes one by wearing PRP's honryo persona, not by an engine flag. Same rule as everywhere else — authority is trained deference, never a capability the engine grants.</p></div>
   </section>
 
   <!-- 06 -->
   <section>
-    <div class="sec-head"><span class="n">§06</span><h2>Tests</h2></div>
+    <div class="sec-head"><span class="n">§07</span><h2>Tests</h2></div>
     <p class="lede measure">They die because their <em>module</em> dies — never to make a gate green. Say which and why in the commit, per AGENTS.md.</p>
     <div class="tbl-wrap">
       <table>
@@ -313,7 +343,7 @@
 
   <!-- 07 -->
   <section>
-    <div class="sec-head"><span class="n">§07</span><h2>Order of operations</h2></div>
+    <div class="sec-head"><span class="n">§08</span><h2>Order of operations</h2></div>
     <p class="lede measure">Each step is a green-gates checkpoint (<code>bun test</code> · <code>typecheck</code> · <code>lint</code>). Nothing here is a shim; every rename is a real move.</p>
     <ol class="steps">
       <li><div><div class="t">Cut the Flue lane</div><div class="d">Isolated, zero behaviour change. Gets the tree honest before the real work.</div></div></li>
