@@ -277,7 +277,45 @@ out — deliberate, but it will surface in the UI.
 - [ ] Add the land gate against `GET`/`POST .../land`, and handle the `409`-with-result case
 - [ ] Handle land's refusal when the main checkout is off-base or dirty
 - [ ] Derive `collidesWith` client-side from `status`'s `changedFiles[]` — it is not a server field
+- [ ] Drop any `ownership ?? 'owned'` — it is always present now
+- [ ] Optional: keep the token from `attach` and send it as `Bearer`, so helm's own messages read as its handle rather than `human`
 - [ ] Un-pin
+
+### `ownership` is always present
+
+It used to be omitted for owned agents (absent meant owned), which made
+`agent.ownership === 'owned'` false for every owned agent. It is now always `'owned'` or
+`'attached'` on the wire. If helm wrote `?? 'owned'`, that can go.
+
+### Attach returns a credential, and it is optional
+
+Every attached sender used to be attributed as `'human'`, because attribution came from a
+kild session id and an attached harness has none. Two attached agents were indistinguishable.
+
+`POST /api/kilds/:id/agents/attach` now also returns a **token**. Send it as
+`Authorization: Bearer <token>` and the message is attributed to **that handle**:
+
+```
+seq 2  from: "honryo"   ← Bearer
+seq 3  from: "claude"   ← Bearer
+seq 4  from: "human"    ← no credential
+```
+
+Seq 2 and 3 both read `human` before.
+
+- **Optional by design.** No header, a non-Bearer scheme, or a blank Bearer all behave
+  exactly as before (`from: "human"`). helm needs no change unless it wants to be named.
+- Scoped to one `(kild, handle)`. A token for another kild is a `409`, not a silent fallback.
+- Re-attaching returns the **same** token, so a session-start hook cannot invalidate the
+  token its own running session holds.
+- In memory only; dies with the kild. Nothing to persist or refresh.
+
+**This is attribution, not authorization.** No route requires a token, and seat enforcement
+is deliberately unbuilt — on a loopback engine any local process can read the token, so
+gating `stop`/`DELETE` would break the CLI in exchange for ceremony.
+
+Also note `from` on a message is now the sender's **handle**, not its persona. Two agents
+running the same persona are finally distinguishable.
 
 ## Attribution: `from` is already engine-derived
 
