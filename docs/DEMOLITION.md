@@ -21,6 +21,55 @@ room/operator skin · **MOVE** = intelligence, belongs in `wirasm/prp` · **DIE*
   `participants[0]` and a `@human` report force-wakes the lead, so peer messaging exists but
   bends through an engine-imposed hierarchy.
 
+### Moving intelligence out leaves an obligation
+
+**Every `MOVE` needs a named mechanism counterpart.** Deleting the intelligence *and* its
+trigger does not relocate a capability — it removes it. The audit's first pass tracked what
+leaves and not what must remain, and coupled two things without noticing:
+
+**Memory synthesis needs a trigger.** Removing `recordMemory`'s synthesis spawn, moving the
+charter to PRP, and dropping `memory.synthesis` from config together delete the *only* thing
+that fires it: room-close. The mechanism half has to stay.
+
+- **KEEP (mechanism):** the engine emits a lifecycle event on close/land carrying the facts it
+  holds — `{ kildId, name, cwd, worktree, base, transcriptPath, ledgerPath }` — on the event
+  stream, and runs whatever `hooks.onClose` declares in config. kild never knows the word
+  "memory"; it fires a declared hook.
+- **MOVE (intelligence):** `synthesisPrompt()` (the charter — what to distill and how) and the
+  synthesis persona.
+- **Config:** `memory.synthesis` generalizes into `hooks.onClose`. Existing setups re-point
+  rather than lose the capability.
+
+**The ledger needs an outcome source that is not a tail-grab.** `finalNonSystemPost` dies with
+`room-events.ts`, and it is what produces `LOG.md`'s `outcome:` line. Do **not** port it — it is
+a heuristic ("the last post that wasn't a system notice") standing in for facts the engine
+already owns. The surviving kild-native ledger records what it *knows*:
+
+- land result (merged SHA, or abandoned), commits vs base, changed-file count — from
+  `git-review.ts` and `worktree-status.ts`;
+- per-agent persona, model, tokens, cost — already captured on the session bus;
+- worktree + base, and the pi resume handle per agent.
+
+Prose outcome, if wanted, is PRP's synthesis output in `MEMORY.md` — never the engine guessing.
+The ledger gets more accurate by losing that line.
+
+### Cross-repo: helm cannot merge atomically
+
+"Reshape in lockstep, no compat shim" holds inside this repo — `cli.ts`, the pi extension and
+the engine land in one PR. **helm is a separate repo** consuming the REST/WS API, so it cannot
+land atomically with kild.
+
+The exposure is narrower than it looks: waves 1–3 (Flue lane, operator tier, intelligence-out)
+do not change any endpoint helm consumes — the only removed request field is
+`POST /api/sessions {operator:true}`, which is a CLI/pi-extension path. helm keeps working
+through all of them. The breaking moment is exactly **one** commit: the `/api/rooms*` →
+`/api/kilds*` rename.
+
+**Decision: helm pins** to the last pre-rename kild commit and un-pins once the rename lands.
+Dual-serving both route families is rejected — it would carry the room API through the entire
+rebuild, which is the thing being deleted. To make that workable the route rename must be a
+**single self-contained commit**, clearly labelled, so helm's un-pin target is unambiguous.
+
 ---
 
 ## Scoreboard
