@@ -20,12 +20,24 @@ import { ensureWorktree } from './kild/worktree.ts';
  *  - `POST /api/kilds/:id/agents` answers with a typed error instead of warning to the
  *    engine's own log;
  *  - `DELETE /api/kilds/:id` refuses authored commits, ignores litter, and keeps the branch;
- *  - `GET .../land` changes nothing and `POST .../land` merges and names the sha.
+ *  - `GET .../land` changes nothing and `POST .../land` merges and names the sha;
+ *  - the listing is SPLIT: `/api/kilds` is identity (no git, no log), `/api/kilds/status` is
+ *    the git/cost half, and the log is its own cursored resource at `/api/kilds/:id/messages`.
  */
 const execFile = promisify(execFileCb);
 
 let fetchApp: (req: Request) => Response | Promise<Response>;
 let repo: string;
+
+/** An archived kild seeded on DISK before the engine loads, so the message-cursor tests can
+ *  read a real read-only record. Its log deliberately holds entries with NO `seq` (written by
+ *  an engine that predates the cursor) and a `ts` that goes BACKWARDS. */
+const ARCHIVED = 'archived-kild-1';
+const ARCHIVED_LOG = [
+  { id: 'm1', kildId: ARCHIVED, from: 'human', to: ['coder'], text: 'one', ts: 1000 },
+  { id: 'm2', kildId: ARCHIVED, from: 'coder', to: ['human'], text: 'two', ts: 500 },
+  { id: 'm3', kildId: ARCHIVED, from: 'human', to: ['coder'], text: 'three', ts: 1500 },
+];
 
 const git = (...args: string[]) => execFile('git', ['-C', repo, ...args]);
 const gitIn = (dir: string, ...args: string[]) => execFile('git', ['-C', dir, ...args]);
@@ -58,7 +70,19 @@ async function treeWithLitter(name: string) {
 }
 
 beforeAll(async () => {
-  process.env.KILD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'kild-server-kilds-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kild-server-kilds-'));
+  process.env.KILD_HOME = home;
+  fs.mkdirSync(path.join(home, 'kilds'), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, 'kilds', `${ARCHIVED}.json`),
+    JSON.stringify({
+      id: ARCHIVED,
+      name: 'record',
+      cwd: os.tmpdir(),
+      agents: [{ handle: 'coder' }],
+      log: ARCHIVED_LOG,
+    }),
+  );
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'kild-server-repo-'));
   await execFile('git', ['-C', repo, 'init', '-q', '-b', 'main']);
   await git('config', 'user.email', 't@t');
@@ -112,9 +136,7 @@ test('GET /api/kilds enumerates kild/* worktrees FROM GIT, so an orphan is addre
     worktree?: string;
     orphan?: boolean;
     agents: unknown[];
-    log: unknown[];
     cwd?: string;
-    git?: { branch: string | null; ahead: number };
   }>;
   const orphan = kilds.find((kild) => kild.worktree === 'stranded');
   expect(orphan).toBeDefined();
@@ -123,44 +145,136 @@ test('GET /api/kilds enumerates kild/* worktrees FROM GIT, so an orphan is addre
   expect(orphan?.id).toBe('stranded');
   expect(orphan?.orphan).toBe(true);
   expect(orphan?.agents).toEqual([]);
-  expect(orphan?.log).toEqual([]);
   expect(orphan?.cwd).toBe(repo);
-  expect(orphan?.git?.branch).toBe('kild/stranded');
 });
 
-test('?state= filters the collection, and an unknown state is a client error', async () => {
-  await treeWithCommit('filtered');
-  const orphans = (await (await get('/api/kilds?state=orphan')).json()) as Array<{
-    worktree?: string;
-    orphan?: boolean;
-  }>;
-  expect(orphans.length).toBeGreaterThan(0);
-  expect(orphans.every((kild) => kild.orphan === true)).toBe(true);
-  expect(orphans.some((kild) => kild.worktree === 'filtered')).toBe(true);
+// ── §5: the listing is split — cheap identity here, costly git on /status ─────────────
 
-  // No live kilds in this engine, so the live half is empty — prune-as-a-filter meanwhile
-  // reports only what disposal would actually accept: `filtered` has commits, so it is out.
-  expect(await (await get('/api/kilds?state=live')).json()).toEqual([]);
-  const reclaimable = (await (await get('/api/kilds?state=reclaimable')).json()) as Array<{
+test('GET /api/kilds is the CHEAP half: no git, no log, on any entry', async () => {
+  const kilds = (await (await get('/api/kilds')).json()) as Array<Record<string, unknown>>;
+  expect(kilds.length).toBeGreaterThan(0);
+  for (const kild of kilds) {
+    // The two unbounded costs: a git status batch per kild, and the whole conversation.
+    expect(kild).not.toHaveProperty('git');
+    expect(kild).not.toHaveProperty('log');
+    expect(kild).not.toHaveProperty('totals');
+    expect(Object.keys(kild).sort()).toEqual(
+      expect.arrayContaining(['agents', 'cwd', 'id', 'name']),
+    );
+  }
+});
+
+test('GET /api/kilds/status is the COSTLY half: git per kild, still no log', async () => {
+  const kilds = (await (await get('/api/kilds/status')).json()) as Array<{
+    worktree?: string;
+    git?: { branch: string | null; ahead: number; changedFiles: string[] };
+    log?: unknown;
+  }>;
+  const orphan = kilds.find((kild) => kild.worktree === 'stranded');
+  expect(orphan?.git?.branch).toBe('kild/stranded');
+  expect(orphan?.git?.changedFiles).toEqual([]);
+  // The split is git-vs-identity, not git-vs-everything: the log left BOTH payloads.
+  for (const kild of kilds) expect(kild).not.toHaveProperty('log');
+});
+
+test('GET /api/kilds/:id is one kild with its git and WITHOUT its log', async () => {
+  const res = await get('/api/kilds/stranded');
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as Record<string, unknown>;
+  expect(body).toMatchObject({ id: 'stranded', worktree: 'stranded', orphan: true });
+  expect((body.git as { branch: string }).branch).toBe('kild/stranded');
+  expect(body).not.toHaveProperty('log');
+  expect((await get('/api/kilds/never-existed')).status).toBe(404);
+});
+
+test('?state= filters both halves, and reclaimable is a GIT question so it lives on /status', async () => {
+  await treeWithCommit('filtered');
+  for (const route of ['/api/kilds', '/api/kilds/status']) {
+    const orphans = (await (await get(`${route}?state=orphan`)).json()) as Array<{
+      worktree?: string;
+      orphan?: boolean;
+    }>;
+    expect(orphans.length).toBeGreaterThan(0);
+    expect(orphans.every((kild) => kild.orphan === true)).toBe(true);
+    expect(orphans.some((kild) => kild.worktree === 'filtered')).toBe(true);
+    // No live kilds in this engine, so the live half is empty.
+    expect(await (await get(`${route}?state=live`)).json()).toEqual([]);
+
+    const bad = await get(`${route}?state=nonsense`);
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toContain('unknown state');
+  }
+
+  // prune-as-a-filter reports only what disposal would actually accept: `filtered` has
+  // commits, so it is out. It reads `ahead`, so it is only answerable where git ran.
+  const reclaimable = (await (await get('/api/kilds/status?state=reclaimable')).json()) as Array<{
     worktree?: string;
   }>;
   expect(reclaimable.some((kild) => kild.worktree === 'stranded')).toBe(true);
   expect(reclaimable.some((kild) => kild.worktree === 'filtered')).toBe(false);
 
-  const bad = await get('/api/kilds?state=nonsense');
-  expect(bad.status).toBe(400);
-  expect(((await bad.json()) as { error: string }).error).toContain('unknown state');
+  // On the cheap route it is refused outright rather than silently making it expensive.
+  const onCheap = await get('/api/kilds?state=reclaimable');
+  expect(onCheap.status).toBe(400);
+  expect(((await onCheap.json()) as { error: string }).error).toContain('/api/kilds/status');
 });
 
-test('the collection can be scoped to one checkout', async () => {
+test('both halves can be scoped to one checkout', async () => {
   const other = fs.mkdtempSync(path.join(os.tmpdir(), 'kild-server-other-'));
-  expect((await get(`/api/kilds?path=${encodeURIComponent(other)}`)).status).toBe(200);
-  expect(await (await get(`/api/kilds?path=${encodeURIComponent(other)}`)).json()).toEqual([]);
-  const scoped = (await (
-    await get(`/api/kilds?path=${encodeURIComponent(repo)}`)
-  ).json()) as unknown[];
-  expect(scoped.length).toBeGreaterThan(0);
+  for (const route of ['/api/kilds', '/api/kilds/status']) {
+    expect((await get(`${route}?path=${encodeURIComponent(other)}`)).status).toBe(200);
+    expect(await (await get(`${route}?path=${encodeURIComponent(other)}`)).json()).toEqual([]);
+    const scoped = (await (
+      await get(`${route}?path=${encodeURIComponent(repo)}`)
+    ).json()) as unknown[];
+    expect(scoped.length).toBeGreaterThan(0);
+  }
   fs.rmSync(other, { recursive: true, force: true });
+});
+
+// ── §5: the log is its own resource, cursored by seq ─────────────────────────────────
+
+const logOf = async (url: string) =>
+  (await (await get(url)).json()) as Array<{ seq: number; text: string; ts: number }>;
+
+test('an ARCHIVED kild serves its log — it is the read-only record', async () => {
+  const res = await get(`/api/kilds/${ARCHIVED}/messages`);
+  expect(res.status).toBe(200);
+  const log = await res.json();
+  expect((log as Array<{ text: string }>).map((m) => m.text)).toEqual(['one', 'two', 'three']);
+  // Stored order IS arrival order, so a log written before `seq` still reads back cursored.
+  expect((log as Array<{ seq: number }>).map((m) => m.seq)).toEqual([1, 2, 3]);
+  // …and the cursor is strictly increasing exactly where `ts` is not.
+  expect((log as Array<{ ts: number }>).map((m) => m.ts)).toEqual([1000, 500, 1500]);
+});
+
+test('?since= is an EXCLUSIVE cursor: only what arrived after that seq', async () => {
+  expect((await logOf(`/api/kilds/${ARCHIVED}/messages?since=1`)).map((m) => m.text)).toEqual([
+    'two',
+    'three',
+  ]);
+  expect((await logOf(`/api/kilds/${ARCHIVED}/messages?since=2`)).map((m) => m.seq)).toEqual([3]);
+  // Caught up: the same cursor keeps answering "nothing new", never replaying the log.
+  expect(await logOf(`/api/kilds/${ARCHIVED}/messages?since=3`)).toEqual([]);
+  expect(await logOf(`/api/kilds/${ARCHIVED}/messages?since=99`)).toEqual([]);
+  // seqs start at 1, so since=0 is the whole log and a fresh client skips nothing.
+  expect((await logOf(`/api/kilds/${ARCHIVED}/messages?since=0`)).map((m) => m.seq)).toEqual([
+    1, 2, 3,
+  ]);
+});
+
+test('a malformed cursor is a client error, never a silent full replay', async () => {
+  for (const bad of ['abc', '-1', '1.5', '']) {
+    const res = await get(`/api/kilds/${ARCHIVED}/messages?since=${bad}`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('since must be');
+  }
+});
+
+test('messages on an id that is no kild at all is a clean 404', async () => {
+  const res = await get('/api/kilds/never-existed/messages');
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: 'no such kild: never-existed' });
 });
 
 // ── §2: spawning answers ─────────────────────────────────────────────────────────────

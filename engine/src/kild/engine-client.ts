@@ -1,5 +1,5 @@
 import type { InboxMessage } from './inbox.ts';
-import type { AgentSpec, LiveKildStatus } from './kild-types.ts';
+import type { AgentSpec, KildIdentity, KildStatus, Message } from './kild-types.ts';
 
 const ENGINE = process.env.KILD_ENGINE ?? 'http://localhost:4517';
 
@@ -69,17 +69,44 @@ export async function stopKild(kildId: string, sessionId?: string): Promise<Kild
   });
 }
 
-/** The kild collection: live kilds unioned with the `kild/*` worktrees git reports (an
- *  orphaned tree has no agents and no log, and is addressed by its worktree name).
- *  `state` filters (`live` | `orphan` | `reclaimable`); `repo` scopes to one checkout. */
-export async function getLiveKilds(
-  opts: { state?: string; repo?: string } = {},
-): Promise<LiveKildStatus[]> {
+function collectionQuery(opts: { state?: string; repo?: string }): string {
   const query = new URLSearchParams();
   if (opts.state) query.set('state', opts.state);
   if (opts.repo) query.set('path', opts.repo);
-  const suffix = query.size > 0 ? `?${query}` : '';
-  return engineFetch(`/api/kilds${suffix}`);
+  return query.size > 0 ? `?${query}` : '';
+}
+
+/**
+ * The kild collection, CHEAP: identity and structure for live kilds unioned with the
+ * `kild/*` worktrees git reports (an orphaned tree has no agents and is addressed by its
+ * worktree name). No git, no logs, no cost — poll this one.
+ *
+ * `state` filters (`live` | `orphan`); `repo` scopes to one checkout.
+ */
+export async function listKilds(
+  opts: { state?: string; repo?: string } = {},
+): Promise<KildIdentity[]> {
+  return engineFetch(`/api/kilds${collectionQuery(opts)}`);
+}
+
+/** The same collection, COSTLY: each kild's git state and cost rollups, on its own cadence.
+ *  `state` also accepts `reclaimable` here, since that filter reads `ahead`. */
+export async function kildsStatus(
+  opts: { state?: string; repo?: string } = {},
+): Promise<KildStatus[]> {
+  return engineFetch(`/api/kilds/status${collectionQuery(opts)}`);
+}
+
+/** One kild with its git state and cost — never its log (see {@link kildMessages}). */
+export async function getKild(kildId: string): Promise<KildStatus> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}`);
+}
+
+/** A kild's message log, cursored by `seq`. `since` is exclusive — pass the last seq you
+ *  saw. Works for an archived kild too: its log is the read-only record. */
+export async function kildMessages(kildId: string, since?: number): Promise<Message[]> {
+  const suffix = since === undefined ? '' : `?since=${since}`;
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`);
 }
 
 /** Register an attached agent — a harness kild does not own claiming a `@handle`.

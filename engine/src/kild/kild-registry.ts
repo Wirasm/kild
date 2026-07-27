@@ -6,10 +6,21 @@ import {
   type ArchivedKild,
   agentView,
   type Kild,
+  type KildIdentity,
   type KildSummary,
+  kildIdentity,
   type Message,
+  type MessageDraft,
   type OwnedAgent,
 } from './kild-types.ts';
+
+/** A kild as it sits on disk. `seq` post-dates the first persisted kilds, so a file may
+ *  hold messages without one — the loader numbers those by position (see
+ *  {@link KildRegistry.loadArchive}). Decoding, not compatibility: the type the rest of the
+ *  engine sees always has a cursor. */
+interface PersistedKild extends Omit<ArchivedKild, 'log'> {
+  log?: Array<MessageDraft & { seq?: number }>;
+}
 
 /**
  * In-memory store of live kilds, with write-through persistence of each kild's
@@ -69,11 +80,21 @@ export class KildRegistry {
     return undefined;
   }
 
-  appendMessage(kildId: string, message: Message): void {
+  /** Append a message to a kild's log, stamping its cursor. The registry assigns `seq`
+   *  because the registry owns the log: the cursor is a property of the ORDER, and nothing
+   *  else is in a position to guarantee it. Returns the stamped message so the caller
+   *  broadcasts exactly what was recorded (a WS `{message}` frame carries the same `seq` a
+   *  later `?since=` read will report). Undefined when the kild is gone. */
+  appendMessage(kildId: string, draft: MessageDraft): Message | undefined {
     const kild = this.kilds.get(kildId);
-    if (!kild) return;
+    if (!kild) return undefined;
+    // Derived from the log's tail, never from a counter held beside it: the log IS the
+    // record, so a reloaded log reloads its cursor with it. Append-only ⇒ strictly
+    // increasing.
+    const message: Message = { ...draft, seq: (kild.log.at(-1)?.seq ?? 0) + 1 };
     kild.log.push(message);
     this.save(kild); // write-through: the log (and current agent snapshot) to disk
+    return message;
   }
 
   /** Re-persist a kild's snapshot after out-of-band metadata changes (e.g. an agent's
@@ -96,6 +117,17 @@ export class KildRegistry {
    *  per-kild git status, which the ArchivedKild snapshot deliberately drops. */
   liveKildObjects(): Kild[] {
     return [...this.kilds.values()];
+  }
+
+  /** Live kilds as identity + structure only: no git, no cost, no log. The cheap listing. */
+  liveIdentities(): KildIdentity[] {
+    return [...this.kilds.values()].map(kildIdentity);
+  }
+
+  /** One kild's message log — live or archived, since an archived kild's log is exactly
+   *  what it still is: the read-only record. Undefined for an id that is neither. */
+  log(kildId: string): Message[] | undefined {
+    return this.kilds.get(kildId)?.log ?? this.archive.get(kildId)?.log;
   }
 
   /** Live kilds with their full logs — lets a client joining mid-kild (or after a
@@ -170,8 +202,18 @@ export class KildRegistry {
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedKild;
-        if (data?.id) this.archive.set(data.id, data);
+        const data = JSON.parse(
+          fs.readFileSync(path.join(this.dir, file), 'utf8'),
+        ) as PersistedKild;
+        if (!data?.id) continue;
+        // Stored order IS arrival order, so position reconstructs the cursor for any
+        // message written before `seq` existed. Everything downstream can then treat the
+        // cursor as always-present, including `?since=` on an old archived kild.
+        const log: Message[] = (data.log ?? []).map((message, index) => ({
+          ...message,
+          seq: message.seq ?? index + 1,
+        }));
+        this.archive.set(data.id, { ...data, log });
       } catch {
         // a corrupt/partial history file must not crash startup; skip it
       }

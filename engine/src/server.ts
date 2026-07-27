@@ -18,8 +18,8 @@ import { reviewCommits, reviewDiff, reviewFiles } from './kild/git-review.ts';
 import { assessDisposal, removeKildTree } from './kild/kild-disposal.ts';
 import { landMerge, landPlan } from './kild/kild-land.ts';
 import { kildManager } from './kild/kild-manager.ts';
-import { kildTrees, orphanTrees } from './kild/kild-trees.ts';
-import type { AgentSpec, CommandResult, LiveKildStatus } from './kild/kild-types.ts';
+import { type KildTree, kildTrees, orphanTrees } from './kild/kild-trees.ts';
+import type { AgentSpec, CommandResult, KildIdentity, KildStatus } from './kild/kild-types.ts';
 import { listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import {
@@ -296,31 +296,68 @@ async function kildRepos(): Promise<string[]> {
   return [...projects.map((p) => p.path), ...kildManager.liveCwds()];
 }
 
+/** The `?project=`/`?path=` scope of a collection request: one repo, or every known one. */
+async function kildScope(
+  c: Context,
+): Promise<{ ok: true; scope?: string } | { ok: false; error: string; status: 400 | 404 }> {
+  const project = c.req.query('project');
+  const dirPath = c.req.query('path');
+  if (project === undefined && dirPath === undefined) return { ok: true };
+  const ref = await resolveProjectRef(project, dirPath);
+  if (!ref.ok) return ref;
+  return { ok: true, scope: ref.dir };
+}
+
+/** The `kild/*` trees in scope that no live kild is using — the orphan half of the
+ *  collection. This is the ONLY git the cheap listing performs: one
+ *  `git worktree list --porcelain` per repo, however many kilds those repos hold. */
+async function orphansInScope(scope?: string): Promise<KildTree[]> {
+  return orphanTrees(
+    await kildTrees(scope ? [scope] : await kildRepos()),
+    kildManager.liveWorktrees(),
+  );
+}
+
+/** A tree git reports but the engine does not remember, as a kild: no agents, no log, and
+ *  its WORKTREE NAME for an id — without that it has no address at all, which is how trees
+ *  became permanently unreclaimable. */
+function orphanIdentity(tree: KildTree): KildIdentity {
+  return {
+    id: tree.worktree,
+    name: tree.worktree,
+    cwd: tree.repo,
+    worktree: tree.worktree,
+    orphan: true,
+    agents: [],
+  };
+}
+
 /**
  * The collection: live kilds **unioned with the `kild/*` worktrees git reports**.
  *
  * Enumerating from git is what makes the fold safe. The registry only knows the kilds this
  * engine process created; a tree from an earlier run has no record, therefore no id,
- * therefore nothing could list it or dispose of it — the exact stranding this fixes. Such a
- * tree surfaces as a kild with **no agents and no log**, addressed by its worktree name,
- * flagged `orphan`. A worktree that is not a kild (the main checkout, any hand-made tree on
- * a non-`kild/` branch) is not listed at all: kild does not claim trees it did not create.
+ * therefore nothing could list it or dispose of it — the exact stranding this fixes. A
+ * worktree that is not a kild (the main checkout, any hand-made tree on a non-`kild/`
+ * branch) is not listed at all: kild does not claim trees it did not create.
+ *
+ * Identity only, and deliberately: on a machine with 116 kild worktrees the old shape ran a
+ * git status batch per kild per request, which made the one query that is *mostly identity*
+ * the most expensive call in the API. Git and cost live on `/api/kilds/status`, the log on
+ * `/api/kilds/:id/messages`.
  */
-async function kildCollection(scope?: string): Promise<LiveKildStatus[]> {
+async function kildIdentities(scope?: string): Promise<KildIdentity[]> {
+  const live = kildManager.liveIdentities();
+  const orphans = (await orphansInScope(scope)).map(orphanIdentity);
+  return [...(scope ? live.filter((kild) => kild.cwd === scope) : live), ...orphans];
+}
+
+/** The same collection with the costly half attached: git state per kild plus cost rollups. */
+async function kildStatuses(scope?: string): Promise<KildStatus[]> {
   const live = await kildManager.liveKildsStatus();
-  const trees = orphanTrees(
-    await kildTrees(scope ? [scope] : await kildRepos()),
-    kildManager.liveWorktrees(),
-  );
-  const orphans: LiveKildStatus[] = await Promise.all(
-    trees.map(async (tree) => ({
-      id: tree.worktree, // the ONLY id it has — the branch name is its identity
-      name: tree.worktree,
-      worktree: tree.worktree,
-      cwd: tree.repo,
-      orphan: true,
-      agents: [],
-      log: [],
+  const orphans: KildStatus[] = await Promise.all(
+    (await orphansInScope(scope)).map(async (tree) => ({
+      ...orphanIdentity(tree),
       git: await kildGitStatus(tree.path),
     })),
   );
@@ -328,36 +365,108 @@ async function kildCollection(scope?: string): Promise<LiveKildStatus[]> {
 }
 
 /** Would disposal accept this kild? Same rule as the guard — no commits the base does not
- *  have — read off the git status already computed for the listing (`ahead` IS the count
- *  of commits on HEAD that base lacks), so the filter costs nothing extra. The authoritative
+ *  have — read off the git status the status route already computed (`ahead` IS the count of
+ *  commits on HEAD that base lacks), so the filter costs nothing on top. The authoritative
  *  check still runs inside DELETE. */
-function reclaimable(kild: LiveKildStatus, inUse: Set<string>): boolean {
+function reclaimable(kild: KildStatus, inUse: Set<string>): boolean {
   if (!kild.worktree || inUse.has(kild.worktree)) return false;
   return kild.git !== undefined && !kild.git.error && kild.git.ahead === 0;
 }
 
-// Live kilds WITH their logs — so a UI client joining a kild it didn't create (or after a
-// refresh) can load the conversation so far. The WS only streams *new* messages.
-// `?state=live|orphan|reclaimable` filters; `?project=`/`?path=` scopes to one repo.
+/** `?state=live|orphan` — the only filter the cheap route can answer, because `orphan` is
+ *  the one thing enumeration already knows. `reclaimable` is a git question (it reads
+ *  `ahead`), so it lives on `/api/kilds/status` and says so here rather than quietly making
+ *  this route expensive again. */
+function filterByState<T extends { orphan?: boolean }>(
+  kilds: T[],
+  state: string | undefined,
+): { ok: true; kilds: T[] } | { ok: false; error: string } {
+  if (state === undefined) return { ok: true, kilds };
+  if (state === 'live') return { ok: true, kilds: kilds.filter((kild) => !kild.orphan) };
+  if (state === 'orphan') return { ok: true, kilds: kilds.filter((kild) => kild.orphan) };
+  return { ok: false, error: `unknown state: ${state} (live, orphan)` };
+}
+
+// The CHEAP half: identity and structure for every kild — id, name, cwd, worktree, base,
+// orphan, and the roster with each agent's handle/ownership/persona/model/idle. No git, no
+// logs, no per-kild cost. Poll this.
+// `?state=live|orphan` filters; `?project=`/`?path=` scopes to one repo.
 app.get('/api/kilds', async (c) => {
+  const scoped = await kildScope(c);
+  if (!scoped.ok) return c.json({ error: scoped.error }, scoped.status);
   const state = c.req.query('state');
-  const project = c.req.query('project');
-  const dirPath = c.req.query('path');
-  let scope: string | undefined;
-  if (project !== undefined || dirPath !== undefined) {
-    const ref = await resolveProjectRef(project, dirPath);
-    if (!ref.ok) return c.json({ error: ref.error }, ref.status);
-    scope = ref.dir;
+  if (state === 'reclaimable') {
+    return c.json(
+      { error: 'state=reclaimable needs git — ask GET /api/kilds/status?state=reclaimable' },
+      400,
+    );
   }
-  const kilds = await kildCollection(scope);
-  if (state === undefined) return c.json(kilds);
-  if (state === 'live') return c.json(kilds.filter((kild) => !kild.orphan));
-  if (state === 'orphan') return c.json(kilds.filter((kild) => kild.orphan));
+  const filtered = filterByState(await kildIdentities(scoped.scope), state);
+  if (!filtered.ok) return c.json({ error: filtered.error }, 400);
+  return c.json(filtered.kilds);
+});
+
+// The COSTLY half, on its own cadence: each kild's git state (branch, ahead/behind, dirty,
+// uncommittedFiles, changedFiles, conflictsWithBase) plus cost rollups and per-agent
+// tokens/cost. Still no logs — those are `/api/kilds/:id/messages`.
+// `?state=live|orphan|reclaimable` filters; `?project=`/`?path=` scopes to one repo.
+app.get('/api/kilds/status', async (c) => {
+  const scoped = await kildScope(c);
+  if (!scoped.ok) return c.json({ error: scoped.error }, scoped.status);
+  const state = c.req.query('state');
+  const kilds = await kildStatuses(scoped.scope);
   if (state === 'reclaimable') {
     const inUse = worktreesInUse();
     return c.json(kilds.filter((kild) => reclaimable(kild, inUse)));
   }
-  return c.json({ error: `unknown state: ${state} (live, orphan, reclaimable)` }, 400);
+  const filtered = filterByState(kilds, state);
+  if (!filtered.ok) {
+    return c.json({ error: `unknown state: ${state} (live, orphan, reclaimable)` }, 400);
+  }
+  return c.json(filtered.kilds);
+});
+
+// ONE kild, with its git state and cost — and WITHOUT its log, which is its own cursored
+// resource. Bounded cost by construction: one kild's git, never every kild's.
+app.get('/api/kilds/:id', async (c) => {
+  const id = c.req.param('id');
+  const live = await kildManager.liveKildStatus(id);
+  if (live) return c.json(live);
+  const target = await resolveKild(id);
+  if (!target.ok) {
+    return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
+  }
+  return c.json({
+    ...orphanIdentity({
+      worktree: target.value.worktree ?? id,
+      branch: `kild/${target.value.worktree ?? id}`,
+      path: target.value.dir,
+      repo: target.value.repo,
+    }),
+    git: await kildGitStatus(target.value.dir, target.value.base),
+  });
+});
+
+// The log as its own resource, cursored by the message `seq`. `?since=<seq>` is EXCLUSIVE:
+// pass back the last seq you saw and get only what arrived after it (omit it for the whole
+// log). `ts` cannot do this job — it is `Date.now()` and can go backwards.
+//
+// Works for an ARCHIVED kild too: its log is the whole of what it still is, and a read-only
+// record that could not be read would be no record at all.
+app.get('/api/kilds/:id/messages', (c) => {
+  const rawSince = c.req.query('since');
+  let since: number | undefined;
+  if (rawSince !== undefined) {
+    // A digit run, nothing else: `Number('')` and `Number(' ')` are both 0, which would turn
+    // a client's broken cursor into a silent full replay of the log.
+    if (!/^\d+$/.test(rawSince)) {
+      return c.json({ error: 'since must be a non-negative integer message seq' }, 400);
+    }
+    since = Number(rawSince);
+  }
+  const messages = kildManager.messages(c.req.param('id'), since);
+  if (!messages) return c.json({ error: `no such kild: ${c.req.param('id')}` }, 404);
+  return c.json(messages);
 });
 app.post('/api/kilds', async (c) => {
   const body = await c.req.json<{

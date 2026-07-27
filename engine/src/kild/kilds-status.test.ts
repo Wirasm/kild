@@ -54,42 +54,22 @@ test('formatCompactGitSummary appends dirty and conflict markers', () => {
   ).toEqual(' · feature-x +2/-0 dirty CONFLICTS');
 });
 
-test('a live kild with no log compacts to an empty post list', () => {
-  expect(
-    compactLiveKilds([
-      {
-        id: 'kild-1',
-        name: 'ops',
-        agents: [{ handle: 'brain', persona: 'brain' }],
-        log: [],
-      },
-    ]),
-  ).toEqual([
+test('a compacted kild carries NO log — the thread is its own cursored resource', () => {
+  const compact = compactLiveKilds([
     {
       id: 'kild-1',
       name: 'ops',
+      cwd: '/tmp/ops',
       agents: [{ handle: 'brain', persona: 'brain' }],
-      posts: [],
     },
   ]);
-});
-
-test('a live kild keeps only the last two posts and preserves order', () => {
-  const kilds = [
-    {
-      id: 'kild-1',
-      name: 'ops',
-      agents: [{ handle: 'brain', persona: 'brain' }],
-      log: [
-        { id: 'm1', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'one', ts: 1 },
-        { id: 'm2', kildId: 'kild-1', from: 'brain', to: ['human'], text: 'two', ts: 2 },
-        { id: 'm3', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'three', ts: 3 },
-      ],
-    },
-  ];
-
-  const compact = compactLiveKilds(kilds);
-  expect(compact[0]?.posts.map((message) => message.id)).toEqual(['m2', 'm3']);
+  expect(compact).toEqual([
+    { id: 'kild-1', name: 'ops', agents: [{ handle: 'brain', persona: 'brain' }] },
+  ]);
+  // Neither the whole log nor a "last couple posts" teaser: a listing that carries messages
+  // is a listing whose size is unbounded in the conversation.
+  expect(compact[0]).not.toHaveProperty('posts');
+  expect(compact[0]).not.toHaveProperty('log');
 });
 
 test('git compacts to a summary: changed-file COUNT, not the list (pull discipline)', () => {
@@ -108,8 +88,8 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
     {
       id: 'kild-1',
       name: 'ops',
+      cwd: '/tmp/ops',
       agents: [{ handle: 'brain', persona: 'brain' }],
-      log: [],
       git,
     },
   ]);
@@ -130,7 +110,7 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
 
 test('a live kild without git status has no git key', () => {
   const compact = compactLiveKilds([
-    { id: 'kild-1', name: 'ops', agents: [{ handle: 'brain', persona: 'brain' }], log: [] },
+    { id: 'kild-1', name: 'ops', cwd: '/tmp/ops', agents: [{ handle: 'brain', persona: 'brain' }] },
   ]);
   expect(compact[0]).not.toHaveProperty('git');
 });
@@ -139,8 +119,8 @@ test('collisions: two kilds that touch the same file each name the other', () =>
   const mk = (id: string, name: string, changedFiles: string[]) => ({
     id,
     name,
+    cwd: '/tmp/repo',
     agents: [{ handle: 'coder', persona: 'coder' }],
-    log: [],
     git: {
       path: `/tmp/${name}`,
       branch: name,
@@ -173,7 +153,6 @@ test('per-agent attention + cost ride the compact view, with a kild totals rollu
         { handle: 'coder', idle: true, tokens: 3400, cost: 1.25 },
         { handle: 'reviewer', tokens: 600, cost: 0.25 },
       ],
-      log: [],
     },
   ]);
   expect(compact[0]?.agents).toEqual([
@@ -185,7 +164,7 @@ test('per-agent attention + cost ride the compact view, with a kild totals rollu
 
 test('a kild whose agents have no stats gets no totals key', () => {
   const compact = compactLiveKilds([
-    { id: 'kild-1', name: 'ops', agents: [{ handle: 'coder' }], log: [] },
+    { id: 'kild-1', name: 'ops', cwd: '/tmp/ops', agents: [{ handle: 'coder' }] },
   ]);
   expect(compact[0]).not.toHaveProperty('totals');
 });
@@ -195,26 +174,25 @@ test('server-computed totals on the live status are preferred over recomputing',
     {
       id: 'kild-1',
       name: 'ops',
+      cwd: '/tmp/ops',
       agents: [{ handle: 'coder', tokens: 100, cost: 0.1 }],
-      log: [],
       totals: { tokens: 4000, cost: 1.5 },
     },
   ]);
   expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
 });
 
-test('compaction copies agent and post arrays without mutating the source kild', () => {
+test('compaction copies the agent array without mutating the source kild', () => {
   const kilds = [
     {
       id: 'kild-1',
       name: 'ops',
+      cwd: '/tmp/ops',
       agents: [{ handle: 'brain', persona: 'brain' }],
-      log: [{ id: 'm1', kildId: 'kild-1', from: 'human', to: ['brain'], text: 'one', ts: 1 }],
     },
   ];
 
   const compact = compactLiveKilds(kilds);
   expect(compact[0]?.agents).not.toBe(kilds[0]?.agents);
-  expect(compact[0]?.posts).not.toBe(kilds[0]?.log);
-  expect(kilds[0]?.log.map((message) => message.id)).toEqual(['m1']);
+  expect(kilds[0]?.agents.map((agent) => agent.handle)).toEqual(['brain']);
 });

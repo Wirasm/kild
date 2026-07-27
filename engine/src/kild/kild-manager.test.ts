@@ -181,7 +181,7 @@ test('a send that names no recipient is REJECTED — never a default, never a br
     message: 'a message must name at least one recipient',
   });
   // Not recorded, and nobody was woken "just in case".
-  expect(manager.messageLog('kild-1')).toEqual([]);
+  expect(manager.messages('kild-1')).toEqual([]);
   expect(prompted).toEqual([]);
 });
 
@@ -204,7 +204,7 @@ test('send to an unknown recipient returns rejected naming the roster, and is no
     message: 'no such agent: @planner (in the kild: @coder)',
   });
   // ...never recorded or turned into a kild warning.
-  expect(manager.messageLog('kild-1')).toEqual([]);
+  expect(manager.messages('kild-1')).toEqual([]);
 });
 
 test('`human` is not a recipient the engine knows — it is an address like any other', async () => {
@@ -227,7 +227,7 @@ test('a named recipient is prompted, and only that one', async () => {
     value: { message: 'Sent to the kild.', deliveredTo: ['reviewer'] },
   });
   expect(prompted).toEqual([{ id: 's-2', text: '[#demo] @brain: gate approved', from: 'brain' }]);
-  expect(manager.messageLog('kild-1').map((message) => message.text)).toEqual(['gate approved']);
+  expect(manager.messages('kild-1')?.map((message) => message.text)).toEqual(['gate approved']);
 });
 
 test('one message reaches every recipient it names', async () => {
@@ -239,8 +239,8 @@ test('one message reaches every recipient it names', async () => {
   });
   expect(prompted.map((p) => p.id)).toEqual(['s-1', 's-2']);
   // Recorded once, addressed to both — one message, two deliveries.
-  expect(manager.messageLog('kild-1')).toHaveLength(1);
-  expect(manager.messageLog('kild-1')[0]?.to).toEqual(['coder', 'reviewer']);
+  expect(manager.messages('kild-1')).toHaveLength(1);
+  expect(manager.messages('kild-1')?.[0]?.to).toEqual(['coder', 'reviewer']);
 });
 
 test('a sender is never delivered its own message, even when it names itself', async () => {
@@ -268,9 +268,141 @@ test('spawning an agent records no message — a roster change is an event, not 
   const { manager, prompted } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   expect(await manager.spawnAgent('kild-1', { handle: 'reviewer' })).toMatchObject({ ok: true });
-  expect(manager.messageLog('kild-1')).toEqual([]);
+  expect(manager.messages('kild-1')).toEqual([]);
   expect(prompted).toEqual([]);
   expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['coder', 'reviewer']);
+});
+
+// ── The message cursor: seq, not ts ──────────────────────────────────────────────────
+
+test('seq is strictly increasing within a kild — ts is not, and cannot be', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  for (const text of ['one', 'two', 'three', 'four']) await send(manager, ['coder'], text);
+
+  const log = manager.messages('kild-1') ?? [];
+  expect(log.map((m) => m.seq)).toEqual([1, 2, 3, 4]);
+  // Not merely non-decreasing: a cursor that can repeat cannot page.
+  for (let i = 1; i < log.length; i += 1) {
+    expect((log[i]?.seq ?? 0) > (log[i - 1]?.seq ?? 0)).toBe(true);
+  }
+  // `ts` is Date.now() — several sends inside one millisecond tie, which is precisely why
+  // it is not the cursor.
+  expect(new Set(log.map((m) => m.ts)).size).toBeLessThanOrEqual(log.length);
+});
+
+test('the broadcast message carries the SAME seq the log recorded — replay is detectable', async () => {
+  const { manager } = fixture();
+  const broadcast: number[] = [];
+  manager.subscribe((msg) => {
+    if ('message' in msg) broadcast.push(msg.message.seq);
+  });
+  await newKild(manager, [{ handle: 'coder' }]);
+  await send(manager, ['coder'], 'one');
+  await send(manager, ['coder'], 'two');
+  expect(broadcast).toEqual([1, 2]);
+  expect(manager.messages('kild-1')?.map((m) => m.seq)).toEqual(broadcast);
+});
+
+test('messages(since) is an exclusive cursor, and unknown kilds are undefined not empty', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  for (const text of ['one', 'two', 'three']) await send(manager, ['coder'], text);
+
+  expect(manager.messages('kild-1')?.map((m) => m.text)).toEqual(['one', 'two', 'three']);
+  expect(manager.messages('kild-1', 1)?.map((m) => m.text)).toEqual(['two', 'three']);
+  expect(manager.messages('kild-1', 3)).toEqual([]);
+  // "No such kild" and "a kild with nothing to say" are different answers.
+  expect(manager.messages('never-existed')).toBeUndefined();
+});
+
+test('an archived kild still answers messages() — its log IS what it still is', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  await send(manager, ['coder'], 'one');
+  await send(manager, ['coder'], 'two');
+  await manager.stop('kild-1');
+
+  expect(manager.messages('kild-1')?.map((m) => m.seq)).toEqual([1, 2]);
+  expect(manager.messages('kild-1', 1)?.map((m) => m.text)).toEqual(['two']);
+});
+
+test('seq survives persistence: a reloaded registry reports the same cursors', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  for (const text of ['one', 'two', 'three']) await send(manager, ['coder'], text);
+  await manager.stop('kild-1'); // written to $KILD_HOME/kilds/kild-1.json
+
+  // A brand-new registry reads that file back — the cursor is a property of the log, not of
+  // a counter that died with the process.
+  const reloaded = new KildRegistry();
+  const log = reloaded.log('kild-1');
+  expect(log?.map((m) => m.text)).toEqual(['one', 'two', 'three']);
+  expect(log?.map((m) => m.seq)).toEqual([1, 2, 3]);
+});
+
+// ── The cheap listing: identity and structure, nothing that costs ────────────────────
+
+test('liveIdentities carries identity and roster only — no cost, no log, no git', async () => {
+  const { manager, emitAgent } = fixture();
+  await manager.create('kild-1', {
+    name: 'demo',
+    cwd: tmp,
+    agents: [{ handle: 'coder' }],
+    worktree: 'slice-x',
+  });
+  await manager.attach('kild-1', 'claude');
+  emitAgent('s-1', { kind: 'stats', tokens: 900, cost: 0.33, context_pct: null });
+  emitAgent('s-1', { kind: 'pi_session', id: 'aaaa', file: '/tmp/s.jsonl' });
+
+  const [identity] = manager.liveIdentities();
+  expect(identity).toEqual({
+    id: 'kild-1',
+    name: 'demo',
+    cwd: tmp,
+    worktree: 'slice-x',
+    base: 'main',
+    agents: [
+      {
+        handle: 'coder',
+        ownership: undefined,
+        persona: undefined,
+        model: undefined,
+        idle: undefined,
+        stopped: undefined,
+      },
+      {
+        handle: 'claude',
+        ownership: 'attached',
+        persona: undefined,
+        model: undefined,
+        idle: true,
+        stopped: undefined,
+      },
+    ],
+  });
+  // The costly halves are absent here and present on the status view.
+  expect(identity).not.toHaveProperty('log');
+  expect(identity).not.toHaveProperty('git');
+  expect(identity).not.toHaveProperty('totals');
+  expect(identity?.agents[0]).not.toHaveProperty('tokens');
+  expect(identity?.agents[0]).not.toHaveProperty('piSessionFile');
+
+  const [status] = await manager.liveKildsStatus();
+  expect(status?.totals).toEqual({ tokens: 900, cost: 0.33 });
+  expect(status?.agents[0]).toMatchObject({ tokens: 900, piSessionFile: '/tmp/s.jsonl' });
+  expect(status).not.toHaveProperty('log');
+});
+
+test('liveKildStatus enriches ONE kild, so addressing one never probes the rest', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }], 'kild-1');
+  await manager.create('kild-2', { name: 'other', cwd: tmp, agents: [{ handle: 'reviewer' }] });
+
+  const one = await manager.liveKildStatus('kild-1');
+  expect(one).toMatchObject({ id: 'kild-1', name: 'demo' });
+  expect(one?.git?.path).toBe(tmp);
+  expect(await manager.liveKildStatus('never-existed')).toBeUndefined();
 });
 
 // ── Stopping ONE agent (DELETE /api/kilds/:id/agents/:handle) ────────────────────────
