@@ -1,7 +1,7 @@
 {
   "name": "kild-pi-extension",
   "version": "0.1.0",
-  "description": "Drive kild rooms from the pi CLI — thin client over the kild engine's REST API.",
+  "description": "The pi implementation of kild's attached-harness contract — kild_* tools plus the inbox-drain bridge.",
   "type": "module",
   "pi": {
     "extensions": ["./index.ts"]
