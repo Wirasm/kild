@@ -110,9 +110,51 @@ behaviour change to the running engine.
 
 | Consumer | Lines | Verdict |
 |---|---|---|
-| `pi-extension/index.ts` | 727 | **The biggest reshape.** Today it makes a *pi* session "the operator": `operatorGuide()`, `<kild-operator>`, `kild_open_room`, `@human` reporting, `needs-decision`. Rebuild on `spawn`/`send`/`attach`/`inbox`; delete the operator guide and decision vocabulary. **Open question:** with Claude Code as the honryo driving the CLI + `hooks/claude-stop`, is the pi extension still needed, or does it collapse into "pi is just another attached harness"? Decide before rebuilding. **RESHAPE (or DIE)** |
+| `pi-extension/index.ts` | 727 → ~400 | **The biggest reshape — and it stays.** See "the attached-harness contract" below. **RESHAPE** |
 | `hooks/claude-stop` | 40 | The attached-honryo integration — Claude Code draining its inbox at turn end. Keep; retarget `kild room drain` → `kild inbox`. **RESHAPE (keep)** |
 | `cli.ts` | 941 | Delete the whole `operator` command group, `--participants`/`--to` room framing, the `room_halt`/`room_open`/`room_post` WS verbs. Rebuild the verb set: `open`/`spawn`/`attach`/`send`/`inbox`/`ls`/`show`/`land`/`stop` (see the design brief's CLI table). Keep `project`/`agent`/`worktree`/`run`. **RESHAPE (major)** |
+
+---
+
+### The attached-harness contract
+
+The pi extension is **kept and rebuilt** — but reframed. It is not "the operator tier for pi";
+it is *the pi implementation of the attached-harness contract*, exactly peer to Claude Code's.
+
+The engine defines one contract for any harness it does not own:
+
+1. **attach** a handle to a kild (`POST /api/kilds/:id/agents/attach`) — addressable immediately,
+   nothing spawned;
+2. **drain** its inbox at its own turn boundary (the pull half of the transport);
+3. **act** through the same `spawn` / `send` / `observe` / `land` API every client uses.
+
+Two harnesses implement it today, and neither is privileged:
+
+| Harness | attach + drain | act |
+|---|---|---|
+| **Claude Code** | `hooks/claude-stop` (Stop hook) | `kild` CLI via bash (`kild-cli` skill) |
+| **pi** | the extension's WS event bridge, natively at the turn boundary | `kild_*` native tools |
+
+pi's is the *better* integration — a native turn-boundary drain instead of a shell hook — which
+is exactly why the extension earns its keep. A third harness later is a third implementation of
+the same contract, not a third mechanism in the engine.
+
+**Rebuild of `pi-extension/index.ts`:**
+
+- **DELETE** — `operatorGuide()` / the `<kild-operator>` prompt injection (intelligence: PRP
+  supplies the honryo persona, not the extension), `operator: true` session spawning (the engine
+  capability is gone), the `needs-decision` / `resolved` vocabulary, `@human` reporting
+  semantics, and the historical `kild_fleet_*` tool aliases.
+- **REBUILD** — the tool set mirrors the CLI verbs 1:1: `kild_open` (fork a kild), `kild_spawn`
+  (into a kild — the default), `kild_send`, `kild_attach`, `kild_inbox`, `kild_ls`, `kild_show`,
+  `kild_land`, `kild_stop`.
+- **KEEP** — the REST/WS client, `bootId` restart detection, and the event bridge that pushes
+  kild events into the pi session (that bridge *is* pi's inbox drain).
+
+The extension ships **mechanism only**: tool definitions plus the event bridge. Any pi session
+can therefore be a honryo — it becomes one by wearing PRP's honryo persona, not by an engine
+flag. Same rule as everywhere else: authority is trained deference, never a capability the
+engine grants.
 
 ---
 
