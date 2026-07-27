@@ -21,10 +21,14 @@ consume the REST/WS API on `localhost:4517`.
 
 - Layout: `engine/src/` (server.ts, cli.ts, worker.ts, `kild/` domain slices, `operator/`
   tools), `pi-extension/`, `docs/`, `HANDOVER.md` (canonical state doc).
-- The engine is usually RUNNING from this checkout — never start/stop servers; do code
-  work in a git worktree on a branch, PR to `main`.
+- The engine is usually RUNNING from this checkout, and may be hosting the very run you
+  are part of. **Never shut it down, and never bind port 4517.** Starting your own engine
+  on a different port is fine. Do code work in a git worktree on a branch, PR to `main`
+  (`bun install` first — a fresh worktree has no `node_modules`, so the gates cannot run).
 - Gates: `bun test`, `bun run typecheck`, `bun run lint` from `engine/` — all green
   before any PR.
+- **Never delete an existing test to make a gate green.** If a test is genuinely obsolete,
+  say which and why in the commit message.
 - Conventional commits, written as a human — no AI attribution, no Co-Authored-By.
 - Vertical slices: a change owns its types and logic; extend by adding a slice, never
   by growing a god-module. No shims, no backwards-compat aliases.
