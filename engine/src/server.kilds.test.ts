@@ -414,3 +414,64 @@ test('land on an unknown kild is a clean 404', async () => {
   expect((await get('/api/kilds/never-existed/land')).status).toBe(404);
   expect((await post('/api/kilds/never-existed/land')).status).toBe(404);
 });
+
+// ── A bad request body is never a 500 ────────────────────────────────────────────────────
+// A missing or malformed body is a CLIENT mistake, so it must produce a 400 naming what is
+// wrong. Reading the body unguarded threw instead, and Hono surfaced that as "Internal
+// Server Error" — the server blaming itself for a bad request.
+//
+// The sharpest case is a verb that requires nothing. `POST /api/kilds/:id/stop` takes no
+// required field, so a request with NO body is valid input — and it 500'd. A caller with
+// nothing to say, doing the obvious thing, got a server error. Found by the end-to-end
+// migration test, which called stop with no body for exactly that reason.
+
+/** Post with no body at all, and with a malformed one — the two ways a caller gets it wrong. */
+const postRaw = (url: string, body?: string) =>
+  call(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body }),
+  });
+
+const BODY_ROUTES = [
+  '/api/projects',
+  '/api/open',
+  '/api/open-url',
+  '/api/kilds',
+  '/api/kilds/some-id/messages',
+  '/api/kilds/some-id/agents',
+  '/api/kilds/some-id/agents/attach',
+  '/api/kilds/some-id/inbox/drain',
+  '/api/kilds/some-id/stop',
+];
+
+for (const route of BODY_ROUTES) {
+  test(`POST ${route} never 500s on an absent or malformed body`, async () => {
+    expect((await postRaw(route)).status).toBeLessThan(500);
+    expect((await postRaw(route, '{not json')).status).toBeLessThan(500);
+  });
+}
+
+test('stop requires nothing, so an empty body reaches the handler', async () => {
+  // 404, not 400 and certainly not 500: the body was fine, the kild just does not exist.
+  // That distinction is the whole point.
+  const res = await postRaw('/api/kilds/definitely-not-a-kild/stop');
+  expect(res.status).toBe(404);
+  expect((await res.json()) as { error: string }).toMatchObject({
+    error: 'no such kild: definitely-not-a-kild',
+  });
+});
+
+test('a required field still fails loudly, naming itself', async () => {
+  const messages = await post('/api/kilds/some-id/messages', {});
+  expect(messages.status).toBe(400);
+  expect((await messages.json()) as { error: string }).toMatchObject({ error: 'text required' });
+
+  const projects = await post('/api/projects', {});
+  expect(projects.status).toBe(400);
+  expect((await projects.json()) as { error: string }).toMatchObject({
+    error: 'name and path are both required',
+  });
+
+  expect((await post('/api/kilds/some-id/agents/attach', {})).status).toBe(400);
+});

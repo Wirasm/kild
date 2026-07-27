@@ -66,7 +66,10 @@ app.get('/api/health', (c) => c.json({ ok: true, name: 'kild-engine', bootId: BO
 // ── Projects ────────────────────────────────────────────────────────────────
 app.get('/api/projects', async (c) => c.json(await loadProjects()));
 app.post('/api/projects', async (c) => {
-  const { name, path } = await c.req.json<{ name: string; path: string }>();
+  const { name, path } = (await jsonBody(c)) as { name?: string; path?: string };
+  if (typeof name !== 'string' || typeof path !== 'string') {
+    return c.json({ error: 'name and path are both required' }, 400);
+  }
   try {
     return c.json(await addProject(name, path));
   } catch (err) {
@@ -116,6 +119,18 @@ app.get('/api/personas', async (c) => {
   }
   return c.json(await listPersonas(ref.ok ? ref.dir : undefined));
 });
+
+/** Read a JSON body, treating an absent or malformed one as `{}`.
+ *
+ * Every handler validates the fields it requires, so an empty object yields the proper 400
+ * naming what is missing. Reading the body unguarded threw instead, which Hono surfaced as
+ * a 500 — the server reporting its own failure for what is a client mistake. Worse for a
+ * verb whose fields are all optional (`stop`): there an empty body is valid input, and it
+ * 500'd. Found by the end-to-end migration test. */
+async function jsonBody(c: Context): Promise<Record<string, unknown>> {
+  const body = await c.req.json().catch(() => ({}));
+  return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+}
 
 function agentSpecs(input: unknown): AgentSpec[] | null {
   if (!Array.isArray(input)) return null;
@@ -190,7 +205,7 @@ const worktreesInUse = (): Set<string> =>
 // are allowed — the engine is loopback-only but must never shell `open` on an
 // arbitrary path. Keeps UI clients pure-web (no Tauri opener API needed).
 app.post('/api/open', async (c) => {
-  const { path: target } = await c.req.json<{ path: string }>();
+  const { path: target } = (await jsonBody(c)) as { path?: string };
   const root = worktreesRoot();
   const resolved = path.resolve(target ?? '');
   if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
@@ -209,7 +224,7 @@ app.post('/api/open', async (c) => {
 // here so a click never navigates their webview away from the app. Restricted to
 // http/https — never file://, app schemes, etc. execFile (no shell) → no injection.
 app.post('/api/open-url', async (c) => {
-  const { url } = await c.req.json<{ url: string }>();
+  const { url } = (await jsonBody(c)) as { url?: string };
   let parsed: URL;
   try {
     parsed = new URL(url ?? '');
@@ -469,7 +484,7 @@ app.get('/api/kilds/:id/messages', (c) => {
   return c.json(messages);
 });
 app.post('/api/kilds', async (c) => {
-  const body = await c.req.json<{
+  const body = (await jsonBody(c)) as {
     name?: unknown;
     cwd?: unknown;
     project?: unknown;
@@ -479,7 +494,7 @@ app.post('/api/kilds', async (c) => {
     kickoff?: unknown;
     from?: unknown;
     openedBy?: unknown;
-  }>();
+  };
   if (typeof body.name !== 'string') return c.json({ error: 'name required' }, 400);
   // The kickoff is an ordinary directed message, so it names its recipients like any
   // other: `{to: ["coder"], text: "…"}`. There is no agent it falls through to.
@@ -564,12 +579,12 @@ app.post('/api/kilds', async (c) => {
 // REQUIRED here for the same reason: the engine never infers a recipient. Addressing is
 // never parsed from the message text, so `@handle` in `text` remains just text.
 app.post('/api/kilds/:id/messages', async (c) => {
-  const { text, from, sessionId, to } = await c.req.json<{
+  const { text, from, sessionId, to } = (await jsonBody(c)) as {
     text?: unknown;
     from?: unknown;
     sessionId?: unknown;
     to?: unknown;
-  }>();
+  };
   if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
@@ -597,7 +612,7 @@ app.post('/api/kilds/:id/messages', async (c) => {
  * ({@link kildManager.spawnAgent}); the difference is only that this one answers.
  */
 app.post('/api/kilds/:id/agents', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
+  const body = (await jsonBody(c)) as {
     handle?: unknown;
     persona?: unknown;
     model?: unknown;
@@ -644,7 +659,7 @@ app.delete('/api/kilds/:id/agents/:handle', (c) => {
 // human is driving) claims a `@handle` and gets an inbox. Idempotent by handle, so a hook
 // or shell alias can call it on every session start.
 app.post('/api/kilds/:id/agents/attach', async (c) => {
-  const { handle } = await c.req.json<{ handle?: unknown }>();
+  const { handle } = (await jsonBody(c)) as { handle?: unknown };
   if (typeof handle !== 'string' || !handle.trim())
     return c.json({ error: 'handle required' }, 400);
   const result = await kildManager.attach(c.req.param('id'), handle);
@@ -655,7 +670,7 @@ app.post('/api/kilds/:id/agents/attach', async (c) => {
 // drain = idle). POST, never GET: this MUTATES, so a caching proxy or a retry on a
 // GET would silently eat somebody's messages.
 app.post('/api/kilds/:id/inbox/drain', async (c) => {
-  const { handle } = await c.req.json<{ handle?: unknown }>();
+  const { handle } = (await jsonBody(c)) as { handle?: unknown };
   if (typeof handle !== 'string' || !handle.trim())
     return c.json({ error: 'handle required' }, 400);
   const result = kildManager.drain(c.req.param('id'), handle);
@@ -663,10 +678,10 @@ app.post('/api/kilds/:id/inbox/drain', async (c) => {
   return c.json({ ok: true, ...result.value });
 });
 app.post('/api/kilds/:id/stop', async (c) => {
-  const { from, sessionId } = await c.req.json<{
+  const { from, sessionId } = (await jsonBody(c)) as {
     from?: unknown;
     sessionId?: unknown;
-  }>();
+  };
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
   if (sessionId !== undefined && typeof sessionId !== 'string')
