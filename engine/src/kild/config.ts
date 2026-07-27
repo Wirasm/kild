@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import type { KildHook } from './hooks.ts';
+
 /** kild's state directory: `$KILD_HOME`, else `$XDG_CONFIG_HOME/kild`, else
  *  `~/.config/kild`. Holds projects.json, worktrees, etc. */
 export function kildHome(): string {
@@ -30,21 +32,22 @@ export interface KildConfig {
    *  it's good at, cost). Appended to a delegating session's system prompt so the user
    *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
   models?: Record<string, string>;
-  /** Project memory behavior. The engine-written kild log (`<dir>/LOG.md`) is always on;
-   *  `synthesis` opts in to the LLM half: on kild close, a session is spawned to distill
-   *  the transcript into `<dir>/MEMORY.md`. Absent → no synthesis session is spawned. */
+  /** Where the engine writes its ledger and reads project memory from. The
+   *  engine-written kild ledger (`<dir>/LOG.md`) is always on; everything else in the
+   *  dir belongs to whoever put it there. */
   memory?: {
     /** Directory holding the project's memory files (LOG.md, MEMORY.md, direction.md).
      *  `~` expands to $HOME; a relative path resolves against the project cwd.
      *  Default: `.kild` — the project-local store. Any intelligence layer can point
      *  this anywhere; to kild it is just a directory path. */
     dir?: string;
-    synthesis?: {
-      /** provider/model ref for the synthesis session (pick a strong reasoning model). */
-      model?: string;
-      /** Persona for the synthesis session (default: the general-purpose `default`). */
-      persona?: string;
-    };
+  };
+  /** Lifecycle hooks: what to run when the engine reaches a lifecycle moment it owns.
+   *  The engine supplies facts and the moment; the hook supplies the intent. Nothing
+   *  here is interpreted — see {@link KildHook}. */
+  hooks?: {
+    /** Fired when a kild stops, after its ledger entry is written. */
+    onClose?: KildHook;
   };
 }
 
@@ -126,11 +129,11 @@ export async function configuredMemoryDir(cwd: string): Promise<string> {
   return path.resolve(cwd, expandHome(dir));
 }
 
-/** Merged memory-synthesis config (project wins over global); undefined = synthesis off. */
-export async function configuredMemorySynthesis(
-  cwd: string,
-): Promise<{ model?: string; persona?: string } | undefined> {
+/** The declared `hooks.onClose` for `cwd` (project wins over global, whole-hook — a
+ *  project that declares one replaces the global hook rather than merging into it).
+ *  Undefined = nothing declared, so close fires the event and runs nothing. Never throws. */
+export async function configuredCloseHook(cwd: string): Promise<KildHook | undefined> {
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
-  return project?.memory?.synthesis ?? global?.memory?.synthesis;
+  return project?.hooks?.onClose ?? global?.hooks?.onClose;
 }
