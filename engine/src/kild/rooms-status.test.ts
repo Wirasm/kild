@@ -164,44 +164,20 @@ test('collisions: two rooms that touch the same file each name the other', () =>
   expect(byId.r3).not.toHaveProperty('collidesWith');
 });
 
-test('compact view surfaces only OPEN decisions and omits the field when none', () => {
-  const open = { key: 'auth', summary: 'token or session?', openedBy: 'worker', openedAt: 1 };
-  const resolved = {
-    key: 'api-shape',
-    summary: 'REST or RPC?',
-    openedBy: 'worker',
-    openedAt: 1,
-    resolvedBy: 'human',
-    resolvedAt: 2,
-  };
-  const [withDecisions, without] = compactLiveRooms([
-    {
-      id: 'room-1',
-      name: 'ops',
-      participants: [{ name: 'worker' }],
-      log: [],
-      decisions: [open, resolved],
-    },
-    { id: 'room-2', name: 'docs', participants: [{ name: 'worker' }], log: [] },
-  ]);
-  expect(withDecisions?.openDecisions).toEqual([open]);
-  expect(without).not.toHaveProperty('openDecisions');
-});
-
 test('per-participant attention + cost ride the compact view, with a room totals rollup', () => {
   const compact = compactLiveRooms([
     {
       id: 'room-1',
       name: 'ops',
       participants: [
-        { name: 'worker', idle: true, posted: true, tokens: 3400, cost: 1.25 },
+        { name: 'worker', idle: true, tokens: 3400, cost: 1.25 },
         { name: 'reviewer', tokens: 600, cost: 0.25 },
       ],
       log: [],
     },
   ]);
   expect(compact[0]?.participants).toEqual([
-    { name: 'worker', idle: true, posted: true, tokens: 3400, cost: 1.25 },
+    { name: 'worker', idle: true, tokens: 3400, cost: 1.25 },
     { name: 'reviewer', tokens: 600, cost: 0.25 },
   ]);
   expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });

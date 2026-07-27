@@ -7,7 +7,6 @@ import { type SessionCallbacks, type SpawnRequest, sessionManager } from '../ses
 import { resolveBaseBranch, worktreePath } from '../worktree.ts';
 import { roomGitStatus } from '../worktree-status.ts';
 import { Mailbox, type MailboxDrain } from './attached.ts';
-import { applyDecisionMarkers, formatOpenDecisions, openDecisions } from './room-decisions.ts';
 import {
   finalNonSystemPost,
   formatOperatorNotification,
@@ -42,7 +41,6 @@ import {
   type RoomMessage,
   type RoomOutbound,
   roomCostTotals,
-  type SpawnedParticipant,
 } from './room-types.ts';
 
 /** Soft cap on room size — a cheap loop/scale guard in v1 (loop control is otherwise
@@ -61,7 +59,6 @@ function traceRoomPost(roomName: string, message: RoomMessage): void {
       from: message.from,
       to: message.to,
       system: message.system ?? false,
-      implicit: message.implicit ?? false,
       chars: message.text.length,
     }),
   );
@@ -158,11 +155,10 @@ export class RoomManager {
           located.participant.piSessionFile = event.file;
           this.registry.persistNow(located.room.id);
         }
-        // Failsafe on a finished turn: if a delegate went idle WITHOUT posting, its inviter
-        // is blind (an explicit post would have woken the inviter via routing). Nudge the
-        // delegate to report. A delegate that DID post needs nothing — the post is the signal.
+        // A finished turn means the participant is waiting — observability only (it rides
+        // ParticipantView so a client can see who is finished), never a prompt.
         if (event.kind === 'agent_end') {
-          this.nudgeIfIdleWithoutReport(located.participant);
+          located.participant.idle = true;
         }
         this.broadcast({
           room: located.room.id,
@@ -277,7 +273,6 @@ export class RoomManager {
         participants: room.participants.map(participantView),
         state: room.state,
         log: room.log,
-        decisions: room.decisions,
         totals: roomCostTotals(room.participants),
         git: await roomGitStatus(room.worktree ? worktreePath(room.worktree) : room.cwd, room.base),
       })),
@@ -410,26 +405,12 @@ export class RoomManager {
 
   /** Stop every participant session — the human kill switch / room teardown. A room
    *  with history moves straight into the archive and is pushed to clients, so it stays
-   *  visible as a read-only transcript without an engine restart.
-   *
-   *  Open decisions block the close (the fold's whole guarantee: a raised decision
-   *  cannot leave the system silently). `force` is the operator's escape hatch — it is
-   *  never offered to the in-room lead path ({@link handleCloseRoom}). */
-  async close(
-    roomId: string,
-    opts: { force?: boolean } = {},
-  ): Promise<CommandResult<RoomActionSuccess>> {
+   *  visible as a read-only transcript without an engine restart. */
+  async close(roomId: string): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
     const allowed = ensureRoomCanCloseFromOperator(room);
     if (!allowed.ok) return allowed;
-    if (!opts.force && openDecisions(room).length > 0) {
-      return fail(
-        'rejected',
-        `room '${room.name}' has open decisions: ${formatOpenDecisions(room)}. ` +
-          `Resolve each (post 'resolved[<key>]: <how>') or close with force.`,
-      );
-    }
     this.stopSessions(room);
     const transitioned = transitionRoomState(room, 'closed');
     if (!transitioned.ok) return transitioned;
@@ -568,17 +549,7 @@ export class RoomManager {
   ): Promise<CommandResult<RoomActionSuccess>> {
     const located = this.registry.locateSession(sessionId);
     if (!located) return fail('not_found', `session '${sessionId}' is not in a live room`);
-    const result = await this.post(located.room.id, located.participant.name, m.text, {
-      to: m.to,
-      implicit: m.implicit,
-    });
-    // An explicit post counts as reporting ONLY if it actually reached someone else —
-    // a rejected post (unknown recipient) or a self-addressed one leaves whoever is
-    // waiting just as blind as silence, so the idle failsafe must still fire.
-    if (!m.implicit && result.ok && (result.value.deliveredTo?.length ?? 0) > 0) {
-      located.participant.posted = true;
-    }
-    return result;
+    return this.post(located.room.id, located.participant.name, m.text, { to: m.to });
   }
 
   /** A participant called `invite_agent`: add the named participant to its room. */
@@ -613,16 +584,6 @@ export class RoomManager {
     if (!lead || participantSessionId(lead) !== sessionId) {
       return fail('rejected', `only the lead may close room '${room.name}'`);
     }
-    // No force on the participant path: an agent may not bury a raised decision. Only
-    // the operator (human/brain) can force-close past open decisions.
-    if (openDecisions(room).length > 0) {
-      return fail(
-        'rejected',
-        `room '${room.name}' has open decisions: ${formatOpenDecisions(room)}. ` +
-          `Get each resolved (a 'resolved[<key>]: <how>' post) before closing; ` +
-          `only the operator may force-close past them.`,
-      );
-    }
     await this.post(
       room.id,
       HUMAN,
@@ -646,7 +607,7 @@ export class RoomManager {
     roomId: string,
     from: string,
     text: string,
-    opts: { to?: string[]; implicit?: boolean; system?: boolean; allowStopped?: boolean } = {},
+    opts: { to?: string[]; system?: boolean; allowStopped?: boolean } = {},
   ): Promise<CommandResult<RoomActionSuccess>> {
     const room = this.registry.get(roomId);
     if (!room) return fail('not_found', `no such room: ${roomId}`);
@@ -662,7 +623,6 @@ export class RoomManager {
       to,
       text,
       ts: Date.now(),
-      implicit: opts.implicit,
       system: opts.system,
     };
 
@@ -676,15 +636,11 @@ export class RoomManager {
       );
     }
 
-    // Fold decision markers BEFORE the append — appendMessage's write-through snapshot
-    // then persists the updated ledger together with the post that changed it.
-    applyDecisionMarkers(room, message);
     traceRoomPost(room.name, message);
     this.registry.appendMessage(roomId, message);
     routeRoomMessage(room, message, this.delivery());
     if (
       !message.system &&
-      !message.implicit &&
       message.to.includes(HUMAN) &&
       room.participants.some((participant) => participant.name === message.from)
     ) {
@@ -747,47 +703,12 @@ export class RoomManager {
     this.sessions.prompt(target, formatOperatorNotification(room.name, event), 'kild');
   }
 
-  /** Failsafe (NOT the default path): a participant that finishes a turn without a
-   *  DELIVERED explicit post has left whoever is waiting blind — an actual post would have
-   *  woken them via routing (or reached the operator channel for @human). Nudge it ONCE
-   *  per active→idle transition to report: delegates toward their inviter, top-level
-   *  participants toward @human — no one is assumed to be watching the roster (the
-   *  operator is an agent by default; the watching human is the special case). Delivered
-   *  as a direct session prompt (bypasses room routing, so it can't become a post or
-   *  loop); a participant whose post DELIVERED gets nothing (its post is the signal).
-   *
-   *  Spawned only — it is driven by `agent_end` on the session bus, and an attached
-   *  participant has no session to emit one or to be nudged through. Its equivalent is the
-   *  empty drain (see {@link drain}). */
-  private nudgeIfIdleWithoutReport(participant: SpawnedParticipant): void {
-    if (participant.idle) return; // dedup: already handled this transition
-    participant.idle = true;
-    if (participant.posted) return; // it reported — a delivered post is the signal
-    // Deliver signals, not sights: assume NO ONE is watching the roster — the operator is
-    // an agent (a pi operator, another orchestrator) by default, and the watching human is
-    // the special case. So top-level participants are nudged too, toward @human: unposted
-    // work is invisible to every operator kind except a human who happens to be looking.
-    const inviter = participant.invitedBy;
-    const target = !inviter || inviter === HUMAN ? HUMAN : inviter;
-    this.sessions.prompt(
-      participant.sessionId,
-      `[kild] You finished your turn without posting. If you have a result for @${target}, ` +
-        `post_message it to them now (with evidence). If you are done with nothing to add, post ` +
-        `a one-line status so @${target} isn't left waiting.`,
-      'kild',
-    );
-  }
-
   private delivery(): RoomDelivery {
     return {
       deliverAsTurn: (sessionId, from, text) => {
-        // A delivered turn reactivates the participant: clear idle + posted so its next
-        // active→idle transition is judged fresh (did it report THIS turn?).
+        // A delivered turn reactivates the participant: it is no longer waiting.
         const located = this.registry.locateSession(sessionId);
-        if (located) {
-          located.participant.idle = false;
-          located.participant.posted = false;
-        }
+        if (located) located.participant.idle = false;
         this.sessions.prompt(sessionId, text, from);
       },
       // The attached counterpart of the stdin push: queue it and let the participant

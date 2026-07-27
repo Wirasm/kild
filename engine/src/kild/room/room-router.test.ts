@@ -40,10 +40,6 @@ function message(from: string, to: string[], text: string): RoomMessage {
   return { id: 'm1', roomId: 'r1', from, to, text, ts: 0 };
 }
 
-function implicitReply(from: string, to: string[], text: string): RoomMessage {
-  return { id: 'm1', roomId: 'r1', from, to, text, ts: 0, implicit: true };
-}
-
 /** An engine notice: shown to the operator, addressed to no one (`to: []`). */
 function notice(text: string): RoomMessage {
   return { id: 'm1', roomId: 'r1', from: 'human', to: [], text, ts: 0, system: true };
@@ -56,10 +52,9 @@ test('finds only resolved recipients that are not participants or @human', () =>
   ).toEqual(['revewer']);
 });
 
-test('does not warn for system notices or implicit replies', () => {
+test('does not warn for system notices', () => {
   const { room } = fixture();
   expect(unknownRecipients(room, { ...notice('@revewer joined'), to: ['revewer'] })).toEqual([]);
-  expect(unknownRecipients(room, implicitReply('worker', ['revewer'], '...'))).toEqual([]);
 });
 
 test('delivers a mention to that participant as a turn AND broadcasts it', () => {
@@ -138,22 +133,6 @@ test('no addressee in a MULTI-participant room → broadcast only, no turn', () 
   routeRoomMessage(room, message('orchestrator', [], 'thinking out loud'), delivery);
   expect(broadcast).toHaveLength(1);
   expect(delivered).toEqual([]);
-});
-
-test('an implicit reply broadcasts but NEVER delivers a turn (no agent ping-pong)', () => {
-  const { room, delivered, broadcast, delivery } = fixture();
-  // The reviewer's narration auto-posted back to the orchestrator: human sees it, but
-  // it must not prompt the orchestrator — else the two loop forever.
-  routeRoomMessage(room, implicitReply('reviewer', ['orchestrator'], 'standing by'), delivery);
-  expect(broadcast).toHaveLength(1);
-  expect(delivered).toEqual([]);
-});
-
-test('an implicit reply that @mentions another agent still delivers no turn', () => {
-  const { room, delivered, broadcast, delivery } = fixture();
-  routeRoomMessage(room, implicitReply('reviewer', [], '@orchestrator standing by'), delivery);
-  expect(broadcast).toHaveLength(1);
-  expect(delivered).toEqual([]); // explicit post_message is required to prompt an agent
 });
 
 test('formatDelivery frames the post with room, sender, and text', () => {

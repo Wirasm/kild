@@ -383,182 +383,6 @@ test('close transitions a halted room to archived closed state', async () => {
   });
 });
 
-const isNudge = (p: { from?: string; text: string }) =>
-  p.from === 'kild' && p.text.includes('finished your turn without posting');
-
-// createId order: lead 'agent' session = s-1, invited worker session = s-2.
-const WORKER = 's-2';
-
-test('failsafe: a delegate that goes idle WITHOUT posting is nudged to report (once)', async () => {
-  const { manager, callbacks, prompted, emitSession } = fixture({
-    agents: ['default', 'agent', 'worker'],
-  });
-  // Lead (s-1) opens; lead invites a worker → worker.invitedBy = 'agent' (the lead).
-  await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
-  prompted.length = 0;
-
-  // Worker finishes a turn having posted nothing → nudged (the delegate itself).
-  emitSession(WORKER, { kind: 'agent_end' });
-  const nudges = prompted.filter(isNudge);
-  expect(nudges).toHaveLength(1);
-  expect(nudges[0]).toMatchObject({ id: WORKER });
-  expect(nudges[0]?.text).toContain('@agent'); // told to post to its inviter
-
-  // A second agent_end without an intervening turn does NOT re-nudge (dedup).
-  emitSession(WORKER, { kind: 'agent_end' });
-  expect(prompted.filter(isNudge)).toHaveLength(1);
-});
-
-test('default: a delegate that POSTED before going idle is NOT nudged (its post is the signal)', async () => {
-  const { manager, callbacks, prompted, emitSession } = fixture({
-    agents: ['default', 'agent', 'worker'],
-  });
-  await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
-  prompted.length = 0;
-
-  // Worker reports via an explicit post_message, then its turn ends.
-  await callbacks.get(WORKER)?.onMessage?.({ kind: 'message_out', text: 'done', to: ['agent'] });
-  emitSession(WORKER, { kind: 'agent_end' });
-  expect(prompted.filter(isNudge)).toHaveLength(0);
-});
-
-test('the human-invited lead going idle without posting IS nudged — toward @human (no one watches the roster)', async () => {
-  const { manager, prompted, emitSession } = fixture({ agents: ['default', 'agent', 'worker'] });
-  await openRoom(manager, [{ name: 'agent' }]);
-  prompted.length = 0;
-  emitSession('s-1', { kind: 'agent_end' });
-  const nudges = prompted.filter(isNudge);
-  expect(nudges).toHaveLength(1);
-  expect(nudges[0]).toMatchObject({ id: 's-1' });
-  expect(nudges[0]?.text).toContain('@human'); // the operator is an agent by default — signal it
-});
-
-test('a self-addressed post is not a report — the failsafe still nudges', async () => {
-  const { manager, callbacks, prompted, emitSession } = fixture({
-    agents: ['default', 'agent', 'worker'],
-  });
-  await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
-  prompted.length = 0;
-
-  // The #1141 misroute: the worker "reports" to itself. Delivered to no one → still blind.
-  await callbacks.get(WORKER)?.onMessage?.({ kind: 'message_out', text: 'done', to: ['worker'] });
-  emitSession(WORKER, { kind: 'agent_end' });
-  expect(prompted.filter(isNudge)).toHaveLength(1);
-});
-
-test('a post to @human counts as a report — the human is a real recipient (the operator channel)', async () => {
-  const { manager, callbacks, prompted, emitSession } = fixture({
-    agents: ['default', 'agent', 'worker'],
-  });
-  await openRoom(manager, [{ name: 'agent' }]);
-  prompted.length = 0;
-
-  await callbacks
-    .get('s-1')
-    ?.onMessage?.({ kind: 'message_out', text: 'KILD_NOTIFY_OK', to: ['human'] });
-  emitSession('s-1', { kind: 'agent_end' });
-  expect(prompted.filter(isNudge)).toHaveLength(0);
-});
-
-test('a delivered turn re-arms the failsafe (idle-without-post next turn nudges again)', async () => {
-  const { manager, callbacks, prompted, emitSession } = fixture({
-    agents: ['default', 'agent', 'worker'],
-  });
-  await openRoom(manager, [{ name: 'agent' }]);
-  await callbacks.get('s-1')?.onInvite?.({ kind: 'invite', name: 'worker', persona: 'worker' });
-
-  emitSession(WORKER, { kind: 'agent_end' }); // idle without post → nudge 1
-  await manager.postAs('room-1', 'agent', 'do more', ['worker']); // deliver a turn → re-arm
-  emitSession(WORKER, { kind: 'agent_end' }); // idle without post again → nudge 2
-
-  expect(prompted.filter(isNudge)).toHaveLength(2);
-});
-
-// ── keyed decisions: no decision leaves the system silently ──────────────────────────
-
-test('a needs-decision post opens a keyed decision and blocks close until force', async () => {
-  const { manager, callbacks } = fixture();
-  await openRoom(manager, [{ name: 'worker' }]);
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'Two options here.\nneeds-decision[api-shape]: REST or RPC?',
-    to: ['human'],
-  });
-
-  const refused = await manager.close('room-1');
-  expect(refused).toMatchObject({ ok: false, code: 'rejected' });
-  expect((refused as { message: string }).message).toContain('api-shape');
-  expect((refused as { message: string }).message).toContain('force');
-
-  expect(await manager.close('room-1', { force: true })).toEqual({
-    ok: true,
-    value: { message: "Room 'demo' closed." },
-  });
-});
-
-test('a resolved post closes the decision and unblocks an ordinary close', async () => {
-  const { manager, callbacks } = fixture();
-  await openRoom(manager, [{ name: 'worker' }]);
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'needs-decision[api-shape]: REST or RPC?',
-    to: ['human'],
-  });
-  await manager.postFromHuman('room-1', 'resolved[api-shape]: REST — matches the existing API');
-
-  expect(await manager.close('room-1')).toMatchObject({ ok: true });
-});
-
-test('a later done post never masks an open decision (the fold invariant)', async () => {
-  const { manager, callbacks } = fixture();
-  await openRoom(manager, [{ name: 'worker' }]);
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'needs-decision[auth]: token or session?',
-    to: ['human'],
-  });
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'done: shipped it, all handled',
-    to: ['human'],
-  });
-  expect(await manager.close('room-1')).toMatchObject({ ok: false, code: 'rejected' });
-});
-
-test('the lead cannot close (or force) past an open decision — operator only', async () => {
-  const { manager, callbacks } = fixture();
-  await openRoom(manager, [{ name: 'worker' }]);
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'needs-decision[auth]: token or session?',
-    to: ['human'],
-  });
-  const result = await callbacks.get('s-1')?.onCloseRoom?.({ kind: 'close_room' });
-  expect(result).toMatchObject({ ok: false, code: 'rejected' });
-  expect((result as { message: string }).message).toContain('operator');
-  expect(manager.liveRooms()).toHaveLength(1); // the room survived
-});
-
-test('decisions ride the live view and the archived snapshot', async () => {
-  const { manager, callbacks } = fixture();
-  await openRoom(manager, [{ name: 'worker' }]);
-  await callbacks.get('s-1')?.onMessage?.({
-    kind: 'message_out',
-    text: 'needs-decision[auth]: token or session?',
-    to: ['human'],
-  });
-
-  expect(manager.liveRooms()[0]?.decisions).toMatchObject([
-    { key: 'auth', summary: 'token or session?', openedBy: 'worker' },
-  ]);
-
-  await manager.close('room-1', { force: true });
-  expect(manager.archived()[0]?.decisions).toMatchObject([{ key: 'auth', openedBy: 'worker' }]);
-});
-
 // ── pi session identity: the terminal-resume handle ──────────────────────────────────
 
 test('a pi_session event lands on the participant and rides the live view', async () => {
@@ -591,27 +415,24 @@ test('pi session handles survive into the archived snapshot', async () => {
   });
 });
 
-// ── attention state: idle/posted ride the observer views ─────────────────────────────
+// ── attention state: idle rides the observer views ───────────────────────────────────
 
-test('idle and posted ride the live view — finished-and-waiting without parsing logs', async () => {
-  const { manager, callbacks, emitSession } = fixture();
+test('idle rides the live view — finished-and-waiting without parsing logs', async () => {
+  const { manager, emitSession } = fixture();
   await openRoom(manager, [{ name: 'worker' }, { name: 'reviewer' }]);
 
-  // worker finishes its turn having reported; reviewer is still working.
-  await callbacks.get('s-1')?.onMessage?.({ kind: 'message_out', text: 'done', to: ['human'] });
+  // worker finishes its turn; reviewer is still working.
   emitSession('s-1', { kind: 'agent_end' });
 
   const [worker, reviewer] = manager.liveRooms()[0]?.participants ?? [];
-  expect(worker).toMatchObject({ name: 'worker', idle: true, posted: true });
+  expect(worker).toMatchObject({ name: 'worker', idle: true });
   expect(reviewer?.idle).toBeUndefined();
-  expect(reviewer?.posted).toBeUndefined();
 
-  // A delivered turn reactivates: idle/posted reset in the view too.
+  // A delivered turn reactivates: idle clears in the view too.
   await manager.postFromHuman('room-1', 'one more thing', ['worker']);
   expect(manager.liveRooms()[0]?.participants[0]).toMatchObject({
     name: 'worker',
     idle: false,
-    posted: false,
   });
 });
 

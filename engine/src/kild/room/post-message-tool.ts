@@ -12,8 +12,7 @@ import { Type } from 'typebox';
  * message body can contain `@decorator` / `@media` / an email without misrouting, and
  * a non-Claude model that forgets sigil syntax still delivers (the engine defaults an
  * omitted `to` to the room lead). Reaching another participant (delivering them a turn)
- * requires calling this tool; an agent's turn-final narration is auto-posted as an
- * *implicit reply* so the human sees it, but that broadcast never prompts another agent.
+ * requires calling this tool — an agent's ordinary prose is never posted for it.
  */
 export function createPostMessageTool(
   emit: (text: string, to?: string[]) => Promise<string>,

@@ -65,15 +65,11 @@ export async function postRoom(
   });
 }
 
-export async function closeRoom(
-  roomId: string,
-  sessionId?: string,
-  force?: boolean,
-): Promise<RoomActionResponse> {
+export async function closeRoom(roomId: string, sessionId?: string): Promise<RoomActionResponse> {
   return engineFetch(`/api/rooms/${encodeURIComponent(roomId)}/close`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...(sessionId ? { sessionId } : {}), ...(force ? { force } : {}) }),
+    body: JSON.stringify({ ...(sessionId ? { sessionId } : {}) }),
   });
 }
 

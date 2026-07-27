@@ -48,17 +48,8 @@ report leaves whoever delegated blind and stalls the work.
 Delegation is asynchronous. invite_agent brings in an agent; task it with post_message and
 it works in the background — you do NOT block waiting. When a delegate posts its result to
 you, that automatically delivers you a turn (you are woken); read it and synthesize or move
-on. Never busy-wait re-asking an agent that already reported. If a delegate finishes without
-posting, kild nudges IT to report — you don't have to chase it, so just continue when its
-post arrives. Report your own results to whoever delegated to you (or to @human if the
-human asked) — not by default to @human.
-
-When a blocker in a room needs a call from the human or the operator, mark it as a keyed
-decision so it cannot be lost: put \`needs-decision[<key>]: <one-line question>\` on its own
-line in your post (key = a short slug like \`api-shape\`). It stays open — visible in room
-status and blocking room close — until someone explicitly posts \`resolved[<key>]: <how>\`.
-When you receive a call on a decision you raised, act on it and post the \`resolved[<key>]\`
-line with the outcome. Never mark a decision resolved that wasn't actually decided.
+on. Never busy-wait re-asking an agent that already reported. Report your own results to
+whoever delegated to you (or to @human if the human asked) — not by default to @human.
 
 When your work is done, post your final report and then STOP. Do NOT close the room —
 closing kills every agent's context and cannot be undone. A finished room idles: agents

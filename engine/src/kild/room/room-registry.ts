@@ -110,7 +110,6 @@ export class RoomRegistry {
       participants: r.participants.map(participantView),
       state: r.state,
       log: r.log,
-      decisions: r.decisions,
       cwd: r.cwd,
       base: r.base,
     }));
@@ -135,7 +134,6 @@ export class RoomRegistry {
       participants: room.participants.map(participantView),
       state,
       log: room.log,
-      decisions: room.decisions,
       cwd: room.cwd,
       base: room.base,
     };

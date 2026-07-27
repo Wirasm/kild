@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { kildHome } from './config.ts';
-import type { RoomDecision } from './room/room-decisions.ts';
 import { finalNonSystemPost } from './room/room-events.ts';
 import type { Room } from './room/room-types.ts';
 
@@ -14,8 +13,8 @@ import type { Room } from './room/room-types.ts';
  * Two layers with different owners, deliberately split:
  *
  * - `LOG.md` — append-only, ENGINE-written: one entry per closed room, built
- *   entirely from structured state the engine already holds (goal, outcome, decisions,
- *   agents + their pi resume handles, worktree). Free, instant, never hallucinates.
+ *   entirely from structured state the engine already holds (goal, outcome, agents +
+ *   their pi resume handles, worktree). Free, instant, never hallucinates.
  * - `MEMORY.md` — lean CURATED memory, written by an optional synthesis session
  *   (config `memory.synthesis`) that reads the transcript and distills judgment-work:
  *   learnings, direction, the why behind decisions. `direction.md` is human-owned
@@ -71,13 +70,6 @@ function ensureMemoryDir(projectCwd: string, dir: string): string {
   return dir;
 }
 
-function formatDecision(decision: RoomDecision): string {
-  const opened = `${decision.key} (${decision.summary}, raised by @${decision.openedBy})`;
-  if (decision.resolvedAt === undefined) return `- decision UNRESOLVED at close: ${opened}`;
-  const note = decision.note ? `: ${decision.note}` : '';
-  return `- decision ${opened} → resolved by @${decision.resolvedBy}${note}`;
-}
-
 /** One room's log entry, built purely from engine-held state. */
 export function formatRoomLogEntry(room: Room, closedAt: Date): string {
   const lines: string[] = [];
@@ -85,7 +77,6 @@ export function formatRoomLogEntry(room: Room, closedAt: Date): string {
   const kickoff = room.log.find((message) => !message.system);
   if (kickoff) lines.push(`- goal: ${oneLine(kickoff.text, 240)}`);
   lines.push(`- outcome: ${oneLine(finalNonSystemPost(room), 400)}`);
-  for (const decision of room.decisions ?? []) lines.push(formatDecision(decision));
   for (const participant of room.participants) {
     // An attached participant is a harness kild never owned: no persona, no model it can
     // vouch for, and nothing to resume.

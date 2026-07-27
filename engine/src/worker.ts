@@ -76,13 +76,6 @@ export async function runWorker(): Promise<never> {
     }
   }
 
-  // Per-turn state for the implicit-reply rule (room only): the turn's sender, whether
-  // the agent posted explicitly this turn, and its accumulated final text. Reset at
-  // the start of each turn (in drainPrompts).
-  let turnSender = 'human';
-  let postedThisTurn = false;
-  let turnText = '';
-
   // A given-but-unknown model errors (resolveModel throws); no model = pi default.
   let model: ReturnType<typeof resolveModel>;
   let session: Awaited<ReturnType<typeof createAgentSession>>['session'];
@@ -97,10 +90,7 @@ export async function runWorker(): Promise<never> {
     // gets no custom tools.
     const customTools = inRoom
       ? [
-          createPostMessageTool(async (text, to) => {
-            postedThisTurn = true;
-            return emitRoomCommand({ kind: 'message_out', text, to });
-          }),
+          createPostMessageTool((text, to) => emitRoomCommand({ kind: 'message_out', text, to })),
           createInviteAgentTool((spec) => emitRoomCommand({ kind: 'invite', ...spec })),
           ...(isRoomLead
             ? [createCloseRoomTool((spec) => emitRoomCommand({ kind: 'close_room', ...spec }))]
@@ -159,20 +149,8 @@ export async function runWorker(): Promise<never> {
 
   session.subscribe((e: RawAgentEvent) => {
     const ui = translate(e);
-    if (ui) {
-      emit(ui);
-      if (ui.kind === 'text') turnText += ui.delta; // accumulate the turn's reply text
-    }
+    if (ui) emit(ui);
     if (e.type === 'agent_end') {
-      // Implicit reply: if the agent didn't post explicitly this turn, surface its
-      // turn-final text so the human sees what it said. Tagged with the sender for
-      // display only — the engine broadcasts it but does NOT deliver it as a turn
-      // (see room-router.ts), so narration can't ping-pong agents into a loop.
-      if (inRoom && !postedThisTurn && turnText.trim()) {
-        process.stdout.write(
-          `${JSON.stringify({ kind: 'message_out', text: turnText, to: [turnSender], implicit: true })}\n`,
-        );
-      }
       const stats = session.getSessionStats();
       emit({
         kind: 'stats',
@@ -203,18 +181,15 @@ export async function runWorker(): Promise<never> {
   // pi runs one turn at a time. A room can deliver a message (prompt) to this
   // participant while it is still mid-turn, so we queue prompts and drain them
   // strictly sequentially rather than awaiting inside the stdin handler.
-  const promptQueue: Array<{ text: string; from: string }> = [];
+  const promptQueue: string[] = [];
   let draining = false;
   async function drainPrompts(): Promise<void> {
     if (draining) return;
     draining = true;
     while (promptQueue.length > 0) {
-      const next = promptQueue.shift() as { text: string; from: string };
-      turnSender = next.from;
-      turnText = '';
-      postedThisTurn = false;
+      const next = promptQueue.shift() as string;
       try {
-        await session.prompt(next.text);
+        await session.prompt(next);
       } catch (err) {
         emit({ kind: 'error', message: errText(err) });
       }
@@ -233,7 +208,6 @@ export async function runWorker(): Promise<never> {
       let msg: {
         type?: string;
         text?: string;
-        from?: string;
         requestId?: string;
         result?: RoomCommandAck['result'];
       };
@@ -245,8 +219,7 @@ export async function runWorker(): Promise<never> {
       if (msg.type === 'prompt' && msg.text) {
         // First delivered turn carries the preamble: the mechanism guide (how to operate)
         // on top of the persona (<role>). Both ride only the first turn.
-        const text = composeSessionTurn(withRole(msg.text, preamble), sessionPrefix);
-        promptQueue.push({ text, from: msg.from ?? 'human' });
+        promptQueue.push(composeSessionTurn(withRole(msg.text, preamble), sessionPrefix));
         preamble = null;
         sessionPrefix = null;
         void drainPrompts();
