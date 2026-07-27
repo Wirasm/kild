@@ -14,8 +14,7 @@ consume the REST/WS API on `localhost:4517`.
   generic mechanism prompt.
 - **kild knows nothing about prp** (or any intelligence layer). Integration happens via
   generic config paths (`plugins`, `memory.dir`) only.
-- Vocabulary: `../GLOSSARY.md` is law — operator, room, participant, persona, kild
-  session vs pi session, archived.
+- Vocabulary: `../GLOSSARY.md`
 
 ## How to work here
 
