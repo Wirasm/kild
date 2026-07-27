@@ -7,11 +7,18 @@ boundary. Nothing before it changed an endpoint helm consumes; nothing after it 
 
 ## Pinning
 
+> **The un-pin point moved.** When this guide was written the rename was the only
+> breaking change, so pinning across that one commit was enough. It no longer is: the
+> router commit removes fields (`system` on messages, `state`/`stopped` on kilds) and
+> requires `to` on every send, and the reshape in `docs/api-surface.md` changes routes
+> again. **Stay pinned until the reshape lands, then port once** against the final
+> surface. Porting to the intermediate states would mean doing the work three times.
+
 kild and helm live in separate repos and cannot merge atomically, so:
 
 1. **Pin helm** to the last kild commit *before* the rename commit.
-2. Land the rename in kild.
-3. Update helm against this document.
+2. Land the rename, the router commit, and the reshape in kild.
+3. Update helm against this document (and `api-surface.md` for the reshaped routes).
 4. **Un-pin.**
 
 Dual-serving both route families was considered and rejected — it would carry the room API
@@ -189,9 +196,27 @@ actor identity is engine-derived"*). The actor is resolved from the caller's `se
 the human when no session is given. The field survives in the request schema only so that a
 client passing it gets a loud error instead of being silently ignored.
 
-## What is *not* changing (yet)
+## The router commit — what it removes on top of the rename
 
-The lifecycle states (`opening|running|halted|closed`), the `HUMAN` handle, and the lead-default
-routing all survive this commit unchanged — the rename is deliberately mechanical. They are
-removed in the follow-up that replaces the router with directed `send`, and that change will get
-its own migration note.
+The rename was deliberately mechanical, so the lifecycle states, the `HUMAN` handle and the
+lead-default routing all survived it unchanged. The follow-up removes them. Since you are
+pinned across both, here is the combined delta:
+
+- **`to` is required on every send.** The engine never infers a recipient — no lead default,
+  no `@human`-wakes-lead, no "one agent so it must mean them". An empty or missing `to` is a
+  rejection. `POST /api/kilds` takes `kickoff: {to: [handle], text}`.
+  *(The CLI may still resolve `--to` for you when a kild has exactly one agent — that is a
+  client convenience, resolved before the call. The engine has no such rule.)*
+- **`system` is gone from `Message`.** Engine notices are no longer log entries; roster
+  changes come from the `{kilds}` broadcast and the event stream. `Message` is
+  `{id, kildId, from, to[], text, ts}`.
+- **`state` and `stopped` are gone from kilds.** The lifecycle state machine
+  (`opening|running|halted|closed`) is deleted. Liveness is presence: a kild in
+  `GET /api/kilds` is live, one in `/archive` is stopped.
+- **`kild_halt` is gone from the WS frames.** `halt` and `stop` collapsed into `stop`.
+- **`HUMAN` no longer exists.** A human-driven harness attaches and gets an ordinary handle
+  like any other agent. There is no privileged participant.
+
+If helm rendered system notices in the thread, or keyed off `state`/`stopped`, both need
+replacing — the first with roster diffs from the kild list, the second with which collection
+the kild appears in.
