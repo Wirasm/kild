@@ -123,6 +123,35 @@ test('a kild stopped without landing says so plainly, with or without commits', 
   expect(landed).toContain('- landed: yes — kild/fix-auth is contained in main');
 });
 
+test('a RECORDED merge sha wins over inference — the ledger names the commit', () => {
+  // Inference can only ever assert containment ("is contained in main"). When the engine
+  // performed the land it holds the sha, so the entry says which commit it became — and
+  // keeps saying it even if git has since gone unreadable.
+  const entry = formatKildLogEntry(
+    kild('/p'),
+    facts({ commits: 0, tip: undefined, landed: true, landedSha: 'abcdef1234567890' }),
+    new Date('2026-07-24T12:00:00Z'),
+  );
+  expect(entry).toContain('- landed: yes — kild/fix-auth merged into main as abcdef1');
+
+  const despiteGitError = formatKildLogEntry(
+    kild('/p'),
+    facts({ landedSha: 'abcdef1234567890', gitError: 'base ref not found: main' }),
+    new Date('2026-07-24T12:00:00Z'),
+  );
+  expect(despiteGitError).toContain('merged into main as abcdef1');
+  expect(despiteGitError).not.toContain('landed: unknown');
+});
+
+test('collectLedgerFacts treats a recorded sha as landed without asking git', async () => {
+  const dir = await repoWithBranch(); // 2 commits ahead of main, nothing merged
+  const collected = await collectLedgerFacts(dir, 'main', 'abcdef1234567890');
+  expect(collected.landed).toBe(true);
+  expect(collected.landedSha).toBe('abcdef1234567890');
+  // The code facts are still measured, not overwritten by the land record.
+  expect(collected.commits).toBe(2);
+});
+
 test('a kild that ran in the checkout says there was no branch to land', () => {
   // No worktree: the agents worked on the base branch itself, so "0 commits vs main
   // on main" would imply a branch that never existed.

@@ -15,8 +15,11 @@ import { createBunWebSocket } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { agentManager } from './kild/agent-manager.ts';
 import { reviewCommits, reviewDiff, reviewFiles } from './kild/git-review.ts';
+import { assessDisposal, removeKildTree } from './kild/kild-disposal.ts';
+import { landMerge, landPlan } from './kild/kild-land.ts';
 import { kildManager } from './kild/kild-manager.ts';
-import type { AgentSpec, CommandResult } from './kild/kild-types.ts';
+import { kildTrees, orphanTrees } from './kild/kild-trees.ts';
+import type { AgentSpec, CommandResult, LiveKildStatus } from './kild/kild-types.ts';
 import { listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import {
@@ -26,15 +29,8 @@ import {
   UNATTRIBUTED,
 } from './kild/rest-attribution.ts';
 import { readSessionTranscript } from './kild/session-transcript.ts';
-import {
-  assertSafeBranch,
-  forceRemoveWorktree,
-  listWorktrees,
-  pruneMergedWorktrees,
-  removeWorktree,
-  worktreePath,
-  worktreesRoot,
-} from './kild/worktree.ts';
+import { pruneMergedWorktrees, worktreesRoot } from './kild/worktree.ts';
+import { kildGitStatus } from './kild/worktree-status.ts';
 
 const execFile = promisify(execFileCb);
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -109,9 +105,6 @@ async function resolveProjectRef(
   return { ok: false, error: 'project (registered name) or path (absolute) required', status: 400 };
 }
 
-const optionalString = (value: unknown): string | undefined =>
-  typeof value === 'string' ? value : undefined;
-
 // ── Personas ──────────────────────────────────────────────────────────────────
 // Reusable persona definitions, read from the convention dirs (`.pi/agents` etc. — the
 // on-disk dir names are upstream pi convention and unrelated to this route's name).
@@ -123,9 +116,6 @@ app.get('/api/personas', async (c) => {
   }
   return c.json(await listPersonas(ref.ok ? ref.dir : undefined));
 });
-
-// ── Worktrees ─────────────────────────────────────────────────────────────────
-// Worktree names a live session is using are never pruned.
 
 function agentSpecs(input: unknown): AgentSpec[] | null {
   if (!Array.isArray(input)) return null;
@@ -194,72 +184,6 @@ const worktreesInUse = (): Set<string> =>
       .map((s) => s.worktree)
       .filter((w): w is string => typeof w === 'string'),
   );
-
-app.get('/api/worktrees', async (c) => {
-  const ref = await resolveProjectRef(c.req.query('project'), c.req.query('path'));
-  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
-  const repo = ref.dir;
-  try {
-    await pruneMergedWorktrees(repo, worktreesInUse()); // prune-merged on every list
-    const trees = (await listWorktrees(repo)).filter((t) => t.branch.startsWith('kild/'));
-    return c.json(trees);
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
-});
-
-app.delete('/api/worktrees', async (c) => {
-  const body = await c.req.json<{
-    project?: string;
-    path?: string;
-    name: string;
-    force?: boolean;
-  }>();
-  const { name, force } = body;
-  const ref = await resolveProjectRef(optionalString(body.project), optionalString(body.path));
-  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
-  const repo = ref.dir;
-  if (force !== undefined && typeof force !== 'boolean') {
-    return c.json({ error: 'force must be a boolean' }, 400);
-  }
-  try {
-    assertSafeBranch(name); // allowlist before building a path under worktreesRoot()
-    const wtPath = worktreePath(name);
-    const result = worktreesInUse().has(name)
-      ? { ok: false as const, code: 'in_use' as const }
-      : force
-        ? await forceRemoveWorktree(repo, wtPath)
-        : await removeWorktree(repo, wtPath);
-    if (!result.ok) {
-      const error =
-        result.code === 'dirty'
-          ? `worktree '${name}' has uncommitted or untracked files; retry with force: true to discard them`
-          : result.code === 'in_use'
-            ? `worktree '${name}' is in use by a live session`
-            : `worktree '${name}' was not found`;
-      return c.json(
-        { error, code: result.code, ...(result.files ? { files: result.files } : {}) },
-        result.code === 'not_found' ? 404 : 409,
-      );
-    }
-    return c.json({ ok: true, name });
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
-});
-
-app.post('/api/worktrees/prune', async (c) => {
-  const body = await c.req.json<{ project?: string; path?: string }>();
-  const ref = await resolveProjectRef(optionalString(body.project), optionalString(body.path));
-  if (!ref.ok) return c.json({ error: ref.error }, ref.status);
-  const repo = ref.dir;
-  try {
-    const pruned = await pruneMergedWorktrees(repo, worktreesInUse());
-    return c.json({ pruned });
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
-});
 
 // ── Open in OS ────────────────────────────────────────────────────────────────
 // Reveal a worktree path in the OS file browser. Only paths under the worktree root
@@ -342,78 +266,99 @@ app.get('/api/kilds/:id/agents/:handle/transcript', async (c) => {
   return serveTranscript(c, agent.piSessionFile, `agent @${handle}`);
 });
 
-// A live agent's transcript (detached agents, one-shot runs) via AgentInfo.
-app.get('/api/agents/:id/transcript', async (c) => {
-  const id = c.req.param('id');
-  const info = agentManager.list().find((a) => a.id === id);
-  if (!info) return c.json({ error: `no such session: ${id}` }, 404);
-  return serveTranscript(c, info.piSessionFile, `session ${id}`);
-});
-
 // ── Agents ────────────────────────────────────────────────────────────────────
+// An agent inside a kild is addressed ONE way: `/api/kilds/:id/agents/:handle`. The
+// parallel `/api/agents/:id/*` family is gone — two identifier schemes for one object is
+// the shape this reshape exists to delete, and prompting an owned agent was never a second
+// verb: it is `POST /api/kilds/:id/messages`, the one delivery path.
+//
+// This bare listing survives because it answers a question no kild can: the live agent
+// PROCESSES that belong to no kild (one-shot `kild run`, detached spawns) are on no
+// roster, so `/api/kilds/:id/agents` cannot see them. It is a process inventory, not an
+// addressable resource family.
 app.get('/api/agents', (c) => c.json(agentManager.list()));
-
-// Spawn a detached agent — the CLI/scripts drive this over REST instead of holding a
-// WS open. `forkFrom` spawns the agent from a frozen copy of an existing pi session
-// file: the fork gets a NEW session file and never writes the source.
-app.post('/api/agents', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    persona?: string;
-    model?: string;
-    cwd?: string;
-    worktree?: string;
-    base?: string;
-    label?: string;
-    prompt?: string;
-    forkFrom?: unknown;
-  };
-  if (body.forkFrom !== undefined) {
-    if (typeof body.forkFrom !== 'string' || !body.forkFrom.trim()) {
-      return c.json({ error: 'forkFrom must be a session file path' }, 400);
-    }
-    const stat = await fs.stat(body.forkFrom).catch(() => null);
-    if (!stat?.isFile()) {
-      return c.json({ error: `forkFrom is not an existing session file: ${body.forkFrom}` }, 400);
-    }
-  }
-  const id = randomUUID();
-  agentManager.spawn(
-    id,
-    {
-      cwd: body.cwd,
-      persona: body.persona,
-      model: body.model,
-      worktree: body.worktree,
-      base: body.base,
-      label: body.label,
-      forkFrom: body.forkFrom,
-    },
-    'cli',
-  );
-  if (body.prompt) agentManager.prompt(id, body.prompt);
-  return c.json({ ok: true, id });
-});
-
-app.post('/api/agents/:id/prompt', async (c) => {
-  const { text } = (await c.req.json().catch(() => ({}))) as { text?: string };
-  if (!text) return c.json({ error: 'text required' }, 400);
-  const delivered = agentManager.prompt(c.req.param('id'), text);
-  return delivered ? c.json({ ok: true }) : c.json({ error: 'no such session' }, 404);
-});
-
-app.post('/api/agents/:id/stop', (c) => {
-  agentManager.stop(c.req.param('id'));
-  return c.json({ ok: true });
-});
 
 // ── Kilds ─────────────────────────────────────────────────────────────────────
 // Past kilds recovered from disk (read-only history). Live kilds flow over the WS
 // (`{kilds}` summaries + `{message}` sends); this is the conversation record of
 // kilds from previous engine runs — their agent subprocesses are long gone.
 app.get('/api/kilds/archive', (c) => c.json(kildManager.archived()));
+
+// ── The kild collection ───────────────────────────────────────────────────────
+// A kild IS a worktree, so there is ONE resource family for it. `/api/worktrees` is gone:
+// listing is this collection, disposal is `DELETE /api/kilds/:id`, and prune is a filter
+// over the collection (`?state=reclaimable`) rather than a verb of its own.
+
+/** Every repo that might hold a `kild/*` worktree: the registered projects, plus the cwd
+ *  of every live kild (a kild can be opened on an unregistered path). */
+async function kildRepos(): Promise<string[]> {
+  const projects = await loadProjects();
+  return [...projects.map((p) => p.path), ...kildManager.liveCwds()];
+}
+
+/**
+ * The collection: live kilds **unioned with the `kild/*` worktrees git reports**.
+ *
+ * Enumerating from git is what makes the fold safe. The registry only knows the kilds this
+ * engine process created; a tree from an earlier run has no record, therefore no id,
+ * therefore nothing could list it or dispose of it — the exact stranding this fixes. Such a
+ * tree surfaces as a kild with **no agents and no log**, addressed by its worktree name,
+ * flagged `orphan`. A worktree that is not a kild (the main checkout, any hand-made tree on
+ * a non-`kild/` branch) is not listed at all: kild does not claim trees it did not create.
+ */
+async function kildCollection(scope?: string): Promise<LiveKildStatus[]> {
+  const live = await kildManager.liveKildsStatus();
+  const trees = orphanTrees(
+    await kildTrees(scope ? [scope] : await kildRepos()),
+    kildManager.liveWorktrees(),
+  );
+  const orphans: LiveKildStatus[] = await Promise.all(
+    trees.map(async (tree) => ({
+      id: tree.worktree, // the ONLY id it has — the branch name is its identity
+      name: tree.worktree,
+      worktree: tree.worktree,
+      cwd: tree.repo,
+      orphan: true,
+      agents: [],
+      log: [],
+      git: await kildGitStatus(tree.path),
+    })),
+  );
+  return [...(scope ? live.filter((kild) => kild.cwd === scope) : live), ...orphans];
+}
+
+/** Would disposal accept this kild? Same rule as the guard — no commits the base does not
+ *  have — read off the git status already computed for the listing (`ahead` IS the count
+ *  of commits on HEAD that base lacks), so the filter costs nothing extra. The authoritative
+ *  check still runs inside DELETE. */
+function reclaimable(kild: LiveKildStatus, inUse: Set<string>): boolean {
+  if (!kild.worktree || inUse.has(kild.worktree)) return false;
+  return kild.git !== undefined && !kild.git.error && kild.git.ahead === 0;
+}
+
 // Live kilds WITH their logs — so a UI client joining a kild it didn't create (or after a
 // refresh) can load the conversation so far. The WS only streams *new* messages.
-app.get('/api/kilds', async (c) => c.json(await kildManager.liveKildsStatus()));
+// `?state=live|orphan|reclaimable` filters; `?project=`/`?path=` scopes to one repo.
+app.get('/api/kilds', async (c) => {
+  const state = c.req.query('state');
+  const project = c.req.query('project');
+  const dirPath = c.req.query('path');
+  let scope: string | undefined;
+  if (project !== undefined || dirPath !== undefined) {
+    const ref = await resolveProjectRef(project, dirPath);
+    if (!ref.ok) return c.json({ error: ref.error }, ref.status);
+    scope = ref.dir;
+  }
+  const kilds = await kildCollection(scope);
+  if (state === undefined) return c.json(kilds);
+  if (state === 'live') return c.json(kilds.filter((kild) => !kild.orphan));
+  if (state === 'orphan') return c.json(kilds.filter((kild) => kild.orphan));
+  if (state === 'reclaimable') {
+    const inUse = worktreesInUse();
+    return c.json(kilds.filter((kild) => reclaimable(kild, inUse)));
+  }
+  return c.json({ error: `unknown state: ${state} (live, orphan, reclaimable)` }, 400);
+});
 app.post('/api/kilds', async (c) => {
   const body = await c.req.json<{
     name?: unknown;
@@ -533,6 +478,59 @@ app.post('/api/kilds/:id/messages', async (c) => {
   if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
 });
+/**
+ * Spawn an agent INTO a live kild.
+ *
+ * This route exists because spawning used to be WS-only and fire-and-forget: the frame was
+ * enqueued, a rejection was `console.warn`ed inside the engine, and the caller was told
+ * nothing at all. A caller that cannot learn its spawn failed is the silent-failure shape
+ * this whole reshape removes. Both transports now call the SAME manager method
+ * ({@link kildManager.spawnAgent}); the difference is only that this one answers.
+ */
+app.post('/api/kilds/:id/agents', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    handle?: unknown;
+    persona?: unknown;
+    model?: unknown;
+    invitedBy?: unknown;
+  };
+  if (typeof body.handle !== 'string' || !body.handle.trim()) {
+    return c.json({ error: 'handle required' }, 400);
+  }
+  if (body.persona !== undefined && typeof body.persona !== 'string') {
+    return c.json({ error: 'persona must be a string' }, 400);
+  }
+  if (body.model !== undefined && typeof body.model !== 'string') {
+    return c.json({ error: 'model must be a string' }, 400);
+  }
+  if (body.invitedBy !== undefined && typeof body.invitedBy !== 'string') {
+    return c.json({ error: 'invitedBy must be a string' }, 400);
+  }
+  const result = await kildManager.spawnAgent(
+    c.req.param('id'),
+    {
+      handle: body.handle.trim(),
+      persona: body.persona,
+      model: body.model,
+    },
+    body.invitedBy,
+  );
+  if (!result.ok) {
+    return c.json({ error: result.message, code: result.code }, kildResultStatus(result));
+  }
+  return c.json({ ok: true, handle: body.handle.trim(), message: result.value.message });
+});
+
+// Stop ONE agent without stopping the kild. The agent stays on the roster (marked
+// `stopped`) — a handle never rebinds, so its transcript stays addressable.
+app.delete('/api/kilds/:id/agents/:handle', (c) => {
+  const result = kildManager.stopAgent(c.req.param('id'), c.req.param('handle'));
+  if (!result.ok) {
+    return c.json({ error: result.message, code: result.code }, kildResultStatus(result));
+  }
+  return c.json({ ok: true, message: result.value.message });
+});
+
 // The attached half of the roster: a harness kild does NOT own (a Claude Code session the
 // human is driving) claims a `@handle` and gets an inbox. Idempotent by handle, so a hook
 // or shell alias can call it on every session start.
@@ -572,6 +570,158 @@ app.post('/api/kilds/:id/stop', async (c) => {
   const result = await kildManager.stop(c.req.param('id'));
   if (!result.ok) return c.json({ error: result.message }, kildResultStatus(result));
   return c.json({ ok: true, message: result.value.message });
+});
+
+// ── Addressing one kild: a live record, or a tree git reports ──────────────────
+/** One kild, whether the engine remembers it or only git does. */
+interface KildTarget {
+  id: string;
+  name: string;
+  /** True when a live kild record backs this tree. */
+  live: boolean;
+  /** The main checkout — where a land merges and where the worktree is registered. */
+  repo: string;
+  /** The kild's effective dir (its worktree, else its cwd). */
+  dir: string;
+  worktree?: string;
+  base?: string;
+}
+
+/** Resolve `:id` to a kild. ONE address per kild: a live kild's id, or — for a tree whose
+ *  record is gone — its worktree name. An archived id resolves to neither on purpose; the
+ *  error says how to address the tree instead of leaving the caller guessing. */
+async function resolveKild(id: string): Promise<CommandResult<KildTarget>> {
+  const located = kildManager.kildDir(id);
+  if (located.ok) return { ok: true, value: { id, live: true, ...located.value } };
+
+  const tree = (await kildTrees(await kildRepos())).find((candidate) => candidate.worktree === id);
+  if (tree) {
+    return {
+      ok: true,
+      value: {
+        id,
+        name: tree.worktree,
+        live: false,
+        repo: tree.repo,
+        dir: tree.path,
+        worktree: tree.worktree,
+      },
+    };
+  }
+
+  const archived = kildManager.archived().find((candidate) => candidate.id === id);
+  if (archived) {
+    return {
+      ok: false,
+      code: 'invalid_state',
+      message:
+        `kild ${id} is archived (its agents are gone)` +
+        `${archived.worktree ? ` — address its tree as '${archived.worktree}'` : ' and had no worktree'}`,
+    };
+  }
+  return { ok: false, code: 'not_found', message: `no such kild: ${id}` };
+}
+
+// ── Disposal ──────────────────────────────────────────────────────────────────
+// The verb nothing had: `land` handles success and `stop` keeps the tree, so a kild nobody
+// ever lands had no ending at all. Guarded on AUTHORED COMMITS (see kild-disposal.ts) —
+// never on working-tree dirt, which is provisioning litter more often than work. The
+// `kild/<name>` BRANCH always survives, so nothing committed is ever lost here; `?force=true`
+// overrides the commits refusal for exactly that reason. Every outcome is reported: a
+// disposal that quietly declines is the defect this replaces.
+app.delete('/api/kilds/:id', async (c) => {
+  const id = c.req.param('id');
+  const forceQuery = c.req.query('force');
+  if (forceQuery !== undefined && forceQuery !== 'true' && forceQuery !== 'false') {
+    return c.json({ error: "force must be 'true' or 'false'" }, 400);
+  }
+  const force = forceQuery === 'true';
+
+  const target = await resolveKild(id);
+  if (!target.ok) {
+    return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
+  }
+  const { worktree, repo, dir, base, live, name } = target.value;
+  if (!worktree) {
+    return c.json(
+      {
+        error: `kild '${name}' ran in the main checkout (${repo}) — it has no worktree to dispose of`,
+        code: 'no_worktree',
+      },
+      409,
+    );
+  }
+
+  const assessment = await assessDisposal({
+    repo,
+    dir,
+    branch: `kild/${worktree}`,
+    base,
+    inUse: worktreesInUse().has(worktree),
+    force,
+  });
+  if (!assessment.ok) {
+    return c.json(
+      {
+        error: assessment.message,
+        code: assessment.code,
+        branch: `kild/${worktree}`,
+        ...(assessment.commits !== undefined ? { commits: assessment.commits } : {}),
+        ...(assessment.tip ? { tip: assessment.tip } : {}),
+      },
+      assessment.code === 'not_found' ? 404 : 409,
+    );
+  }
+
+  // Stop the kild BEFORE the tree goes: its ledger entry is written from the working dir,
+  // so those facts have to be collected while the dir still exists.
+  if (live) await kildManager.stop(id);
+  try {
+    await removeKildTree(repo, dir);
+  } catch (err) {
+    return c.json({ error: errText(err), code: 'rejected', branch: `kild/${worktree}` }, 409);
+  }
+  return c.json({
+    ok: true,
+    id,
+    worktree,
+    branch: `kild/${worktree}`,
+    // Removing a worktree frees disk; it never deletes work.
+    branchKept: true,
+    removed: dir,
+    discarded: assessment.discarded,
+    forced: assessment.forced,
+    message:
+      `Removed worktree '${worktree}'${assessment.forced ? ` (forced past ${assessment.commits} unlanded commit${assessment.commits === 1 ? '' : 's'})` : ''}. ` +
+      `Branch kild/${worktree} kept.` +
+      (assessment.discarded.length > 0
+        ? ` Discarded ${assessment.discarded.length} uncommitted file${assessment.discarded.length === 1 ? '' : 's'}.`
+        : ''),
+  });
+});
+
+// ── Landing ───────────────────────────────────────────────────────────────────
+// GET is the dry run and touches NOTHING; POST performs the merge and records the sha it
+// became on the kild, so the ledger can name the commit instead of inferring containment.
+// Same body either way, so the two are comparable line for line.
+app.get('/api/kilds/:id/land', async (c) => {
+  const target = await resolveKild(c.req.param('id'));
+  if (!target.ok) {
+    return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
+  }
+  return c.json({ ...(await landPlan(target.value.dir, target.value.base)), dryRun: true });
+});
+app.post('/api/kilds/:id/land', async (c) => {
+  const id = c.req.param('id');
+  const target = await resolveKild(id);
+  if (!target.ok) {
+    return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
+  }
+  const result = await landMerge(target.value.repo, target.value.dir, target.value.base);
+  // A land that did not happen is NOT a success — the caller must be able to tell.
+  if (!result.merged) return c.json({ ...result, dryRun: false }, 409);
+  if (target.value.live && result.sha) kildManager.recordLand(id, result.sha);
+  return c.json({ ...result, dryRun: false });
 });
 
 // ── Review intelligence ───────────────────────────────────────────────────────

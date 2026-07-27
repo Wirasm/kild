@@ -273,6 +273,70 @@ test('spawning an agent records no message — a roster change is an event, not 
   expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['coder', 'reviewer']);
 });
 
+// ── Stopping ONE agent (DELETE /api/kilds/:id/agents/:handle) ────────────────────────
+
+test('stopAgent stops that agent only and keeps it on the roster, marked stopped', async () => {
+  const { manager, stopped } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  expect(await manager.stopAgent('kild-1', 'coder')).toEqual({
+    ok: true,
+    value: { message: "Stopped @coder in kild 'demo'." },
+  });
+  expect(stopped).toEqual(['s-1']); // only the coder's session
+  // It stays addressable: a handle is unique for the kild's lifetime and never rebinds,
+  // so its transcript must remain reachable after the process is gone.
+  const agents = manager.liveKilds()[0]?.agents ?? [];
+  expect(agents.map((a) => a.handle)).toEqual(['coder', 'reviewer']);
+  expect(agents.find((a) => a.handle === 'coder')).toMatchObject({ stopped: true, idle: true });
+  expect(agents.find((a) => a.handle === 'reviewer')?.stopped).toBeUndefined();
+});
+
+test('stopAgent is idempotent, and refuses unknown handles and attached harnesses', async () => {
+  const { manager, stopped } = fixture();
+  await newKild(manager, [{ handle: 'coder' }]);
+  await manager.attach('kild-1', 'claude');
+  await manager.stopAgent('kild-1', 'coder');
+  expect(await manager.stopAgent('kild-1', 'coder')).toEqual({
+    ok: true,
+    value: { message: '@coder was already stopped.' },
+  });
+  expect(stopped).toEqual(['s-1']); // not stopped twice
+  expect(await manager.stopAgent('kild-1', 'ghost')).toEqual({
+    ok: false,
+    code: 'not_found',
+    message: 'no such agent: @ghost',
+  });
+  // An attached harness belongs to the human — kild never assumes it may end it.
+  expect(await manager.stopAgent('kild-1', 'claude')).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: "@claude is attached — its harness is not kild's to stop",
+  });
+  expect(await manager.stopAgent('nope', 'coder')).toMatchObject({ code: 'not_found' });
+});
+
+// ── Recording a land, so the ledger can name the commit ──────────────────────────────
+
+test('recordLand puts the merge sha on the kild and the ledger reports it', async () => {
+  const { manager } = fixture();
+  const project = fs.mkdtempSync(path.join(tmp, 'landproj-'));
+  await manager.create('kild-1', {
+    name: 'demo',
+    cwd: project,
+    agents: [{ handle: 'coder' }],
+  });
+  await send(manager, ['coder'], 'ship it');
+  expect(manager.recordLand('kild-1', 'abcdef1234567890')).toEqual({
+    ok: true,
+    value: { message: "Kild 'demo' landed as abcdef1." },
+  });
+  expect(manager.recordLand('nope', 'abcdef1')).toMatchObject({ code: 'not_found' });
+  await manager.stop('kild-1');
+  const log = fs.readFileSync(path.join(project, '.kild', 'LOG.md'), 'utf8');
+  // Inference could only ever say "contained in base"; a recorded sha names the commit.
+  expect(log).toContain('merged into main as abcdef1');
+});
+
 // ── Stop: the one teardown verb ──────────────────────────────────────────────────────
 
 test('stop returns not_found for an unknown kild', async () => {
@@ -491,9 +555,11 @@ test('kildDir resolves a live kild without a worktree to its cwd', async () => {
   const { manager } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   // base falls all the way through to 'main' (tmp is no git checkout, no config).
+  // `repo` is the main checkout — where a land merges and disposal removes the tree from —
+  // and equals `dir` for a kild that has no worktree of its own.
   expect(manager.kildDir('kild-1')).toEqual({
     ok: true,
-    value: { dir: tmp, base: 'main' },
+    value: { name: 'demo', dir: tmp, repo: tmp, worktree: undefined, base: 'main' },
   });
 });
 
