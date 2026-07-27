@@ -14,24 +14,22 @@ import { parseArgs } from 'node:util';
 import { claudeStopOutput } from './kild/claude-stop.ts';
 import {
   attachAgent,
+  disposeKild,
   drainInbox,
   getLiveKilds,
+  type LandResponse,
+  landKild,
+  landPreview,
   listAgents,
   newKild,
   sendMessage,
+  spawnKildAgent,
   stopKild,
+  stopKildAgent,
 } from './kild/engine-client.ts';
 import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
 import { listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
-import {
-  forceRemoveWorktree,
-  listWorktrees,
-  pruneMergedWorktrees,
-  removeWorktree,
-  type Worktree,
-  worktreePath,
-} from './kild/worktree.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -48,6 +46,8 @@ const { values, positionals } = parseArgs({
     as: { type: 'string' }, // `kild attach|inbox --as <handle>`: the attached agent's handle
     format: { type: 'string' }, // `kild inbox --format claude-stop`: harness hook output
     to: { type: 'string' }, // `kild send --to a,b`: the agents addressed
+    state: { type: 'string' }, // `kild ls --state live|orphan|reclaimable`
+    execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
   },
 });
 
@@ -69,8 +69,6 @@ async function dispatch(): Promise<void> {
       return project(action, rest);
     case 'persona':
       return persona(action, rest);
-    case 'worktree':
-      return worktree(action, rest);
     case 'run':
       return run([action, ...rest].filter(Boolean).join(' '));
     case 'ls':
@@ -84,8 +82,22 @@ async function dispatch(): Promise<void> {
       return kildSend(action, rest.join(' '));
     }
     case 'stop': {
-      if (!action) throw new Error('usage: kild stop <id>');
+      if (!action) throw new Error('usage: kild stop <id> [--as <handle>]');
       return kildStop(action);
+    }
+    case 'spawn': {
+      if (!action || !values.as) {
+        throw new Error('usage: kild spawn <id> --as <handle> [--persona p] [--model m]');
+      }
+      return kildSpawn(action, values.as);
+    }
+    case 'rm': {
+      if (!action) throw new Error('usage: kild rm <id|worktree-name> [--force]');
+      return kildRm(action);
+    }
+    case 'land': {
+      if (!action) throw new Error('usage: kild land <id|worktree-name> [--execute]');
+      return kildLand(action);
     }
     case 'attach':
       return kildAttach(action);
@@ -103,7 +115,7 @@ async function dispatch(): Promise<void> {
       return agentsList();
     default:
       console.error(
-        'usage: kild <ls|new|send|stop|attach|inbox|log|show|agents|persona|project|worktree|run> …',
+        'usage: kild <ls|new|send|spawn|stop|rm|land|attach|inbox|log|show|agents|persona|project|run> …',
       );
       process.exit(2);
   }
@@ -173,85 +185,6 @@ async function persona(action: string | undefined, args: string[]): Promise<void
   } else {
     throw new Error('usage: kild persona <ls|show>');
   }
-}
-
-// REST helper for the worktree group when routing through a live engine. Surfaces
-// the engine's error body (e.g. a 409 when a worktree is in use by a live session).
-async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${ENGINE}${path}`, init);
-  if (!r.ok) {
-    const body = (await r.json().catch(() => ({}))) as { error?: string; files?: string[] };
-    const preview = body.files?.length ? `: ${body.files.join(', ')}` : '';
-    throw new Error(`${body.error ?? `${path} failed (${r.status})`}${preview}`);
-  }
-  return r.json() as Promise<T>;
-}
-
-async function worktree(action: string | undefined, args: string[]): Promise<void> {
-  const repo = await resolveProjectFlag();
-  if (!repo) throw new Error('--project <name|path> is required');
-  // The flag is resolved to an absolute dir above, so the engine gets the explicit
-  // `path` variant of its project-or-path contract.
-  const q = `path=${encodeURIComponent(repo)}`;
-
-  // When the engine is up it owns the live sessions, so route mutations through it —
-  // its endpoints skip worktrees a running session is using. When it's down, no live
-  // session can exist, so operating directly is safe (and `ls` is read-only).
-  const engineUp = await fetch(`${ENGINE}/api/health`)
-    .then((r) => r.ok)
-    .catch(() => false);
-
-  if (action === 'ls') {
-    const trees = engineUp
-      ? await engineFetch<Worktree[]>(`/api/worktrees?${q}`)
-      : (await listWorktrees(repo)).filter((t) => t.branch.startsWith('kild/'));
-    if (json) return void console.log(JSON.stringify(trees, null, 2));
-    if (trees.length === 0) return void console.error('no kild worktrees');
-    for (const t of trees) console.log(`${t.branch}\t${t.path}`);
-  } else if (action === 'rm') {
-    const [name] = args;
-    if (!name) throw new Error('usage: kild worktree rm <name> --project <p>');
-    if (engineUp) {
-      await engineFetch(`/api/worktrees`, {
-        method: 'DELETE',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ path: repo, name, force: values.force }),
-      });
-    } else {
-      const result = values.force
-        ? await forceRemoveWorktree(repo, worktreePath(name))
-        : await removeWorktree(repo, worktreePath(name));
-      if (!result.ok) throw new Error(removeRefusalMessage(name, result));
-    }
-    if (json) console.log(JSON.stringify({ ok: true, name }, null, 2));
-    else console.log(`${values.force ? 'force-removed' : 'removed'} worktree ${name}`);
-  } else if (action === 'prune') {
-    const pruned = engineUp
-      ? (
-          await engineFetch<{ pruned: string[] }>(`/api/worktrees/prune`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ path: repo }),
-          })
-        ).pruned
-      : await pruneMergedWorktrees(repo);
-    if (json) console.log(JSON.stringify({ pruned }, null, 2));
-    else console.log(pruned.length ? `pruned: ${pruned.join(', ')}` : 'nothing to prune');
-  } else {
-    throw new Error('usage: kild worktree <ls|rm|prune> --project <p> [--force]');
-  }
-}
-
-function removeRefusalMessage(
-  name: string,
-  refusal: { code: 'dirty' | 'in_use' | 'not_found'; files?: string[] },
-): string {
-  if (refusal.code === 'dirty') {
-    const files = refusal.files?.join(', ') || '(unknown files)';
-    return `worktree '${name}' has uncommitted or untracked files: ${files}. Re-run with --force to discard them.`;
-  }
-  if (refusal.code === 'in_use') return `worktree '${name}' is in use by a live session`;
-  return `worktree '${name}' was not found`;
 }
 
 async function engineRunning(): Promise<boolean> {
@@ -405,18 +338,100 @@ async function kildShow(id: string): Promise<void> {
   }
 }
 
-/** `kild ls` — live kilds with their code-state observability. */
+/**
+ * `kild ls [--state live|orphan|reclaimable] [--project <p>]` — the kild collection with
+ * its code-state observability.
+ *
+ * This lists kilds **and the `kild/*` worktrees git reports**: a tree left by an earlier
+ * engine run appears as an `orphan` kild with no agents and no log, addressed by its
+ * worktree name. That name is what `kild rm` / `kild land` take, so a stranded tree is
+ * reachable again.
+ */
 async function kildList(): Promise<void> {
-  const kilds = compactLiveKilds(await getLiveKilds());
-  if (json) return void console.log(JSON.stringify(kilds, null, 2));
-  if (kilds.length === 0) return void console.error('no live kilds');
+  const repo = await resolveProjectFlag();
+  const live = await getLiveKilds({ state: values.state, repo });
+  const kilds = compactLiveKilds(live);
+  const orphaned = new Set(live.filter((kild) => kild.orphan).map((kild) => kild.id));
+  if (json) {
+    return void console.log(
+      JSON.stringify(
+        kilds.map((kild) => (orphaned.has(kild.id) ? { ...kild, orphan: true } : kild)),
+        null,
+        2,
+      ),
+    );
+  }
+  if (kilds.length === 0) return void console.error('no kilds');
   for (const r of kilds) {
-    const parts = r.agents.map((p) => (p.model ? `${p.handle}:${p.model}` : p.handle)).join(', ');
+    if (orphaned.has(r.id)) {
+      console.log(`${r.id}\t(orphan tree, no kild record)${formatCompactGitSummary(r.git)}`);
+      continue;
+    }
+    const parts = r.agents
+      .map(
+        (p) => `${p.model ? `${p.handle}:${p.model}` : p.handle}${p.stopped ? ' (stopped)' : ''}`,
+      )
+      .join(', ');
     const col = r.collidesWith?.length
       ? ` · collides: ${r.collidesWith.map((c) => `${c.kild}(${c.files.length})`).join(', ')}`
       : '';
     console.log(`${r.id}\t${r.name} [${parts}]${formatCompactGitSummary(r.git)}${col}`);
   }
+}
+
+/** `kild spawn <id> --as <handle> [--persona p] [--model m]` — add an agent to a live
+ *  kild. Answers: a rejection (unknown persona, duplicate handle, capacity) is an error
+ *  with the engine's reason, not a shrug. */
+async function kildSpawn(id: string, handle: string): Promise<void> {
+  const res = await spawnKildAgent(id, {
+    handle,
+    persona: values.persona,
+    model: values.model,
+  });
+  console.log(json ? JSON.stringify(res, null, 2) : res.message);
+}
+
+/**
+ * `kild rm <id|worktree-name> [--force]` — dispose of a kild's worktree.
+ *
+ * Refused when the branch carries commits the base does not have: that is unlanded work,
+ * and you are told so instead of the tree quietly surviving forever. Uncommitted files are
+ * NOT a refusal (provisioning litter is not work) — they are discarded and listed. The
+ * `kild/<name>` branch always survives, which is why `--force` costs no commits.
+ */
+async function kildRm(id: string): Promise<void> {
+  const res = await disposeKild(id, values.force);
+  if (json) return void console.log(JSON.stringify(res, null, 2));
+  console.log(res.message);
+  if (res.discarded.length > 0) console.error(`discarded: ${res.discarded.join(', ')}`);
+}
+
+function formatLand(res: LandResponse): string {
+  const head = `${res.branch ?? '(no branch)'} → ${res.base}`;
+  const commits = `${res.commits.length} commit${res.commits.length === 1 ? '' : 's'}`;
+  const files = `${res.files.length} file${res.files.length === 1 ? '' : 's'}`;
+  if (res.merged) return `landed ${head} as ${res.sha?.slice(0, 7)} (${commits}, ${files})`;
+  if (res.error) return `would not land ${head}: ${res.error}`;
+  return `would land ${head}: ${commits}, ${files}`;
+}
+
+/** `kild land <id|worktree-name> [--execute]` — without `--execute` this is a DRY RUN
+ *  that touches nothing; with it, the branch is merged into its base in the project's main
+ *  checkout and the merge sha is reported (and recorded on the kild for the ledger). */
+async function kildLand(id: string): Promise<void> {
+  const res = values.execute ? await landKild(id) : await landPreview(id);
+  if (json) return void console.log(JSON.stringify(res, null, 2));
+  console.log(formatLand(res));
+  if (res.collides.length > 0) console.error(`collides: ${res.collides.join(', ')}`);
+  if (!res.merged && !values.execute && res.wouldMerge) {
+    console.error('(dry run — re-run with --execute to merge)');
+  }
+}
+
+/** `kild stop <id>` with `--as <handle>` stops ONE agent instead of the whole kild. */
+async function kildStopAgent(id: string, handle: string): Promise<void> {
+  const res = await stopKildAgent(id, handle);
+  console.log(json ? JSON.stringify(res, null, 2) : res.message);
 }
 
 /** `kild new <goal> --detach` — open a kild, print its id, return (no streaming). */
@@ -490,8 +505,10 @@ async function kildSend(id: string, text: string): Promise<void> {
   else console.error(res.message);
 }
 
-/** `kild stop <id>` — stop a specific kild by id. */
+/** `kild stop <id>` — stop a specific kild by id. With `--as <handle>` it stops that ONE
+ *  agent and leaves the kild running. */
 async function kildStop(id: string): Promise<void> {
+  if (values.as) return kildStopAgent(id, values.as);
   const res = await stopKild(id);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);

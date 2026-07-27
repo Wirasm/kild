@@ -109,6 +109,7 @@ export class KildRegistry {
       log: k.log,
       cwd: k.cwd,
       base: k.base,
+      landedSha: k.landedSha,
     }));
   }
 
@@ -132,6 +133,7 @@ export class KildRegistry {
       log: kild.log,
       cwd: kild.cwd,
       base: kild.base,
+      landedSha: kild.landedSha,
     };
   }
 

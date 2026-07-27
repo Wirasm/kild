@@ -93,20 +93,31 @@ export interface KildLedgerFacts {
   uncommittedFiles: number;
   /** True only when git can prove the branch's work is already in base: nothing ahead,
    *  base has moved past it, and it is not the base branch itself. Everything else —
-   *  including "we cannot tell" — is not landed, because a ledger may not guess. */
+   *  including "we cannot tell" — is not landed, because a ledger may not guess.
+   *  A recorded {@link landedSha} also makes it true: that is not a guess. */
   landed: boolean;
+  /** The merge commit this kild landed as, when the engine performed the land
+   *  (`POST /api/kilds/:id/land`). Inference can only ever say "contained in base"; a
+   *  recorded sha says WHICH commit, so the ledger prefers it. */
+  landedSha?: string;
   /** Any git failure, captured as data (the probes never throw). */
   gitError?: string;
 }
 
 /**
  * Collect a kild's git facts for the ledger. `dir` is the kild's effective directory
- * (its worktree if it had one, else its cwd) and `base` its base branch.
+ * (its worktree if it had one, else its cwd) and `base` its base branch. `landedSha` is the
+ * merge the engine recorded when it landed this kild, if it did — a fact it holds outright,
+ * so it needs no inference and survives a git failure.
  *
  * Never throws and never blocks a stop: a non-repo, a missing base ref or any git error
  * comes back as `gitError` with zeroed counts, and the entry says so.
  */
-export async function collectLedgerFacts(dir: string, base?: string): Promise<KildLedgerFacts> {
+export async function collectLedgerFacts(
+  dir: string,
+  base?: string,
+  landedSha?: string,
+): Promise<KildLedgerFacts> {
   const status = await kildGitStatus(dir, base);
   const review = await reviewCommits(dir, status.base);
   const gitError = status.error ?? review.error;
@@ -119,17 +130,25 @@ export async function collectLedgerFacts(dir: string, base?: string): Promise<Ki
     changedFiles: status.changedFiles.length,
     uncommittedFiles: status.uncommittedFiles,
     landed:
-      !gitError &&
-      review.commits.length === 0 &&
-      status.behind > 0 &&
-      status.branch !== null &&
-      status.branch !== status.base,
+      landedSha !== undefined ||
+      (!gitError &&
+        review.commits.length === 0 &&
+        status.behind > 0 &&
+        status.branch !== null &&
+        status.branch !== status.base),
+    landedSha,
     gitError,
   };
 }
 
-/** The land result line: a merged branch, an unlanded one, or an honest "unknown". */
+/** The land result line: a merged branch, an unlanded one, or an honest "unknown".
+ *  A RECORDED merge sha wins over everything below — it is the one form of "landed" that
+ *  can name the commit, and it holds even if git later goes unreadable. */
 function landLine(facts: KildLedgerFacts): string {
+  if (facts.landedSha) {
+    const where = facts.branch ?? 'the working tree';
+    return `- landed: yes — ${where} merged into ${facts.base} as ${facts.landedSha.slice(0, 7)}`;
+  }
   if (facts.gitError) return `- landed: unknown — git: ${facts.gitError}`;
   // A kild without its own worktree works in the checkout, on the base branch itself:
   // there is no branch to land, and saying "no commits vs main on main" would pretend

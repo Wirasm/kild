@@ -69,8 +69,17 @@ export async function stopKild(kildId: string, sessionId?: string): Promise<Kild
   });
 }
 
-export async function getLiveKilds(): Promise<LiveKildStatus[]> {
-  return engineFetch('/api/kilds');
+/** The kild collection: live kilds unioned with the `kild/*` worktrees git reports (an
+ *  orphaned tree has no agents and no log, and is addressed by its worktree name).
+ *  `state` filters (`live` | `orphan` | `reclaimable`); `repo` scopes to one checkout. */
+export async function getLiveKilds(
+  opts: { state?: string; repo?: string } = {},
+): Promise<LiveKildStatus[]> {
+  const query = new URLSearchParams();
+  if (opts.state) query.set('state', opts.state);
+  if (opts.repo) query.set('path', opts.repo);
+  const suffix = query.size > 0 ? `?${query}` : '';
+  return engineFetch(`/api/kilds${suffix}`);
 }
 
 /** Register an attached agent — a harness kild does not own claiming a `@handle`.
@@ -108,40 +117,70 @@ export async function drainInbox(kildId: string, handle: string): Promise<DrainI
   });
 }
 
-export interface SpawnAgentRequest {
-  persona?: string;
-  model?: string;
-  cwd?: string;
-  worktree?: string;
-  base?: string;
-  /** Session label shown in listings (e.g. a kild name). Display only. */
-  label?: string;
-  /** Absolute pi session file to fork from — the spawned agent starts from a frozen
-   *  copy of its history (a new session file; the source is never written). */
-  forkFrom?: string;
-  /** Initial prompt delivered right after spawn. */
-  prompt?: string;
-}
-
-/** Spawn a detached agent through the engine; returns its id. */
-export async function spawnAgent(req: SpawnAgentRequest): Promise<{ ok: true; id: string }> {
-  return engineFetch('/api/agents', {
+/** Spawn an agent into a live kild. Unlike the WS frame this ANSWERS: a rejection comes
+ *  back as a thrown error carrying the engine's reason, never a silent no-op. */
+export async function spawnKildAgent(
+  kildId: string,
+  agent: AgentSpec,
+): Promise<{ ok: true; handle: string; message: string }> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/agents`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(req),
+    body: JSON.stringify(agent),
   });
 }
 
-export async function promptAgent(id: string, text: string): Promise<{ ok: boolean }> {
-  return engineFetch(`/api/agents/${encodeURIComponent(id)}/prompt`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
+/** Stop ONE agent in a kild; the kild and its other agents keep going. */
+export async function stopKildAgent(kildId: string, handle: string): Promise<KildActionResponse> {
+  return engineFetch(
+    `/api/kilds/${encodeURIComponent(kildId)}/agents/${encodeURIComponent(handle)}`,
+    { method: 'DELETE' },
+  );
 }
 
-export async function stopAgent(id: string): Promise<{ ok: boolean }> {
-  return engineFetch(`/api/agents/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+/** What disposal did, and what it cost. The `kild/<name>` branch always survives. */
+export interface DisposeKildResponse {
+  ok: true;
+  id: string;
+  worktree: string;
+  branch: string;
+  branchKept: true;
+  removed: string;
+  /** Uncommitted/untracked files the removal discarded — named, never hidden. */
+  discarded: string[];
+  forced: boolean;
+  message: string;
+}
+
+/** Dispose of a kild's worktree. Refused when the branch carries commits base does not
+ *  have (`force` overrides — the branch, and every commit on it, survives regardless). */
+export async function disposeKild(kildId: string, force = false): Promise<DisposeKildResponse> {
+  const query = force ? '?force=true' : '';
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}${query}`, { method: 'DELETE' });
+}
+
+/** A land, real or hypothetical — the same shape either way. */
+export interface LandResponse {
+  base: string;
+  branch: string | null;
+  commits: Array<{ sha: string; subject: string }>;
+  files: string[];
+  collides: string[];
+  wouldMerge: boolean;
+  merged: boolean;
+  sha?: string;
+  error?: string;
+  dryRun: boolean;
+}
+
+/** The dry run: what landing would do. Touches nothing. */
+export async function landPreview(kildId: string): Promise<LandResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/land`);
+}
+
+/** Perform the land and report the merge sha. */
+export async function landKild(kildId: string): Promise<LandResponse> {
+  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/land`, { method: 'POST' });
 }
 
 export interface AgentSummary {

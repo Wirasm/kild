@@ -156,17 +156,18 @@ export async function listWorktrees(repo: string): Promise<Worktree[]> {
   return trees;
 }
 
-/** A refusal to remove a worktree without an explicit destructive request. */
+/** A refusal to remove a worktree: it is not there, or a live agent is working in it.
+ *  There is deliberately no `dirty` refusal — disposal is guarded on authored COMMITS
+ *  (see `kild-disposal.ts`); the working tree is not evidence of work. */
 export type WorktreeRemoveRefusal = {
   ok: false;
-  code: 'dirty' | 'in_use' | 'not_found';
-  files?: string[];
+  code: 'in_use' | 'not_found';
 };
 
 export type WorktreeRemoveResult = { ok: true } | WorktreeRemoveRefusal;
 
 /** Files whose uncommitted changes would be discarded by removing `wtPath`. */
-async function changedFiles(wtPath: string): Promise<string[]> {
+export async function changedFiles(wtPath: string): Promise<string[]> {
   const { stdout } = await execFile('git', [
     '-C',
     wtPath,
@@ -184,7 +185,8 @@ async function changedFiles(wtPath: string): Promise<string[]> {
   return files;
 }
 
-async function registeredWorktree(repo: string, wtPath: string): Promise<boolean> {
+/** Is `wtPath` a worktree git actually has registered for `repo`? */
+export async function registeredWorktree(repo: string, wtPath: string): Promise<boolean> {
   if (!existsSync(wtPath)) return false;
   // macOS commonly presents /var as a /private/var symlink; git reports the latter.
   // Resolve both sides rather than comparing spellings of the same directory.
@@ -193,24 +195,10 @@ async function registeredWorktree(repo: string, wtPath: string): Promise<boolean
   return trees.some((tree) => existsSync(tree.path) && realpathSync(tree.path) === target);
 }
 
-/** Remove a worktree only when it is clean. Refusals are data so callers can give a
- * useful preview instead of parsing git's prose. `inUse` is supplied by the engine,
- * which alone knows about live sessions. */
-export async function removeWorktree(
-  repo: string,
-  wtPath: string,
-  inUse = false,
-): Promise<WorktreeRemoveResult> {
-  if (inUse) return { ok: false, code: 'in_use' };
-  if (!(await registeredWorktree(repo, wtPath))) return { ok: false, code: 'not_found' };
-  const files = await changedFiles(wtPath);
-  if (files.length > 0) return { ok: false, code: 'dirty', files };
-  await execFile('git', ['-C', repo, 'worktree', 'remove', wtPath]);
-  return { ok: true };
-}
-
-/** Explicitly destructive removal. Live-session protection remains the caller's
- * responsibility; this verb exists so force is never implicit in ordinary removal. */
+/** Remove a worktree, discarding whatever is in it. The ONE removal primitive: the
+ * decision of whether removal is allowed belongs to `kild-disposal.ts`, which guards on
+ * authored commits and reports what it discards. Live-agent protection is likewise the
+ * caller's — only the engine knows about live sessions. Never deletes the branch. */
 export async function forceRemoveWorktree(
   repo: string,
   wtPath: string,

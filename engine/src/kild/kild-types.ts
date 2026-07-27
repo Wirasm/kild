@@ -49,6 +49,11 @@ interface AgentBase {
   tokens?: number;
   /** Latest cumulative cost (USD) for this agent's session, from `stats` UiEvents. */
   cost?: number;
+  /** True once this agent's session has been stopped on its own (via
+   *  `DELETE /api/kilds/:id/agents/:handle`). It STAYS on the roster — a handle is
+   *  unique for the kild's lifetime and never rebinds — so observers need this to tell
+   *  a working agent from a stopped one. */
+  stopped?: boolean;
 }
 
 /** An agent kild spawned and owns: an agent session addressable by its `@handle`,
@@ -106,6 +111,8 @@ export interface AgentView {
   tokens?: number;
   /** Latest cumulative session cost in USD (from `stats` UiEvents). */
   cost?: number;
+  /** True once the agent's session was stopped individually (see {@link AgentBase.stopped}). */
+  stopped?: boolean;
 }
 
 /** The one mapping from a live agent to its observer view — every list/status/
@@ -122,6 +129,7 @@ export function agentView(agent: Agent): AgentView {
     idle: agent.idle,
     tokens: agent.tokens,
     cost: agent.cost,
+    stopped: agent.stopped,
   };
 }
 
@@ -174,6 +182,10 @@ export interface Kild {
   base?: string;
   agents: Agent[];
   log: Message[];
+  /** Merge commit this kild's branch landed as, recorded by `POST /api/kilds/:id/land`.
+   *  The ledger prefers it over inferring containment from git, so a landed run can name
+   *  the sha it became instead of only asserting it is contained. */
+  landedSha?: string;
 }
 
 /** An agent to spawn into a kild. */
@@ -217,6 +229,8 @@ export interface ArchivedKild {
   cwd?: string;
   /** Base branch the kild measured against. Optional: older files predate it. */
   base?: string;
+  /** Merge commit the kild landed as, when it was landed through the engine. */
+  landedSha?: string;
 }
 
 /** A live kild enriched with its git/worktree state — the code-state half of
@@ -226,6 +240,11 @@ export interface LiveKildStatus extends ArchivedKild {
   git?: KildGitStatus;
   /** Kild cost rollup summed over agents — absent until stats have arrived. */
   totals?: CostTotals;
+  /** True for a kild that exists only as a `kild/*` worktree on disk: enumerated from
+   *  git because its kild record is gone (an older engine run, lost state). It has no
+   *  agents and no log, and is addressed by its WORKTREE NAME — without this it would
+   *  have no id at all, which is how trees became permanently unreclaimable. */
+  orphan?: boolean;
 }
 
 /** Typed kild-domain result: every command either succeeds with a value or fails with

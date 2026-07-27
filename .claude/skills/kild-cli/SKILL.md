@@ -41,12 +41,15 @@ One word per concept. See `docs/VOCABULARY.md`.
 | Command | What it does |
 |---|---|
 | `kild run [opts] <prompt…>` | Run one agent on a prompt to completion, print the result |
-| `kild ls` | List live kilds with code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-kild collisions) |
+| `kild ls [--state s] [--project p]` | List kilds with code-state observability (branch, ahead/behind, dirty, conflicts, changed-file count, cross-kild collisions). **Includes `kild/*` worktrees with no live kild** — abandoned trees show as `(orphan tree, no kild record)`, addressed by worktree name. `--state live\|orphan\|reclaimable` |
 | `kild new <goal> --detach [opts]` | Create a kild, print its id, return. Omit `--detach` for an interactive session |
 | `kild log <id>` | Read a kild's full message thread (`kild ls` shows only the last messages) |
 | `kild show <id>` | One kild in detail: agents, git state, collisions, full log |
-| `kild send <id> <text…> [--to a,b]` | Send a message into a live kild. `--to` names recipients; omit to reach the kild's lead |
-| `kild stop <id>` | Stop a live kild by id |
+| `kild send <id> <text…> --to a,b` | Send a message to named recipients in a live kild. **There is no lead and no default** — the engine never infers a recipient. `--to` is only omittable when the kild has exactly one agent, and the CLI then resolves that handle and sends it explicitly |
+| `kild spawn <id> --as <handle>` | Add an agent to a live kild (`--persona`, `--model`). Errors are reported — an unknown persona or duplicate handle fails loudly |
+| `kild stop <id>` | Stop a live kild by id. With `--as <handle>` stops **that one agent** and leaves the kild running |
+| `kild land <id> [--execute]` | Without `--execute`: a **dry run** that touches nothing and reports what would merge and what collides. With it: merges the kild's branch into its base in the project's main checkout and prints the merge sha |
+| `kild rm <id> [--force]` | Dispose of a kild's worktree. Refused when the branch carries commits its base does not have (unlanded work); uncommitted files are discarded and listed, not a refusal. **The `kild/<name>` branch always survives**, so `--force` loses no commits |
 | `kild attach <id> --as <handle>` | Register an **attached** agent — a harness kild does not spawn (e.g. the Claude Code session you are in) claiming a `@handle`. Idempotent |
 | `kild inbox <id> --as <handle>` | Destructively read that agent's inbox. Empty = idle. `--format claude-stop` shapes it as a Claude Code `Stop` hook |
 | `kild agents` | List live agents |
@@ -55,9 +58,12 @@ One word per concept. See `docs/VOCABULARY.md`.
 | `kild project rm <name>` | Remove a project |
 | `kild persona ls [--project <dir>]` | List available personas (built-in `default` + convention dirs + config plugins) |
 | `kild persona show <name> [--project <dir>]` | Print a persona's resolved system prompt |
-| `kild worktree ls --project <p>` | List the project's `kild/*` worktrees |
-| `kild worktree rm <name> --project <p>` | Remove a worktree (frees disk; the `kild/<name>` branch persists) |
-| `kild worktree prune --project <p>` | Remove **and `-d`-delete the branch of** each `kild/*` worktree merged into the default branch (clean trees only) |
+
+There is **no `kild worktree` group**: a kild *is* a worktree, so it has one set of verbs.
+`kild worktree ls` → `kild ls`, `kild worktree rm` → `kild rm`, and `kild worktree prune` →
+`kild ls --state reclaimable` (then `kild rm` what you mean to reclaim — nothing is removed
+behind your back). All of these take a live kild's **id** or an orphan tree's **worktree
+name**; `kild ls` prints whichever applies.
 
 Add `--json` to any command for machine-readable output on stdout.
 
@@ -65,7 +71,9 @@ Add `--json` to any command for machine-readable output on stdout.
 
 `--project <name|path>` · `--persona <name>` · `--model <ref>` · `--worktree <name>` ·
 `--base <branch>` · `--agents a,b,c` (for `kild new`) · `--to a,b` (for `kild send`) ·
-`--as <handle>` (for `attach`/`inbox`) · `--detach` · `--force` · `--json`
+`--as <handle>` (for `attach`/`inbox`/`spawn`, and `stop` to stop one agent) ·
+`--state live|orphan|reclaimable` (for `kild ls`) · `--execute` (for `kild land`) ·
+`--detach` · `--force` · `--json`
 
 ## Driving kilds (multi-agent units of parallel work)
 
@@ -141,10 +149,18 @@ Conventions when you drive kild:
   the checkout's current branch. On a repo whose trunk is `dev`, set `{"baseBranch":"dev"}`
   so ahead/behind and collisions reflect only this kild's work.
 - **Observe & land.** `kild ls` shows each kild's branch, ahead/behind, dirty, conflicts,
-  and cross-kild file collisions; the agent lands work with normal git/gh inside its tree.
-- **Clean up.** `kild worktree rm <name> --project <p>` frees a tree; `prune` removes trees
-  whose branch merged into base. **Note:** prune only reclaims *merged and clean* trees, so
-  abandoned work accumulates — see `docs/worktree-disposal.md`.
+  and cross-kild file collisions. `kild land <id>` previews the merge without touching
+  anything; `kild land <id> --execute` performs it and prints the sha (recorded on the kild,
+  so the ledger names the commit).
+- **Clean up.** `kild rm <id>` frees a tree. It refuses while the branch carries commits the
+  base does not have — that is unlanded work, and you are told so rather than the tree
+  quietly surviving. Uncommitted files are **not** a refusal (provisioning litter is not
+  work): they are discarded and listed. The `kild/<name>` branch always survives, which is
+  why `--force` costs no commits. `kild ls --state reclaimable` is the list `kild rm` would
+  accept.
+- **Stranded trees are addressable.** `kild ls` enumerates worktrees from git, so a tree
+  from an earlier engine run appears as an orphan (no agents, no log) under its worktree
+  name and can be landed or removed like any other kild.
 
 ## The output contract
 
@@ -199,8 +215,10 @@ Two agents on one repo in isolation, then review + clean up:
 kild run --project myapp --worktree fix-auth --json "Fix the auth bug." 2>/dev/null &
 kild run --project myapp --worktree add-logs --json "Add request logging." 2>/dev/null &
 wait
-kild worktree ls --project myapp --json
-kild worktree rm fix-auth --project myapp
+kild ls --project myapp --json           # both trees, with their git state
+kild land fix-auth                       # dry run: what would merge, what collides
+kild land fix-auth --execute             # merge it, print the sha
+kild rm fix-auth                         # free the tree (the branch stays)
 ```
 
 Register a project, then list its personas:

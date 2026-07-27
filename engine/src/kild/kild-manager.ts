@@ -243,6 +243,9 @@ export class KildManager {
         id: kild.id,
         name: kild.name,
         worktree: kild.worktree,
+        cwd: kild.cwd,
+        base: kild.base,
+        landedSha: kild.landedSha,
         agents: kild.agents.map(agentView),
         log: kild.log,
         totals: costTotals(kild.agents),
@@ -253,19 +256,85 @@ export class KildManager {
 
   /** The effective kild dir (the kild's worktree if set, else its cwd) + base of
    *  ONE live kild — the same resolution {@link liveKildsStatus} uses per kild, exposed
-   *  so the review endpoints can drill into a single kild without probing every kild's
-   *  git state. Live kilds only: an archived kild's agents are gone and its worktree may
-   *  be pruned, so there is no working dir to inspect (`invalid_state`); an id that was
-   *  never a kild is `not_found`. */
-  kildDir(kildId: string): CommandResult<{ dir: string; base?: string }> {
+   *  so the review, land and disposal endpoints can drill into a single kild without
+   *  probing every kild's git state. `repo` is the main checkout (its cwd), which land
+   *  merges into and disposal removes the worktree from. Live kilds only: an archived
+   *  kild's agents are gone and its worktree may be pruned, so there is no working dir to
+   *  inspect (`invalid_state`); an id that was never a kild is `not_found`. */
+  kildDir(kildId: string): CommandResult<{
+    name: string;
+    dir: string;
+    repo: string;
+    worktree?: string;
+    base?: string;
+  }> {
     const kild = this.registry.get(kildId);
     if (kild) {
-      return ok({ dir: kild.worktree ? worktreePath(kild.worktree) : kild.cwd, base: kild.base });
+      return ok({
+        name: kild.name,
+        dir: kild.worktree ? worktreePath(kild.worktree) : kild.cwd,
+        repo: kild.cwd,
+        worktree: kild.worktree,
+        base: kild.base,
+      });
     }
     if (this.registry.archived().some((archived) => archived.id === kildId)) {
       return fail('invalid_state', `kild ${kildId} is archived; its working dir is gone`);
     }
     return fail('not_found', `no such live kild: ${kildId}`);
+  }
+
+  /** Project directories the live kilds run in — the repos to ask git for `kild/*`
+   *  worktrees, alongside the registered projects. */
+  liveCwds(): string[] {
+    return [...new Set(this.registry.liveKildObjects().map((kild) => kild.cwd))];
+  }
+
+  /** Worktree names live kilds occupy — a tree in this set has a kild record, so it is
+   *  not an orphan. */
+  liveWorktrees(): Set<string> {
+    return new Set(
+      this.registry
+        .liveKildObjects()
+        .map((kild) => kild.worktree)
+        .filter((name): name is string => typeof name === 'string'),
+    );
+  }
+
+  /** Record the merge a land produced, so the ledger can name the commit instead of
+   *  inferring containment. */
+  recordLand(kildId: string, sha: string): CommandResult<KildActionSuccess> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    kild.landedSha = sha;
+    this.registry.persistNow(kildId);
+    return ok({ message: `Kild '${kild.name}' landed as ${sha.slice(0, 7)}.` });
+  }
+
+  /** Stop ONE agent's session without stopping the kild — the rest keep working.
+   *
+   *  The agent stays on the roster, marked `stopped`: a handle is unique for the kild's
+   *  lifetime and must never rebind, so its history stays addressable
+   *  (`…/agents/:handle/transcript`) after its process is gone. An attached agent is
+   *  refused — its harness belongs to the human, and kild must never assume it may end
+   *  it. */
+  stopAgent(kildId: string, handle: string): CommandResult<KildActionSuccess> {
+    const kild = this.registry.get(kildId);
+    if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    const agent = kild.agents.find((candidate) => candidate.handle === handle.trim());
+    if (!agent) return fail('not_found', `no such agent: @${handle}`);
+    if (agent.ownership === 'attached') {
+      return fail('rejected', `@${agent.handle} is attached — its harness is not kild's to stop`);
+    }
+    if (agent.stopped) {
+      return ok({ message: `@${agent.handle} was already stopped.` });
+    }
+    this.sessions.stop(agent.id);
+    agent.stopped = true;
+    agent.idle = true;
+    this.registry.persistNow(kildId);
+    this.broadcast({ kilds: this.registry.summaries() });
+    return ok({ message: `Stopped @${agent.handle} in kild '${kild.name}'.` });
   }
 
   /** Spawn an agent into a live kild. `invitedBy` is the spawning agent's handle, absent
@@ -389,7 +458,7 @@ export class KildManager {
     try {
       // Facts at the moment of stopping — after this the worktree can be landed or
       // pruned and the answers change.
-      appendKildLog(kild, memoryDir, await collectLedgerFacts(dir, kild.base));
+      appendKildLog(kild, memoryDir, await collectLedgerFacts(dir, kild.base, kild.landedSha));
     } catch (err) {
       console.error(
         `kild: ledger append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
