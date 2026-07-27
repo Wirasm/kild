@@ -6,6 +6,7 @@ import type { Kild } from './kild-types.ts';
 import {
   appendKildLog,
   formatKildLogEntry,
+  NO_FINAL_MESSAGE,
   projectMemorySection,
   synthesisPrompt,
 } from './memory.ts';
@@ -49,17 +50,15 @@ function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
         text: 'Fix the auth bug',
         ts: 1,
       },
-      { id: 'm1', kildId: 'kild-1', from: 'human', to: [], text: 'joined', ts: 2, system: true },
       {
-        id: 'm2',
+        id: 'm1',
         kildId: 'kild-1',
         from: 'agent',
         to: ['human'],
         text: 'Done: commit abc123, tests green',
-        ts: 3,
+        ts: 2,
       },
     ],
-    state: 'closed',
     worktree: 'fix-auth',
     base: 'main',
     ...overrides,
@@ -75,6 +74,15 @@ test('the log entry carries goal, outcome, resume handles, worktree — pure fac
     '- agent @agent (agent, openai-codex/gpt-5.6-sol) — pi --session /sessions/aaaa-bbbb.jsonl',
   );
   expect(entry).toContain('- worktree: kild/fix-auth (base main)');
+});
+
+test('goal is the first message and outcome the last; an empty kild says so', () => {
+  // Both were "the first/last non-system post" while engine notices sat on the log.
+  // With notices gone the log is nothing but real messages, so the ends are the ends.
+  const empty = formatKildLogEntry(kild('/p', { log: [] }), new Date('2026-07-24T12:00:00Z'));
+  expect(empty).not.toContain('- goal:');
+  expect(empty).toContain(`- outcome: ${NO_FINAL_MESSAGE}`);
+  expect(NO_FINAL_MESSAGE).toBe('(no messages recorded)');
 });
 
 test('appendKildLog creates the memory dir with a .gitignore and appends in order', () => {

@@ -47,7 +47,7 @@ const { values, positionals } = parseArgs({
     base: { type: 'string' }, // base branch for the worktree + git-status baseline
     as: { type: 'string' }, // `kild attach|inbox --as <handle>`: the attached agent's handle
     format: { type: 'string' }, // `kild inbox --format claude-stop`: harness hook output
-    to: { type: 'string' }, // `kild send --to a,b`: recipients; omit to reach the kild lead
+    to: { type: 'string' }, // `kild send --to a,b`: the agents addressed
   },
 });
 
@@ -78,7 +78,9 @@ async function dispatch(): Promise<void> {
     case 'new':
       return kildNew([action, ...rest].filter(Boolean).join(' '));
     case 'send': {
-      if (!action || rest.length === 0) throw new Error('usage: kild send <id> <text…>');
+      if (!action || rest.length === 0) {
+        throw new Error('usage: kild send <id> --to a,b <text…>');
+      }
       return kildSend(action, rest.join(' '));
     }
     case 'stop': {
@@ -278,10 +280,10 @@ async function agentsList(): Promise<void> {
 /**
  * `kild new <goal>` — opens a kild of agents (`--agents a,b,c`, each a
  * persona from the project's own personas; with none, one general-purpose `default`
- * agent), sends the goal to the lead, and streams every message. With `--worktree
- * <name>` the whole kild shares one `kild/<name>` tree (agents attach to it).
- * You can keep typing to send more messages (address agents with @handle).
- * The run ends when the kild does: the lead stops it with its `stop` tool
+ * agent), sends the goal to the agents named by `--to`, and streams every message. With
+ * `--worktree <name>` the whole kild shares one `kild/<name>` tree (agents attach to it).
+ * You can keep typing to send more messages to the same recipients.
+ * The run ends when the kild does: an agent stops it with its `stop` tool
  * after the final report, or Ctrl-C is the kill switch — it stops the kild
  * (stopping all agents) and exits. Requires the engine (it is multi-session).
  */
@@ -356,10 +358,7 @@ async function kildLog(id: string): Promise<void> {
   const kild = (await getLiveKilds()).find((r) => r.id === id);
   if (!kild) throw new Error(`no such live kild: ${id}`);
   if (json) return void console.log(JSON.stringify(kild.log, null, 2));
-  for (const m of kild.log) {
-    const tag = m.system ? ' [sys]' : '';
-    console.log(`${m.from} → [${m.to.join(', ')}]${tag}: ${m.text}`);
-  }
+  for (const m of kild.log) console.log(`${m.from} → [${m.to.join(', ')}]: ${m.text}`);
 }
 
 /** `kild show <id>` — one live kild's complete coordination and code-state context. */
@@ -377,13 +376,11 @@ async function kildShow(id: string): Promise<void> {
     ...(compact.git ? { git: compact.git } : {}),
     ...(compact.collidesWith ? { collidesWith: compact.collidesWith } : {}),
     worktree: kild.worktree,
-    state: kild.state,
     log: kild.log,
   };
   if (json) return void console.log(JSON.stringify(detail, null, 2));
 
   console.log(`${kild.id}\t${kild.name}`);
-  console.log(`state: ${kild.state ?? 'unknown'}`);
   console.log(`worktree: ${kild.worktree ?? '(none)'}`);
   console.log('agents:');
   for (const agent of compact.agents) {
@@ -404,8 +401,7 @@ async function kildShow(id: string): Promise<void> {
   }
   console.log('log:');
   for (const message of kild.log) {
-    const tag = message.system ? ' [sys]' : '';
-    console.log(`${message.from} → [${message.to.join(', ')}]${tag}: ${message.text}`);
+    console.log(`${message.from} → [${message.to.join(', ')}]: ${message.text}`);
   }
 }
 
@@ -425,32 +421,71 @@ async function kildList(): Promise<void> {
 
 /** `kild new <goal> --detach` — open a kild, print its id, return (no streaming). */
 async function kildNew(goal: string): Promise<void> {
-  if (!goal) throw new Error('usage: kild new <goal…> [--agents a,b] [--detach]');
+  if (!goal) throw new Error('usage: kild new <goal…> [--agents a,b] [--to a] [--detach]');
   if (!values.detach) return kildInteractive(goal);
+  const agents = kildAgents();
+  // The kickoff names its recipients like any other message. With one agent the CLI
+  // resolves that here; with several, say who the goal is for.
+  const to =
+    parseTo() ??
+    soleRecipient(
+      agents.map((a) => a.handle),
+      'this kild',
+    );
   const res = await newKild({
     name: values.project ?? 'kild',
     cwd: await kildCwd(),
-    agents: kildAgents(),
+    agents,
     worktree: values.worktree,
     base: values.base,
-    kickoff: goal,
+    kickoff: { to, text: goal },
   });
   console.log(json ? JSON.stringify(res, null, 2) : res.id);
 }
 
-/** `kild send <id> <text> [--to a,b]` — steer an existing kild from a separate
- *  call. `--to` names the agents addressed, mirroring the in-kild `send`
- *  tool; omit it to reach the kild lead. Recipients are never parsed from the text, so
- *  writing `@handle` in the message body addresses nobody. */
-async function kildSend(id: string, text: string): Promise<void> {
+/** `--to a,b` as a handle list. Returns undefined when the flag was not given at all;
+ *  a given-but-empty `--to` is a usage error, never "everyone". */
+function parseTo(): string[] | undefined {
+  if (values.to === undefined) return undefined;
   const to = values.to
-    ?.split(',')
+    .split(',')
     .map((s) => s.trim().replace(/^@/, ''))
     .filter(Boolean);
-  if (values.to !== undefined && !to?.length) {
-    throw new Error('--to must name at least one agent, e.g. --to claude');
+  if (to.length === 0) throw new Error('--to must name at least one agent, e.g. --to claude');
+  return to;
+}
+
+/**
+ * The CLI's one convenience the ENGINE deliberately refuses: in a kild with exactly one
+ * agent there is no ambiguity about who a message is for, so `--to` may be omitted and
+ * resolved here — client-side, against the roster this CLI can see — then passed
+ * explicitly. The engine still never defaults; it is handed a named recipient either way.
+ */
+function soleRecipient(handles: string[], where: string): string[] {
+  const only = handles[0];
+  if (handles.length === 1 && only) return [only];
+  throw new Error(
+    handles.length === 0
+      ? `--to is required: ${where} has no agents to address`
+      : `--to is required: ${where} has ${handles.length} agents (${handles.join(', ')})`,
+  );
+}
+
+/** `kild send <id> --to a,b <text>` — steer an existing kild from a separate call.
+ *  `--to` names the agents addressed, mirroring the in-kild `send` tool. Recipients are
+ *  never parsed from the text, so writing `@handle` in the message body addresses
+ *  nobody. */
+async function kildSend(id: string, text: string): Promise<void> {
+  let to = parseTo();
+  if (!to) {
+    const kild = (await getLiveKilds()).find((candidate) => candidate.id === id);
+    if (!kild) throw new Error(`no such live kild: ${id}`);
+    to = soleRecipient(
+      kild.agents.map((agent) => agent.handle),
+      `kild ${id}`,
+    );
   }
-  const res = await sendMessage(id, text, undefined, to);
+  const res = await sendMessage(id, to, text);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
 }
@@ -488,9 +523,15 @@ async function kildInteractive(goal: string): Promise<void> {
     : [{ handle: 'agent', persona: 'default' }];
   if (agents.length === 0) throw new Error('--agents must name at least one agent');
   const base = values.base;
-  // Addressing is structured: the engine defaults an untargeted message to the kild lead,
-  // so the goal reaches the lead without munging the text.
-  const kickoff = goal;
+  // Every message this session sends — the kickoff and each line typed afterwards — goes
+  // to these handles. The engine never infers them; the CLI resolves a single-agent kild
+  // as a convenience and otherwise makes you say who you are talking to.
+  const to =
+    parseTo() ??
+    soleRecipient(
+      agents.map((a) => a.handle),
+      'this kild',
+    );
   const kildId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
 
@@ -530,7 +571,7 @@ async function kildInteractive(goal: string): Promise<void> {
               }),
             );
           } else {
-            ws.send(JSON.stringify({ type: 'kild_send', id: kildId, text }));
+            ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text }));
           }
         }
       });
@@ -548,11 +589,11 @@ async function kildInteractive(goal: string): Promise<void> {
           agents: agents.map((p) => ({ ...p, model: values.model })),
         }),
       );
-      ws.send(JSON.stringify({ type: 'kild_send', id: kildId, text: kickoff }));
+      ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text: goal }));
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · type to send · /spawn <handle> [persona] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · type to send to ${to.map((h) => `@${h}`).join(' ')} · /spawn <handle> [persona] [model] · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
@@ -567,7 +608,7 @@ async function kildInteractive(goal: string): Promise<void> {
       } catch {
         return;
       }
-      // The engine archived our kild (the lead called `stop`, or another
+      // The engine archived our kild (an agent called `stop`, or another
       // client stopped it) — the run is over; resolve without re-stopping.
       if (parsed.archivedKild?.id === kildId) {
         if (!json) console.error('\x1b[2m— kild stopped —\x1b[0m');
@@ -619,8 +660,8 @@ async function runViaEngine(prompt: string): Promise<void> {
     };
 
     ws.addEventListener('open', () => {
-      // A one-shot run is a 1-agent kild: the agent is the sole inhabitant, so
-      // the bare send (no @mention) is delivered straight to it.
+      // A one-shot run is a 1-agent kild, so the CLI resolves the recipient here and
+      // addresses it explicitly — @agent is the whole roster.
       ws.send(
         JSON.stringify({
           type: 'kild_new',
@@ -631,7 +672,7 @@ async function runViaEngine(prompt: string): Promise<void> {
           agents: [{ handle: 'agent', persona: values.persona, model: values.model }],
         }),
       );
-      ws.send(JSON.stringify({ type: 'kild_send', id, text: prompt }));
+      ws.send(JSON.stringify({ type: 'kild_send', id, to: ['agent'], text: prompt }));
     });
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(String((e as { data: unknown }).data)) as {

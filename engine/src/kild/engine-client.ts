@@ -9,7 +9,9 @@ export interface NewKildRequest {
   project?: string;
   worktree?: string;
   agents: AgentSpec[];
-  kickoff: string;
+  /** The first message into the kild — addressed like any other: it names its
+   *  recipients. There is no agent it falls through to. */
+  kickoff: { to: string[]; text: string };
   /** Base branch for the worktree + git-status baseline (default: checkout's branch). */
   base?: string;
   /** Live session that created the kild; ordinary REST callers omit this. */
@@ -44,24 +46,18 @@ export async function newKild(req: NewKildRequest): Promise<NewKildResponse> {
   });
 }
 
-/** `to` names the agents being addressed, exactly as the in-kild `send` tool does. Omit
- *  it to reach the kild lead — the long-standing default, unchanged. Without it a caller
- *  outside a kild could only ever reach the lead, so an attached agent was addressable by
- *  agents but not by the human. */
+/** `to` names the agents being addressed, exactly as the in-kild `send` tool does, and
+ *  like it, it is required — the engine has no default recipient to fall back to. */
 export async function sendMessage(
   kildId: string,
+  to: string[],
   text: string,
   sessionId?: string,
-  to?: string[],
 ): Promise<KildActionResponse> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      ...(sessionId ? { sessionId } : {}),
-      ...(to?.length ? { to } : {}),
-    }),
+    body: JSON.stringify({ to, text, ...(sessionId ? { sessionId } : {}) }),
   });
 }
 

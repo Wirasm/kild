@@ -39,7 +39,6 @@ export async function runAgent(): Promise<never> {
   const personaName = process.env.KILD_PERSONA || undefined;
   const modelPattern = process.env.KILD_MODEL || undefined;
   const inKild = !!process.env.KILD_KILD_ID;
-  const isKildLead = process.env.KILD_LEAD === '1';
   const skillsProfile = process.env.KILD_SKILLS_PROFILE || undefined;
   const forkFrom = process.env.KILD_FORK_SESSION || undefined;
 
@@ -78,23 +77,20 @@ export async function runAgent(): Promise<never> {
     const modelRuntime = await ModelRuntime.create();
     const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
-    // An agent in a kild gets `send` + `spawn`; the kild's LEAD also gets `stop`
-    // (ending the kild is the lead's explicit act). A non-kild session gets no custom
-    // tools.
+    // Every agent in a kild gets the same three tools — there is no rank, so there is no
+    // tool only some agents hold. A non-kild session gets no custom tools.
     const customTools = inKild
       ? [
-          createSendTool((text, to) => emitKildCommand({ kind: 'send', text, to })),
+          createSendTool((to, text) => emitKildCommand({ kind: 'send', to, text })),
           createSpawnTool((spec) => emitKildCommand({ kind: 'spawn', ...spec })),
-          ...(isKildLead
-            ? [createStopTool((spec) => emitKildCommand({ kind: 'stop', ...spec }))]
-            : []),
+          createStopTool((spec) => emitKildCommand({ kind: 'stop', ...spec })),
         ]
       : undefined;
     // Skills: an explicit kild capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
     // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
     // PLUS the config-declared skill dirs, so a spawned agent can load `prp-implement` when
     // the orchestrator tells it to. This is what makes a plugged-in framework's process
-    // reachable by whoever gets spawned, not only the lead.
+    // reachable by whoever gets spawned, not only the agent that was there first.
     let resourceLoader: DefaultResourceLoader | undefined;
     if (skillsProfile) {
       resourceLoader = new DefaultResourceLoader({

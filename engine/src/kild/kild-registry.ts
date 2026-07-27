@@ -13,9 +13,11 @@ import {
 
 /**
  * In-memory store of live kilds, with write-through persistence of each kild's
- * conversation log to `$KILD_HOME/kilds/<id>.json`. Live behaviour (delivery/
- * broadcast) lives in the router/manager — this only holds state and the on-disk
- * mirror.
+ * message history to `$KILD_HOME/kilds/<id>.json`. Live behaviour (delivery/broadcast)
+ * lives in the manager — this only holds state and the on-disk mirror.
+ *
+ * Membership here IS liveness: a kild in this map is running, a kild in the archive is
+ * stopped. There is no state field, because there is no third answer.
  *
  * Persistence is **history only**: on construction we load past kilds into a
  * separate `archive` map. An owned agent is a subprocess that dies with the engine,
@@ -41,15 +43,14 @@ export class KildRegistry {
     return this.kilds.get(kildId);
   }
 
-  /** Drop the live kild. If it had any history, move it into the in-memory archive
-   *  immediately (and return the snapshot) so it shows as read-only history without
-   *  waiting for the next engine start. Persist the final archived snapshot too, so a
-   *  halted→closed transition survives restart/reload. */
+  /** Drop the live kild — leaving the registry IS being stopped. If it had any history,
+   *  move it into the in-memory archive immediately (and return the snapshot) so it shows
+   *  as read-only history without waiting for the next engine start. */
   remove(kildId: string): ArchivedKild | undefined {
     const kild = this.kilds.get(kildId);
     this.kilds.delete(kildId);
     if (!kild || kild.log.length === 0) return undefined;
-    const archived = this.snapshot(kild, kild.state);
+    const archived = this.snapshot(kild);
     this.archive.set(kild.id, archived);
     this.saveArchived(archived);
     return archived;
@@ -88,8 +89,6 @@ export class KildRegistry {
       name: k.name,
       worktree: k.worktree,
       agents: k.agents.map(agentView),
-      state: k.state,
-      stopped: k.state === 'halted',
     }));
   }
 
@@ -107,7 +106,6 @@ export class KildRegistry {
       name: k.name,
       worktree: k.worktree,
       agents: k.agents.map(agentView),
-      state: k.state,
       log: k.log,
       cwd: k.cwd,
       base: k.base,
@@ -122,16 +120,15 @@ export class KildRegistry {
   /** Serialise a kild's history. Kilds with no messages are not worth persisting. */
   private save(kild: Kild): void {
     if (kild.log.length === 0) return;
-    this.persist(kild.id, this.snapshot(kild, kild.state));
+    this.persist(kild.id, this.snapshot(kild));
   }
 
-  private snapshot(kild: Kild, state: ArchivedKild['state']): ArchivedKild {
+  private snapshot(kild: Kild): ArchivedKild {
     return {
       id: kild.id,
       name: kild.name,
       worktree: kild.worktree,
       agents: kild.agents.map(agentView),
-      state,
       log: kild.log,
       cwd: kild.cwd,
       base: kild.base,
@@ -172,7 +169,7 @@ export class KildRegistry {
       if (!file.endsWith('.json')) continue;
       try {
         const data = JSON.parse(fs.readFileSync(path.join(this.dir, file), 'utf8')) as ArchivedKild;
-        if (data?.id) this.archive.set(data.id, { ...data, state: data.state ?? 'closed' });
+        if (data?.id) this.archive.set(data.id, data);
       } catch {
         // a corrupt/partial history file must not crash startup; skip it
       }

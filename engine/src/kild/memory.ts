@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { kildHome } from './config.ts';
-import { finalNonSystemPost } from './kild-events.ts';
 import type { Kild } from './kild-types.ts';
 
 /**
@@ -70,13 +69,27 @@ function ensureMemoryDir(projectCwd: string, dir: string): string {
   return dir;
 }
 
+/** Stable fallback when a kild produced no messages at all. */
+export const NO_FINAL_MESSAGE = '(no messages recorded)';
+
+/**
+ * The ledger's `outcome:` source: the text of the kild's last message.
+ *
+ * A heuristic, and knowingly so — it stands in for facts the engine already holds (land
+ * result, commits vs base, changed files) and is replaced by them in a later slice. It
+ * lives here because the ledger is its only consumer.
+ */
+function finalMessageText(kild: Pick<Kild, 'log'>): string {
+  return kild.log.at(-1)?.text ?? NO_FINAL_MESSAGE;
+}
+
 /** One kild's log entry, built purely from engine-held state. */
 export function formatKildLogEntry(kild: Kild, closedAt: Date): string {
   const lines: string[] = [];
   lines.push(`## ${closedAt.toISOString().slice(0, 10)} — ${kild.name} (${kild.id})`);
-  const kickoff = kild.log.find((message) => !message.system);
+  const kickoff = kild.log[0];
   if (kickoff) lines.push(`- goal: ${oneLine(kickoff.text, 240)}`);
-  lines.push(`- outcome: ${oneLine(finalNonSystemPost(kild), 400)}`);
+  lines.push(`- outcome: ${oneLine(finalMessageText(kild), 400)}`);
   for (const agent of kild.agents) {
     // An attached agent is a harness kild never owned: no persona, no model it can
     // vouch for, and nothing to resume.
