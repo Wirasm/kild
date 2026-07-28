@@ -305,6 +305,11 @@ app.get('/api/agents', (c) => c.json(agentManager.list()));
 // The archive is a listing, so it carries no log — `GET /api/kilds/:id/messages` serves an
 // archived kild's log exactly as it serves a live one. The archive only grows, so shipping
 // every stopped kild's full conversation here was the most expensive listing in the engine.
+// ORDER-DEPENDENT: this must stay ABOVE `/api/kilds/:id`. Hono matches in REGISTRATION
+// order, not static-before-param — verified: with `:id` registered first, a GET for
+// `/api/kilds/archive` binds `id="archive"` and this handler never runs. The failure is a
+// 404 from resolveKild, which reads as "no such kild" rather than as a routing mistake.
+// Same applies to `/api/kilds/status` below.
 app.get('/api/kilds/archive', (c) => c.json(kildManager.archivedViews()));
 
 // ── The kild collection ───────────────────────────────────────────────────────
@@ -433,6 +438,8 @@ app.get('/api/kilds', async (c) => {
 // uncommittedFiles, changedFiles, conflictsWithBase) plus cost rollups and per-agent
 // tokens/cost. Still no logs — those are `/api/kilds/:id/messages`.
 // `?state=live|orphan|reclaimable` filters; `?project=`/`?path=` scopes to one repo.
+// ORDER-DEPENDENT: must stay ABOVE `/api/kilds/:id` — see the note on `/api/kilds/archive`.
+// This is the route the whole cheap/costly polling split rests on, so it fails expensively.
 app.get('/api/kilds/status', async (c) => {
   const scoped = await kildScope(c);
   if (!scoped.ok) return c.json({ error: scoped.error }, scoped.status);
@@ -451,6 +458,10 @@ app.get('/api/kilds/status', async (c) => {
 
 // ONE kild, with its git state and cost — and WITHOUT its log, which is its own cursored
 // resource. Bounded cost by construction: one kild's git, never every kild's.
+// Registered AFTER the static `/api/kilds/archive` and `/api/kilds/status` deliberately.
+// Hono matches in registration order, so moving this above either one silently swallows it:
+// the id binds to the literal word and resolveKild answers "no such kild". Nothing about the
+// resulting 404 says the cause was routing.
 app.get('/api/kilds/:id', async (c) => {
   const id = c.req.param('id');
   const live = await kildManager.liveKildStatus(id);
