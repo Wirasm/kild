@@ -278,7 +278,7 @@ test('formatDelivery frames the message with kild, sender, and text', () => {
   expect(formatDelivery('demo', 'orchestrator', 'do X')).toBe('[#demo] @orchestrator: do X');
 });
 
-test('spawning an agent records no message — a roster change is an event, not a post', async () => {
+test('spawning an agent records no message — a roster change is an event, not a message', async () => {
   const { manager, prompted } = fixture();
   await newKild(manager, [{ handle: 'coder' }]);
   expect(await manager.spawnAgent('kild-1', { handle: 'reviewer' })).toMatchObject({ ok: true });
@@ -1114,7 +1114,7 @@ test('a human-driven harness attaches under any handle it likes — nothing is r
   await manager.send('kild-1', 'coder', ['human'], 'need a call on the schema');
   expect(manager.drain('kild-1', 'human')).toMatchObject({
     ok: true,
-    value: { posts: [{ from: 'coder', text: 'need a call on the schema' }] },
+    value: { messages: [{ from: 'coder', text: 'need a call on the schema' }] },
   });
 });
 
@@ -1128,7 +1128,7 @@ test('a message addressed to an attached agent is queued, not pushed', async () 
   const drained = manager.drain('kild-1', 'claude');
   expect(drained).toMatchObject({
     ok: true,
-    value: { idle: false, capped: false, posts: [{ from: 'coder', text: 'review is done' }] },
+    value: { idle: false, capped: false, messages: [{ from: 'coder', text: 'review is done' }] },
   });
 });
 
@@ -1145,7 +1145,7 @@ test('drain is destructive and the empty drain is the idle signal', async () => 
   // Second drain: nothing queued → empty, idle. No separate status verb exists, or needed.
   expect(manager.drain('kild-1', 'claude')).toEqual({
     ok: true,
-    value: { posts: [], idle: true, capped: false },
+    value: { messages: [], idle: true, capped: false },
   });
   const done = manager.liveKilds()[0]?.agents.find((p) => p.handle === 'claude');
   expect(done?.idle).toBe(true);
@@ -1164,7 +1164,7 @@ test('the wake cap stops a runaway sender from waking an attached agent forever'
     expect(await wake()).toMatchObject({ idle: false });
   }
   // The cap trips: the harness is told nothing (so it may stop), the mail is not eaten.
-  expect(await wake()).toMatchObject({ posts: [], idle: true, capped: true });
+  expect(await wake()).toMatchObject({ messages: [], idle: true, capped: true });
   expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { capped: false } });
 });
 
@@ -1178,7 +1178,7 @@ test('owned delivery is untouched by the attached branch', async () => {
     text: '[#demo] @orchestrator: do X',
     from: 'orchestrator',
   });
-  expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
+  expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { messages: [] } });
 });
 
 test('an inbox only ever sees messages that named it — it is not a firehose', async () => {
@@ -1189,7 +1189,7 @@ test('an inbox only ever sees messages that named it — it is not a firehose', 
   await manager.attach('kild-1', 'claude');
   await send(manager, ['orchestrator'], 'kick off');
   await manager.send('kild-1', 'orchestrator', ['coder'], 'for you only');
-  expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { posts: [] } });
+  expect(manager.drain('kild-1', 'claude')).toMatchObject({ ok: true, value: { messages: [] } });
 });
 
 test('one message splits across both transports: pushed to owned, queued to attached', async () => {
@@ -1204,7 +1204,7 @@ test('one message splits across both transports: pushed to owned, queued to atta
   });
   expect(manager.drain('kild-1', 'claude')).toMatchObject({
     ok: true,
-    value: { posts: [{ from: 'orchestrator', text: 'status?' }] },
+    value: { messages: [{ from: 'orchestrator', text: 'status?' }] },
   });
 });
 

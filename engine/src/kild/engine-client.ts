@@ -128,7 +128,7 @@ export async function attachAgent(kildId: string, handle: string): Promise<Attac
 
 export interface DrainInboxResponse {
   ok: true;
-  posts: InboxMessage[];
+  messages: InboxMessage[];
   /** True when this drain reported nothing — the attached agent's idle signal. */
   idle: boolean;
   /** True when the engine's wake cap withheld mail. The caller is told nothing either way. */
