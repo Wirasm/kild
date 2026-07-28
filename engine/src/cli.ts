@@ -31,7 +31,7 @@ import {
   stopKildAgent,
 } from './kild/engine-client.ts';
 import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
-import { listPersonas } from './kild/personas.ts';
+import { GENERAL_PERSONA, listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
 
 const { values, positionals } = parseArgs({
@@ -211,7 +211,7 @@ async function agentsList(): Promise<void> {
   if (json) return void console.log(JSON.stringify(agents, null, 2));
   if (agents.length === 0) return void console.error('no live agents');
   for (const a of agents) {
-    console.log(`${a.id}\t${a.persona ?? 'default'}${a.model ? ` (${a.model})` : ''}`);
+    console.log(`${a.id}\t${a.persona ?? GENERAL_PERSONA}${a.model ? ` (${a.model})` : ''}`);
   }
 }
 
@@ -233,7 +233,7 @@ function kildAgents(): Array<{ handle: string; persona: string; model?: string }
         .map((s) => s.trim())
         .filter(Boolean)
         .map((n) => ({ handle: n, persona: n, model: values.model }))
-    : [{ handle: 'agent', persona: 'default', model: values.model }];
+    : [{ handle: 'agent', persona: GENERAL_PERSONA, model: values.model }];
 }
 
 async function kildCwd(): Promise<string> {
@@ -573,7 +573,7 @@ async function kildInteractive(goal: string): Promise<void> {
         .map((s) => s.trim())
         .filter(Boolean)
         .map((n) => ({ handle: n, persona: n }))
-    : [{ handle: 'agent', persona: 'default' }];
+    : [{ handle: 'agent', persona: GENERAL_PERSONA }];
   if (agents.length === 0) throw new Error('--agents must name at least one agent');
   const base = values.base;
   // Every message this session sends — the kickoff and each line typed afterwards — goes

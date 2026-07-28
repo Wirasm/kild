@@ -26,14 +26,15 @@ test('the catalog lists each persona with its description', () => {
   expect(section).toContain('- planner — Drafts an implementation plan');
 });
 
-test('`default` is not listed — it describes nothing, and the prompt says so', () => {
+test('the built-in general agent is listed like any other, with its description', () => {
+  // It used to be filtered out for having no description. Describing it was the fix; hiding
+  // the one persona that always exists left an agent unable to delegate anything general.
   const section = formatPersonasSection([
-    { name: 'default', description: '' },
+    { name: 'general', description: 'General-purpose, no specialisation. Use when no other fits' },
     { name: 'reviewer', description: 'r' },
   ]);
-  expect(section).not.toContain('- default');
-  // But an agent still has to know it can ask for it.
-  expect(section).toContain('`default` (not listed)');
+  expect(section).toContain('- general — General-purpose, no specialisation.');
+  expect(section).toContain('- reviewer — r');
 });
 
 test('a persona with no description is still listed — a name beats invisibility', () => {
@@ -42,8 +43,7 @@ test('a persona with no description is still listed — a name beats invisibilit
   expect(section).not.toContain('coder —');
 });
 
-test('no personas beyond default yields no section at all, not an empty heading', () => {
-  expect(formatPersonasSection([{ name: 'default', description: '' }])).toBe('');
+test('an empty catalog yields no section at all, not an empty heading', () => {
   expect(formatPersonasSection([])).toBe('');
 });
 

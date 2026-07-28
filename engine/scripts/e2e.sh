@@ -84,7 +84,7 @@ chk "branch really survives"                   "$(cd $REPO && git branch --list 
 
 echo "══ 4. create a kild, directed send, attach, inbox"
 C=$(curl -s -X POST $E/api/kilds -H 'content-type: application/json' \
-  -d "{\"name\":\"e2e\",\"cwd\":\"$REPO\",\"worktree\":\"e2e\",\"agents\":[{\"handle\":\"coder\",\"persona\":\"default\"}],\"kickoff\":{\"to\":[\"coder\"],\"text\":\"start\"}}")
+  -d "{\"name\":\"e2e\",\"cwd\":\"$REPO\",\"worktree\":\"e2e\",\"agents\":[{\"handle\":\"coder\",\"persona\":\"general\"}],\"kickoff\":{\"to\":[\"coder\"],\"text\":\"start\"}}")
 ID=$(echo "$C" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)
 chk "kild created" "$C" '"ok":true'
 BAD=$(curl -s -X POST $E/api/kilds -H 'content-type: application/json' \

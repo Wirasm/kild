@@ -28,7 +28,7 @@ import {
   type StopOut,
 } from './kild-types.ts';
 import { appendKildLog, collectLedgerFacts, kildTranscriptPath } from './memory.ts';
-import { listPersonas } from './personas.ts';
+import { GENERAL_PERSONA, listPersonas } from './personas.ts';
 import { resolveBaseBranch, worktreePath } from './worktree.ts';
 import { kildGitStatus } from './worktree-status.ts';
 
@@ -755,7 +755,7 @@ export class KildManager {
       seenHandles.add(spec.handle);
 
       const resolvedPersona = spec.persona ?? spec.handle;
-      if (resolvedPersona !== 'default' && !knownPersonas.has(resolvedPersona)) {
+      if (resolvedPersona !== GENERAL_PERSONA && !knownPersonas.has(resolvedPersona)) {
         return fail('rejected', `unknown persona: ${resolvedPersona}`);
       }
       validated.push({ ...spec, resolvedPersona });

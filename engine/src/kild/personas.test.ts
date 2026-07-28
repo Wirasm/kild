@@ -46,7 +46,7 @@ test('discovers scoped global agents before home Claude agents', async () => {
     const personas = await listPersonas(projectRoot);
 
     expect(personas.map((persona) => persona.name)).toEqual([
-      'default',
+      'general',
       'project',
       'claude',
       'pi',

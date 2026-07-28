@@ -83,10 +83,10 @@ test('an agent hook spawns one agent with its persona, model and rendered prompt
   });
 });
 
-test('an agent hook without a persona runs as `default`', async () => {
+test('an agent hook without a persona runs as the built-in `general`', async () => {
   const recorder = spawnRecorder();
   await runCloseHook({ agent: { prompt: 'go' } }, event(), recorder.spawn);
-  expect(recorder.calls[0]?.spec.persona).toBe('default');
+  expect(recorder.calls[0]?.spec.persona).toBe('general');
 });
 
 test('a command hook runs in the kild cwd with the facts in its environment', async () => {
