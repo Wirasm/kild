@@ -378,3 +378,45 @@ test('a send to a kild this session is not attached to presents no credential', 
   expect(authHeaders[0]).toBeNull();
   withNoMail();
 });
+
+/**
+ * The silence line. `kild inbox --format claude-stop` IS a Stop hook and must degrade to
+ * silence; every other verb must fail loudly. An unreadable attachment record is the case
+ * that distinguishes them, because swallowing it in `send` posts a message with no
+ * credential — silently unattributed, which is the bug this whole change exists to fix.
+ */
+async function withCorruptRecord(session: string) {
+  await fs.mkdir(path.join(kildHome, 'attached'), { recursive: true });
+  await fs.writeFile(path.join(kildHome, 'attached', `${session}.json`), '{not json');
+}
+
+test('an unreadable record makes `send` fail loudly, never an unattributed send', async () => {
+  await withCorruptRecord('sess-corrupt');
+  drainResponse = { status: 200, body: { ok: true, message: 'Sent to the kild.' } };
+  drainRequests = [];
+  const sent = await runCli(['send', 'kild-9', '--to', 'claude', 'hi'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-corrupt',
+  });
+  expect(sent.exitCode).toBe(1);
+  expect(sent.stderr).toContain('unreadable attachment record');
+  // The decisive assertion: the message must NOT have gone out without a credential.
+  expect(drainRequests.map((r) => r.path)).not.toContain('/api/kilds/kild-9/messages');
+  withNoMail();
+});
+
+test('the same unreadable record is silence for the hook, which may never block a turn', async () => {
+  await withCorruptRecord('sess-corrupt');
+  const hook = await runCli(['inbox', '--format', 'claude-stop'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-corrupt',
+  });
+  expect(hook.stdout).toBe('');
+  expect(hook.exitCode).toBe(0);
+});
+
+test('...but an ordinary `inbox` reports the real cause, not a usage message', async () => {
+  await withCorruptRecord('sess-corrupt');
+  const human = await runCli(['inbox'], undefined, { CLAUDE_CODE_SESSION_ID: 'sess-corrupt' });
+  expect(human.exitCode).toBe(1);
+  expect(human.stderr).toContain('unreadable attachment record');
+  expect(human.stderr).not.toContain('usage: kild inbox');
+});

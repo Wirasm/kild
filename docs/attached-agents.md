@@ -121,13 +121,16 @@ never writes into `~/.claude`. Wire it by hand:
 }
 ```
 
-and in the environment of the session you want attached:
+then, from any session, at any time:
 
 ```bash
-export KILD_KILD_ID=<kild id from `kild ls`>   # unset ⇒ the hook does nothing at all
-export KILD_HANDLE=claude                      # optional, defaults to `claude`
-kild attach "$KILD_KILD_ID" --as "$KILD_HANDLE"
+kild attach <kild id from `kild ls`> --as claude    # the whole setup
 ```
+
+`attach` records that against the session that ran it and the hook resolves the same id, so no
+environment variable is involved and no relaunch is needed. `KILD_KILD_ID`/`KILD_HANDLE` still
+pin a session up front, but they now **lose** to an actual attach (see below), and there is no
+longer a default handle — an attach knows which handle it claimed, so nothing guesses one.
 
 With mail waiting, the hook prints Stop-hook JSON and exits 0
 ([hook contract](https://code.claude.com/docs/en/hooks), verified 2026-07-27):

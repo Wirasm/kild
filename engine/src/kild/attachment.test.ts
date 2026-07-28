@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { findAttachment, forgetAttachment, recordAttachment } from './attachment.ts';
+import { findAttachment, recordAttachment } from './attachment.ts';
 
 let home: string;
 let previous: string | undefined;
@@ -79,30 +79,75 @@ describe('supersession — the fork case', () => {
   });
 });
 
-describe('degrading to not-attached', () => {
-  // Every one of these sits under a turn-end hook, which must never fail somebody's turn.
-  test('malformed JSON reads as not attached', async () => {
+describe('unreadable is not the same fact as absent', () => {
+  // A send that swallowed "cannot read" would post with no credential — silently
+  // unattributed, which is the bug this module exists to prevent. Only a missing file means
+  // "not attached"; everything else throws and each caller decides. The turn-end hook
+  // catches at its own call site (see cli.attached.test.ts).
+  test('malformed JSON throws rather than reading as not attached', async () => {
     await fs.mkdir(path.join(home, 'attached'), { recursive: true });
     await fs.writeFile(recordFile('sess-1'), '{not json');
-    expect(await findAttachment('sess-1')).toBeNull();
+    expect(findAttachment('sess-1')).rejects.toThrow('unreadable attachment record');
   });
 
-  test('a record missing its fields reads as not attached', async () => {
+  test('a record missing its fields throws', async () => {
     await fs.mkdir(path.join(home, 'attached'), { recursive: true });
     await fs.writeFile(recordFile('sess-1'), JSON.stringify({ kildId: 'kild-a' }));
-    expect(await findAttachment('sess-1')).toBeNull();
+    expect(findAttachment('sess-1')).rejects.toThrow('malformed attachment record');
   });
 
-  test('a record with non-string fields reads as not attached', async () => {
+  test('a record with non-string fields throws', async () => {
     await fs.mkdir(path.join(home, 'attached'), { recursive: true });
     await fs.writeFile(recordFile('sess-1'), JSON.stringify({ kildId: 1, handle: [] }));
-    expect(await findAttachment('sess-1')).toBeNull();
+    expect(findAttachment('sess-1')).rejects.toThrow('malformed attachment record');
+  });
+
+  test('an absent record is still simply null', async () => {
+    expect(await findAttachment('never-attached')).toBeNull();
   });
 
   test('a record without attachedAt still resolves', async () => {
     await fs.mkdir(path.join(home, 'attached'), { recursive: true });
     await fs.writeFile(recordFile('s'), JSON.stringify({ kildId: 'kild-a', handle: 'kild' }));
     expect(await findAttachment('s')).toMatchObject({ attachedAt: 0 });
+  });
+});
+
+describe('concurrent attaches', () => {
+  test('two sessions claiming one handle at once leave exactly one attached', async () => {
+    // Without mutual exclusion each supersede scan sees the other's freshly written record as
+    // somebody else's and deletes it, leaving NEITHER attached — data loss in precisely the
+    // fork case this record exists to serve.
+    await Promise.all([
+      recordAttachment('race-a', 'kild-x', 'claude'),
+      recordAttachment('race-b', 'kild-x', 'claude'),
+    ]);
+    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
+      f.endsWith('.json'),
+    );
+    expect(survivors).toHaveLength(1);
+  });
+
+  test('many sessions racing on one handle still leave exactly one', async () => {
+    await Promise.all(
+      ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => recordAttachment(`many-${s}`, 'kild-y', 'kild')),
+    );
+    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
+      f.endsWith('.json'),
+    );
+    expect(survivors).toHaveLength(1);
+  });
+
+  test('concurrent attaches to DIFFERENT handles all survive', async () => {
+    await Promise.all([
+      recordAttachment('h-1', 'kild-z', 'alpha'),
+      recordAttachment('h-2', 'kild-z', 'beta'),
+      recordAttachment('h-3', 'kild-z', 'gamma'),
+    ]);
+    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
+      f.endsWith('.json'),
+    );
+    expect(survivors).toHaveLength(3);
   });
 });
 
@@ -120,17 +165,5 @@ describe('session ids reach the filesystem', () => {
   test('a traversing id cannot write outside the directory', async () => {
     await expect(recordAttachment('../../escaped', 'kild-a', 'kild')).rejects.toThrow();
     await expect(fs.readFile(path.join(home, '..', '..', 'escaped.json'))).rejects.toThrow();
-  });
-});
-
-describe('forgetAttachment', () => {
-  test('drops the record', async () => {
-    await recordAttachment('sess-1', 'kild-a', 'kild');
-    await forgetAttachment('sess-1');
-    expect(await findAttachment('sess-1')).toBeNull();
-  });
-
-  test('forgetting a session that never attached is not an error', async () => {
-    await forgetAttachment('never-attached');
   });
 });

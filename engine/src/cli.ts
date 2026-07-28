@@ -288,9 +288,12 @@ async function resolveAttachment(
 ): Promise<{ kildId?: string; handle?: string }> {
   if (id && handle) return { kildId: id, handle };
   const session = harnessSession();
-  // A record that cannot be read is not an error here: this resolution sits under a turn-end
-  // hook, which must degrade to silence rather than fail somebody's every turn.
-  const record = session ? await findAttachment(session).catch(() => null) : null;
+  // Deliberately NOT guarded. An unreadable record means "there may be an attachment and I
+  // cannot read it", and a `kild send` that swallowed that would post the message with no
+  // credential — silently unattributed, which is the exact bug this file exists to fix. The
+  // one caller allowed to degrade to silence is the turn-end hook, and it does so at its own
+  // call site where it knows it is a hook.
+  const record = session ? await findAttachment(session) : null;
   return {
     kildId: id ?? record?.kildId ?? process.env.KILD_KILD_ID ?? undefined,
     handle: handle ?? record?.handle ?? process.env.KILD_HANDLE ?? undefined,
@@ -332,7 +335,18 @@ async function kildInbox(idArg: string | undefined): Promise<void> {
   // Omitting both resolves the kild this session attached to — the case the environment
   // could never serve, since a session that started before the kild existed has no way to
   // be told about it.
-  const { kildId: id, handle } = await resolveAttachment(idArg, values.as);
+  //
+  // This is the one place the hook contract applies: as a hook, an unresolvable or unreadable
+  // attachment is silence; as an ordinary verb it is a loud error naming the real cause, not a
+  // usage message that sends the operator looking at their own syntax.
+  let resolved: { kildId?: string; handle?: string };
+  try {
+    resolved = await resolveAttachment(idArg, values.as);
+  } catch (err) {
+    if (!claudeStop) throw err;
+    return;
+  }
+  const { kildId: id, handle } = resolved;
   if (!id || !handle) {
     if (claudeStop) return; // not attached → silence, never a blocked turn
     throw new Error(

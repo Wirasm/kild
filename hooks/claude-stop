@@ -10,13 +10,19 @@
 #        { "hooks": { "Stop": [ { "hooks": [ { "type": "command",
 #            "command": "/abs/path/to/kild/hooks/claude-stop" } ] } ] } }
 #
-#   2. In the environment of the session you want attached (the same names the engine
-#      sets on the agents it spawns, so an attached agent describes itself identically):
-#        export KILD_KILD_ID=<kild id from `kild ls`>
-#        export KILD_HANDLE=claude              # optional, defaults to `claude`
+#   2. Claim a handle, from any session, at any time — this is the whole setup:
+#        kild attach <kild id from `kild ls`> --as claude
 #
-#   3. Claim the handle once the kild exists:
-#        kild attach "$KILD_KILD_ID" --as "$KILD_HANDLE"
+#      `attach` records that against the id of the session that ran it, and the drain below
+#      resolves the same id, so the session that attaches is the session that receives. A
+#      session can therefore attach to a kild opened AFTER it started, which is the normal
+#      case and which no environment variable could ever support.
+#
+#   3. Optional, and no longer the way in: export KILD_KILD_ID / KILD_HANDLE to pin a
+#      session to one kild up front. There is NO default handle — an attach knows which
+#      handle it claimed, so nothing has to guess one. Both variables now LOSE to an actual
+#      attach, because a harness settings file re-injects them on every start including
+#      resumes and a stale one naming an archived kild would drain nothing forever.
 #
 # The contract, in one line: print the drain's JSON, or print nothing, and ALWAYS exit 0.
 # A hook that cannot reach kild must never stop you from finishing a turn.
