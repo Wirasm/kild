@@ -24,7 +24,7 @@ test('agentEnv carries the fork source to the agent as KILD_FORK_SESSION', () =>
   );
   expect(env.KILD_FORK_SESSION).toBe('/sessions/2026-07-24_abc.jsonl');
   expect(env.KILD_CWD).toBe('/proj');
-  expect(env.KILD_SESSION_ID).toBe('s-1');
+  expect(env.KILD_AGENT_ID).toBe('s-1');
 });
 
 test('agentEnv leaves KILD_FORK_SESSION empty for an ordinary (fresh) spawn', () => {

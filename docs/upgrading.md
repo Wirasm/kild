@@ -169,6 +169,7 @@ that list), and the `kild/<name>` branch always survives, so force costs no comm
 | `KILD_PARTICIPANT` → `KILD_HANDLE` | renamed (Stop-hook wiring) |
 | `KILD_OPERATOR` | **removed** — the operator tier is gone |
 | `KILD_ROLE=worker` → `KILD_ROLE=agent` | renamed (internal; only matters if you invoke the worker directly) |
+| `KILD_SESSION_ID` → `KILD_AGENT_ID` | renamed (internal — the engine sets it on every agent it spawns). `session` means pi's conversation and nothing else, and this is the engine's own id for an agent's process. The REST field it is presented as renamed with it: `sessionId` → `agentId`. |
 
 ## For helm and other API clients
 

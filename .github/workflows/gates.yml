@@ -1,0 +1,37 @@
+# The gates AGENTS.md already requires, run where nobody can forget them.
+#
+# It runs on macOS as well as Linux on purpose. Two bugs on this branch were green on one
+# platform and red on the other, for reasons invisible in the diff: `/var` is a symlink to
+# `/private/var` on macOS, so paths built from `$KILD_HOME` did not compare equal to the same
+# paths reported by git; and `.git` is a FILE in a linked worktree, so a `-d` test read "no
+# worktree here" only on machines where one had actually been created. A single-platform CI
+# would have passed both.
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test
+      # The HTTP surface end to end, against a real engine on a real repo. It binds
+      # $KILD_E2E_PORT, never 4517, and needs no model provider: every check here can fail.
+      - run: bun run e2e
+        env:
+          KILD_E2E_PORT: 4611

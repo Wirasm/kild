@@ -46,26 +46,40 @@ export async function newKild(req: NewKildRequest): Promise<NewKildResponse> {
   });
 }
 
+/**
+ * The agent id of the process this CLI is running INSIDE, when it is running inside one.
+ *
+ * The engine sets `KILD_AGENT_ID` on every agent it spawns, and an agent that shells
+ * `kild send` from bash is one of those. Forwarding it is what makes such a message
+ * attributable: without it the agent presented no credential and its own words landed on the
+ * log as `human` — the engine could not tell one of its own agents from the operator typing.
+ * A human's shell has no such variable and is still `human`, which is correct.
+ */
+const selfAgentId = (): string | undefined => process.env.KILD_AGENT_ID || undefined;
+
 /** `to` names the agents being addressed, exactly as the in-kild `send` tool does, and
  *  like it, it is required — the engine has no default recipient to fall back to. */
 export async function sendMessage(
   kildId: string,
   to: string[],
   text: string,
-  sessionId?: string,
+  agentId: string | undefined = selfAgentId(),
 ): Promise<KildActionResponse> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ to, text, ...(sessionId ? { sessionId } : {}) }),
+    body: JSON.stringify({ to, text, ...(agentId ? { agentId } : {}) }),
   });
 }
 
-export async function stopKild(kildId: string, sessionId?: string): Promise<KildActionResponse> {
+export async function stopKild(
+  kildId: string,
+  agentId: string | undefined = selfAgentId(),
+): Promise<KildActionResponse> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/stop`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...(sessionId ? { sessionId } : {}) }),
+    body: JSON.stringify({ ...(agentId ? { agentId } : {}) }),
   });
 }
 

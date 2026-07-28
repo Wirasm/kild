@@ -78,7 +78,7 @@ export async function runAgent(): Promise<never> {
     const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
     // Every agent in a kild gets the same two tools — there is no rank, so there is no
-    // tool only some agents hold. A non-kild session gets no custom tools. `send` also
+    // tool only some agents hold. An agent outside a kild gets no custom tools. `send` also
     // covers growing the kild: addressing a handle nobody holds creates that agent, which
     // is why there is no third tool here.
     const customTools = inKild

@@ -587,17 +587,17 @@ app.post('/api/kilds', async (c) => {
 // REQUIRED here for the same reason: the engine never infers a recipient. Addressing is
 // never parsed from the message text, so `@handle` in `text` remains just text.
 app.post('/api/kilds/:id/messages', async (c) => {
-  const { text, from, sessionId, to } = (await jsonBody(c)) as {
+  const { text, from, agentId, to } = (await jsonBody(c)) as {
     text?: unknown;
     from?: unknown;
-    sessionId?: unknown;
+    agentId?: unknown;
     to?: unknown;
   };
   if (typeof text !== 'string') return c.json({ error: 'text required' }, 400);
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
-  if (sessionId !== undefined && typeof sessionId !== 'string')
-    return c.json({ error: 'sessionId must be a string' }, 400);
+  if (agentId !== undefined && typeof agentId !== 'string')
+    return c.json({ error: 'agentId must be a string' }, 400);
   const addressed = recipients(to);
   if (!addressed.ok) return c.json({ error: addressed.error }, 400);
   const id = c.req.param('id');
@@ -605,7 +605,7 @@ app.post('/api/kilds/:id/messages', async (c) => {
     {
       kildId: id,
       from: typeof from === 'string' ? from : undefined,
-      sessionId,
+      agentId,
       token: bearerToken(c),
     },
     kildManager,
@@ -630,7 +630,7 @@ app.post('/api/kilds/:id/agents', async (c) => {
     persona?: unknown;
     model?: unknown;
     invitedBy?: unknown;
-    sessionId?: unknown;
+    agentId?: unknown;
     task?: unknown;
     forkFrom?: unknown;
   };
@@ -643,8 +643,8 @@ app.post('/api/kilds/:id/agents', async (c) => {
   if (body.model !== undefined && typeof body.model !== 'string') {
     return c.json({ error: 'model must be a string' }, 400);
   }
-  if (body.sessionId !== undefined && typeof body.sessionId !== 'string') {
-    return c.json({ error: 'sessionId must be a string' }, 400);
+  if (body.agentId !== undefined && typeof body.agentId !== 'string') {
+    return c.json({ error: 'agentId must be a string' }, 400);
   }
   // No `invitedBy` check here: presence alone is a rejection, whatever its type, and
   // resolveSpawnActor is the one place that says so.
@@ -676,7 +676,7 @@ app.post('/api/kilds/:id/agents', async (c) => {
   const spawner = resolveSpawnActor(
     {
       kildId: id,
-      sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      agentId: typeof body.agentId === 'string' ? body.agentId : undefined,
       token: bearerToken(c),
       invitedBy: body.invitedBy,
     },
@@ -714,7 +714,7 @@ app.delete('/api/kilds/:id/agents/:handle', (c) => {
 // or shell alias can call it on every session start.
 //
 // It also gets a `token`: send it back as `Authorization: Bearer <token>` and this handle is
-// what the engine writes as `from`. Without it an attached sender has no kild session to be
+// what the engine writes as `from`. Without it an attached sender has no agent process to be
 // recognised by and reads as the unattributed label — so two attached agents in one kild
 // were indistinguishable on the log. Re-attaching returns the same token (see AttachTokens).
 app.post('/api/kilds/:id/agents/attach', async (c) => {
@@ -737,19 +737,19 @@ app.post('/api/kilds/:id/inbox/drain', async (c) => {
   return c.json({ ok: true, ...result.value });
 });
 app.post('/api/kilds/:id/stop', async (c) => {
-  const { from, sessionId } = (await jsonBody(c)) as {
+  const { from, agentId } = (await jsonBody(c)) as {
     from?: unknown;
-    sessionId?: unknown;
+    agentId?: unknown;
   };
   if (from !== undefined && typeof from !== 'string')
     return c.json({ error: 'from must be a string' }, 400);
-  if (sessionId !== undefined && typeof sessionId !== 'string')
-    return c.json({ error: 'sessionId must be a string' }, 400);
+  if (agentId !== undefined && typeof agentId !== 'string')
+    return c.json({ error: 'agentId must be a string' }, 400);
   const attribution = resolveStopActor(
     {
       kildId: c.req.param('id'),
       from: typeof from === 'string' ? from : undefined,
-      sessionId,
+      agentId,
       token: bearerToken(c),
     },
     kildManager,

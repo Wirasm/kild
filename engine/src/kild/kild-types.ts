@@ -61,7 +61,9 @@ interface AgentBase {
 export interface OwnedAgent extends AgentBase {
   /** Absent (the persisted default) or explicit — both mean kild owns the process. */
   ownership?: 'owned';
-  /** The kild session id running this agent. */
+  /** The engine's id for the process running this agent — a `randomUUID()` the manager
+   *  assigns, and the credential that process presents as `KILD_AGENT_ID`. Not a pi session:
+   *  that is {@link piSessionId}. */
   id: string;
   /** The underlying pi session id — the durable terminal-resume handle
    *  (`pi --session <piSessionFile ?? piSessionId>`). Captured from the agent's
@@ -86,9 +88,9 @@ export interface AttachedAgent extends AgentBase {
  *  address that is not in it does not exist. */
 export type Agent = OwnedAgent | AttachedAgent;
 
-/** The kild session behind an agent, or `undefined` when kild does not own its
- *  process. The ONE place callers that genuinely do not care about the ownership (stop
- *  the sessions, find a kild by session id) ask the question. */
+/** The process id behind an agent, or `undefined` when kild does not own one. The ONE place
+ *  callers that genuinely do not care about the ownership (stop every process, find a kild by
+ *  agent id) ask the question. */
 export function agentProcessId(agent: Agent): string | undefined {
   return agent.ownership === 'attached' ? undefined : agent.id;
 }

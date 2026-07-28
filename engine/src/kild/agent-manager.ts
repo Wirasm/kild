@@ -82,7 +82,7 @@ export function agentEnv(
     KILD_CWD: req.cwd ?? process.cwd(),
     KILD_PERSONA: req.persona ?? '',
     // Session identity is manager-owned: REST callers use it to identify kild creators.
-    KILD_SESSION_ID: id,
+    KILD_AGENT_ID: id,
     // The worktree *name*; the agent ensures it from KILD_CWD (the repo).
     KILD_WORKTREE: req.worktree ?? '',
     // Base branch a brand-new worktree forks from (empty → current HEAD).
