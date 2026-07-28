@@ -166,8 +166,14 @@ echo "══ 8. land: dry run touches nothing, execute records a sha"
 # The worktree is `kild/<name>` under $KILD_HOME/worktrees — the same tree `ensureWorktree`
 # would create and attach to — so creating it here tests exactly the same path and makes land
 # a real assertion with no provider needed.
+#
+# `-e`, NOT `-d`: in a LINKED worktree `.git` is a FILE (a `gitdir:` pointer), not a
+# directory. With `-d` the guard read "no worktree here" for a tree that was already there —
+# so on a machine where the agent got far enough to create it, this re-ran `git worktree add`
+# and failed on the existing branch, every run. Exactly the environment-dependent shape this
+# section is meant to remove: green where no agent starts, red where one does.
 WT="$KILD_HOME/worktrees/e2e"
-if [ ! -d "$WT/.git" ]; then
+if [ ! -e "$WT/.git" ]; then
   ( cd "$REPO" && git worktree add -q -b kild/e2e "$WT" main ) || no "e2e worktree created" "git worktree add failed"
 fi
 ( cd "$WT" && echo landed > l.txt && git add . && git commit -qm "kild work" ) \
@@ -201,6 +207,7 @@ AM=$(curl -s "$E/api/kilds/$ID/messages")
 chk "archived kild's log is still readable"    "$AM" "first"
 chkno "no state field on the archive"          "$(curl -s $E/api/kilds/archive)" '"state"'
 chkno "the archive listing carries NO log"     "$(curl -s $E/api/kilds/archive)" '"log"'
+chk "…but it IS sortable: endedAt is present"  "$(curl -s $E/api/kilds/archive)" '"endedAt":[0-9]'
 chk "the archived kild's record is still there" "$(curl -s $E/api/kilds/archive)" "e2e"
 PJ=$(curl -s -o /dev/null -w '%{http_code}' $E/api/projects)
 chk "GET /api/projects is gone"                "$PJ" "404"

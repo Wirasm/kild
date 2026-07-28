@@ -148,13 +148,27 @@ handle.
 
 ```diff
 - { id, name, worktree, agents[], log[], cwd, base, landedSha }
-+ { id, name, worktree, agents[],        cwd, base, landedSha, landed? }
++ { id, name, worktree, agents[],        cwd, base, landedSha, landed?, endedAt? }
 ```
 
 **`log` is gone from `GET /api/kilds/archive` and from the WS `{archivedKild}` frame.** One
 rule, no exceptions: no listing and no broadcast carries a log. Read an archived kild's log the
 same way you read a live one — `GET /api/kilds/:id/messages`, cursored by `seq`. The archive
 only grows, so this was the most expensive payload in the engine.
+
+`endedAt?: number` is new, and it is what makes the cheap archive usable: epoch millis for
+the last moment the engine knew the kild was alive — for one that stopped normally, when it
+stopped. **Sort history on this.** Dropping `log` dropped the only temporal signal with it
+(the last message's `ts` had been carrying that job by accident), which would have meant one
+`/messages` request per archived kild just to order a list.
+
+Wall-clock deliberately: `ts` cannot be a cursor because it can go backwards, but "when did
+this end" is a fact about the world and `seq` cannot answer it. Use it for display order,
+never for paging.
+
+Optional only because archives written before the field exist on disk. **There is no
+fallback** — an old archive has no end time, and the engine will not infer one from its last
+message. Sort the unknowns last; we are not shimming a shape we own both sides of.
 
 `landed?: {commits, files}` is new: what the land carried, counted when it merged. Measuring
 afterwards is measuring the wrong thing (`base..HEAD` is empty once the branch is in base).
@@ -345,6 +359,8 @@ out — deliberate, but it will surface in the UI.
 - [ ] Derive `collidesWith` client-side from `status`'s `changedFiles[]` — it is not a server field
 - [ ] Drop any `ownership ?? 'owned'` — it is always present now, archives included
 - [ ] Stop reading `log` off `GET /api/kilds/archive` and the `{archivedKild}` frame — use `/messages`
+- [ ] Sort the archive on `endedAt` (not on `log.last.ts`, which is gone); unknowns last
+- [ ] Full-text search over archived messages needs the logs — it is not a listing concern; say so if you want an endpoint
 - [ ] Drop `/api/projects` (deleted; the registry has no REST surface)
 - [ ] Spawn with `task` instead of spawn-then-post; stop sending `invitedBy` (it is a `409`)
 - [ ] Render `agent.invitedBy` if you want the delegation tree — it is ground truth now

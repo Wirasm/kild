@@ -195,12 +195,21 @@ is guaranteed to exist, so a `?state=` union would return a shape where half the
 structurally absent. `?state=` filters what a listing already contains; the archive is a
 different collection.
 
-**But the archive is a LISTING, so it now obeys the listing rule: no log.** It used to carry
+**But the archive is a LISTING, so it now obeys the listing rule: no log** — and it carries
+`endedAt` so it stays sortable. It used to carry
 every archived kild's full message history — and the archive only grows, so "list my stopped
 kilds" meant "send me every conversation I have ever had", which is exactly the cost the
 cheap/costly split removed for live kilds. `GET /api/kilds/:id/messages` already serves an
 archived kild's log. Same for the WS `{archivedKild}` frame: a subscribed client already
 received every `{message}`, and one that was not reads `/messages`.
+
+The first cut of this took the log and left nothing temporal behind, which made the cheap
+listing unsortable: ordering history newest-first meant one request per archived kild, worse
+than the payload it removed. `endedAt` is that fact as its own field, stamped on every
+persist rather than only at stop — so a kild the engine died under has one too, and no reader
+has to infer a time from a message. There is no decode fallback for archives written before
+the field: an old one has no end time, and guessing from its last message would be an
+inference dressed as a fact.
 
 ## 9. The project registry has no REST surface
 
