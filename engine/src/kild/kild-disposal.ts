@@ -1,5 +1,6 @@
 import { reviewCommits } from './git-review.ts';
 import { changedFiles, forceRemoveWorktree, registeredWorktree } from './worktree.ts';
+import type { BaseSource } from './worktree-status.ts';
 
 /**
  * Disposal — the verb that reclaims a kild's worktree, and the one guard it answers to.
@@ -31,6 +32,10 @@ export interface DisposalRefusal {
   commits?: number;
   /** For `authored`: short sha of the newest of them. */
   tip?: string;
+  /** For `authored`: the branch the count was measured against, and whether anybody chose it.
+   *  On the wire so a client can render "measured against a guess" rather than a bare number. */
+  base?: string;
+  baseSource?: BaseSource | 'explicit';
 }
 
 /** A disposal the guard allows, and the cost of going ahead with it. */
@@ -107,15 +112,30 @@ export async function assessDisposal(req: DisposalRequest): Promise<DisposalAsse
   const commits = review.commits.length;
   const tip = review.commits[0]?.sha.slice(0, 7);
   if (commits > 0 && !req.force) {
+    // Say where the base came from when nobody chose it. "carries 365 commits not in main" is
+    // a true sentence and a useless one if `main` was a guess — that exact refusal held 116
+    // trees and 5.4 GB, because a repo whose default was `dev` read as hundreds of commits
+    // ahead of a branch it never forked from. The count is not evidence of unlanded work
+    // unless the base is, and only the engine knows which it had.
+    const guessed =
+      review.baseSource === 'origin-head'
+        ? ` (base ${review.base} came from origin/HEAD, which git caches at clone time and ` +
+          'never refreshes — set baseBranch in .kild/config.json if it is wrong)'
+        : review.baseSource === 'fallback'
+          ? ` (nothing configured a base, so this is a guess — set baseBranch in ` +
+            '.kild/config.json, or pass --base)'
+          : '';
     return {
       ok: false,
       code: 'authored',
       message:
         `${where} carries ${commits} commit${commits === 1 ? '' : 's'} not in ` +
-        `${review.base}${tip ? ` (tip ${tip})` : ''} — land it, or retry with force ` +
+        `${review.base}${tip ? ` (tip ${tip})` : ''}${guessed} — land it, or retry with force ` +
         '(the branch and its commits survive either way)',
       commits,
       tip,
+      base: review.base,
+      baseSource: review.baseSource,
     };
   }
 

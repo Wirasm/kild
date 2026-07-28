@@ -209,3 +209,68 @@ test('removal frees the tree and keeps the branch — disposal never deletes wor
   expect(existsSync(wt.path)).toBe(false);
   expect((await git('branch')).stdout).toContain('kild/reclaim');
 });
+
+test('a refusal built on a GUESSED base says so, and one on a chosen base does not', async () => {
+  // The measured failure: 116 trees held behind "carries 365 commits not in main". True, and
+  // useless — that repo's default is `dev`, so every tree was hundreds of commits ahead of a
+  // branch it had never forked from, by construction. The refusal named the base. What it
+  // could not say was that nobody had chosen it, and that cost four measurement passes and
+  // 5.4 GB. The count is only evidence of unlanded work if the base is.
+  const wt = await ensureWorktree(repo, 'guessed', 'main');
+  writeFileSync(path.join(wt.path, 'a.txt'), 'authored\n');
+  await gitIn(wt.path, 'add', '.');
+  await gitIn(wt.path, 'commit', '-q', '-m', 'real work');
+
+  // No `base` given, and this repo has no origin/HEAD → the literal fallback.
+  const guessed = await assessDisposal({
+    repo,
+    dir: wt.path,
+    branch: 'kild/guessed',
+    inUse: false,
+  });
+  expect(guessed.ok).toBe(false);
+  if (guessed.ok) return;
+  expect(guessed.baseSource).toBe('fallback');
+  expect(guessed.base).toBe('main');
+  expect(guessed.message).toContain('nothing configured a base');
+  expect(guessed.message).toContain('.kild/config.json');
+
+  // Named explicitly: the same refusal, with no hedge, because somebody chose the branch.
+  const chosen = await assessDisposal({
+    repo,
+    dir: wt.path,
+    branch: 'kild/guessed',
+    base: 'main',
+    inUse: false,
+  });
+  expect(chosen.ok).toBe(false);
+  if (chosen.ok) return;
+  expect(chosen.baseSource).toBe('explicit');
+  expect(chosen.message).not.toContain('this is a guess');
+  expect(chosen.message).toContain('carries 1 commit not in main');
+});
+
+test('a base cached in origin/HEAD is labelled as the cache it is', async () => {
+  // origin/HEAD is written at clone time and never refreshed, so it goes stale silently when
+  // the remote's default moves. Better than a literal guess; still not a fact anyone asserted.
+  await git('remote', 'add', 'origin', repo);
+  await git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+  await git('update-ref', 'refs/remotes/origin/main', 'main');
+
+  const wt = await ensureWorktree(repo, 'cached', 'main');
+  writeFileSync(path.join(wt.path, 'a.txt'), 'authored\n');
+  await gitIn(wt.path, 'add', '.');
+  await gitIn(wt.path, 'commit', '-q', '-m', 'real work');
+
+  const assessment = await assessDisposal({
+    repo,
+    dir: wt.path,
+    branch: 'kild/cached',
+    inUse: false,
+  });
+  expect(assessment.ok).toBe(false);
+  if (assessment.ok) return;
+  expect(assessment.baseSource).toBe('origin-head');
+  expect(assessment.message).toContain('origin/HEAD');
+  expect(assessment.message).toContain('caches at clone time');
+});
