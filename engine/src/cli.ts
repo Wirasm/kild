@@ -386,8 +386,11 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   if (!Number.isFinite(interval) || interval <= 0) {
     throw new Error(`--interval must be a positive number of seconds (got ${values.interval})`);
   }
-  const deadline = Date.now() + timeout * 1000;
-  const sleep = () => new Promise((resolve) => setTimeout(resolve, interval));
+  const started = Date.now();
+  const deadline = started + timeout * 1000;
+  function sleep(): Promise<unknown> {
+    return new Promise((resolve) => setTimeout(resolve, interval));
+  }
   let failures = 0;
 
   /**
@@ -414,6 +417,29 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     }
   }
 
+  /**
+   * Wait for the next poll, or report that the window has closed.
+   *
+   * The ONE definition of "is there room for another attempt", because there were two and one
+   * of them was wrong — twice. First the failure path skipped the wait entirely; then the fix
+   * unified failure *tolerance* into `poll()` but left the *deadline* inline at each call
+   * site, so the bootstrap fetch had no deadline check at all and a single blip could overrun
+   * a one-second window by six seconds. Both bugs were the same shape: one decision, two
+   * copies, one of them updated.
+   */
+  async function waitForNextPoll(): Promise<boolean> {
+    if (Date.now() + interval >= deadline) return false;
+    await sleep();
+    return true;
+  }
+
+  function expire(): never {
+    // Report the window that actually elapsed. Printing the requested `--timeout` made the
+    // message a lie in exactly the case worth reporting — the one where waiting overran it.
+    console.error(`kild: nothing new in ${Math.round((Date.now() - started) / 1000)}s`);
+    process.exit(WATCH_EXIT.quiet);
+  }
+
   // Default to the log's current end, so a watcher started now waits for what happens NEXT
   // rather than firing immediately on the conversation it was started in the middle of. A
   // blip here is tolerated exactly as one in the loop is — starting an instant before an
@@ -422,7 +448,7 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   while (cursor === undefined) {
     const batch = await poll(undefined);
     if (batch) cursor = batch.at(-1)?.seq ?? 0;
-    else await sleep();
+    else if (!(await waitForNextPoll())) expire();
   }
 
   // Poll FIRST, then sleep: a watcher handed an explicit `--since` that is already behind the
@@ -431,8 +457,7 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     const batch = await poll(cursor);
     if (!batch) {
       // Tolerated failure — wait like any other quiet interval rather than spinning.
-      if (Date.now() + interval >= deadline) break;
-      await sleep();
+      if (!(await waitForNextPoll())) break;
       continue;
     }
     const { incoming, cursor: next } = pollResult(batch, handle, cursor);
@@ -459,13 +484,10 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
       );
       process.exit(WATCH_EXIT.mail);
     }
-    // Stop when there is no room left for another poll, rather than sleeping past the
-    // deadline and reporting a window longer than the one that was asked for.
-    if (Date.now() + interval >= deadline) break;
-    await sleep();
+    // Same single definition as the failure path uses: no room for another attempt ends it.
+    if (!(await waitForNextPoll())) break;
   }
-  console.error(`kild: nothing new in ${timeout}s (cursor ${cursor})`);
-  process.exit(WATCH_EXIT.quiet);
+  expire();
 }
 
 async function kildInbox(idArg: string | undefined): Promise<void> {

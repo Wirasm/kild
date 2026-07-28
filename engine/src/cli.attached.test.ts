@@ -606,3 +606,42 @@ test('a bad --interval is a loud usage error', async () => {
   expect(bad.exitCode).toBe(1);
   expect(bad.stderr).toContain('--interval');
 });
+
+test('the BOOTSTRAP path respects the window too, not just the poll loop', async () => {
+  // The fix for the spinning-retry bug unified failure *tolerance* into one helper but left
+  // the *deadline* check inline at both call sites, and only the loop's copy got it. So a
+  // single blip during the initial cursor fetch — the default, no-`--since` path — could
+  // sleep a full interval with no regard for the window: a 1s request took 6s. One decision,
+  // two copies, one updated. Exactly the shape of the bug it was fixing.
+  const started = Date.now();
+  const overrun = await runCli(
+    ['watch', 'kild-9', '--as', 'kild', '--timeout', '1', '--interval', '6'],
+    'http://127.0.0.1:1',
+  );
+  const elapsed = Date.now() - started;
+  expect(overrun.exitCode).toBe(2); // quiet — the window closed, the engine was not declared dead
+  // A 1s window must not become a 6s one because the first fetch happened to fail.
+  expect(elapsed).toBeLessThan(3_000);
+}, 15_000);
+
+test('the quiet message reports the time that actually elapsed', async () => {
+  // It printed the requested --timeout verbatim, which made it a lie in precisely the case
+  // worth reporting: the one where waiting overran the window. A REACHABLE but silent engine
+  // is what produces `quiet` — a dead one correctly produces `unreachable` instead.
+  messagesResponse = { status: 200, body: [] };
+  const quiet = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '1',
+    '--timeout',
+    '1',
+    '--interval',
+    '0.2',
+  ]);
+  expect(quiet.exitCode).toBe(2);
+  expect(quiet.stderr).toMatch(/nothing new in \d+s/);
+  messagesResponse = undefined;
+});
