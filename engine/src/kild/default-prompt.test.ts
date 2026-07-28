@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 
-import { composeSessionTurn, MECHANISM_PROMPT } from './mechanism-prompt.ts';
+import { composeSessionTurn, DEFAULT_PROMPT } from './default-prompt.ts';
 
 test('the mechanism prompt sits on top of the role-wrapped turn', () => {
   const turn = '<role>\nPERSONA\n</role>\n\nhi';
-  expect(composeSessionTurn(turn, MECHANISM_PROMPT)).toBe(`${MECHANISM_PROMPT}\n\n${turn}`);
+  expect(composeSessionTurn(turn, DEFAULT_PROMPT)).toBe(`${DEFAULT_PROMPT}\n\n${turn}`);
 });
 
 test('a null prefix leaves the turn unchanged (mechanism disabled)', () => {

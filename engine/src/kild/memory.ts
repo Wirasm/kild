@@ -179,8 +179,12 @@ function agentLine(agent: Kild['agents'][number]): string {
   // An attached agent is a harness kild never owned: no persona, no model it can
   // vouch for, and nothing to resume.
   if (agent.ownership === 'attached') return `- attached @${agent.handle}`;
-  const persona = agent.persona ?? 'default';
+  // No `?? 'default'`: the roster records the persona that actually ran, so inventing one
+  // here would put a name in the ledger no agent used. When it is genuinely absent — a kild
+  // persisted before the roster recorded it — say nothing rather than guess.
   const model = agent.model ? `, ${agent.model}` : '';
+  const ran = [agent.persona, model.replace(/^, /, '')].filter(Boolean).join(', ');
+  const what = ran ? ` (${ran})` : '';
   const spend = [
     agent.tokens === undefined ? '' : `${agent.tokens} tokens`,
     agent.cost === undefined ? '' : `$${agent.cost.toFixed(4)}`,
@@ -188,7 +192,7 @@ function agentLine(agent: Kild['agents'][number]): string {
   const cost = spend.length > 0 ? ` — ${spend.join(', ')}` : '';
   const resume = agent.piSessionFile ?? agent.piSessionId;
   const handle = resume ? ` — pi --session ${resume}` : '';
-  return `- agent @${agent.handle} (${persona}${model})${cost}${handle}`;
+  return `- agent @${agent.handle}${what}${cost}${handle}`;
 }
 
 /**

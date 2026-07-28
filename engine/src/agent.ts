@@ -10,13 +10,9 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import { configuredMemoryDir, configuredModels, resolvePluginPaths } from './kild/config.ts';
+import { composeSessionTurn, DEFAULT_PROMPT, formatModelsSection } from './kild/default-prompt.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import type { CommandAck, SendOut, SpawnOut, StopOut } from './kild/kild-types.ts';
-import {
-  composeSessionTurn,
-  formatModelsSection,
-  MECHANISM_PROMPT,
-} from './kild/mechanism-prompt.ts';
 import { projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withPersona } from './kild/models.ts';
 import { resolvePersonaInstructions } from './kild/personas.ts';
@@ -88,7 +84,7 @@ export async function runAgent(): Promise<never> {
       : undefined;
     // Skills: an explicit kild capability profile (KILD_SKILLS_PROFILE) is EXCLUSIVE — it
     // replaces pi's defaults with just that dir. Otherwise every session gets pi's defaults
-    // PLUS the config-declared skill dirs, so a spawned agent can load `prp-implement` when
+    // PLUS the config-declared skill dirs, so a spawned agent can load a plugged-in skill when
     // the orchestrator tells it to. This is what makes a plugged-in framework's process
     // reachable by whoever gets spawned, not only the agent that was there first.
     let resourceLoader: DefaultResourceLoader | undefined;
@@ -163,7 +159,7 @@ export async function runAgent(): Promise<never> {
   const memorySections = [projectMemorySection(cwd, await configuredMemoryDir(cwd))]
     .filter(Boolean)
     .join('\n\n');
-  let sessionPrefix: string | null = [MECHANISM_PROMPT, modelsSection, memorySections]
+  let sessionPrefix: string | null = [DEFAULT_PROMPT, modelsSection, memorySections]
     .filter(Boolean)
     .join('\n\n');
 
