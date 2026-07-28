@@ -23,6 +23,32 @@ interface PersistedKild extends Omit<ArchivedKild, 'log'> {
 }
 
 /**
+ * Narrow one history file to the shape the engine's types promise, or refuse it.
+ *
+ * `JSON.parse(...) as PersistedKild` asserted a shape nothing had checked — the same
+ * pattern that made a hand-edited `projects.json` 500 routes across the engine and a
+ * `memory.dir: 42` throw out of a function documented as never throwing. A history file is
+ * the same kind of input: written by an older engine, hand-edited, or truncated by a crash
+ * mid-write. Only the fields the loader actually dereferences are checked; the rest ride
+ * along, because the engine does not interpret them.
+ */
+function decodePersisted(
+  raw: unknown,
+): (Omit<PersistedKild, 'log'> & { log: Array<MessageDraft & { seq?: number }> }) | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const data = raw as Record<string, unknown>;
+  if (typeof data.id !== 'string' || !data.id) return undefined;
+  if (data.log !== undefined && !Array.isArray(data.log)) return undefined;
+  const log = (Array.isArray(data.log) ? data.log : []).filter(
+    (message): message is MessageDraft & { seq?: number } =>
+      typeof message === 'object' &&
+      message !== null &&
+      typeof (message as Message).text === 'string',
+  );
+  return { ...(data as unknown as Omit<PersistedKild, 'log'>), log };
+}
+
+/**
  * In-memory store of live kilds, with write-through persistence of each kild's
  * message history to `$KILD_HOME/kilds/<id>.json`. Live behaviour (delivery/broadcast)
  * lives in the manager — this only holds state and the on-disk mirror.
@@ -38,12 +64,34 @@ interface PersistedKild extends Omit<ArchivedKild, 'log'> {
  */
 export class KildRegistry {
   private readonly kilds = new Map<string, Kild>();
-  /** Past kilds recovered from disk at startup (read-only logs). */
+  /** Past kilds recovered from disk (read-only logs), loaded on first read. */
   private readonly archive = new Map<string, ArchivedKild>();
-  private readonly dir = path.join(kildHome(), 'kilds');
+  private archiveLoaded = false;
 
-  constructor() {
-    this.loadArchive();
+  /**
+   * Where history lives — read per call, never captured.
+   *
+   * It used to be a field initializer, which meant `$KILD_HOME` was read at the moment
+   * this module was first imported and then frozen for the life of the process. That is a
+   * fine assumption for the engine (one process, one env) and a wrong one for anything
+   * that imports it twice with different state: the first importer silently decided where
+   * every later one would look. Bun shares the module registry across test files, so the
+   * archive tests passed or failed on file ORDER — green on one filesystem's readdir
+   * order, red on another's, with nothing in the diff to explain it.
+   */
+  private get dir(): string {
+    return path.join(kildHome(), 'kilds');
+  }
+
+  /** Load history the first time anything asks for it, rather than at construction, for
+   *  the same reason: construction happens at import, and the answer depends on state the
+   *  caller may not have set yet. */
+  private ensureArchive(): Map<string, ArchivedKild> {
+    if (!this.archiveLoaded) {
+      this.archiveLoaded = true;
+      this.loadArchive();
+    }
+    return this.archive;
   }
 
   create(kild: Kild): void {
@@ -62,7 +110,7 @@ export class KildRegistry {
     this.kilds.delete(kildId);
     if (!kild || kild.log.length === 0) return undefined;
     const archived = this.snapshot(kild);
-    this.archive.set(kild.id, archived);
+    this.ensureArchive().set(kild.id, archived);
     this.saveArchived(archived);
     return archived;
   }
@@ -127,7 +175,7 @@ export class KildRegistry {
   /** One kild's message log — live or archived, since an archived kild's log is exactly
    *  what it still is: the read-only record. Undefined for an id that is neither. */
   log(kildId: string): Message[] | undefined {
-    return this.kilds.get(kildId)?.log ?? this.archive.get(kildId)?.log;
+    return this.kilds.get(kildId)?.log ?? this.ensureArchive().get(kildId)?.log;
   }
 
   /** Live kilds with their full logs — lets a client joining mid-kild (or after a
@@ -147,7 +195,7 @@ export class KildRegistry {
 
   /** Past kilds (read-only logs) recovered from disk at startup. */
   archived(): ArchivedKild[] {
-    return [...this.archive.values()];
+    return [...this.ensureArchive().values()];
   }
 
   /** Serialise a kild's history. Kilds with no messages are not worth persisting. */
@@ -201,21 +249,29 @@ export class KildRegistry {
     }
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
+      const path_ = path.join(this.dir, file);
       try {
-        const data = JSON.parse(
-          fs.readFileSync(path.join(this.dir, file), 'utf8'),
-        ) as PersistedKild;
-        if (!data?.id) continue;
+        const data = decodePersisted(JSON.parse(fs.readFileSync(path_, 'utf8')));
+        if (!data) {
+          // Named, not swallowed. A dropped archive and "this kild never existed" are the
+          // same answer to every reader downstream, so the only place the difference can
+          // still be told is here.
+          console.error(`kild: skipping unreadable history file ${path_}`);
+          continue;
+        }
         // Stored order IS arrival order, so position reconstructs the cursor for any
         // message written before `seq` existed. Everything downstream can then treat the
         // cursor as always-present, including `?since=` on an old archived kild.
-        const log: Message[] = (data.log ?? []).map((message, index) => ({
+        const log: Message[] = data.log.map((message, index) => ({
           ...message,
           seq: message.seq ?? index + 1,
         }));
-        this.archive.set(data.id, { ...data, log });
-      } catch {
-        // a corrupt/partial history file must not crash startup; skip it
+        this.archive.set(data.id, { ...data, log } as ArchivedKild);
+      } catch (err) {
+        // A corrupt/partial history file must not crash startup — but it says so.
+        console.error(
+          `kild: skipping unreadable history file ${path_}: ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
   }

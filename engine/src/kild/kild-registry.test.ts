@@ -57,6 +57,54 @@ test('a fresh registry loads past kilds into the archive (read-only) with their 
   expect(reg.get('kild-a')).toBeUndefined();
 });
 
+// ── A history file is untrusted input ────────────────────────────────────────────────
+// It is written by an older engine, hand-edited, or truncated by a crash mid-write. The
+// loader used to assert its shape with a bare cast and swallow every failure, so a dropped
+// archive and "this kild never existed" were the same answer to every reader.
+
+test('a malformed history file is skipped and REPORTED, and its siblings still load', () => {
+  const dir = path.join(tmp, 'kilds');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'truncated.json'), '{"id":"truncated","log":[{"text":');
+  fs.writeFileSync(path.join(dir, 'not-an-object.json'), '"just a string"');
+  fs.writeFileSync(path.join(dir, 'no-id.json'), '{"name":"nameless","log":[]}');
+  fs.writeFileSync(path.join(dir, 'log-not-array.json'), '{"id":"bad-log","log":"nope"}');
+
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => errors.push(args.join(' '));
+  let ids: string[];
+  try {
+    ids = new KildRegistry().archived().map((a) => a.id);
+  } finally {
+    console.error = original;
+  }
+
+  expect(ids).not.toContain('truncated');
+  expect(ids).not.toContain('bad-log');
+  expect(ids).toContain('kild-a'); // one bad file does not cost you the rest of your history
+  // Four bad files, four complaints — silence is what made this indistinguishable from
+  // having no history at all.
+  expect(errors).toHaveLength(4);
+  expect(errors.every((line) => line.includes('unreadable history file'))).toBe(true);
+});
+
+test('a message that is not a message is dropped, and the rest of the log survives', () => {
+  const dir = path.join(tmp, 'kilds');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'partial.json'),
+    JSON.stringify({
+      id: 'partial',
+      name: 'demo',
+      agents: [],
+      log: [{ ...msg('partial', 'real'), seq: 1 }, null, 42, { from: 'human' }],
+    }),
+  );
+  const found = new KildRegistry().archived().find((a) => a.id === 'partial');
+  expect(found?.log.map((m) => m.text)).toEqual(['real']);
+});
+
 test('remove() moves a kild with history straight into the archive and returns the snapshot', () => {
   const reg = new KildRegistry();
   reg.create(kild('kild-b'));
