@@ -528,3 +528,36 @@ test('watch with nothing to resolve is a usage error', async () => {
   expect(bare.exitCode).toBe(1);
   expect(bare.stderr).toContain('usage: kild watch');
 });
+
+test('watch states plainly that it consumed nothing', async () => {
+  // The obvious wrong assumption about a wake verb is that it also marks-as-seen. A harness
+  // built on that would drop every message it was woken for while looking correct, so the
+  // output has to say otherwise rather than leaving it to be inferred.
+  messagesResponse = { status: 200, body: [logMessage(5, 'claude')] };
+  const watched = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '4',
+    '--timeout',
+    '3',
+  ]);
+  expect(watched.stdout).toContain('nothing consumed');
+  expect(watched.stdout).toContain('kild inbox');
+
+  const asJson = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '4',
+    '--timeout',
+    '3',
+    '--json',
+  ]);
+  expect(JSON.parse(asJson.stdout)).toMatchObject({ consumed: false });
+  messagesResponse = undefined;
+});

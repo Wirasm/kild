@@ -359,7 +359,10 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   if (!id || !handle) {
     throw new Error(
       'usage: kild watch [<id> --as <handle>] [--since <seq>] [--timeout <seconds>]\n' +
-        '  omit id/--as to use the kild this session attached to',
+        '  omit id/--as to use the kild this session attached to\n' +
+        '  waits for somebody else to speak, then exits: 0 mail, 2 quiet, 3 engine unreachable\n' +
+        '  NON-DESTRUCTIVE — it reads the log and consumes nothing. Your mail is still\n' +
+        '  waiting afterwards; drain it with `kild inbox`.',
     );
   }
   const timeout = values.timeout === undefined ? WATCH_DEFAULT_TIMEOUT_S : Number(values.timeout);
@@ -406,10 +409,19 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     const { incoming, cursor: next } = pollResult(batch, handle, cursor);
     cursor = next;
     if (incoming.length > 0) {
+      // Say plainly that nothing was consumed. The obvious wrong assumption about a wake verb
+      // is that it also marks-as-seen, and a harness built on that would drop every message it
+      // was woken for while looking entirely correct.
       console.log(
         json
-          ? JSON.stringify({ kildId: id, handle, since: cursor, messages: incoming }, null, 2)
-          : `${watchSummary(incoming)}\n  read with: kild log ${id} --since ${cursor - incoming.length}`,
+          ? JSON.stringify(
+              { kildId: id, handle, since: cursor, consumed: false, messages: incoming },
+              null,
+              2,
+            )
+          : `${watchSummary(incoming)} (nothing consumed — still in your inbox)\n` +
+              `  read with: kild log ${id} --since ${cursor - incoming.length}\n` +
+              `  drain with: kild inbox`,
       );
       process.exit(WATCH_EXIT.mail);
     }
