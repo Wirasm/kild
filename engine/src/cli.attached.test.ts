@@ -486,7 +486,7 @@ test('a quiet engine and a DEAD engine exit differently', async () => {
 
   // Nothing listening on this port at all.
   const dead = await runCli(
-    ['watch', 'kild-9', '--as', 'kild', '--since', '1', '--timeout', '30'],
+    ['watch', 'kild-9', '--as', 'kild', '--since', '1', '--timeout', '30', '--interval', '0.05'],
     'http://127.0.0.1:1',
   );
   expect(dead.exitCode).toBe(3);
@@ -510,7 +510,7 @@ test('a dead engine is `unreachable` even with no --since to skip the first fetc
   // starting a watcher against a dead engine got exit 1 (usage) instead of 3 (unreachable),
   // which is exactly the distinction these codes exist to make.
   const dead = await runCli(
-    ['watch', 'kild-9', '--as', 'kild', '--timeout', '30'],
+    ['watch', 'kild-9', '--as', 'kild', '--timeout', '30', '--interval', '0.05'],
     'http://127.0.0.1:1',
   );
   expect(dead.exitCode).toBe(3);
@@ -560,4 +560,49 @@ test('watch states plainly that it consumed nothing', async () => {
   ]);
   expect(JSON.parse(asJson.stdout)).toMatchObject({ consumed: false });
   messagesResponse = undefined;
+});
+
+test('the "read with" hint reaches the message that woke the watcher', async () => {
+  // The hint used to be derived by arithmetic on the cursor, which assumed the new messages
+  // were the highest-numbered ones in the batch. One own-message with a higher seq made the
+  // printed command skip the very message it was suggesting you read.
+  messagesResponse = {
+    status: 200,
+    body: [logMessage(10, 'kild'), logMessage(11, 'claude'), logMessage(12, 'kild')],
+  };
+  const watched = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '9',
+    '--timeout',
+    '3',
+  ]);
+  expect(watched.exitCode).toBe(0);
+  expect(watched.stdout).toContain('--since 10'); // one BELOW the waking message, not 11
+  messagesResponse = undefined;
+});
+
+test('tolerated failures WAIT between attempts instead of spinning', async () => {
+  // The tolerance existed to give a restarting engine a moment. The retry used `continue`,
+  // which skipped the sleep entirely, so all three attempts burned in ~8ms and a restart was
+  // reported as a dead engine — the tolerance inverted into the bug it was meant to prevent.
+  // Timing is the only thing that distinguishes the fixed loop from the broken one.
+  const started = Date.now();
+  const dead = await runCli(
+    ['watch', 'kild-9', '--as', 'kild', '--since', '1', '--timeout', '30', '--interval', '0.4'],
+    'http://127.0.0.1:1',
+  );
+  const elapsed = Date.now() - started;
+  expect(dead.exitCode).toBe(3);
+  // Three attempts means two gaps; anything under one gap means it spun.
+  expect(elapsed).toBeGreaterThan(700);
+}, 10_000);
+
+test('a bad --interval is a loud usage error', async () => {
+  const bad = await runCli(['watch', 'kild-9', '--as', 'kild', '--interval', 'fast']);
+  expect(bad.exitCode).toBe(1);
+  expect(bad.stderr).toContain('--interval');
 });

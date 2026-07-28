@@ -65,6 +65,7 @@ const { values, positionals } = parseArgs({
     task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
     session: { type: 'string' }, // `kild attach|inbox|send --session <id>`: the harness session
     timeout: { type: 'string' }, // `kild watch --timeout <seconds>`: how long to wait
+    interval: { type: 'string' }, // `kild watch --interval <seconds>`: wake latency vs load
   },
 });
 
@@ -358,7 +359,7 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   const { kildId: id, handle } = await resolveAttachment(idArg, values.as);
   if (!id || !handle) {
     throw new Error(
-      'usage: kild watch [<id> --as <handle>] [--since <seq>] [--timeout <seconds>]\n' +
+      'usage: kild watch [<id> --as <handle>] [--since <seq>] [--timeout <s>] [--interval <s>]\n' +
         '  omit id/--as to use the kild this session attached to\n' +
         '  waits for somebody else to speak, then exits: 0 mail, 2 quiet, 3 engine unreachable\n' +
         '  NON-DESTRUCTIVE — it reads the log and consumes nothing. Your mail is still\n' +
@@ -377,34 +378,62 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   // to the top-level catch and exited 1 — a *usage* code — so a harness starting a watcher
   // against a dead engine could not tell "the engine is gone" from "you typed it wrong". That
   // is the distinction the exit codes exist for, defeated at the one moment it matters most.
-  let cursor: number;
-  const explicitSince = parseSince();
-  if (explicitSince !== undefined) {
-    cursor = explicitSince;
-  } else {
+  // Narrowing does not survive into a closure, so pin it once the guard above has run.
+  const kildId = id;
+  // Wake latency, and the gap between tolerated retries. Tunable because a harness that
+  // wants a snappier wake should not have to fork the CLI to get one.
+  const interval = values.interval === undefined ? WATCH_POLL_MS : Number(values.interval) * 1000;
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error(`--interval must be a positive number of seconds (got ${values.interval})`);
+  }
+  const deadline = Date.now() + timeout * 1000;
+  const sleep = () => new Promise((resolve) => setTimeout(resolve, interval));
+  let failures = 0;
+
+  /**
+   * Ask once. Returns the batch, or null when the failure was tolerated and the caller should
+   * wait and try again; exits `unreachable` once tolerance runs out.
+   *
+   * ONE place that knows how much transient failure is acceptable, used by both the bootstrap
+   * fetch and the poll loop. They had separate copies of this decision and immediately drifted:
+   * the loop retried with no delay at all, so three "tolerated" failures burned in about eight
+   * milliseconds and a merely-restarting engine was declared dead — the exact opposite of what
+   * the tolerance exists for — while the bootstrap fetch tolerated nothing whatsoever.
+   */
+  async function poll(
+    since: number | undefined,
+  ): Promise<Awaited<ReturnType<typeof kildMessages>> | null> {
     try {
-      cursor = (await kildMessages(id)).at(-1)?.seq ?? 0;
+      const batch = await kildMessages(kildId, since);
+      failures = 0;
+      return batch;
     } catch (err) {
-      console.error(`kild: engine unreachable: ${errText(err)}`);
+      if (++failures < WATCH_TOLERATED_FAILURES) return null;
+      console.error(`kild: engine unreachable after ${failures} attempts: ${errText(err)}`);
       process.exit(WATCH_EXIT.unreachable);
     }
   }
-  const deadline = Date.now() + timeout * 1000;
-  let failures = 0;
+
+  // Default to the log's current end, so a watcher started now waits for what happens NEXT
+  // rather than firing immediately on the conversation it was started in the middle of. A
+  // blip here is tolerated exactly as one in the loop is — starting an instant before an
+  // engine finishes restarting must not be reported as an engine that is gone.
+  let cursor = parseSince();
+  while (cursor === undefined) {
+    const batch = await poll(undefined);
+    if (batch) cursor = batch.at(-1)?.seq ?? 0;
+    else await sleep();
+  }
 
   // Poll FIRST, then sleep: a watcher handed an explicit `--since` that is already behind the
   // conversation reacts at once instead of after an interval of avoidable silence.
   for (;;) {
-    let batch: Awaited<ReturnType<typeof kildMessages>>;
-    try {
-      batch = await kildMessages(id, cursor);
-      failures = 0;
-    } catch (err) {
-      // A restarting engine is not a gone one. Tolerate a few, then say so rather than
-      // waiting out the window and reporting silence we cannot vouch for.
-      if (++failures < WATCH_TOLERATED_FAILURES) continue;
-      console.error(`kild: engine unreachable after ${failures} attempts: ${errText(err)}`);
-      process.exit(WATCH_EXIT.unreachable);
+    const batch = await poll(cursor);
+    if (!batch) {
+      // Tolerated failure — wait like any other quiet interval rather than spinning.
+      if (Date.now() + interval >= deadline) break;
+      await sleep();
+      continue;
     }
     const { incoming, cursor: next } = pollResult(batch, handle, cursor);
     cursor = next;
@@ -420,15 +449,20 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
               2,
             )
           : `${watchSummary(incoming)} (nothing consumed — still in your inbox)\n` +
-              `  read with: kild log ${id} --since ${cursor - incoming.length}\n` +
+              // Derived from the OLDEST incoming seq, not from arithmetic on the cursor.
+              // `cursor - incoming.length` assumed the new messages were the highest-numbered
+              // ones in the batch, so a single own-message with a higher seq made the printed
+              // command skip past the very message that woke the watcher — a wrong answer
+              // handed over with the confidence of a working command.
+              `  read with: kild log ${id} --since ${Math.min(...incoming.map((m) => m.seq)) - 1}\n` +
               `  drain with: kild inbox`,
       );
       process.exit(WATCH_EXIT.mail);
     }
     // Stop when there is no room left for another poll, rather than sleeping past the
     // deadline and reporting a window longer than the one that was asked for.
-    if (Date.now() + WATCH_POLL_MS >= deadline) break;
-    await new Promise((resolve) => setTimeout(resolve, WATCH_POLL_MS));
+    if (Date.now() + interval >= deadline) break;
+    await sleep();
   }
   console.error(`kild: nothing new in ${timeout}s (cursor ${cursor})`);
   process.exit(WATCH_EXIT.quiet);

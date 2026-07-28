@@ -49,10 +49,19 @@ describe('pollResult', () => {
     expect(pollResult([], 'kild', 9)).toEqual({ incoming: [], cursor: 9 });
   });
 
-  test('the cursor never goes backwards', () => {
-    // seq is the cursor precisely because it is monotonic; nothing here may undo that.
-    const { cursor } = pollResult([message(2, 'claude')], 'kild', 10);
+  test('a message at or behind the cursor is neither fresh mail nor a cursor rewind', () => {
+    // `since` is documented exclusive, so this should never arrive — but if it ever does,
+    // reporting it as new wakes a watcher on already-seen content, repeatedly. Asserting only
+    // the cursor here left that half completely unconstrained.
+    const { incoming, cursor } = pollResult([message(2, 'claude')], 'kild', 10);
     expect(cursor).toBe(10);
+    expect(incoming).toEqual([]);
+  });
+
+  test('a batch straddling the cursor reports only what is genuinely new', () => {
+    const batch = [message(9, 'claude'), message(10, 'claude'), message(11, 'claude')];
+    const { incoming } = pollResult(batch, 'kild', 10);
+    expect(incoming.map((m) => m.seq)).toEqual([11]);
   });
 });
 

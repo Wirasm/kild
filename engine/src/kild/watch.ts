@@ -64,7 +64,12 @@ export interface WatchPoll {
  */
 export function pollResult(messages: Message[], handle: string, cursor: number): WatchPoll {
   return {
-    incoming: messages.filter((message) => message.from !== handle),
+    // `seq <= cursor` is dropped as well as own messages. `since` is documented exclusive, so
+    // a message at or behind the cursor should never arrive — but relying on that means one
+    // server-side slip re-delivers an already-seen message as fresh mail and wakes a watcher
+    // on stale content, forever. The guard is one comparison and it makes this function
+    // correct on its own terms rather than on a promise made elsewhere.
+    incoming: messages.filter((message) => message.from !== handle && message.seq > cursor),
     cursor: messages.reduce((furthest, message) => Math.max(furthest, message.seq), cursor),
   };
 }
