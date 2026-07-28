@@ -70,10 +70,14 @@ test('the source session file is never written — even when the fork is appende
     fs.mkdtempSync(path.join(tmp, 'target-')),
     sessionDir,
   );
+  // Cast at the SDK boundary, not around our own types. pi's exported `Message` union is
+  // narrower than what `appendMessage` accepts at runtime — this shape is what the agent
+  // actually sends and what the assertions below verify the SDK does with it. The cast
+  // documents that mismatch rather than hiding a shape our code got wrong.
   forked.appendMessage({
     role: 'user',
     content: [{ type: 'text', text: 'a question against the frozen snapshot' }],
-  });
+  } as Parameters<typeof forked.appendMessage>[0]);
 
   expect(fs.readFileSync(source, 'utf8')).toBe(before); // byte-identical
   expect(fs.readFileSync(forked.getSessionFile() as string, 'utf8')).toContain(

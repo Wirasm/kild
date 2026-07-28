@@ -55,6 +55,7 @@ function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
         to: ['agent'],
         text: 'Fix the auth bug',
         ts: 1,
+        seq: 1,
       },
       {
         id: 'm1',
@@ -63,6 +64,7 @@ function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
         to: ['human'],
         text: 'second message',
         ts: 2,
+        seq: 2,
       },
     ],
     worktree: 'fix-auth',

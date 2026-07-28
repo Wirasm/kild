@@ -1,5 +1,5 @@
 import { type AgentView, type CostTotals, costTotals, type KildStatus } from './kild-types.ts';
-import type { KildGitStatus } from './worktree-status.ts';
+import type { BaseSource, KildGitStatus } from './worktree-status.ts';
 
 /** The director's compact view of a kild's git state: a summary, not the full
  *  changed-file list. Per the pull-not-push discipline, the director sees a COUNT plus
@@ -15,13 +15,23 @@ export interface CompactGitStatus {
   uncommittedFiles: number;
   changedFileCount: number;
   conflictsWithBase: boolean | null;
+  /** Where {@link base} came from. Declared rather than left riding the spread: it was
+   *  reaching this wire already, typed nowhere and rendered nowhere, which is how a field
+   *  ends up load-bearing by accident. `changedFiles` is dropped here deliberately; this is
+   *  kept deliberately. */
+  baseSource: BaseSource;
   error?: string;
 }
 
 /** One-line git summary shared by kild list and detail displays. */
 export function formatCompactGitSummary(git?: CompactGitStatus): string {
   if (!git) return '';
-  return ` · ${git.branch ?? '?'} +${git.ahead}/-${git.behind}${git.dirty ? ' dirty' : ''}${git.conflictsWithBase ? ' CONFLICTS' : ''}`;
+  // An ahead/behind count is only a fact about somebody's work if the base is. When nobody
+  // chose the base, the numbers still print — refusing to show them would be worse — but they
+  // print marked, so a reader knows what the comparison rests on.
+  const guessed = git.baseSource === 'explicit' || git.baseSource === 'configured';
+  const against = guessed ? '' : ` vs ${git.base}?`;
+  return ` · ${git.branch ?? '?'} +${git.ahead}/-${git.behind}${against}${git.dirty ? ' dirty' : ''}${git.conflictsWithBase ? ' CONFLICTS' : ''}`;
 }
 
 /** One overlap: `kild` also changed `files`. The specific overlapping files ARE the

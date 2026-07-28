@@ -116,7 +116,7 @@ test('landing merges into base and reports the merge sha', async () => {
   expect(result.merged).toBe(true);
   expect(result.sha).toMatch(/^[0-9a-f]{40}$/);
   // The base really carries the work now, at exactly the sha reported.
-  expect((await git('rev-parse', 'HEAD')).stdout.trim()).toBe(result.sha);
+  expect((await git('rev-parse', 'HEAD')).stdout.trim()).toBe(result.sha as string);
   expect((await git('log', '--format=%s', '-1')).stdout.trim()).toBe(
     'kild: land kild/ship into main',
   );

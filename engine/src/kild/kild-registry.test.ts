@@ -32,7 +32,7 @@ function kild(id: string): Kild {
 }
 
 function msg(kildId: string, text: string): Message {
-  return { id: `${kildId}-1`, kildId, from: 'human', to: ['agent'], text, ts: 1 };
+  return { id: `${kildId}-1`, kildId, from: 'human', to: ['agent'], text, ts: 1, seq: 1 };
 }
 
 test('appendMessage write-throughs the kild log; an empty kild leaves no file', () => {
