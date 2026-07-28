@@ -33,9 +33,18 @@ import {
   type SendOut,
   type SpawnContext,
   type StopOut,
+  storedBase,
 } from './kild-types.ts';
 import { GENERAL_PERSONA, listPersonas } from './personas.ts';
 import { resolveBaseBranch, worktreePath } from './worktree.ts';
+
+/** The base and its provenance as stored fields — one call, so the two can never be recorded
+ *  apart. A `base` without its `baseSource` is a guess wearing a decision's clothes. */
+async function resolvedBaseFields(cwd: string, flag?: string) {
+  const { base, source } = await resolveBaseBranch(cwd, flag);
+  return { base, baseSource: source };
+}
+
 import { kildGitStatus } from './worktree-status.ts';
 
 /** Soft cap on kild size — a cheap loop/scale guard in v1 (loop control is otherwise
@@ -179,7 +188,7 @@ export class KildManager {
       // Resolve the base once here — the single chokepoint every creator (CLI, REST, WS)
       // flows through: explicit `base` wins, else the cwd's configured `baseBranch`, else
       // its current branch, else `main`.
-      base: await resolveBaseBranch(spec.cwd, spec.base),
+      ...(await resolvedBaseFields(spec.cwd, spec.base)),
       agents: [],
       log: [],
     };
@@ -265,7 +274,10 @@ export class KildManager {
       landedSha: kild.landedSha,
       agents: kild.agents.map(agentView),
       totals: costTotals(kild.agents),
-      git: await kildGitStatus(kild.worktree ? worktreePath(kild.worktree) : kild.cwd, kild.base),
+      git: await kildGitStatus(
+        kild.worktree ? worktreePath(kild.worktree) : kild.cwd,
+        storedBase(kild),
+      ),
     };
   }
 

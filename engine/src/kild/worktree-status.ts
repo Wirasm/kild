@@ -17,6 +17,10 @@ export interface KildGitStatus {
   path: string; // the dir inspected
   branch: string | null;
   base: string; // base branch compared against (default: main)
+  /** Where {@link base} came from. `explicit` is an assertion by the caller; the others are
+   *  the engine's own resolution, and a client that renders ahead/behind should say so — an
+   *  ahead-count measured against a guessed base is not a fact about anybody's work. */
+  baseSource: BaseSource;
   ahead: number; // commits on branch not in base
   behind: number; // commits on base not in branch
   dirty: boolean; // uncommitted changes present
@@ -38,28 +42,68 @@ async function runGit(dir: string, args: string[]): Promise<GitResult> {
   }
 }
 
+/**
+ * Where a base branch came from. Carried alongside the branch itself because a GUESS and a
+ * CONFIGURED FACT are different claims, and everything downstream — a git summary, a disposal
+ * refusal — reads as authoritative unless told otherwise.
+ *
+ * This is not hypothetical. 116 worktrees sat unreclaimable behind a refusal reading "carries
+ * 365 commits not in main", which was true and meaningless: that repo's default is `dev`, so
+ * every tree was hundreds of commits ahead of a branch it had never forked from, by
+ * construction. The refusal named the base. What it could not say was that nobody had chosen
+ * it. Four measurement passes went into rediscovering that, and 5.4 GB went into not knowing.
+ */
+export type BaseSource =
+  /** A caller named it — `--base`, or a query param. The only one that is an assertion. */
+  | 'explicit'
+  /** `baseBranch` in project or global config. Chosen deliberately, just not in this call. */
+  | 'configured'
+  /** The checkout's current branch at creation time. Plausible, nobody chose it. */
+  | 'current-branch'
+  /** `origin/HEAD` — the remote's default AS CACHED LOCALLY. Git writes this symref at clone
+   *  time and never refreshes it, so it goes stale silently when the remote's default moves.
+   *  Better than a literal guess; still not a fact anyone asserted. */
+  | 'origin-head'
+  /** Nothing said otherwise, so `main`. A pure guess, and the one that cost the 116. */
+  | 'fallback'
+  /** A kild recorded before provenance was tracked. Not a guess and not a choice — an
+   *  absence. Named rather than folded into `fallback`, because claiming we know it was
+   *  guessed is the same overreach as claiming we know it was chosen. */
+  | 'unrecorded';
+
+export interface ResolvedBase {
+  base: string;
+  source: BaseSource;
+}
+
 /** The base branch to compare against when the caller doesn't name one: the remote's
- *  default (`origin/HEAD`, minus the `origin/` prefix) if set, else `main`. Shared
- *  with git-review so summary status and review drill-down agree on the baseline. */
-export async function resolveDefaultBase(dir: string): Promise<string> {
+ *  default (`origin/HEAD`, minus the `origin/` prefix) if set, else `main` — and WHICH of
+ *  those it was. Shared with git-review so summary status and review drill-down agree. */
+export async function resolveDefaultBase(dir: string): Promise<ResolvedBase> {
   const head = await runGit(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
   if (head.ok) {
     const branch = head.stdout.trim().replace(/^origin\//, '');
-    if (branch) return branch;
+    if (branch) return { base: branch, source: 'origin-head' };
   }
-  return 'main';
+  return { base: 'main', source: 'fallback' };
 }
 
 /** Inspect one kild directory's git state relative to `base` (default: the
  *  remote default branch, else `main`). Never throws: a non-git dir, a missing base
  *  ref, or any git error returns a well-formed object with `error` set and safe
  *  defaults so a driving agent can surface the state without crashing. */
-export async function kildGitStatus(dir: string, base?: string): Promise<KildGitStatus> {
-  const resolvedBase = base ?? (await resolveDefaultBase(dir));
+export async function kildGitStatus(dir: string, base?: ResolvedBase): Promise<KildGitStatus> {
+  // Takes a ResolvedBase, never a bare string. A string parameter meant any caller holding a
+  // stored base passed it as though a human had named it, so `Kild.base` — itself resolved by
+  // a fallback chain at creation — was reported as `explicit` for every live kild. The base and
+  // where it came from travel together or the provenance is decoration.
+  const resolved = base ?? (await resolveDefaultBase(dir));
+  const resolvedBase = resolved.base;
   const status: KildGitStatus = {
     path: dir,
     branch: null,
     base: resolvedBase,
+    baseSource: resolved.source,
     ahead: 0,
     behind: 0,
     dirty: false,

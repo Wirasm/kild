@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { configuredBaseBranch, kildHome } from './config.ts';
+import type { ResolvedBase } from './worktree-status.ts';
 
 // execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
 // and UI clients' worktree selectors feed a (possibly LLM-generated) name in here,
@@ -82,12 +83,25 @@ export async function currentBranch(repo: string): Promise<string | undefined> {
   return branch || undefined;
 }
 
-/** Resolve the base branch for a worktree/kild in `cwd`: explicit `flag` wins, else the
- *  configured `baseBranch` (project over global), else the checkout's current branch, else
- *  `main`. This is the branch new worktrees fork from and that git status is measured
- *  against, so ahead/behind + collisions reflect this kild's own work. */
-export async function resolveBaseBranch(cwd: string, flag?: string): Promise<string> {
-  return flag ?? (await configuredBaseBranch(cwd)) ?? (await currentBranch(cwd)) ?? 'main';
+/**
+ * Resolve the base branch for a worktree/kild in `cwd`, AND say where it came from: explicit
+ * `flag` wins, else the configured `baseBranch` (project over global), else the checkout's
+ * current branch, else `main`.
+ *
+ * The provenance is not decoration. This result is stored as `Kild.base` at creation and then
+ * handed to every git comparison for the rest of the kild's life. Returned as a bare string it
+ * was indistinguishable from a base a human named, so a guess laundered into an assertion the
+ * moment it was stored — and every refusal measured against it claimed a certainty nobody had.
+ * That is the failure that held 116 worktrees; storing the string without its source is how it
+ * would have survived the fix.
+ */
+export async function resolveBaseBranch(cwd: string, flag?: string): Promise<ResolvedBase> {
+  if (flag) return { base: flag, source: 'explicit' };
+  const configured = await configuredBaseBranch(cwd);
+  if (configured) return { base: configured, source: 'configured' };
+  const current = await currentBranch(cwd);
+  if (current) return { base: current, source: 'current-branch' };
+  return { base: 'main', source: 'fallback' };
 }
 
 /** Create a fresh isolated worktree on a `kild/<name>` branch, force-resetting any

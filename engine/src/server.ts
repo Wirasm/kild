@@ -20,6 +20,7 @@ import { landMerge, landPlan } from './kild/kild-land.ts';
 import { kildManager } from './kild/kild-manager.ts';
 import { type KildTree, kildTrees, orphanTrees } from './kild/kild-trees.ts';
 import type { AgentSpec, CommandResult, KildIdentity, KildStatus } from './kild/kild-types.ts';
+import { storedBase } from './kild/kild-types.ts';
 import { listPersonas } from './kild/personas.ts';
 import { findProject, loadProjects } from './kild/projects.ts';
 import {
@@ -465,7 +466,7 @@ app.get('/api/kilds/:id', async (c) => {
       path: target.value.dir,
       repo: target.value.repo,
     }),
-    git: await kildGitStatus(target.value.dir, target.value.base),
+    git: await kildGitStatus(target.value.dir, storedBase(target.value)),
   });
 });
 
@@ -829,7 +830,7 @@ app.delete('/api/kilds/:id', async (c) => {
   if (!target.ok) {
     return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
   }
-  const { worktree, repo, dir, base, live, name } = target.value;
+  const { worktree, repo, dir, live, name } = target.value;
   if (!worktree) {
     return c.json(
       {
@@ -844,7 +845,7 @@ app.delete('/api/kilds/:id', async (c) => {
     repo,
     dir,
     branch: `kild/${worktree}`,
-    base,
+    base: storedBase(target.value),
     inUse: worktreesInUse().has(worktree),
     force,
   });
@@ -902,7 +903,7 @@ app.get('/api/kilds/:id/land', async (c) => {
   if (!target.ok) {
     return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
   }
-  return c.json({ ...(await landPlan(target.value.dir, target.value.base)), dryRun: true });
+  return c.json({ ...(await landPlan(target.value.dir, storedBase(target.value))), dryRun: true });
 });
 app.post('/api/kilds/:id/land', async (c) => {
   const id = c.req.param('id');
@@ -910,7 +911,7 @@ app.post('/api/kilds/:id/land', async (c) => {
   if (!target.ok) {
     return c.json({ error: target.message, code: target.code }, kildResultStatus(target));
   }
-  const result = await landMerge(target.value.repo, target.value.dir, target.value.base);
+  const result = await landMerge(target.value.repo, target.value.dir, storedBase(target.value));
   // A land that did not happen is NOT a success — the caller must be able to tell.
   if (!result.merged) return c.json({ ...result, dryRun: false }, 409);
   if (target.value.live && result.sha) {
@@ -933,14 +934,14 @@ app.get('/api/kilds/:id/git/commits', async (c) => {
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
-  return c.json(await reviewCommits(located.value.dir, located.value.base));
+  return c.json(await reviewCommits(located.value.dir, storedBase(located.value)));
 });
 app.get('/api/kilds/:id/git/files', async (c) => {
   const located = kildManager.kildDir(c.req.param('id'));
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
-  return c.json(await reviewFiles(located.value.dir, located.value.base));
+  return c.json(await reviewFiles(located.value.dir, storedBase(located.value)));
 });
 app.get('/api/kilds/:id/git/diff', async (c) => {
   const file = c.req.query('path');
@@ -949,7 +950,7 @@ app.get('/api/kilds/:id/git/diff', async (c) => {
   if (!located.ok) {
     return c.json({ error: located.message, code: located.code }, kildResultStatus(located));
   }
-  const diff = await reviewDiff(located.value.dir, located.value.base, file);
+  const diff = await reviewDiff(located.value.dir, storedBase(located.value), file);
   // The traversal guard: only a path git itself reported may be diffed.
   if (diff.unknownPath) return c.json({ error: diff.error }, 404);
   return c.json(diff);

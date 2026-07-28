@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { resolveDefaultBase } from './worktree-status.ts';
+import { type BaseSource, type ResolvedBase, resolveDefaultBase } from './worktree-status.ts';
 
 /**
  * Review intelligence — the git drill-down behind a review surface. Where
@@ -56,12 +56,18 @@ export interface ReviewFile {
 
 export interface ReviewCommitsResult {
   base: string;
+  /** Where {@link base} came from — see BaseSource. A commit count measured against a guessed
+   *  base is not evidence of unlanded work, and a caller refusing on it must be able to say so. */
+  baseSource: BaseSource;
   commits: ReviewCommit[];
   error?: string; // any git failure captured here, NEVER thrown
 }
 
 export interface ReviewFilesResult {
   base: string;
+  /** Where {@link base} came from — same contract as ReviewCommitsResult. Stats measured
+   *  against a guessed base are not facts about anybody's work either. */
+  baseSource: BaseSource;
   files: ReviewFile[];
   error?: string; // any git failure captured here, NEVER thrown
 }
@@ -221,9 +227,17 @@ export function parsePorcelainZ(stdout: string): {
 
 /** Commits on the kild's branch that base doesn't have (`base..HEAD`), newest
  *  first, each with its own diff stats. Never throws — failures land in `error`. */
-export async function reviewCommits(dir: string, base?: string): Promise<ReviewCommitsResult> {
-  const resolvedBase = base ?? (await resolveDefaultBase(dir));
-  const result: ReviewCommitsResult = { base: resolvedBase, commits: [] };
+export async function reviewCommits(
+  dir: string,
+  base?: ResolvedBase,
+): Promise<ReviewCommitsResult> {
+  const resolved = base ?? (await resolveDefaultBase(dir));
+  const resolvedBase = resolved.base;
+  const result: ReviewCommitsResult = {
+    base: resolvedBase,
+    baseSource: resolved.source,
+    commits: [],
+  };
   const invalid = await verifyRepoAndBase(dir, resolvedBase);
   if (invalid) {
     result.error = invalid;
@@ -269,9 +283,10 @@ async function countLines(dir: string, file: string): Promise<number> {
 
 /** Per-file diff stats vs base — committed (branch vs merge-base) and uncommitted
  *  (working tree, incl. untracked files) combined into one list. Never throws. */
-export async function reviewFiles(dir: string, base?: string): Promise<ReviewFilesResult> {
-  const resolvedBase = base ?? (await resolveDefaultBase(dir));
-  const result: ReviewFilesResult = { base: resolvedBase, files: [] };
+export async function reviewFiles(dir: string, base?: ResolvedBase): Promise<ReviewFilesResult> {
+  const resolved = base ?? (await resolveDefaultBase(dir));
+  const resolvedBase = resolved.base;
+  const result: ReviewFilesResult = { base: resolvedBase, baseSource: resolved.source, files: [] };
   const invalid = await verifyRepoAndBase(dir, resolvedBase);
   if (invalid) {
     result.error = invalid;
@@ -358,7 +373,7 @@ async function noIndexDiff(dir: string, file: string): Promise<GitResult> {
  *  and no git/fs call ever receives the raw caller path otherwise. Never throws. */
 export async function reviewDiff(
   dir: string,
-  base: string | undefined,
+  base: ResolvedBase | undefined,
   file: string,
 ): Promise<ReviewDiffResult> {
   const files = await reviewFiles(dir, base);

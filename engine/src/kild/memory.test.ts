@@ -55,6 +55,7 @@ function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
         to: ['agent'],
         text: 'Fix the auth bug',
         ts: 1,
+        seq: 1,
       },
       {
         id: 'm1',
@@ -63,6 +64,7 @@ function kild(cwd: string, overrides: Partial<Kild> = {}): Kild {
         to: ['human'],
         text: 'second message',
         ts: 2,
+        seq: 2,
       },
     ],
     worktree: 'fix-auth',
@@ -170,7 +172,11 @@ test('a RECORDED merge sha wins over inference — the ledger names the commit',
 
 test('collectLedgerFacts treats a recorded sha as landed without asking git', async () => {
   const dir = await repoWithBranch(); // 2 commits ahead of main, nothing merged
-  const collected = await collectLedgerFacts(dir, 'main', 'abcdef1234567890');
+  const collected = await collectLedgerFacts(
+    dir,
+    { base: 'main', source: 'explicit' },
+    'abcdef1234567890',
+  );
   expect(collected.landed).toBe(true);
   expect(collected.landedSha).toBe('abcdef1234567890');
   // The code facts are still measured, not overwritten by the land record.
@@ -256,7 +262,7 @@ test('collectLedgerFacts reports real commits, files and an unlanded branch', as
   const dir = await repoWithBranch();
   fs.writeFileSync(path.join(dir, 'c.ts'), 'x\n'); // uncommitted
 
-  const collected = await collectLedgerFacts(dir, 'main');
+  const collected = await collectLedgerFacts(dir, { base: 'main', source: 'explicit' });
   expect(collected.gitError).toBeUndefined();
   expect(collected.base).toBe('main');
   expect(collected.branch).toBe('kild/work');
@@ -273,14 +279,14 @@ test('collectLedgerFacts reports landed once the branch is contained in base', a
   await git(dir, ['merge', '--no-ff', '-m', 'land', 'kild/work']);
   await git(dir, ['checkout', 'kild/work']);
 
-  const collected = await collectLedgerFacts(dir, 'main');
+  const collected = await collectLedgerFacts(dir, { base: 'main', source: 'explicit' });
   expect(collected.commits).toBe(0);
   expect(collected.landed).toBe(true);
 });
 
 test('collectLedgerFacts on a non-repo yields an error, not a throw', async () => {
   const dir = fs.mkdtempSync(path.join(tmp, 'norepo-'));
-  const collected = await collectLedgerFacts(dir, 'main');
+  const collected = await collectLedgerFacts(dir, { base: 'main', source: 'explicit' });
   expect(collected.gitError).toBeDefined();
   expect(collected.landed).toBe(false);
   expect(collected.commits).toBe(0);

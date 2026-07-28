@@ -18,6 +18,7 @@ test('formatCompactGitSummary preserves clean known-branch divergence', () => {
       uncommittedFiles: 0,
       changedFileCount: 0,
       conflictsWithBase: null,
+      baseSource: 'explicit' as const,
     }),
   ).toEqual(' · feature-x +2/-1');
 });
@@ -34,6 +35,7 @@ test('formatCompactGitSummary renders a null branch as unknown', () => {
       uncommittedFiles: 0,
       changedFileCount: 0,
       conflictsWithBase: null,
+      baseSource: 'explicit' as const,
     }),
   ).toEqual(' · ? +0/-0');
 });
@@ -50,6 +52,7 @@ test('formatCompactGitSummary appends dirty and conflict markers', () => {
       uncommittedFiles: 1,
       changedFileCount: 1,
       conflictsWithBase: true,
+      baseSource: 'explicit' as const,
     }),
   ).toEqual(' · feature-x +2/-0 dirty CONFLICTS');
 });
@@ -60,11 +63,15 @@ test('a compacted kild carries NO log — the thread is its own cursored resourc
       id: 'kild-1',
       name: 'ops',
       cwd: '/tmp/ops',
-      agents: [{ handle: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', ownership: 'owned' as const, persona: 'brain' }],
     },
   ]);
   expect(compact).toEqual([
-    { id: 'kild-1', name: 'ops', agents: [{ handle: 'brain', persona: 'brain' }] },
+    {
+      id: 'kild-1',
+      name: 'ops',
+      agents: [{ handle: 'brain', ownership: 'owned' as const, persona: 'brain' }],
+    },
   ]);
   // Neither the whole log nor a "last couple messages" teaser: a listing that carries messages
   // is a listing whose size is unbounded in the conversation.
@@ -83,13 +90,14 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
     uncommittedFiles: 1,
     changedFiles: ['src/a.ts', 'src/b.ts'],
     conflictsWithBase: null,
+    baseSource: 'explicit' as const,
   };
   const compact = compactLiveKilds([
     {
       id: 'kild-1',
       name: 'ops',
       cwd: '/tmp/ops',
-      agents: [{ handle: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', ownership: 'owned' as const, persona: 'brain' }],
       git,
     },
   ]);
@@ -103,6 +111,7 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
     uncommittedFiles: 1,
     changedFileCount: 2,
     conflictsWithBase: null,
+    baseSource: 'explicit' as const,
   });
   // The full list is NOT in the director's compact view.
   expect(compact[0]?.git).not.toHaveProperty('changedFiles');
@@ -110,7 +119,12 @@ test('git compacts to a summary: changed-file COUNT, not the list (pull discipli
 
 test('a live kild without git status has no git key', () => {
   const compact = compactLiveKilds([
-    { id: 'kild-1', name: 'ops', cwd: '/tmp/ops', agents: [{ handle: 'brain', persona: 'brain' }] },
+    {
+      id: 'kild-1',
+      name: 'ops',
+      cwd: '/tmp/ops',
+      agents: [{ handle: 'brain', ownership: 'owned' as const, persona: 'brain' }],
+    },
   ]);
   expect(compact[0]).not.toHaveProperty('git');
 });
@@ -120,7 +134,7 @@ test('collisions: two kilds that touch the same file each name the other', () =>
     id,
     name,
     cwd: '/tmp/repo',
-    agents: [{ handle: 'coder', persona: 'coder' }],
+    agents: [{ handle: 'coder', ownership: 'owned' as const, persona: 'coder' }],
     git: {
       path: `/tmp/${name}`,
       branch: name,
@@ -131,6 +145,7 @@ test('collisions: two kilds that touch the same file each name the other', () =>
       uncommittedFiles: 0,
       changedFiles,
       conflictsWithBase: null,
+      baseSource: 'explicit' as const,
     },
   });
   const compact = compactLiveKilds([
@@ -149,22 +164,28 @@ test('per-agent attention + cost ride the compact view, with a kild totals rollu
     {
       id: 'kild-1',
       name: 'ops',
+      cwd: '/tmp/ops',
       agents: [
-        { handle: 'coder', idle: true, tokens: 3400, cost: 1.25 },
-        { handle: 'reviewer', tokens: 600, cost: 0.25 },
+        { handle: 'coder', ownership: 'owned' as const, idle: true, tokens: 3400, cost: 1.25 },
+        { handle: 'reviewer', ownership: 'owned' as const, tokens: 600, cost: 0.25 },
       ],
     },
   ]);
   expect(compact[0]?.agents).toEqual([
-    { handle: 'coder', idle: true, tokens: 3400, cost: 1.25 },
-    { handle: 'reviewer', tokens: 600, cost: 0.25 },
+    { handle: 'coder', ownership: 'owned' as const, idle: true, tokens: 3400, cost: 1.25 },
+    { handle: 'reviewer', ownership: 'owned' as const, tokens: 600, cost: 0.25 },
   ]);
   expect(compact[0]?.totals).toEqual({ tokens: 4000, cost: 1.5 });
 });
 
 test('a kild whose agents have no stats gets no totals key', () => {
   const compact = compactLiveKilds([
-    { id: 'kild-1', name: 'ops', cwd: '/tmp/ops', agents: [{ handle: 'coder' }] },
+    {
+      id: 'kild-1',
+      name: 'ops',
+      cwd: '/tmp/ops',
+      agents: [{ handle: 'coder', ownership: 'owned' as const }],
+    },
   ]);
   expect(compact[0]).not.toHaveProperty('totals');
 });
@@ -175,7 +196,7 @@ test('server-computed totals on the live status are preferred over recomputing',
       id: 'kild-1',
       name: 'ops',
       cwd: '/tmp/ops',
-      agents: [{ handle: 'coder', tokens: 100, cost: 0.1 }],
+      agents: [{ handle: 'coder', ownership: 'owned' as const, tokens: 100, cost: 0.1 }],
       totals: { tokens: 4000, cost: 1.5 },
     },
   ]);
@@ -188,7 +209,7 @@ test('compaction copies the agent array without mutating the source kild', () =>
       id: 'kild-1',
       name: 'ops',
       cwd: '/tmp/ops',
-      agents: [{ handle: 'brain', persona: 'brain' }],
+      agents: [{ handle: 'brain', ownership: 'owned' as const, persona: 'brain' }],
     },
   ];
 

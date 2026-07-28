@@ -4,6 +4,7 @@ import path from 'node:path';
 import { kildHome } from './config.ts';
 import { reviewCommits } from './git-review.ts';
 import type { Kild } from './kild-types.ts';
+import type { ResolvedBase } from './worktree-status.ts';
 import { kildGitStatus } from './worktree-status.ts';
 
 /**
@@ -115,12 +116,12 @@ export interface KildLedgerFacts {
  */
 export async function collectLedgerFacts(
   dir: string,
-  base?: string,
+  base?: ResolvedBase,
   landedSha?: string,
   carried?: { commits: number; files: number },
 ): Promise<KildLedgerFacts> {
   const status = await kildGitStatus(dir, base);
-  const review = await reviewCommits(dir, status.base);
+  const review = await reviewCommits(dir, { base: status.base, source: status.baseSource });
   const gitError = status.error ?? review.error;
   const tip = review.commits[0]?.sha.slice(0, 7);
   return {

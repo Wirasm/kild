@@ -161,7 +161,7 @@ describe('concurrent attaches', () => {
       path.join(home, 'attached', 'claims', 'kild-w', 'kild'),
       'utf8',
     );
-    expect(claim.trim()).toBe(winner);
+    expect(claim.trim()).toBe(winner as string);
     expect(await findAttachment(winner as string)).toMatchObject({ kildId: 'kild-w' });
   });
 
