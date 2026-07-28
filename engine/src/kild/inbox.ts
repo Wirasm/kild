@@ -29,13 +29,13 @@ export const DEFAULT_WAKE_CAP = 3;
 /** Hard ceiling on queued messages, so an agent that walked away (its harness closed,
  *  its hook unwired) cannot grow an unbounded queue in a long-lived engine. Oldest are
  *  dropped first — the kild log remains the complete record either way. */
-export const MAX_QUEUED_POSTS = 50;
+export const MAX_QUEUED_MESSAGES = 50;
 
 /** What one drain reports. */
 export interface InboxDrain {
   /** The messages removed from the queue — empty when there was nothing, or when the
    *  wake cap suppressed this drain. */
-  posts: InboxMessage[];
+  messages: InboxMessage[];
   /** True when this drain reported nothing. THE idle signal: an attached agent is idle
    *  exactly when it asks for mail and there is none to act on — no separate status
    *  verb, no liveness poll. */
@@ -78,10 +78,10 @@ export class Inbox {
   /** Queue one message. Only ever called for a message actually addressed to this agent —
    *  queueing every kild message would make the inbox a firehose and trip the cap on
    *  traffic the agent was never asked to read. */
-  enqueue(post: InboxMessage): void {
-    this.queue.push(post);
-    if (this.queue.length > MAX_QUEUED_POSTS) {
-      this.queue.splice(0, this.queue.length - MAX_QUEUED_POSTS);
+  enqueue(message: InboxMessage): void {
+    this.queue.push(message);
+    if (this.queue.length > MAX_QUEUED_MESSAGES) {
+      this.queue.splice(0, this.queue.length - MAX_QUEUED_MESSAGES);
     }
   }
 
@@ -90,16 +90,16 @@ export class Inbox {
   drain(): InboxDrain {
     if (this.queue.length === 0) {
       this.wakes = 0;
-      return { posts: [], idle: true, capped: false };
+      return { messages: [], idle: true, capped: false };
     }
     if (this.wakes >= this.cap) {
       // Report empty WITHOUT consuming the mail: the agent is allowed to stop, and
       // whatever is waiting is still waiting when a human next drives a turn.
       this.wakes = 0;
-      return { posts: [], idle: true, capped: true };
+      return { messages: [], idle: true, capped: true };
     }
-    const posts = this.queue.splice(0, this.queue.length);
+    const messages = this.queue.splice(0, this.queue.length);
     this.wakes += 1;
-    return { posts, idle: false, capped: false };
+    return { messages, idle: false, capped: false };
   }
 }

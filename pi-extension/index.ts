@@ -244,14 +244,14 @@ interface ArchivedKild {
   landedSha?: string;
 }
 
-interface InboxPost {
+interface InboxMessage {
   from: string;
   text: string;
   ts: number;
 }
 interface InboxDrainResponse {
   ok: true;
-  posts: InboxPost[];
+  messages: InboxMessage[];
   idle: boolean;
   capped: boolean;
 }
@@ -490,7 +490,7 @@ const draining = new Set<string>();
 async function drainInto(
   kildId: string,
   handle: string,
-): Promise<{ posts: InboxPost[]; capped: boolean } | undefined> {
+): Promise<{ messages: InboxMessage[]; capped: boolean } | undefined> {
   const key = `${kildId} ${handle}`;
   if (draining.has(key)) return undefined;
   draining.add(key);
@@ -504,19 +504,19 @@ async function drainInto(
       return undefined;
     }
     const drained = (await r.json()) as InboxDrainResponse;
-    if (drained.posts.length === 0) {
+    if (drained.messages.length === 0) {
       dbg(`drain ${handle}@${kildId.slice(0, 8)}: empty${drained.capped ? ' (capped)' : ''}`);
-      return { posts: [], capped: drained.capped };
+      return { messages: [], capped: drained.capped };
     }
     const name = kildNames.get(kildId) ?? kildId.slice(0, 8);
-    const body = drained.posts.map((p) => `@${p.from}: ${p.text}`).join('\n\n');
-    dbg(`drain ${handle}@${kildId.slice(0, 8)}: ${drained.posts.length} message(s)`);
+    const body = drained.messages.map((p) => `@${p.from}: ${p.text}`).join('\n\n');
+    dbg(`drain ${handle}@${kildId.slice(0, 8)}: ${drained.messages.length} message(s)`);
     push(
       `[kild] You are @${handle} in kild "${name}" (${kildId}). ` +
-        `${drained.posts.length} message(s) drained from your inbox:\n\n${truncate(body)}\n\n` +
+        `${drained.messages.length} message(s) drained from your inbox:\n\n${truncate(body)}\n\n` +
         MAIL_CAVEAT,
     );
-    return { posts: drained.posts, capped: drained.capped };
+    return { messages: drained.messages, capped: drained.capped };
   } catch (e) {
     dbg(`drain ${handle}@${kildId.slice(0, 8)}: ${(e as Error).message}`);
     return undefined;
@@ -547,7 +547,7 @@ const notifiedGone = new Set<string>();
  * The gap detector, on the log rather than on a listing.
  *
  * The inbox is the delivery path and stays so. But an inbox is LIVE state: it is dropped
- * when the engine restarts, its oldest posts are dropped past `MAX_QUEUED_POSTS`, and any
+ * when the engine restarts, its oldest messages are dropped past `MAX_QUEUED_MESSAGES`, and any
  * other client holding the same handle (the CLI's Stop hook, a second session) can drain it
  * out from under us. The log is the complete record and now carries a real cursor, so after
  * a gap we ask `?since=<last seq we saw>` who wrote to our handles and report only what no
@@ -559,7 +559,7 @@ const notifiedGone = new Set<string>();
  *
  * `drain` is what the reconcile's own drains just handed over; those messages are in the log
  * above the cursor too (no WS frame ever carried them), so each is matched off against a
- * post and left alone. Matched by SENDER AND TEXT, never by `ts`: the engine stamps the
+ * message and left alone. Matched by SENDER AND TEXT, never by `ts`: the engine stamps the
  * inbox copy of a message with its own `Date.now()`, so the two timestamps differ by
  * whatever a millisecond boundary decides.
  *
@@ -571,7 +571,7 @@ const notifiedGone = new Set<string>();
 async function recoverFromLog(
   kildId: string,
   handles: Set<string>,
-  drain: { posts: InboxPost[]; capped: boolean } | undefined,
+  drain: { messages: InboxMessage[]; capped: boolean } | undefined,
 ): Promise<void> {
   if (drain?.capped) {
     dbg(`recover ${kildId.slice(0, 8)}: drain capped — leaving mail queued`);
@@ -590,11 +590,11 @@ async function recoverFromLog(
   // No cursor means no way to tell history from missed mail: baseline only.
   if (known === undefined) return;
 
-  // One post consumed per message, so two identical texts still count as two.
-  const unmatched = [...(drain?.posts ?? [])];
+  // One message consumed per message, so two identical texts still count as two.
+  const unmatched = [...(drain?.messages ?? [])];
   const missed = messages.filter((m) => {
     if (handles.has(m.from) || !m.to.some((h) => handles.has(h))) return false;
-    const already = unmatched.findIndex((post) => post.from === m.from && post.text === m.text);
+    const already = unmatched.findIndex((message) => message.from === m.from && message.text === m.text);
     if (already >= 0) {
       unmatched.splice(already, 1);
       return false;
@@ -657,15 +657,15 @@ async function reconcileAfterReconnect(): Promise<void> {
     // is still queued and the engine withheld it on purpose.
     let capped = false;
     let drainRan = false;
-    const posts: InboxPost[] = [];
+    const messages: InboxMessage[] = [];
     for (const handle of handles) {
       const drained = await drainInto(kildId, handle);
       if (!drained) continue;
       drainRan = true;
       capped ||= drained.capped;
-      posts.push(...drained.posts);
+      messages.push(...drained.messages);
     }
-    await recoverFromLog(kildId, handles, drainRan ? { posts, capped } : undefined);
+    await recoverFromLog(kildId, handles, drainRan ? { messages, capped } : undefined);
   }
 }
 
@@ -1058,14 +1058,14 @@ export default function (pi: PiExtensionAPI) {
         `/api/kilds/${encodeURIComponent(p.id)}/inbox/drain`,
         postJson({ handle: p.handle }),
       );
-      const text = drained.posts.length
-        ? drained.posts.map((m) => `@${m.from}: ${m.text}`).join('\n\n')
+      const text = drained.messages.length
+        ? drained.messages.map((m) => `@${m.from}: ${m.text}`).join('\n\n')
         : drained.capped
           ? 'no mail (wake cap reached — anything queued is reported on the next drain)'
           : 'no mail';
       return {
         content: [{ type: 'text', text: truncate(text) }],
-        details: { count: drained.posts.length, idle: drained.idle, capped: drained.capped },
+        details: { count: drained.messages.length, idle: drained.idle, capped: drained.capped },
       };
     },
   });

@@ -286,13 +286,13 @@ async function kildInbox(id: string | undefined): Promise<void> {
   }
 
   if (claudeStop) {
-    const output = claudeStopOutput({ kildId: id, handle, posts: drained.posts });
+    const output = claudeStopOutput({ kildId: id, handle, messages: drained.messages });
     if (output) console.log(JSON.stringify(output));
     return;
   }
   if (json) return void console.log(JSON.stringify(drained, null, 2));
-  for (const post of drained.posts) console.log(`${post.from}: ${post.text}`);
-  if (drained.posts.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
+  for (const message of drained.messages) console.log(`${message.from}: ${message.text}`);
+  if (drained.messages.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
 }
 
 /** `--since <seq>` as a message cursor. A non-number is a usage error, never "from the

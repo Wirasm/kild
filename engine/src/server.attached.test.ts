@@ -21,7 +21,7 @@ beforeAll(async () => {
   fetchApp = server.fetch as typeof fetchApp;
 });
 
-const post = (url: string, body: unknown) =>
+const message = (url: string, body: unknown) =>
   fetchApp(
     new Request(`http://localhost${url}`, {
       method: 'POST',
@@ -31,7 +31,7 @@ const post = (url: string, body: unknown) =>
   );
 
 test.each(['agents/attach', 'inbox/drain'])('POST %s without a handle is a 400', async (verb) => {
-  const res = await post(`/api/kilds/kild-1/${verb}`, {});
+  const res = await message(`/api/kilds/kild-1/${verb}`, {});
   expect(res.status).toBe(400);
   expect(await res.json()).toEqual({ error: 'handle required' });
 });
@@ -40,7 +40,7 @@ test.each([
   'agents/attach',
   'inbox/drain',
 ])('POST %s with a blank handle is a 400', async (verb) => {
-  const res = await post(`/api/kilds/kild-1/${verb}`, { handle: '   ' });
+  const res = await message(`/api/kilds/kild-1/${verb}`, { handle: '   ' });
   expect(res.status).toBe(400);
 });
 
@@ -48,7 +48,7 @@ test.each([
   'agents/attach',
   'inbox/drain',
 ])('POST %s on an unknown kild is a clean 404', async (verb) => {
-  const res = await post(`/api/kilds/no-such-kild/${verb}`, { handle: 'claude' });
+  const res = await message(`/api/kilds/no-such-kild/${verb}`, { handle: 'claude' });
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({ error: 'no such kild: no-such-kild' });
 });

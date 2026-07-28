@@ -45,7 +45,7 @@ const gitIn = (dir: string, ...args: string[]) => execFile('git', ['-C', dir, ..
 const call = (url: string, init?: RequestInit) =>
   Promise.resolve(fetchApp(new Request(`http://localhost${url}`, init)));
 const get = (url: string) => call(url);
-const post = (url: string, body?: unknown) =>
+const message = (url: string, body?: unknown) =>
   call(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -95,15 +95,15 @@ beforeAll(async () => {
   fetchApp = server.fetch as typeof fetchApp;
   // Registering the project is what puts this repo in the enumeration's scope for the
   // UNSCOPED `GET /api/kilds` — the call helm makes.
-  expect((await post('/api/projects', { name: 'proj', path: repo })).status).toBe(200);
+  expect((await message('/api/projects', { name: 'proj', path: repo })).status).toBe(200);
 });
 
 // ── §1: one address for an agent ─────────────────────────────────────────────────────
 
 test('the parallel /api/agents/:id/* family is gone', async () => {
-  expect((await post('/api/agents', { persona: 'default' })).status).toBe(404);
-  expect((await post('/api/agents/some-id/prompt', { text: 'hi' })).status).toBe(404);
-  expect((await post('/api/agents/some-id/stop')).status).toBe(404);
+  expect((await message('/api/agents', { persona: 'default' })).status).toBe(404);
+  expect((await message('/api/agents/some-id/prompt', { text: 'hi' })).status).toBe(404);
+  expect((await message('/api/agents/some-id/stop')).status).toBe(404);
   expect((await get('/api/agents/some-id/transcript')).status).toBe(404);
 });
 
@@ -124,7 +124,7 @@ test('an agent transcript is addressed one way: on its kild, by handle', async (
 test('the /api/worktrees family is gone', async () => {
   expect((await get(`/api/worktrees?path=${encodeURIComponent(repo)}`)).status).toBe(404);
   expect((await del('/api/worktrees')).status).toBe(404);
-  expect((await post('/api/worktrees/prune', { path: repo })).status).toBe(404);
+  expect((await message('/api/worktrees/prune', { path: repo })).status).toBe(404);
 });
 
 test('GET /api/kilds enumerates kild/* worktrees FROM GIT, so an orphan is addressable', async () => {
@@ -280,25 +280,25 @@ test('messages on an id that is no kild at all is a clean 404', async () => {
 // ── §2: spawning answers ─────────────────────────────────────────────────────────────
 
 test('POST /api/kilds/:id/agents returns a REAL error instead of a silent warning', async () => {
-  const res = await post('/api/kilds/no-such-kild/agents', { handle: 'reviewer' });
+  const res = await message('/api/kilds/no-such-kild/agents', { handle: 'reviewer' });
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({ error: 'no such kild: no-such-kild', code: 'not_found' });
 });
 
 test('POST /api/kilds/:id/agents validates its body before touching a kild', async () => {
-  expect(await (await post('/api/kilds/k/agents', {})).json()).toEqual({
+  expect(await (await message('/api/kilds/k/agents', {})).json()).toEqual({
     error: 'handle required',
   });
-  expect(await (await post('/api/kilds/k/agents', { handle: '  ' })).json()).toEqual({
+  expect(await (await message('/api/kilds/k/agents', { handle: '  ' })).json()).toEqual({
     error: 'handle required',
   });
-  expect(await (await post('/api/kilds/k/agents', { handle: 'a', model: 7 })).json()).toEqual({
+  expect(await (await message('/api/kilds/k/agents', { handle: 'a', model: 7 })).json()).toEqual({
     error: 'model must be a string',
   });
-  expect(await (await post('/api/kilds/k/agents', { handle: 'a', task: '' })).json()).toEqual({
+  expect(await (await message('/api/kilds/k/agents', { handle: 'a', task: '' })).json()).toEqual({
     error: 'task must be a non-empty string',
   });
-  expect(await (await post('/api/kilds/k/agents', { handle: 'a', task: 7 })).json()).toEqual({
+  expect(await (await message('/api/kilds/k/agents', { handle: 'a', task: 7 })).json()).toEqual({
     error: 'task must be a non-empty string',
   });
 });
@@ -307,7 +307,7 @@ test('POST /api/kilds/:id/agents validates its body before touching a kild', asy
 // agent's `task`. The route used to take `invitedBy` from the body, which — once a task
 // became a message — would have been a forgery path for message senders. It is derived now.
 test('POST /api/kilds/:id/agents refuses a caller-asserted invitedBy', async () => {
-  const res = await post('/api/kilds/no-such-kild/agents', {
+  const res = await message('/api/kilds/no-such-kild/agents', {
     handle: 'reviewer',
     invitedBy: 'orchestrator',
   });
@@ -412,7 +412,7 @@ test('GET .../land is a dry run that changes nothing; POST merges and names the 
     status: (await git('status', '--porcelain')).stdout,
   }).toEqual(before);
 
-  const landed = await post('/api/kilds/landable/land');
+  const landed = await message('/api/kilds/landable/land');
   expect(landed.status).toBe(200);
   const body = (await landed.json()) as { merged: boolean; sha: string; dryRun: boolean };
   expect(body.merged).toBe(true);
@@ -424,7 +424,7 @@ test('GET .../land is a dry run that changes nothing; POST merges and names the 
 
 test('a land that did not happen is a 409, never a 200 with merged:false', async () => {
   await ensureWorktree(repo, 'nothing-to-land', 'main');
-  const res = await post('/api/kilds/nothing-to-land/land');
+  const res = await message('/api/kilds/nothing-to-land/land');
   expect(res.status).toBe(409);
   const body = (await res.json()) as { merged: boolean; error: string };
   expect(body.merged).toBe(false);
@@ -433,7 +433,7 @@ test('a land that did not happen is a 409, never a 200 with merged:false', async
 
 test('land on an unknown kild is a clean 404', async () => {
   expect((await get('/api/kilds/never-existed/land')).status).toBe(404);
-  expect((await post('/api/kilds/never-existed/land')).status).toBe(404);
+  expect((await message('/api/kilds/never-existed/land')).status).toBe(404);
 });
 
 // ── A bad request body is never a 500 ────────────────────────────────────────────────────
@@ -484,15 +484,15 @@ test('stop requires nothing, so an empty body reaches the handler', async () => 
 });
 
 test('a required field still fails loudly, naming itself', async () => {
-  const messages = await post('/api/kilds/some-id/messages', {});
+  const messages = await message('/api/kilds/some-id/messages', {});
   expect(messages.status).toBe(400);
   expect((await messages.json()) as { error: string }).toMatchObject({ error: 'text required' });
 
-  const projects = await post('/api/projects', {});
+  const projects = await message('/api/projects', {});
   expect(projects.status).toBe(400);
   expect((await projects.json()) as { error: string }).toMatchObject({
     error: 'name and path are both required',
   });
 
-  expect((await post('/api/kilds/some-id/agents/attach', {})).status).toBe(400);
+  expect((await message('/api/kilds/some-id/agents/attach', {})).status).toBe(400);
 });

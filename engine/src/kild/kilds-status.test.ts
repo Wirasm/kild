@@ -66,9 +66,9 @@ test('a compacted kild carries NO log — the thread is its own cursored resourc
   expect(compact).toEqual([
     { id: 'kild-1', name: 'ops', agents: [{ handle: 'brain', persona: 'brain' }] },
   ]);
-  // Neither the whole log nor a "last couple posts" teaser: a listing that carries messages
+  // Neither the whole log nor a "last couple messages" teaser: a listing that carries messages
   // is a listing whose size is unbounded in the conversation.
-  expect(compact[0]).not.toHaveProperty('posts');
+  expect(compact[0]).not.toHaveProperty('messages');
   expect(compact[0]).not.toHaveProperty('log');
 });
 
