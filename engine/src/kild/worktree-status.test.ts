@@ -73,7 +73,7 @@ test('a branch one commit ahead reports ahead 1 and the changed file', async () 
   await git(dir, ['add', '.']);
   await commit(dir, 'add feature');
 
-  const status = await kildGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, { base: 'main', source: 'explicit' });
 
   expect(status.error).toBeUndefined();
   expect(status.branch).toBe('feature');
@@ -88,7 +88,7 @@ test('an uncommitted edit marks the kild dirty', async () => {
   const dir = await initRepo();
   fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
 
-  const status = await kildGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, { base: 'main', source: 'explicit' });
 
   expect(status.error).toBeUndefined();
   expect(status.dirty).toBe(true);
@@ -119,7 +119,7 @@ test('a branch that merges cleanly into base reports conflictsWithBase false', a
   await git(dir, ['add', '.']);
   await commit(dir, 'add feature'); // new file, no overlap with base
 
-  const status = await kildGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, { base: 'main', source: 'explicit' });
 
   expect(status.error).toBeUndefined();
   expect(status.ahead).toBe(1);
@@ -139,7 +139,7 @@ test('a branch that edits the same line as base reports conflictsWithBase true',
   await commit(dir, 'main edit');
   await git(dir, ['checkout', 'feature']);
 
-  const status = await kildGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, { base: 'main', source: 'explicit' });
 
   expect(status.ahead).toBe(1);
   expect(status.behind).toBe(1);
@@ -149,7 +149,7 @@ test('a branch that edits the same line as base reports conflictsWithBase true',
 test('a missing base ref is reported as an error, not a crash', async () => {
   const dir = await initRepo();
 
-  const status = await kildGitStatus(dir, 'does-not-exist');
+  const status = await kildGitStatus(dir, { base: 'does-not-exist', source: 'explicit' });
 
   expect(status.error).toBeDefined();
   expect(status.base).toBe('does-not-exist');

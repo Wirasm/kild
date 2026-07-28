@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 
 import { type ReviewCommit, reviewCommits } from './git-review.ts';
 import { currentBranch } from './worktree.ts';
+import type { ResolvedBase } from './worktree-status.ts';
 import { kildGitStatus } from './worktree-status.ts';
 
 /**
@@ -91,7 +92,7 @@ export async function conflictingPaths(
  * `dir` is the kild's effective directory (its worktree, else its cwd); `base` its base
  * branch (absent → the repo's default).
  */
-export async function landPlan(dir: string, base?: string): Promise<LandResult> {
+export async function landPlan(dir: string, base?: ResolvedBase): Promise<LandResult> {
   const status = await kildGitStatus(dir, base);
   const result: LandResult = {
     base: status.base,
@@ -115,7 +116,7 @@ export async function landPlan(dir: string, base?: string): Promise<LandResult> 
     return result;
   }
 
-  const review = await reviewCommits(dir, status.base);
+  const review = await reviewCommits(dir, { base: status.base, source: status.baseSource });
   if (review.error) {
     result.error = review.error;
     return result;
@@ -147,7 +148,11 @@ export async function landPlan(dir: string, base?: string): Promise<LandResult> 
  * report the merge sha. Runs the same plan first and refuses on anything it flagged, so a
  * caller never has to interpret two different verdicts.
  */
-export async function landMerge(repo: string, dir: string, base?: string): Promise<LandResult> {
+export async function landMerge(
+  repo: string,
+  dir: string,
+  base?: ResolvedBase,
+): Promise<LandResult> {
   const plan = await landPlan(dir, base);
   if (!plan.wouldMerge || plan.branch === null) return plan;
 

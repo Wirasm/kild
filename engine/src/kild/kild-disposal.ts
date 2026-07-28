@@ -1,6 +1,6 @@
 import { reviewCommits } from './git-review.ts';
 import { changedFiles, forceRemoveWorktree, registeredWorktree } from './worktree.ts';
-import type { BaseSource } from './worktree-status.ts';
+import type { BaseSource, ResolvedBase } from './worktree-status.ts';
 
 /**
  * Disposal — the verb that reclaims a kild's worktree, and the one guard it answers to.
@@ -70,7 +70,7 @@ export interface DisposalRequest {
   /** Branch the tree is on (`kild/<name>`), for the message. */
   branch?: string;
   /** Base branch authored commits are measured against. Absent → the repo's default. */
-  base?: string;
+  base?: ResolvedBase;
   /** True when a live agent process is working in this tree. */
   inUse: boolean;
   /** Dispose even when the branch carries authored commits. The branch — and every commit

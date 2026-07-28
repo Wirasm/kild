@@ -3,6 +3,7 @@ import path from 'node:path';
 import { configuredCloseHook, configuredMemoryDir } from './config.ts';
 import { type HookAgentSpawn, type KildCloseEvent, runCloseHook } from './hooks.ts';
 import type { Kild } from './kild-types.ts';
+import { storedBase } from './kild-types.ts';
 import { appendKildLog, collectLedgerFacts, kildTranscriptPath } from './memory.ts';
 import { worktreePath } from './worktree.ts';
 
@@ -47,7 +48,7 @@ export async function closeKild(kild: Kild, deps: CloseDeps): Promise<void> {
     appendKildLog(
       kild,
       memoryDir,
-      await collectLedgerFacts(dir, kild.base, kild.landedSha, kild.landed),
+      await collectLedgerFacts(dir, storedBase(kild), kild.landedSha, kild.landed),
     );
   } catch (err) {
     console.error(`kild: ledger append failed for '${kild.name}': ${errText(err)}`);

@@ -53,7 +53,7 @@ test('a tree with ONLY untracked litter is disposable, and the litter is named',
     repo,
     dir: wt.path,
     branch: 'kild/litter',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
   });
   expect(assessment.ok).toBe(true);
@@ -77,7 +77,7 @@ test('uncommitted changes to TRACKED files are not a refusal either', async () =
     repo,
     dir: wt.path,
     branch: 'kild/tracked',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
   });
   expect(assessment.ok).toBe(true);
@@ -98,7 +98,7 @@ test('an undeterminable discard list says so, instead of reporting nothing lost'
     repo,
     dir: wt.path,
     branch: 'kild/unreadable',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
     force: true, // past the commits guard, which refuses `undetermined` on its own
   });
@@ -119,7 +119,7 @@ test('a branch carrying commits base does not have is REFUSED, with the count an
     repo,
     dir: wt.path,
     branch: 'kild/authored',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
   });
   expect(assessment.ok).toBe(false);
@@ -143,7 +143,7 @@ test('force overrides the authored refusal — the branch and its commits surviv
     repo,
     dir: wt.path,
     branch: 'kild/forced',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
     force: true,
   });
@@ -183,7 +183,7 @@ test('a base that cannot be resolved is undetermined, and says force is the way 
     repo,
     dir: wt.path,
     branch: 'kild/nobase',
-    base: 'no-such-base',
+    base: { base: 'no-such-base', source: 'explicit' },
     inUse: false,
   });
   expect(assessment).toMatchObject({ ok: false, code: 'undetermined' });
@@ -195,7 +195,7 @@ test('a base that cannot be resolved is undetermined, and says force is the way 
       repo,
       dir: wt.path,
       branch: 'kild/nobase',
-      base: 'no-such-base',
+      base: { base: 'no-such-base', source: 'explicit' },
       inUse: false,
       force: true,
     }),
@@ -240,7 +240,7 @@ test('a refusal built on a GUESSED base says so, and one on a chosen base does n
     repo,
     dir: wt.path,
     branch: 'kild/guessed',
-    base: 'main',
+    base: { base: 'main', source: 'explicit' },
     inUse: false,
   });
   expect(chosen.ok).toBe(false);

@@ -1,7 +1,7 @@
 import type { UiEvent } from './events.ts';
 import type { KildCloseEvent } from './hooks.ts';
 import type { Inbox } from './inbox.ts';
-import type { KildGitStatus } from './worktree-status.ts';
+import type { BaseSource, KildGitStatus, ResolvedBase } from './worktree-status.ts';
 
 /**
  * Kild domain — the operator-facing primitive: a set of agents exchanging directed
@@ -281,6 +281,11 @@ export interface NewKildSpec {
   /** Base branch for the worktree + git-status baseline (default: the checkout's current
    *  branch). Editable via `.kild/config.json` `baseBranch` or the `--base` CLI flag. */
   base?: string;
+  /** Where {@link base} came from. Stored with it because the two are one fact: a base
+   *  resolved by fallback and a base a human named produce identical strings, and everything
+   *  measured against them — ahead/behind, a disposal refusal — is only as certain as the
+   *  base is. Recording the string alone is what let a guess be reported as a choice. */
+  baseSource?: BaseSource;
 }
 
 /** Lightweight kild descriptor for client lists. Its presence in a `{kilds}` broadcast
@@ -495,4 +500,19 @@ export interface CommandAck {
   type: 'command_result';
   requestId: string;
   result: CommandResult<KildActionSuccess>;
+}
+
+/**
+ * A kild's recorded base, read as the pair it is.
+ *
+ * The ONE way to turn a stored `base` back into something a git comparison accepts, so no
+ * caller can hand a stored string to a function expecting a resolved base and have it treated
+ * as an assertion. That laundering is what made every live kild report its base as `explicit`
+ * — including the ones whose base was `currentBranch() ?? 'main'` at creation.
+ */
+export function storedBase(kild: {
+  base?: string;
+  baseSource?: BaseSource;
+}): ResolvedBase | undefined {
+  return kild.base ? { base: kild.base, source: kild.baseSource ?? 'unrecorded' } : undefined;
 }

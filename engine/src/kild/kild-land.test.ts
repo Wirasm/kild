@@ -68,7 +68,7 @@ test('the dry run reports what would land and TOUCHES NOTHING', async () => {
   const beforeTree = await snapshot(wt.path);
   const beforeRepo = await snapshot(repo);
 
-  const plan = await landPlan(wt.path, 'main');
+  const plan = await landPlan(wt.path, { base: 'main', source: 'explicit' });
   expect(plan.wouldMerge).toBe(true);
   expect(plan.merged).toBe(false);
   expect(plan.sha).toBeUndefined();
@@ -89,7 +89,7 @@ test('the dry run names the colliding files and would not merge', async () => {
   await git('commit', '-q', '-am', 'main moves');
   const beforeRepo = await snapshot(repo);
 
-  const plan = await landPlan(wt.path, 'main');
+  const plan = await landPlan(wt.path, { base: 'main', source: 'explicit' });
   expect(plan.wouldMerge).toBe(false);
   expect(plan.collides).toEqual(['README.md']);
   expect(plan.error).toContain('conflicts in 1 file');
@@ -99,20 +99,20 @@ test('the dry run names the colliding files and would not merge', async () => {
 test('a kild with nothing committed would not land, and says exactly that', async () => {
   const wt = await ensureWorktree(repo, 'empty', 'main');
   writeFileSync(path.join(wt.path, 'only-litter.txt'), 'x');
-  const plan = await landPlan(wt.path, 'main');
+  const plan = await landPlan(wt.path, { base: 'main', source: 'explicit' });
   expect(plan.wouldMerge).toBe(false);
   expect(plan.error).toBe('nothing committed on kild/empty vs main');
 });
 
 test('a kild that ran in the checkout has no branch to land', async () => {
-  const plan = await landPlan(repo, 'main');
+  const plan = await landPlan(repo, { base: 'main', source: 'explicit' });
   expect(plan.wouldMerge).toBe(false);
   expect(plan.error).toContain('no branch to land');
 });
 
 test('landing merges into base and reports the merge sha', async () => {
   const wt = await kildWithWork('ship');
-  const result = await landMerge(repo, wt.path, 'main');
+  const result = await landMerge(repo, wt.path, { base: 'main', source: 'explicit' });
   expect(result.merged).toBe(true);
   expect(result.sha).toMatch(/^[0-9a-f]{40}$/);
   // The base really carries the work now, at exactly the sha reported.
@@ -122,7 +122,7 @@ test('landing merges into base and reports the merge sha', async () => {
   );
   expect((await git('branch', '--merged', 'main')).stdout).toContain('kild/ship');
   // And a dry run afterwards agrees there is nothing left to land.
-  expect((await landPlan(wt.path, 'main')).wouldMerge).toBe(false);
+  expect((await landPlan(wt.path, { base: 'main', source: 'explicit' })).wouldMerge).toBe(false);
 });
 
 test('landing refuses when base is not checked out in the repo, and merges nothing', async () => {
@@ -130,7 +130,7 @@ test('landing refuses when base is not checked out in the repo, and merges nothi
   await git('checkout', '-q', '-b', 'side');
   const before = await snapshot(repo);
 
-  const result = await landMerge(repo, wt.path, 'main');
+  const result = await landMerge(repo, wt.path, { base: 'main', source: 'explicit' });
   expect(result.merged).toBe(false);
   expect(result.error).toContain('is on side, not main');
   expect(await snapshot(repo)).toEqual(before);
@@ -141,7 +141,7 @@ test('landing refuses on a dirty main checkout rather than entangling the merge'
   writeFileSync(path.join(repo, 'README.md'), 'edited in the checkout\n');
   const before = await snapshot(repo);
 
-  const result = await landMerge(repo, wt.path, 'main');
+  const result = await landMerge(repo, wt.path, { base: 'main', source: 'explicit' });
   expect(result.merged).toBe(false);
   expect(result.error).toContain('uncommitted changes');
   expect(await snapshot(repo)).toEqual(before);
@@ -153,7 +153,7 @@ test('a conflicting land is refused before git is asked to merge', async () => {
   await git('commit', '-q', '-am', 'main moves');
   const before = await snapshot(repo);
 
-  const result = await landMerge(repo, wt.path, 'main');
+  const result = await landMerge(repo, wt.path, { base: 'main', source: 'explicit' });
   expect(result.merged).toBe(false);
   expect(result.collides).toEqual(['README.md']);
   // No half-finished merge left behind for someone else to discover.

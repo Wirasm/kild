@@ -72,7 +72,7 @@ test('commits vs base come newest-first with per-commit stats', async () => {
   await git(dir, ['add', '.']);
   await commit(dir, 'trim a, add b');
 
-  const result = await reviewCommits(dir, 'main');
+  const result = await reviewCommits(dir, { base: 'main', source: 'explicit' });
 
   expect(result.error).toBeUndefined();
   expect(result.base).toBe('main');
@@ -93,21 +93,21 @@ test('commits vs base come newest-first with per-commit stats', async () => {
 
 test('no commits ahead of base yields an empty list, no error', async () => {
   const dir = await initRepo();
-  const result = await reviewCommits(dir, 'main');
+  const result = await reviewCommits(dir, { base: 'main', source: 'explicit' });
   expect(result.error).toBeUndefined();
   expect(result.commits).toEqual([]);
 });
 
 test('commits: a missing base ref is an error object, not a crash', async () => {
   const dir = await initRepo();
-  const result = await reviewCommits(dir, 'does-not-exist');
+  const result = await reviewCommits(dir, { base: 'does-not-exist', source: 'explicit' });
   expect(result.error).toBe('base ref not found: does-not-exist');
   expect(result.commits).toEqual([]);
 });
 
 test('commits: a non-git directory is an error object, not a crash', async () => {
   const dir = mkTmp('kild-git-review-nogit-');
-  const result = await reviewCommits(dir, 'main');
+  const result = await reviewCommits(dir, { base: 'main', source: 'explicit' });
   expect(result.error).toBeDefined();
   expect(result.commits).toEqual([]);
 });
@@ -123,7 +123,7 @@ test('files combine committed, uncommitted, and untracked changes vs base', asyn
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\nedited\n'); // uncommitted edit
   fs.writeFileSync(path.join(dir, 'untracked.txt'), 'u1\nu2\nu3\n'); // never added
 
-  const result = await reviewFiles(dir, 'main');
+  const result = await reviewFiles(dir, { base: 'main', source: 'explicit' });
 
   expect(result.error).toBeUndefined();
   const byPath = new Map(result.files.map((file) => [file.path, file]));
@@ -160,7 +160,7 @@ test('files report deletions and renames with the pre-rename path', async () => 
   await git(dir, ['mv', 'README.md', 'RENAMED.md']);
   await commit(dir, 'delete + rename');
 
-  const result = await reviewFiles(dir, 'main');
+  const result = await reviewFiles(dir, { base: 'main', source: 'explicit' });
 
   expect(result.error).toBeUndefined();
   const byPath = new Map(result.files.map((file) => [file.path, file]));
@@ -184,7 +184,7 @@ test("files never include the base's own advances (merge-base semantics)", async
   await commit(dir, 'theirs');
   await git(dir, ['checkout', 'feature']);
 
-  const result = await reviewFiles(dir, 'main');
+  const result = await reviewFiles(dir, { base: 'main', source: 'explicit' });
 
   expect(result.error).toBeUndefined();
   expect(result.files.map((file) => file.path)).toEqual(['mine.txt']);
@@ -192,7 +192,7 @@ test("files never include the base's own advances (merge-base semantics)", async
 
 test('files: a missing base ref is an error object, not a crash', async () => {
   const dir = await initRepo();
-  const result = await reviewFiles(dir, 'does-not-exist');
+  const result = await reviewFiles(dir, { base: 'does-not-exist', source: 'explicit' });
   expect(result.error).toBe('base ref not found: does-not-exist');
   expect(result.files).toEqual([]);
 });
@@ -207,7 +207,7 @@ test('diff returns one unified patch covering committed + working-tree changes',
   await commit(dir, 'committed line');
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\ncommitted\nuncommitted\n');
 
-  const result = await reviewDiff(dir, 'main', 'README.md');
+  const result = await reviewDiff(dir, { base: 'main', source: 'explicit' }, 'README.md');
 
   expect(result.error).toBeUndefined();
   expect(result.truncated).toBe(false);
@@ -220,7 +220,7 @@ test('diff covers an untracked file via no-index', async () => {
   const dir = await initRepo();
   fs.writeFileSync(path.join(dir, 'fresh.txt'), 'brand new\n');
 
-  const result = await reviewDiff(dir, 'main', 'fresh.txt');
+  const result = await reviewDiff(dir, { base: 'main', source: 'explicit' }, 'fresh.txt');
 
   expect(result.error).toBeUndefined();
   expect(result.patch).toContain('+brand new');
@@ -229,7 +229,7 @@ test('diff covers an untracked file via no-index', async () => {
 test('diff refuses a path git did not report (traversal guard)', async () => {
   const dir = await initRepo();
   for (const evil of ['../../etc/passwd', '/etc/passwd', 'nope.txt']) {
-    const result = await reviewDiff(dir, 'main', evil);
+    const result = await reviewDiff(dir, { base: 'main', source: 'explicit' }, evil);
     expect(result.unknownPath).toBe(true);
     expect(result.error).toContain('not reported by git');
     expect(result.patch).toBe('');
@@ -240,7 +240,7 @@ test('diff larger than the cap is truncated and flagged', async () => {
   const dir = await initRepo();
   fs.writeFileSync(path.join(dir, 'big.txt'), 'x-line-of-payload\n'.repeat(20_000)); // ~360 KB
 
-  const result = await reviewDiff(dir, 'main', 'big.txt');
+  const result = await reviewDiff(dir, { base: 'main', source: 'explicit' }, 'big.txt');
 
   expect(result.error).toBeUndefined();
   expect(result.truncated).toBe(true);
