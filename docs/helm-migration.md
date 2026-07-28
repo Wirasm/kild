@@ -192,6 +192,33 @@ view. `GET /api/kilds` does not carry the field. What it *does* carry is `git.ch
 full per-kild changed-file list, which is everything needed to derive collisions client-side.
 Deriving them in helm from `git.changedFiles` is the correct approach, not a workaround.
 
+#### Three states, not two — an empty `changedFiles` is not always "clean"
+
+`changedFiles` is **not optional**: `KildGitStatus.changedFiles` is `string[]` and is always
+present. What *is* optional is the whole `git` block, so "not measured" is encoded by `git`
+being absent, never by the list being absent.
+
+The state that catches people is the third one. `worktree-status.ts` captures git failures as
+**data** — `error?: string`, documented there as "any git failure captured here, NEVER thrown"
+— and leaves `ahead`/`behind` at 0 and `changedFiles` empty when it fires:
+
+| Shape | Means |
+|---|---|
+| `git` absent | not measured |
+| `git` present, `changedFiles: []`, no `error` | measured, genuinely clean |
+| `git` present, `changedFiles: []`, `error` set | **measurement failed — nothing is known** |
+
+So an empty list with `error` set is *not* "this kild collides with nothing", it is "we cannot
+tell what this kild touches". Rendering the two the same makes a client state confidently that
+there are no collisions at exactly the moment it cannot know — and a land gate is the last
+place that answer should be guessed. Treat `error` as undetermined and render it as such;
+`conflictsWithBase` is already `boolean | null` with `null` meaning explicitly undetermined, so
+undetermined is a state this wire expects you to have a rendering for.
+
+Note also that only the **full** `/status` shape carries the list. `GET /api/kilds` has no
+`git` at all, and the compact form reduces it to `changedFileCount`. Derivation only works
+where the list actually is.
+
 ### Request body changes
 
 - `POST /api/kilds` — `participants: [{name, persona, model}]` → `agents: [{handle, persona, model}]`
