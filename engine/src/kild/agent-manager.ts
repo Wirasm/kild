@@ -6,7 +6,6 @@ import type {
   CommandResult,
   KildActionSuccess,
   SendOut,
-  SpawnOut,
   StopOut,
 } from './kild-types.ts';
 import { readSkillsProfile, skillsProfileForAgent } from './skills-profile.ts';
@@ -96,11 +95,13 @@ export function agentEnv(
 }
 
 /** Control-line callbacks for an agent process — used by the KildManager to route an
- *  agent's `send` / `spawn` back into its kild. A bare (non-kild) session passes none,
- *  so the control lines are simply never emitted. */
+ *  agent's `send` / `stop` back into its kild. A bare (non-kild) session passes none,
+ *  so the control lines are simply never emitted.
+ *
+ *  There is no `onSpawn`: growing a kild is what a `send` to an unheld handle does, so the
+ *  engine has one fewer control line to route and an agent one fewer tool to learn. */
 export interface AgentCallbacks {
   onSend?: (m: SendOut) => MaybePromise<CommandResult<KildActionSuccess>>;
-  onSpawn?: (s: SpawnOut) => MaybePromise<CommandResult<KildActionSuccess>>;
   onStop?: (s: StopOut) => MaybePromise<CommandResult<KildActionSuccess>>;
 }
 
@@ -139,7 +140,6 @@ class PiSession {
         if (!line) continue;
         let parsed:
           | (Partial<SendOut> & { kind: 'send' })
-          | (Partial<SpawnOut> & { kind: 'spawn' })
           | (Partial<StopOut> & { kind: 'stop' })
           | (UiEvent & { kind: UiEvent['kind'] });
         try {
@@ -147,12 +147,10 @@ class PiSession {
         } catch {
           continue; // non-JSON line from the agent (a stray log); ignore.
         }
-        // An agent's `send` / `spawn` arrive as control lines routed back to its kild,
+        // An agent's `send` / `stop` arrive as control lines routed back to its kild,
         // not the transcript. Everything else is a UiEvent.
         if (parsed.kind === 'send') {
           void this.acknowledge(parsed.requestId, callbacks?.onSend?.(parsed as SendOut));
-        } else if (parsed.kind === 'spawn' && parsed.handle) {
-          void this.acknowledge(parsed.requestId, callbacks?.onSpawn?.(parsed as SpawnOut));
         } else if (parsed.kind === 'stop') {
           void this.acknowledge(parsed.requestId, callbacks?.onStop?.(parsed as StopOut));
         } else if (parsed.kind) {

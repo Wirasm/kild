@@ -367,6 +367,9 @@ export interface KildActionSuccess {
   /** For sends: the named recipients other than the sender. Empty = the message reached
    *  no one, e.g. a self-addressed send. */
   deliveredTo?: string[];
+  /** For sends that grew the kild: the handles this send brought in (see
+   *  {@link CreateMissing}). Absent when every recipient already existed. */
+  created?: string[];
 }
 
 export interface NewKildSuccess extends KildActionSuccess {
@@ -388,7 +391,13 @@ export type KildOutbound =
   | { kild: string; agent: string; event: UiEvent };
 
 /** Agent→engine control line: an agent called `send`. Distinct from a `UiEvent` —
- *  routed to the kild, not shown as the agent's raw transcript. */
+ *  routed to the kild, not shown as the agent's raw transcript.
+ *
+ *  There is no `spawn` line beside it. An agent grows its kild by ADDRESSING someone new:
+ *  a recipient the kild does not have is created and then delivered to, with `persona` and
+ *  `model` describing who it should be (see {@link CreateMissing}). Spawning was never the
+ *  goal — every real delegation was spawn-then-send, and a spawn on its own produced an
+ *  agent sitting idle. */
 export interface SendOut {
   kind: 'send';
   requestId?: string;
@@ -396,17 +405,32 @@ export interface SendOut {
   /** The recipients the sending agent named (structured, never parsed from the text).
    *  Required: the engine never infers a recipient, so an empty list is a rejection. */
   to: string[];
+  /** Persona for any recipient that has to be created; defaults per handle. */
+  persona?: string;
+  /** Model for any recipient that has to be created. */
+  model?: string;
 }
 
-/** Agent→engine control line: an agent called `spawn` to pull in another. */
-export interface SpawnOut {
-  kind: 'spawn';
-  requestId?: string;
-  handle: string;
+/**
+ * What a recipient becomes when the kild does not have it yet — passed by a caller that may
+ * grow the kild, and absent for one that may not.
+ *
+ * Its presence is the whole difference between the two send paths: for an agent inside a
+ * kild, naming someone new is how delegation starts, so `send` creates them; at the REST
+ * boundary a typo'd handle must never quietly cost a process, so it stays a rejection naming
+ * the roster. Nothing is read out of the message text in either case — the caller names the
+ * handles as data.
+ *
+ * There is no per-recipient variant: when one call names several new handles they are all
+ * created from this one spec (which is exactly the fan-out shape — N handles, one persona,
+ * one brief). Different personas are different calls.
+ */
+export interface CreateMissing {
+  /** Persona each created recipient runs. Omitted means "the handle is the persona name",
+   *  the same resolution every other spawn path uses. */
   persona?: string;
+  /** Model each created recipient runs on. */
   model?: string;
-  /** What the new agent is being spawned to do — see {@link SpawnContext.task}. */
-  task?: string;
 }
 
 /** Agent→engine control line: an agent called `stop`. */

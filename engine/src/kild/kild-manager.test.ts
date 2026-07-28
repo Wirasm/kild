@@ -112,21 +112,25 @@ test('rejects when kild capacity would be exceeded', async () => {
   });
 });
 
-test('rejects an omitted-persona agent whose handle is not a known persona', async () => {
+// The rejection NAMES the personas that exist. It is not decoration: a persona is how a
+// handle nobody holds becomes an agent, so this message is the discovery path — without the
+// list, a caller's only recourse is another guess.
+test('rejects an omitted-persona agent whose handle is not a known persona, naming what exists', async () => {
   const { manager } = fixture();
   expect(await newKild(manager, [{ handle: 'planner' }])).toEqual({
     ok: false,
     code: 'rejected',
-    message: 'unknown persona: planner',
+    message:
+      'unknown persona: planner (available: general, default, coder, reviewer, orchestrator)',
   });
 });
 
 test('rejects an explicitly named unknown persona', async () => {
   const { manager } = fixture();
-  expect(await newKild(manager, [{ handle: 'coder', persona: 'planner' }])).toEqual({
+  expect(await newKild(manager, [{ handle: 'coder', persona: 'planner' }])).toMatchObject({
     ok: false,
     code: 'rejected',
-    message: 'unknown persona: planner',
+    message: expect.stringContaining('unknown persona: planner (available: general,'),
   });
 });
 
@@ -325,25 +329,134 @@ test('a task with no sender is refused before anything is spawned', async () => 
   expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['orchestrator']);
 });
 
-test('an agent’s spawn control line tasks the new agent as ITSELF, whatever the line says', async () => {
-  const { manager, callbacks } = fixture();
+// ── One verb: addressing an agent that isn't here brings it in ─────────────────────────
+// An agent has no `spawn` tool. Spawning was never the goal — it produced an agent sitting
+// idle — so `send` does both: a recipient the kild does not have is created, then delivered
+// to. The REST path deliberately does NOT (see `createMissing`): a typo from a client must
+// not cost a process.
+
+test('an agent’s send creates a recipient the kild does not have, then delivers to it', async () => {
+  const { manager, callbacks, spawned, prompted } = fixture();
   await newKild(manager, [{ handle: 'orchestrator' }]);
-  // The control line carries no sender and cannot: the engine takes it from the session it
-  // arrived on. An agent says what it wants done; the engine says who asked.
-  await callbacks.get('s-1')?.onSpawn?.({
-    kind: 'spawn',
-    handle: 'reviewer',
-    persona: 'reviewer',
-    task: 'review the auth diff',
+
+  const result = await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['reviewer'],
+    text: 'review the auth diff',
   });
+  expect(result).toMatchObject({ ok: true, value: { created: ['reviewer'] } });
+
+  // Created…
+  expect(spawned.map((s) => s.persona)).toEqual(['orchestrator', 'reviewer']);
+  // …with the spawn edge recorded, taken from the session the line arrived on and never
+  // from the line itself: the agent says who it is addressing, the engine says who asked.
+  expect(manager.liveKilds()[0]?.agents.find((a) => a.handle === 'reviewer')).toMatchObject({
+    invitedBy: 'orchestrator',
+  });
+  // …and delivered to, as one ordinary message on the log.
   expect(manager.messages('kild-1')?.[0]).toMatchObject({
+    seq: 1,
     from: 'orchestrator',
     to: ['reviewer'],
     text: 'review the auth diff',
   });
-  expect(manager.liveKilds()[0]?.agents.find((a) => a.handle === 'reviewer')).toMatchObject({
+  expect(prompted.at(-1)).toMatchObject({
+    id: 's-2',
+    text: formatDelivery('demo', 'orchestrator', 'review the auth diff'),
+  });
+});
+
+test('persona and model describe who a created recipient is; the handle names the instance', async () => {
+  const { manager, callbacks, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['reviewer-auth'],
+    text: 'the auth path only',
+    persona: 'reviewer',
+    model: 'openai-codex/gpt-5.6-sol',
+  });
+  expect(spawned.at(-1)?.persona).toBe('reviewer');
+  expect(manager.liveIdentities()[0]?.agents.at(-1)).toMatchObject({
+    handle: 'reviewer-auth',
+    persona: 'reviewer',
+    model: 'openai-codex/gpt-5.6-sol',
     invitedBy: 'orchestrator',
   });
+});
+
+test('a fan-out names several new handles at once — one persona, one brief', async () => {
+  const { manager, callbacks } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  const result = await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['rev-1', 'rev-2', 'rev-3'],
+    text: 'independently: is this diff safe to land?',
+    persona: 'reviewer',
+  });
+  expect(result).toMatchObject({ ok: true, value: { created: ['rev-1', 'rev-2', 'rev-3'] } });
+  expect(manager.liveIdentities()[0]?.agents.map((a) => a.handle)).toEqual([
+    'orchestrator',
+    'rev-1',
+    'rev-2',
+    'rev-3',
+  ]);
+  // One message, three recipients — not three sends.
+  expect(manager.messages('kild-1')).toHaveLength(1);
+});
+
+test('a send naming an already-present agent creates nothing and reports nothing created', async () => {
+  const { manager, callbacks, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }, { handle: 'coder' }]);
+  const result = await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['coder'],
+    text: 'ship it',
+  });
+  expect(result).toMatchObject({ ok: true });
+  expect((result as { value: { created?: string[] } }).value.created).toBeUndefined();
+  expect(spawned).toHaveLength(2); // the two from create, nothing new
+});
+
+test('an unresolvable persona rejects the whole send: nothing is created, nothing is sent', async () => {
+  const { manager, callbacks, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  // Persona defaults to the handle, so this is also what a typo'd handle costs: a clean
+  // rejection naming the personas that DO exist, rather than an agent nobody meant to make.
+  const result = await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['reviewr'],
+    text: 'review the auth diff',
+  });
+  expect(result).toMatchObject({ ok: false, code: 'rejected' });
+  expect((result as { message: string }).message).toContain('reviewer');
+  expect(spawned).toHaveLength(1);
+  expect(manager.messages('kild-1')).toEqual([]);
+});
+
+test('one bad recipient among good ones creates NEITHER — the batch is validated first', async () => {
+  const { manager, callbacks, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  const result = await callbacks.get('s-1')?.onSend?.({
+    kind: 'send',
+    to: ['coder', 'nobody-persona'],
+    text: 'go',
+  });
+  expect(result).toMatchObject({ ok: false, code: 'rejected' });
+  expect(spawned).toHaveLength(1);
+  expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['orchestrator']);
+});
+
+test('the REST path still refuses an unknown recipient — a client typo costs no process', async () => {
+  const { manager, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  // No `createMissing`: same call, opposite meaning. This is the one difference between an
+  // agent inside the kild and a caller at the boundary.
+  expect(await manager.send('kild-1', 'human', ['reviewer'], 'hi')).toMatchObject({
+    ok: false,
+    code: 'rejected',
+  });
+  expect(spawned).toHaveLength(1);
 });
 
 test('invitedBy rides the cheap roster view, so five identical personas are attributable', async () => {

@@ -51,5 +51,5 @@ test('the catalog explains that handle and persona are separate', () => {
   // The distinction that makes two instances of one persona addressable: same persona,
   // different handles. Without it an agent assumes one persona means one agent.
   const section = formatPersonasSection([{ name: 'coder', description: 'writes code' }]);
-  expect(section).toContain('spawn the same persona twice under two handles');
+  expect(section).toContain('name the same persona under two handles');
 });
