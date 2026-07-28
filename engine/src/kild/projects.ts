@@ -13,14 +13,42 @@ function projectsFile(): string {
   return path.join(kildHome(), 'projects.json');
 }
 
+/**
+ * Registered projects, or `[]`.
+ *
+ * This must never return a non-array. It used to hand back `parsed.projects` unchecked, so a
+ * `projects.json` that was hand-edited into a bare array — or anything else without that key
+ * — yielded `undefined`, and every caller does `.map`/`.find` on the result. One malformed
+ * file 500'd routes across the whole engine, blaming the server for the operator's typo.
+ */
 export async function loadProjects(): Promise<Project[]> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(projectsFile(), 'utf8');
-    return (JSON.parse(raw) as { projects: Project[] }).projects;
+    raw = await fs.readFile(projectsFile(), 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return []; // unreadable registry → no projects, not a crashed request
+  }
+  // Accept the canonical `{projects: [...]}`, and tolerate a bare array, which is what a
+  // hand-edited file usually becomes.
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { projects?: unknown })?.projects)
+      ? (parsed as { projects: unknown[] }).projects
+      : [];
+  return list.filter(
+    (entry): entry is Project =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as Project).name === 'string' &&
+      typeof (entry as Project).path === 'string',
+  );
 }
 
 export async function findProject(name: string): Promise<Project | null> {

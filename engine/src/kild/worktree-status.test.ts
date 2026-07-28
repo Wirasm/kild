@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { roomGitStatus } from './worktree-status.ts';
+import { kildGitStatus } from './worktree-status.ts';
 
 const execFile = promisify(execFileCb);
 
@@ -52,7 +52,7 @@ async function initRepo(): Promise<string> {
 
 test('clean repo on the base branch reports no divergence and no changes', async () => {
   const dir = await initRepo();
-  const status = await roomGitStatus(dir); // default base resolves to main
+  const status = await kildGitStatus(dir); // default base resolves to main
 
   expect(status.error).toBeUndefined();
   expect(status.path).toBe(dir);
@@ -73,7 +73,7 @@ test('a branch one commit ahead reports ahead 1 and the changed file', async () 
   await git(dir, ['add', '.']);
   await commit(dir, 'add feature');
 
-  const status = await roomGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, 'main');
 
   expect(status.error).toBeUndefined();
   expect(status.branch).toBe('feature');
@@ -84,11 +84,11 @@ test('a branch one commit ahead reports ahead 1 and the changed file', async () 
   expect(status.dirty).toBe(false);
 });
 
-test('an uncommitted edit marks the room dirty', async () => {
+test('an uncommitted edit marks the kild dirty', async () => {
   const dir = await initRepo();
   fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
 
-  const status = await roomGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, 'main');
 
   expect(status.error).toBeUndefined();
   expect(status.dirty).toBe(true);
@@ -100,7 +100,7 @@ test('an uncommitted edit marks the room dirty', async () => {
 test('a non-git directory returns an error object without throwing', async () => {
   const dir = mkTmp('kild-wt-nogit-');
 
-  const status = await roomGitStatus(dir);
+  const status = await kildGitStatus(dir);
 
   expect(status.error).toBeDefined();
   expect(status.path).toBe(dir);
@@ -119,7 +119,7 @@ test('a branch that merges cleanly into base reports conflictsWithBase false', a
   await git(dir, ['add', '.']);
   await commit(dir, 'add feature'); // new file, no overlap with base
 
-  const status = await roomGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, 'main');
 
   expect(status.error).toBeUndefined();
   expect(status.ahead).toBe(1);
@@ -139,7 +139,7 @@ test('a branch that edits the same line as base reports conflictsWithBase true',
   await commit(dir, 'main edit');
   await git(dir, ['checkout', 'feature']);
 
-  const status = await roomGitStatus(dir, 'main');
+  const status = await kildGitStatus(dir, 'main');
 
   expect(status.ahead).toBe(1);
   expect(status.behind).toBe(1);
@@ -149,7 +149,7 @@ test('a branch that edits the same line as base reports conflictsWithBase true',
 test('a missing base ref is reported as an error, not a crash', async () => {
   const dir = await initRepo();
 
-  const status = await roomGitStatus(dir, 'does-not-exist');
+  const status = await kildGitStatus(dir, 'does-not-exist');
 
   expect(status.error).toBeDefined();
   expect(status.base).toBe('does-not-exist');

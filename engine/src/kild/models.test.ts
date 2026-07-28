@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 
-import { resolveModel, withRole } from './models.ts';
+import { resolveModel, withPersona } from './models.ts';
 
 const registry = {
   find: (provider: string, id: string) =>
@@ -26,7 +26,7 @@ test('no pattern resolves to undefined (use pi default)', () => {
   expect(resolveModel(registry, undefined)).toBeUndefined();
 });
 
-test('withRole wraps only when given instructions', () => {
-  expect(withRole('hi', 'be terse')).toContain('<role>');
-  expect(withRole('hi', null)).toBe('hi');
+test('withPersona wraps only when given instructions', () => {
+  expect(withPersona('hi', 'be terse')).toContain('<persona>');
+  expect(withPersona('hi', null)).toBe('hi');
 });

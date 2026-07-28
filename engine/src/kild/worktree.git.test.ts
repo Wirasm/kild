@@ -9,7 +9,6 @@ import {
   ensureWorktree,
   forceRemoveWorktree,
   pruneMergedWorktrees,
-  removeWorktree,
   worktreePath,
 } from './worktree.ts';
 
@@ -89,49 +88,28 @@ test('ensureWorktree attaches without resetting (uncommitted work survives)', as
   expect(existsSync(path.join(wt.path, 'WIP.txt'))).toBe(true);
 });
 
-test('safe removal removes a clean worktree', async () => {
-  const wt = await ensureWorktree(repo, 'clean');
-  await expect(removeWorktree(repo, wt.path)).resolves.toEqual({ ok: true });
-  expect(existsSync(wt.path)).toBe(false);
-});
-
-test('safe removal refuses dirty worktree and previews modified and untracked files', async () => {
-  const wt = await ensureWorktree(repo, 'dirty-remove');
-  writeFileSync(path.join(wt.path, 'tracked.txt'), 'base');
-  await gitIn(wt.path, 'add', 'tracked.txt');
-  await gitIn(wt.path, 'commit', '-q', '-m', 'tracked');
-  writeFileSync(path.join(wt.path, 'tracked.txt'), 'changed');
-  writeFileSync(path.join(wt.path, 'untracked.txt'), 'wip');
-
-  await expect(removeWorktree(repo, wt.path)).resolves.toEqual({
-    ok: false,
-    code: 'dirty',
-    files: expect.arrayContaining(['tracked.txt', 'untracked.txt']),
-  });
-  expect(existsSync(wt.path)).toBe(true);
-});
-
-test('force removal discards a dirty worktree', async () => {
+test('removal discards a dirty worktree — the working tree is not evidence of work', async () => {
   const wt = await ensureWorktree(repo, 'force-dirty');
   writeFileSync(path.join(wt.path, 'WIP.txt'), 'discard');
   await expect(forceRemoveWorktree(repo, wt.path)).resolves.toEqual({ ok: true });
   expect(existsSync(wt.path)).toBe(false);
 });
 
-test('safe removal reports a missing worktree', async () => {
-  await expect(removeWorktree(repo, worktreePath('missing'))).resolves.toEqual({
+test('removal reports a missing worktree instead of throwing', async () => {
+  await expect(forceRemoveWorktree(repo, worktreePath('missing'))).resolves.toEqual({
     ok: false,
     code: 'not_found',
   });
 });
 
-test('ensureWorktree re-creating a removed worktree preserves the branch commits', async () => {
+test('removal never deletes the branch: re-creating the worktree restores its commits', async () => {
   const wt = await ensureWorktree(repo, 'persist');
   writeFileSync(path.join(wt.path, 'COMMITTED.txt'), 'keep');
   await gitIn(wt.path, 'add', '.');
   await gitIn(wt.path, 'commit', '-q', '-m', 'work');
-  await removeWorktree(repo, wt.path); // worktree gone; kild/persist branch kept
+  await forceRemoveWorktree(repo, wt.path); // worktree gone; kild/persist branch kept
   expect(existsSync(wt.path)).toBe(false);
+  expect((await git('branch')).stdout).toContain('kild/persist');
   const again = await ensureWorktree(repo, 'persist');
   expect(existsSync(path.join(again.path, 'COMMITTED.txt'))).toBe(true);
 });

@@ -1,0 +1,363 @@
+<title>kild — demolition map</title>
+<style>
+  :root {
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+
+    --ground: #ECEEF1; --surface: #FFFFFF; --surface-2: #F4F6F8;
+    --ink: #14181F; --ink-soft: #4C5464; --ink-faint: #838D9C;
+    --line: #DBE0E7; --line-strong: #C6CCD6;
+    --mech: #0E6E78; --mech-bg: #0e6e781a;
+    --prp: #8A6410;  --prp-bg: #8a641018;
+    --seal: #C0402A; --seal-bg: #c0402a16;
+    --measure: 68ch; --shell: 1100px; --radius: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0D1015; --surface: #14181F; --surface-2: #1A1F28;
+      --ink: #E7EAEF; --ink-soft: #9BA5B3; --ink-faint: #626C7B;
+      --line: #262D38; --line-strong: #333C49;
+      --mech: #46B8C2; --mech-bg: #46b8c220;
+      --prp: #DBA842;  --prp-bg: #dba84220;
+      --seal: #E86B4E; --seal-bg: #e86b4e1f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0D1015; --surface: #14181F; --surface-2: #1A1F28;
+    --ink: #E7EAEF; --ink-soft: #9BA5B3; --ink-faint: #626C7B;
+    --line: #262D38; --line-strong: #333C49;
+    --mech: #46B8C2; --mech-bg: #46b8c220;
+    --prp: #DBA842;  --prp-bg: #dba84220;
+    --seal: #E86B4E; --seal-bg: #e86b4e1f;
+  }
+  :root[data-theme="light"] {
+    --ground: #ECEEF1; --surface: #FFFFFF; --surface-2: #F4F6F8;
+    --ink: #14181F; --ink-soft: #4C5464; --ink-faint: #838D9C;
+    --line: #DBE0E7; --line-strong: #C6CCD6;
+    --mech: #0E6E78; --mech-bg: #0e6e781a;
+    --prp: #8A6410;  --prp-bg: #8a641018;
+    --seal: #C0402A; --seal-bg: #c0402a16;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--font-sans);
+         font-size:17px; line-height:1.62; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:var(--shell); margin:0 auto; padding:0 28px; }
+  .measure { max-width:var(--measure); }
+  a { color:var(--mech); text-decoration:none; border-bottom:1px solid color-mix(in srgb,var(--mech) 35%,transparent); }
+  a:hover { border-bottom-color:var(--mech); }
+  a:focus-visible { outline:2px solid var(--seal); outline-offset:3px; border-radius:2px; }
+  code { font-family:var(--font-mono); font-size:0.86em; background:var(--surface-2);
+         border:1px solid var(--line); padding:0.08em 0.36em; border-radius:3px; white-space:nowrap; }
+
+  .masthead { border-bottom:1px solid var(--line); background-color:var(--ground);
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0 27px, color-mix(in srgb,var(--seal) 7%,transparent) 27px 28px),
+      repeating-linear-gradient(90deg, transparent 0 27px, color-mix(in srgb,var(--seal) 7%,transparent) 27px 28px); }
+  .masthead .wrap { padding-top:54px; padding-bottom:42px; }
+  .eyebrow { font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase;
+             color:var(--ink-faint); margin:0 0 22px; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .eyebrow .sep { color:var(--line-strong); }
+  h1 { font-family:var(--font-mono); font-weight:600; font-size:clamp(2rem,5vw,2.9rem); line-height:1.03;
+       letter-spacing:-0.02em; margin:0 0 24px; text-wrap:balance; }
+  .thesis { font-family:var(--font-serif); font-size:clamp(1.2rem,2.4vw,1.5rem); line-height:1.42;
+            max-width:34ch; margin:0 0 28px; text-wrap:balance; }
+  .thesis .s { color:var(--seal); } .thesis .m { color:var(--mech); }
+  .meta-row { display:flex; flex-wrap:wrap; gap:10px 26px; font-family:var(--font-mono); font-size:0.74rem;
+              color:var(--ink-soft); border-top:1px solid var(--line); padding-top:20px; }
+  .meta-row b { color:var(--ink); font-weight:600; }
+
+  /* scoreboard */
+  .score { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:1px;
+           background:var(--line); border:1px solid var(--line); border-radius:var(--radius);
+           overflow:hidden; margin:34px 0 0; }
+  .score > div { background:var(--surface); padding:20px 22px; }
+  .score .num { font-family:var(--font-mono); font-size:1.85rem; font-weight:600; letter-spacing:-0.02em;
+                line-height:1; font-variant-numeric:tabular-nums; }
+  .score .lbl { font-family:var(--font-mono); font-size:0.68rem; letter-spacing:0.11em; text-transform:uppercase;
+                color:var(--ink-faint); margin-top:9px; }
+  .score .sub { font-size:0.83rem; color:var(--ink-soft); margin-top:6px; line-height:1.45; }
+  .n-die .num { color:var(--ink-faint); } .n-mech .num { color:var(--mech); }
+  .n-seal .num { color:var(--seal); } .n-prp .num { color:var(--prp); }
+
+  section { padding:58px 0 8px; border-top:1px solid var(--line); }
+  section:first-of-type { border-top:none; }
+  .sec-head { display:flex; gap:18px; align-items:baseline; margin-bottom:24px; }
+  .sec-head .n { font-family:var(--font-mono); font-size:0.82rem; color:var(--seal); flex:none; padding-top:4px; letter-spacing:0.06em; }
+  h2 { font-family:var(--font-mono); font-weight:600; font-size:clamp(1.35rem,2.9vw,1.85rem);
+       letter-spacing:-0.015em; margin:0; line-height:1.1; text-wrap:balance; }
+  .lede { font-size:1.05rem; color:var(--ink-soft); margin:0 0 22px; }
+  p { margin:0 0 18px; }
+  h3.sub { font-family:var(--font-mono); font-size:0.95rem; font-weight:600; margin:34px 0 12px; }
+  h3.sub .tag { font-size:0.72rem; color:var(--ink-faint); font-weight:500; }
+
+  .tbl-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); margin:6px 0 20px; }
+  table { border-collapse:collapse; width:100%; min-width:640px; font-size:0.88rem; }
+  th, td { text-align:left; padding:11px 15px; border-bottom:1px solid var(--line); vertical-align:top; }
+  thead th { font-family:var(--font-mono); font-size:0.68rem; letter-spacing:0.09em; text-transform:uppercase;
+             color:var(--ink-faint); background:var(--surface-2); }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:var(--surface-2); }
+  td.mono { font-family:var(--font-mono); font-size:0.81rem; }
+  td.num { font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right; color:var(--ink-soft); font-size:0.82rem; white-space:nowrap; }
+  td.num b { color:var(--ink); font-weight:600; }
+  .disp { font-family:var(--font-mono); font-size:0.65rem; font-weight:600; letter-spacing:0.08em;
+          text-transform:uppercase; padding:3px 8px; border-radius:3px; white-space:nowrap; display:inline-block; }
+  .d-keep { background:var(--mech-bg); color:var(--mech); }
+  .d-reshape { background:var(--seal-bg); color:var(--seal); }
+  .d-move { background:var(--prp-bg); color:var(--prp); }
+  .d-die { background:color-mix(in srgb,var(--ink-faint) 16%,transparent); color:var(--ink-faint); }
+  tr.dead td.mono { color:var(--ink-faint); }
+  tr.dead td.mono code, tr.dead td.mono { text-decoration:line-through; text-decoration-color:color-mix(in srgb,var(--ink-faint) 45%,transparent); }
+
+  .callout { border:1px solid var(--line); border-left:3px solid var(--seal); background:var(--surface);
+             border-radius:var(--radius); padding:18px 20px; margin:4px 0 22px; }
+  .callout .h { font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.1em; text-transform:uppercase;
+                color:var(--seal); margin-bottom:8px; }
+  .callout p { margin:0; font-size:0.94rem; color:var(--ink-soft); }
+  .seal-t { color:var(--seal); font-weight:600; }
+  .callout.mech { border-left-color:var(--mech); } .callout.mech .h { color:var(--mech); }
+
+  /* shrink bars */
+  .shrink { display:grid; gap:14px; margin:6px 0 8px; }
+  .row { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:15px 18px; }
+  .row .top { display:flex; justify-content:space-between; gap:14px; align-items:baseline; font-family:var(--font-mono);
+              font-size:0.85rem; margin-bottom:9px; flex-wrap:wrap; }
+  .row .top .f { font-weight:600; }
+  .row .top .d { color:var(--ink-soft); font-size:0.78rem; font-variant-numeric:tabular-nums; }
+  .row .top .d s { color:var(--ink-faint); }
+  .bar { height:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:2px; overflow:hidden; display:flex; }
+  .bar .stay { background:var(--mech); }
+  .bar .cut { background:color-mix(in srgb,var(--seal) 55%,transparent); }
+  .row .why { font-size:0.85rem; color:var(--ink-soft); margin-top:9px; line-height:1.5; }
+
+  ol.steps { list-style:none; counter-reset:st; margin:0; padding:0; display:grid; gap:11px; }
+  ol.steps li { counter-increment:st; background:var(--surface); border:1px solid var(--line);
+                border-radius:var(--radius); padding:15px 18px; display:flex; gap:16px; }
+  ol.steps li::before { content:counter(st); font-family:var(--font-mono); font-size:0.8rem; font-weight:600;
+                        color:var(--seal); flex:none; padding-top:1px; }
+  ol.steps .t { font-weight:600; font-size:0.95rem; margin-bottom:3px; }
+  ol.steps .d { font-size:0.88rem; color:var(--ink-soft); }
+
+  footer { border-top:1px solid var(--line); margin-top:56px; padding:38px 0 68px; }
+  footer .restate { font-family:var(--font-serif); font-size:1.14rem; line-height:1.5; max-width:56ch; margin:0 0 20px; text-wrap:balance; }
+  footer .prov { font-family:var(--font-mono); font-size:0.72rem; color:var(--ink-faint); line-height:1.7; }
+
+  @media (max-width:720px) { body { font-size:16px; } .sec-head { flex-direction:column; gap:4px; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { animation: rise .55s cubic-bezier(.2,.7,.3,1) both; }
+    @keyframes rise { from { opacity:0; transform:translateY(9px);} to { opacity:1; transform:none; } }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap reveal">
+    <p class="eyebrow"><span>kild</span><span class="sep">/</span><span>demolition map</span><span class="sep">·</span><span>full-tree audit</span></p>
+    <h1>What gets torn out.</h1>
+    <p class="thesis">Two corpses, not one: a <span class="s">dead Flue lane</span> the engine never calls, and the <span class="m">Room model</span> the reframe replaces.</p>
+    <div class="meta-row">
+      <span><b>Audited</b> &nbsp;engine/src · pi-extension · docs · hooks</span>
+      <span><b>Consumers</b> &nbsp;helm UI + our CLI only</span>
+      <span><b>Compat</b> &nbsp;none required</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="score">
+    <div class="n-mech"><div class="num">6,710</div><div class="lbl">engine source lines</div><div class="sub">28 test files alongside</div></div>
+    <div class="n-die"><div class="num">~400</div><div class="lbl">dead on arrival</div><div class="sub">Flue lane — nothing live imports it</div></div>
+    <div class="n-seal"><div class="num">~500</div><div class="lbl">deleted outright</div><div class="sub">router, decisions, operator tier, lifecycle</div></div>
+    <div class="n-prp"><div class="num">809→250</div><div class="lbl">room-manager.ts</div><div class="sub">the biggest file, more than halved</div></div>
+  </div>
+
+  <div style="padding-top:26px" class="measure">
+    <p class="lede">This is the kill list against the current tree, companion to the design brief. Verdicts: <span class="disp d-keep">keep</span> load-bearing mechanism · <span class="disp d-reshape">reshape</span> survives, loses its room skin · <span class="disp d-move">move</span> intelligence, goes to PRP · <span class="disp d-die">die</span> deleted.</p>
+  </div>
+
+  <!-- 01 -->
+  <section>
+    <div class="sec-head"><span class="n">§01</span><h2>The dead Flue lane</h2></div>
+    <p class="lede measure">Unrelated to the reframe — and deletable today. The live path (<code>server.ts → worker.ts</code>) resolves models through pi's <code>ModelRuntime</code> directly. <strong>Nothing on that path imports <code>@flue/runtime</code>.</strong> Everything below is a frozen demo or a superseded runner carrying a dependency for dead code.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>File</th><th class="num">Lines</th><th>Why it dies</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr class="dead"><td class="mono">kild/run.ts</td><td class="num">49</td><td>Flue in-process one-shot runner; imported only by <code>workflows/run.ts</code>. Real <code>kild run</code> goes through the worker.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">kild/auth.ts</td><td class="num">54</td><td><code>bridgePiAuth</code> → Flue's <code>configureProvider</code>; imported only by a demo. Live auth is <code>ModelRuntime.create()</code>.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">flue/worktree-sandbox.ts</td><td class="num">66</td><td>Flue SandboxFactory used only by a demo. The real mechanism is <code>kild/worktree.ts</code>.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">workflows/* (5 files)</td><td class="num">~180</td><td>Frozen demos — <code>workflows/README.md</code> says so itself.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">flue.config.ts + @flue/runtime dep</td><td class="num">—</td><td>Falls out once the above are gone.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">flue/worktree-sandbox.test.ts</td><td class="num">48</td><td>Test for a deleted module.</td><td><span class="disp d-die">die</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout mech"><div class="h">One commit, zero risk</div><p>~400 source + 48 test lines and one dependency, removable with no behaviour change to the running engine. Do this first — it makes the tree honest before the real work.</p></div>
+  </section>
+
+  <!-- 02 -->
+  <section>
+    <div class="sec-head"><span class="n">§02</span><h2>Deleted outright</h2></div>
+    <p class="lede measure">The room choreography and the operator tier. This is where the recurring addressing bugs die with their cause.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>File</th><th class="num">Lines</th><th>What it was</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr class="dead"><td class="mono">room/room-router.ts</td><td class="num">105</td><td>Lead default, <code>@human</code>-wakes-lead, implicit-reply suppression, the 1:1 bare-post rule. Directed <code>send(to)</code> replaces it with a ~10-line loop.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">room/room-decisions.ts</td><td class="num">88</td><td>The <code>needs-decision[key]</code> ledger — a protocol, not mechanism.</td><td><span class="disp d-move">move</span></td></tr>
+          <tr class="dead"><td class="mono">room/room-events.ts</td><td class="num">44</td><td>Operator-notification formatting + opener notify plumbing.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">room/room-lifecycle.ts</td><td class="num">58</td><td>4-state machine + 6 guards. A kild is open or landed.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">room/rest-room-attribution.ts</td><td class="num">70</td><td>Three-headed actor resolution. The principle (engine-derived identity) survives on one <code>send</code> endpoint.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">operator/open-room-tool.ts</td><td class="num">43</td><td rowspan="4" style="vertical-align:middle">The operator tier in full. Claude Code drives REST directly — there is no brain to ship.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">operator/post-room-tool.ts</td><td class="num">27</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">operator/rooms-status-tool.ts</td><td class="num">26</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">operator/close-room-tool.ts</td><td class="num">35</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">room/close-room-tool.ts</td><td class="num">43</td><td>Lead-only <code>close_room</code>. Closing becomes a seat power; landing becomes <code>land</code>.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">room/invite-agent-tool.ts</td><td class="num">36</td><td>→ <code>spawn</code></td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">room/post-message-tool.ts</td><td class="num">50</td><td>→ <code>send</code></td><td><span class="disp d-reshape">reshape</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section>
+    <div class="sec-head"><span class="n">§03</span><h2>The big shrinks</h2></div>
+    <p class="lede measure">Files that survive but lose most of their mass. Teal is what stays; red is what comes out.</p>
+    <div class="shrink">
+      <div class="row">
+        <div class="top"><span class="f">kild/room/room-manager.ts</span><span class="d"><s>809</s> → ~250 lines</span></div>
+        <div class="bar"><span class="stay" style="width:31%"></span><span class="cut" style="width:69%"></span></div>
+        <div class="why"><b>Out:</b> the idle/posted nudge failsafe, opener notifications, the lead concept (<code>participants[0]</code>), decision-blocked close, the lead-only close check, the <code>postFromHuman</code>/<code>postAs</code>/<code>HUMAN</code> split, <code>halt</code>, memory-synthesis spawn. <b>In:</b> spawn a session per agent, the session-bus subscription (model/cost/pi-session capture), join/drain, directed route. → <code>KildManager</code></div>
+      </div>
+      <div class="row">
+        <div class="top"><span class="f">cli.ts</span><span class="d"><s>941</s> → rebuilt verb set</span></div>
+        <div class="bar"><span class="stay" style="width:45%"></span><span class="cut" style="width:55%"></span></div>
+        <div class="why"><b>Out:</b> the entire <code>operator</code> command group, <code>--participants</code>/room framing, <code>room_halt</code>/<code>room_open</code>/<code>room_post</code> WS verbs. <b>In:</b> <code>open · spawn · attach · send · inbox · ls · show · land · stop</code>. <b>Keeps:</b> project, agent, worktree, run.</div>
+      </div>
+      <div class="row">
+        <div class="top"><span class="f">server.ts</span><span class="d"><s>779</s> → ~550 lines</span></div>
+        <div class="bar"><span class="stay" style="width:70%"></span><span class="cut" style="width:30%"></span></div>
+        <div class="why"><b>Out:</b> the operator framing on <code>/api/sessions</code>, the <code>room_halt</code> WS verb, attribution wiring, the human/actor post split. <code>/api/rooms*</code> → <code>/api/kilds*</code> + new agents/messages/land routes. <b>Keeps:</b> worktrees, personas, transcripts, git-review, open-url, the WS bus.</div>
+      </div>
+      <div class="row">
+        <div class="top"><span class="f">worker.ts</span><span class="d"><s>297</s> → ~200 lines</span></div>
+        <div class="bar"><span class="stay" style="width:67%"></span><span class="cut" style="width:33%"></span></div>
+        <div class="why"><b>Out:</b> the <code>operatorEnabled</code> tool branch, <code>KILD_ROOM_LEAD</code>/<code>isRoomLead</code>, the lead <code>close_room</code> tool, and the implicit-reply auto-post at <code>agent_end</code>. <b>Keeps:</b> worktree ensure, model/auth, resource loader + skills, fork, first-turn preamble.</div>
+      </div>
+      <div class="row">
+        <div class="top"><span class="f">kild/room/room-types.ts</span><span class="d"><s>333</s> → ~180 lines</span></div>
+        <div class="bar"><span class="stay" style="width:54%"></span><span class="cut" style="width:46%"></span></div>
+        <div class="why"><b>Out:</b> <code>HUMAN</code>, <code>RoomLifecycleState</code>, <code>decisions</code>, <code>implicit</code>/<code>system</code> on messages, lead semantics. <b>Renames:</b> Room→Kild, RoomParticipant→Agent, RoomMessage→Message, spawned/attached→owned/attached.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section>
+    <div class="sec-head"><span class="n">§04</span><h2>Reshaped &amp; kept</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>File</th><th class="num">Lines</th><th>What changes</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">room/attached.ts (Mailbox)</td><td class="num">106</td><td>Becomes the <strong>universal inbox</strong> — owned agents drain by push, attached by pull. Keeps the wake-cap loop guard.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">room/claude-stop.ts</td><td class="num">85</td><td>Literally the honryo's turn-boundary drain. Keep; rename room→kild in the emitted guidance.</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">room/room-registry.ts</td><td class="num">184</td><td>Sound state store + write-through persistence. Strip decisions/lifecycle from snapshots.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">operator/rooms-status.ts</td><td class="num">100</td><td>Cross-kild <strong>collision detection</strong> — valuable, pure. Keep; drop openDecisions; move out of <code>operator/</code>.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">operator/engine-client.ts</td><td class="num">167</td><td>Retarget to <code>/api/kilds*</code>; drop the operator spawn + room shapes.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">kild/memory.ts</td><td class="num">176</td><td><strong>Split:</strong> the engine-written LOG (from held state) is mechanism → keep thin. The synthesis session (LLM + persona curating MEMORY.md) is intelligence → PRP.</td><td><span class="disp d-move">move</span></td></tr>
+          <tr><td class="mono">kild/mechanism-prompt.ts</td><td class="num">90</td><td>Trim the room-comms, needs-decision and close_room paragraphs → keep only spawn/send transport facts + model catalog.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">kild/sessions.ts</td><td class="num">319</td><td>Already room-agnostic. Only the callback names change: <code>onMessage/onInvite/onCloseRoom</code> → <code>onSend/onSpawn</code>.</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">worktree.ts · worktree-status.ts · git-review.ts</td><td class="num">847</td><td>The jewel — isolation, collision detection, diff/land. Untouched.</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">events · agents · models · skills-profile · projects · config · session-transcript</td><td class="num">503</td><td>Pure mechanism. Untouched (drop <code>memory.synthesis</code> from config if synthesis moves).</td><td><span class="disp d-keep">keep</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section>
+    <div class="sec-head"><span class="n">§05</span><h2>Consumers &amp; periphery</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Item</th><th class="num">Lines</th><th>Verdict</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="mono">pi-extension/index.ts</td><td class="num">727<br>→ ~400</td><td><strong>The biggest reshape — and it stays.</strong> Reframed from "the operator tier for pi" to the pi implementation of the attached-harness contract (§06).</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr><td class="mono">hooks/claude-stop</td><td class="num">40</td><td>The attached-honryo integration. Keep; retarget <code>kild room drain</code> → <code>kild inbox</code>.</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">VISION.md</td><td class="num">58</td><td><strong>Already speaks the new model</strong> — "Fracture the Honryū", "the Tōryō — one director", "kild ships mechanism". The vision was right; the implementation drifted.</td><td><span class="disp d-keep">keep</span></td></tr>
+          <tr><td class="mono">HANDOVER.md</td><td class="num">—</td><td>Supersede the room-patching roadmap — slices 5 &amp; 6 are subsumed by this teardown.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+          <tr class="dead"><td class="mono">engine/COMPARISON.md</td><td class="num">97</td><td>Historical Flue-vs-Rust record defending a bet we are now deleting.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr class="dead"><td class="mono">docs/fleet-observability · room-mailbox-notes · pi-extension-plan · upstream-worktree-sandbox</td><td class="num">447</td><td>Trackers and review notes for work now done or being torn out.</td><td><span class="disp d-die">die</span></td></tr>
+          <tr><td class="mono">docs/attached-participants.md</td><td class="num">143</td><td>This is the honryo transport spec. Keep; rename room→kild.</td><td><span class="disp d-reshape">reshape</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 06 contract -->
+  <section>
+    <div class="sec-head"><span class="n">§06</span><h2>The attached-harness contract</h2></div>
+    <p class="lede measure">The pi extension is kept and rebuilt — but reframed. It is not "the operator tier for pi"; it is <em>the pi implementation of the attached-harness contract</em>, exactly peer to Claude Code's.</p>
+    <p class="measure">The engine defines one contract for any harness it does not own: <strong>attach</strong> a handle to a kild (addressable immediately, nothing spawned) · <strong>drain</strong> its inbox at its own turn boundary · <strong>act</strong> through the same spawn / send / observe / land API every client uses.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Harness</th><th>attach + drain</th><th>act</th></tr></thead>
+        <tbody>
+          <tr><td class="mono seal-t">Claude Code</td><td class="mono"><code>hooks/claude-stop</code> — Stop hook</td><td class="mono"><code>kild</code> CLI over bash (kild-cli skill)</td></tr>
+          <tr><td class="mono">pi</td><td class="mono">the extension's WS event bridge, natively at the turn boundary</td><td class="mono"><code>kild_*</code> native tools</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="measure">pi's is the <em>better</em> integration — a native turn-boundary drain instead of a shell hook — which is exactly why the extension earns its keep. A third harness later is a third implementation of the same contract, not a third mechanism in the engine.</p>
+
+    <h3 class="sub">Rebuild of <code>pi-extension/index.ts</code> <span class="tag">— 727 → ~400</span></h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Disposition</th><th>What</th></tr></thead>
+        <tbody>
+          <tr><td><span class="disp d-die">delete</span></td><td><code>operatorGuide()</code> / the <code>&lt;kild-operator&gt;</code> prompt injection (intelligence — PRP supplies the honryo persona, not the extension) · <code>operator: true</code> session spawning · the <code>needs-decision</code>/<code>resolved</code> vocabulary · <code>@human</code> reporting semantics · the historical <code>kild_fleet_*</code> aliases</td></tr>
+          <tr><td><span class="disp d-reshape">rebuild</span></td><td>Tools mirror the CLI verbs 1:1 — <code>kild_open</code> (fork a kild) · <code>kild_spawn</code> (into a kild, the default) · <code>kild_send</code> · <code>kild_attach</code> · <code>kild_inbox</code> · <code>kild_ls</code> · <code>kild_show</code> · <code>kild_land</code> · <code>kild_stop</code></td></tr>
+          <tr><td><span class="disp d-keep">keep</span></td><td>The REST/WS client · <code>bootId</code> restart detection · the event bridge pushing kild events into the pi session — <em>that bridge is pi's inbox drain</em></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout mech"><div class="h">Mechanism only</div><p>The extension ships tool definitions plus the event bridge — nothing else. Any pi session can therefore be a honryo: it becomes one by wearing PRP's honryo persona, not by an engine flag. Same rule as everywhere else — authority is trained deference, never a capability the engine grants.</p></div>
+  </section>
+
+  <!-- 06 -->
+  <section>
+    <div class="sec-head"><span class="n">§07</span><h2>Tests</h2></div>
+    <p class="lede measure">They die because their <em>module</em> dies — never to make a gate green. Say which and why in the commit, per AGENTS.md.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Disposition</th><th>Files</th><th class="num">Lines</th></tr></thead>
+        <tbody>
+          <tr><td><span class="disp d-die">die</span></td><td class="mono">room-router · room-decisions · room-events · rest-room-attribution · flue/worktree-sandbox</td><td class="num">~530</td></tr>
+          <tr><td><span class="disp d-reshape">rewrite</span></td><td class="mono">room-manager (938 — mostly tests deleted behaviour: lead routing, idle nudge, decision-blocked close, operator notify) · rooms-status · server.attached · server.post-to · server.room-cwd · cli.attached · worker.fork</td><td class="num">~1,700</td></tr>
+          <tr><td><span class="disp d-keep">keep</span></td><td class="mono">worktree · worktree.git · worktree-status · git-review · events · models · config · agents · sessions · session-transcript · skills-profile · attached · memory · mechanism-prompt</td><td class="num">~1,300</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section>
+    <div class="sec-head"><span class="n">§08</span><h2>Order of operations</h2></div>
+    <p class="lede measure">Each step is a green-gates checkpoint (<code>bun test</code> · <code>typecheck</code> · <code>lint</code>). Nothing here is a shim; every rename is a real move.</p>
+    <ol class="steps">
+      <li><div><div class="t">Cut the Flue lane</div><div class="d">Isolated, zero behaviour change. Gets the tree honest before the real work.</div></div></li>
+      <li><div><div class="t">Rename the domain</div><div class="d">Room→Kild, RoomParticipant→Agent, RoomMessage→Message, spawned/attached→owned/attached. Mechanical; gates stay green.</div></div></li>
+      <li><div><div class="t">Delete the addressing choreography</div><div class="d">room-router, the lead, implicit replies, HUMAN. Replace with directed <code>send</code>. The recurring addressing bug class dies here.</div></div></li>
+      <li><div><div class="t">Collapse the tiers</div><div class="d">Delete <code>operator/*</code> and the operator worker branch. invite_agent + open_room → one <code>spawn</code>; post_message + post_room → one <code>send</code>.</div></div></li>
+      <li><div><div class="t">Move intelligence out</div><div class="d">room-decisions, the idle-nudge failsafe, memory synthesis → PRP.</div></div></li>
+      <li><div><div class="t">Reshape the surfaces</div><div class="d">server routes, CLI verbs, pi-extension (or retire it), hooks/claude-stop.</div></div></li>
+      <li><div><div class="t">Add the new mechanism</div><div class="d"><code>/api/kilds/:id/land</code> plus seat guardrails: push-protection, spend cap, hard-halt.</div></div></li>
+    </ol>
+  </section>
+
+  <footer>
+    <p class="restate">The substrate was never the problem. Isolation, supervision and observability stay exactly as they are — what comes out is the org chart that grew on top of them.</p>
+    <p class="prov">full-tree audit · engine/src · pi-extension · docs · hooks · 2026-07-27 · companion to the agent-centric design brief · committed as docs/DEMOLITION.md</p>
+  </footer>
+</div>

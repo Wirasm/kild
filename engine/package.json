@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.0.1",
-  "description": "kild engine — the agent runtime, daemon, and CLI. Coding-agent SDK substrate, Flue as a layer.",
+  "description": "kild engine — the agent runtime, daemon, and CLI.",
   "bin": {
     "kild": "./src/cli.ts"
   },
@@ -14,22 +14,20 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "biome check src",
+    "e2e": "bash scripts/e2e.sh",
     "format": "biome format --write src",
-    "compile": "bun build --compile --minify --target=bun-darwin-arm64 src/server.ts --outfile dist/kild-engine",
-    "flue": "flue"
+    "compile": "bun build --compile --minify --target=bun-darwin-arm64 src/server.ts --outfile dist/kild-engine"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
-    "@flue/runtime": "^0.9.2",
     "hono": "^4.8.3",
     "just-bash": "^3.0.1",
     "valibot": "^1.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
-    "@flue/cli": "^0.9.2",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }

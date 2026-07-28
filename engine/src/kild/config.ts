@@ -1,9 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-/** Default model for the Flue layer's helpers. Interactive sessions resolve their
- *  own model (or pi's configured default) via the coding-agent SDK. */
-export const DEFAULT_MODEL = process.env.KILD_MODEL ?? 'minimax/MiniMax-M3';
+import type { KildHook } from './hooks.ts';
 
 /** kild's state directory: `$KILD_HOME`, else `$XDG_CONFIG_HOME/kild`, else
  *  `~/.config/kild`. Holds projects.json, worktrees, etc. */
@@ -24,7 +22,7 @@ export interface KildConfig {
   plugins?: string[];
   /** Extra agent dirs (personas), beyond `.claude/agents` / `.pi/agents`. */
   agentPaths?: string[];
-  /** Extra skill dirs, discoverable by every session (operator + all participants). */
+  /** Extra skill dirs, discoverable by every session (the engine + all agents). */
   skillPaths?: string[];
   /** Base branch new worktrees are created from and that git status/collisions are
    *  measured against (e.g. `dev`). Overridable per-invocation with `--base`; if unset,
@@ -34,21 +32,22 @@ export interface KildConfig {
    *  it's good at, cost). Appended to a delegating session's system prompt so the user
    *  and the orchestrator can steer which models fan-out agents run on. Order = preference. */
   models?: Record<string, string>;
-  /** Project memory behavior. The engine-written room log (`<dir>/LOG.md`) is always on;
-   *  `synthesis` opts in to the LLM half: on room close, a session is spawned to distill
-   *  the transcript into `<dir>/MEMORY.md`. Absent → no synthesis session is spawned. */
+  /** Where the engine writes its ledger and reads project memory from. The
+   *  engine-written kild ledger (`<dir>/LOG.md`) is always on; everything else in the
+   *  dir belongs to whoever put it there. */
   memory?: {
     /** Directory holding the project's memory files (LOG.md, MEMORY.md, direction.md).
      *  `~` expands to $HOME; a relative path resolves against the project cwd.
      *  Default: `.kild` — the project-local store. Any intelligence layer can point
      *  this anywhere; to kild it is just a directory path. */
     dir?: string;
-    synthesis?: {
-      /** provider/model ref for the synthesis session (pick a strong reasoning model). */
-      model?: string;
-      /** Persona for the synthesis session (default: the general-purpose `default`). */
-      persona?: string;
-    };
+  };
+  /** Lifecycle hooks: what to run when the engine reaches a lifecycle moment it owns.
+   *  The engine supplies facts and the moment; the hook supplies the intent. Nothing
+   *  here is interpreted — see {@link KildHook}. */
+  hooks?: {
+    /** Fired when a kild stops, after its ledger entry is written. */
+    onClose?: KildHook;
   };
 }
 
@@ -64,10 +63,54 @@ function expandHome(p: string): string {
   return p;
 }
 
+/** One config field, narrowed to the type {@link KildConfig} promises. */
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+const strings = (v: unknown): string[] | undefined =>
+  Array.isArray(v) ? v.filter((item): item is string => typeof item === 'string') : undefined;
+const record = (v: unknown): Record<string, unknown> | undefined =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+
+/**
+ * Narrow a hand-edited file to the shape the type claims: every field of the wrong type is
+ * DROPPED, not passed through.
+ *
+ * This is the boundary, and it exists because the same class of bug already shipped once:
+ * `loadProjects` read `.projects` unchecked and 500'd routes across the engine for one
+ * malformed registry. Here the equivalent was `memory.dir: 42` — `expandHome` would call
+ * `.startsWith` on a number and throw out of a function documented as never throwing, which
+ * is a 500 on `POST /stop` for a typo in a config file. Every reader below can now trust its
+ * declared type because exactly one place checks.
+ */
+function sanitizeConfig(raw: Record<string, unknown>): KildConfig {
+  const memory = record(raw.memory);
+  const hooks = record(raw.hooks);
+  const models = record(raw.models);
+  return {
+    plugins: strings(raw.plugins),
+    agentPaths: strings(raw.agentPaths),
+    skillPaths: strings(raw.skillPaths),
+    baseBranch: str(raw.baseBranch),
+    // Both halves must be strings: the key is a model ref and the value is prompt text.
+    models: models
+      ? Object.fromEntries(
+          Object.entries(models).filter(
+            (entry): entry is [string, string] => str(entry[1]) !== undefined,
+          ),
+        )
+      : undefined,
+    memory: memory ? { dir: str(memory.dir) } : undefined,
+    // A hook's INSIDE is deliberately not validated — the engine does not interpret hook
+    // content (see KildHook), and `runCloseHook` already guards each form before running it.
+    hooks: hooks ? { onClose: record(hooks.onClose) as KildHook | undefined } : undefined,
+  };
+}
+
 async function readConfigFile(file: string): Promise<KildConfig | null> {
   try {
-    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as KildConfig;
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const raw = record(JSON.parse(await fs.readFile(file, 'utf8')));
+    return raw ? sanitizeConfig(raw) : null;
   } catch {
     return null; // missing or malformed config must never crash discovery
   }
@@ -130,11 +173,11 @@ export async function configuredMemoryDir(cwd: string): Promise<string> {
   return path.resolve(cwd, expandHome(dir));
 }
 
-/** Merged memory-synthesis config (project wins over global); undefined = synthesis off. */
-export async function configuredMemorySynthesis(
-  cwd: string,
-): Promise<{ model?: string; persona?: string } | undefined> {
+/** The declared `hooks.onClose` for `cwd` (project wins over global, whole-hook — a
+ *  project that declares one replaces the global hook rather than merging into it).
+ *  Undefined = nothing declared, so close fires the event and runs nothing. Never throws. */
+export async function configuredCloseHook(cwd: string): Promise<KildHook | undefined> {
   const global = await readConfigFile(path.join(kildHome(), 'config.json'));
   const project = await readConfigFile(path.join(cwd, '.kild', 'config.json'));
-  return project?.memory?.synthesis ?? global?.memory?.synthesis;
+  return project?.hooks?.onClose ?? global?.hooks?.onClose;
 }

@@ -16,8 +16,8 @@ export function resolveModel(registry: ModelRegistry, pattern: string | undefine
   return model;
 }
 
-/** Layer an agent's role prompt onto a user prompt. The coding-agent SDK has no
- *  append-system-prompt knob, so the role is prepended to the first message. */
-export function withRole(text: string, instructions: string | null): string {
-  return instructions ? `<role>\n${instructions}\n</role>\n\n${text}` : text;
+/** Layer an agent's persona prompt onto a user prompt. The coding-agent SDK has no
+ *  append-system-prompt knob, so the persona is prepended to the first message. */
+export function withPersona(text: string, instructions: string | null): string {
+  return instructions ? `<persona>\n${instructions}\n</persona>\n\n${text}` : text;
 }

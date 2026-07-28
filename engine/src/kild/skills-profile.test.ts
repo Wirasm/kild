@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { readSkillsProfile, skillsProfileForWorker } from './skills-profile.ts';
+import { readSkillsProfile, skillsProfileForAgent } from './skills-profile.ts';
 
 test('accepts an absolute skills profile path', () => {
   expect(readSkillsProfile('/profiles/prp')).toBe('/profiles/prp');
@@ -12,8 +12,8 @@ test('rejects a relative skills profile path at engine startup', () => {
   );
 });
 
-test('assigns the profile only to room participants', () => {
-  expect(skillsProfileForWorker('room-1', '/profiles/prp')).toBe('/profiles/prp');
-  expect(skillsProfileForWorker(undefined, '/profiles/prp')).toBeUndefined();
-  expect(skillsProfileForWorker('room-1', undefined)).toBeUndefined();
+test('assigns the profile only to kild agents', () => {
+  expect(skillsProfileForAgent('kild-1', '/profiles/prp')).toBe('/profiles/prp');
+  expect(skillsProfileForAgent(undefined, '/profiles/prp')).toBeUndefined();
+  expect(skillsProfileForAgent('kild-1', undefined)).toBeUndefined();
 });

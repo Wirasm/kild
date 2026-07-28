@@ -7,9 +7,7 @@ import { configuredBaseBranch, kildHome } from './config.ts';
 
 // execFile (no shell) + a branch-name allowlist: the brain's create_worktree tool
 // and UI clients' worktree selectors feed a (possibly LLM-generated) name in here,
-// so shell interpolation would be RCE. This module is kild-owned and hot-path-safe:
-// the session path imports it directly, so it must NOT depend on @flue (the general
-// `worktree()` sandbox lives in flue/worktree-sandbox.ts).
+// so shell interpolation would be RCE.
 const execFile = promisify(execFileCb);
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -24,8 +22,31 @@ export interface Worktree {
   name?: string;
 }
 
+/**
+ * The canonical spelling of a path — symlinks resolved, whether or not it exists yet.
+ *
+ * One directory must have ONE spelling in this engine, because half the paths here come
+ * from git (which always reports the resolved form) and half are built from `$KILD_HOME`
+ * (which is whatever the operator's environment says). On macOS those differ for anything
+ * under `/var`, which is a symlink to `/private/var` — so a tree kild had just created did
+ * not compare equal to the same tree in `git worktree list`, and every comparison between
+ * the two sides was quietly false on one platform and true on another.
+ *
+ * `realpathSync` alone cannot do it: the path often does not exist yet (it is about to be
+ * created). So resolve the longest prefix that does exist and rebuild the rest onto it.
+ */
+export function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    // At the filesystem root `dirname` is a fixed point; stop rather than recurse forever.
+    return parent === p ? p : path.join(canonicalPath(parent), path.basename(p));
+  }
+}
+
 export function worktreesRoot(): string {
-  return path.join(kildHome(), 'worktrees');
+  return canonicalPath(path.join(kildHome(), 'worktrees'));
 }
 
 export function assertSafeBranch(branch: string): void {
@@ -47,7 +68,7 @@ export function worktreeName(branch: string): string {
 }
 
 /** The on-disk path a worktree name maps to. Deterministic, no I/O — so the engine
- *  can fill `SessionInfo.worktreePath` synchronously before the worker creates it. */
+ *  can fill `AgentInfo.worktreePath` synchronously before the agent creates it. */
 export function worktreePath(name: string): string {
   assertSafeBranch(name);
   return path.join(worktreesRoot(), name.replace(/\//g, '-'));
@@ -61,10 +82,10 @@ export async function currentBranch(repo: string): Promise<string | undefined> {
   return branch || undefined;
 }
 
-/** Resolve the base branch for a worktree/room in `cwd`: explicit `flag` wins, else the
+/** Resolve the base branch for a worktree/kild in `cwd`: explicit `flag` wins, else the
  *  configured `baseBranch` (project over global), else the checkout's current branch, else
  *  `main`. This is the branch new worktrees fork from and that git status is measured
- *  against, so ahead/behind + collisions reflect this room's own work. */
+ *  against, so ahead/behind + collisions reflect this kild's own work. */
 export async function resolveBaseBranch(cwd: string, flag?: string): Promise<string> {
   return flag ?? (await configuredBaseBranch(cwd)) ?? (await currentBranch(cwd)) ?? 'main';
 }
@@ -158,17 +179,18 @@ export async function listWorktrees(repo: string): Promise<Worktree[]> {
   return trees;
 }
 
-/** A refusal to remove a worktree without an explicit destructive request. */
+/** A refusal to remove a worktree: it is not there, or a live agent is working in it.
+ *  There is deliberately no `dirty` refusal — disposal is guarded on authored COMMITS
+ *  (see `kild-disposal.ts`); the working tree is not evidence of work. */
 export type WorktreeRemoveRefusal = {
   ok: false;
-  code: 'dirty' | 'in_use' | 'not_found';
-  files?: string[];
+  code: 'in_use' | 'not_found';
 };
 
 export type WorktreeRemoveResult = { ok: true } | WorktreeRemoveRefusal;
 
 /** Files whose uncommitted changes would be discarded by removing `wtPath`. */
-async function changedFiles(wtPath: string): Promise<string[]> {
+export async function changedFiles(wtPath: string): Promise<string[]> {
   const { stdout } = await execFile('git', [
     '-C',
     wtPath,
@@ -186,7 +208,8 @@ async function changedFiles(wtPath: string): Promise<string[]> {
   return files;
 }
 
-async function registeredWorktree(repo: string, wtPath: string): Promise<boolean> {
+/** Is `wtPath` a worktree git actually has registered for `repo`? */
+export async function registeredWorktree(repo: string, wtPath: string): Promise<boolean> {
   if (!existsSync(wtPath)) return false;
   // macOS commonly presents /var as a /private/var symlink; git reports the latter.
   // Resolve both sides rather than comparing spellings of the same directory.
@@ -195,24 +218,10 @@ async function registeredWorktree(repo: string, wtPath: string): Promise<boolean
   return trees.some((tree) => existsSync(tree.path) && realpathSync(tree.path) === target);
 }
 
-/** Remove a worktree only when it is clean. Refusals are data so callers can give a
- * useful preview instead of parsing git's prose. `inUse` is supplied by the engine,
- * which alone knows about live sessions. */
-export async function removeWorktree(
-  repo: string,
-  wtPath: string,
-  inUse = false,
-): Promise<WorktreeRemoveResult> {
-  if (inUse) return { ok: false, code: 'in_use' };
-  if (!(await registeredWorktree(repo, wtPath))) return { ok: false, code: 'not_found' };
-  const files = await changedFiles(wtPath);
-  if (files.length > 0) return { ok: false, code: 'dirty', files };
-  await execFile('git', ['-C', repo, 'worktree', 'remove', wtPath]);
-  return { ok: true };
-}
-
-/** Explicitly destructive removal. Live-session protection remains the caller's
- * responsibility; this verb exists so force is never implicit in ordinary removal. */
+/** Remove a worktree, discarding whatever is in it. The ONE removal primitive: the
+ * decision of whether removal is allowed belongs to `kild-disposal.ts`, which guards on
+ * authored commits and reports what it discards. Live-agent protection is likewise the
+ * caller's — only the engine knows about live sessions. Never deletes the branch. */
 export async function forceRemoveWorktree(
   repo: string,
   wtPath: string,
