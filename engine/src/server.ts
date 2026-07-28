@@ -27,7 +27,6 @@ import {
   resolveSendActor,
   resolveSpawnActor,
   resolveStopActor,
-  UNATTRIBUTED,
 } from './kild/rest-attribution.ts';
 import { readSessionTranscript } from './kild/session-transcript.ts';
 import { pruneMergedWorktrees, worktreesRoot } from './kild/worktree.ts';
@@ -958,7 +957,17 @@ app.get('/api/kilds/:id/git/diff', async (c) => {
 // ── Live stream (WebSocket) ─────────────────────────────────────────────────
 // Every connection subscribes to the kild broadcast — so kilds created by any client
 // (UI client or CLI) are visible to all. Kilds are engine-owned and survive a drop.
-// Frames carry the kild id as `id`; sessions are the internal substrate, not on the wire.
+//
+// **The socket is a SUBSCRIPTION. Kild mutations go over REST.** `kild_new`, `kild_send`,
+// `kild_spawn` and `kild_stop` used to live here, and they could not answer: the frame was
+// enqueued, a rejection was `console.warn`ed inside the engine, and the caller was told
+// nothing at all. `kild new --agents not-a-persona` printed a header inviting you to type
+// into a kild that never existed and then hung forever. Adding a rejection frame would have
+// been inventing a second request/response protocol beside the one that already works — so
+// the frames are gone instead, and every mutation is a REST call with a status code.
+//
+// What remains is the bare-agent session substrate (`spawn` / `prompt` / `stop`), which is
+// the one-shot `kild run` path and has no kild to answer for.
 type ClientMessage =
   | {
       type: 'spawn';
@@ -972,26 +981,7 @@ type ClientMessage =
       env?: Record<string, string>;
     }
   | { type: 'prompt'; id: string; text: string; from?: string }
-  | { type: 'stop'; id: string }
-  | {
-      type: 'kild_new';
-      id: string;
-      name: string;
-      cwd: string;
-      agents: Array<{ handle: string; persona?: string; model?: string }>;
-      worktree?: string;
-      base?: string;
-    }
-  | { type: 'kild_send'; id: string; to: string[]; text: string }
-  | {
-      type: 'kild_spawn';
-      id: string;
-      agent: { handle: string; persona?: string; model?: string };
-      /** First message for the new agent, delivered from the unattributed label — the same
-       *  sender `kild_send` uses on this transport, which carries no credential. */
-      task?: string;
-    }
-  | { type: 'kild_stop'; id: string };
+  | { type: 'stop'; id: string };
 
 function parseClientMessage(data: string): ClientMessage | null {
   let msg: unknown;
@@ -1019,21 +1009,6 @@ function parseClientMessage(data: string): ClientMessage | null {
     return m as ClientMessage;
   }
   if (m.type === 'stop') return m as ClientMessage;
-  if (m.type === 'kild_new') {
-    if (typeof m.name !== 'string' || typeof m.cwd !== 'string' || !Array.isArray(m.agents)) {
-      return null;
-    }
-    if (m.worktree !== undefined && typeof m.worktree !== 'string') return null;
-    return m as ClientMessage;
-  }
-  if (m.type === 'kild_send' && typeof m.text === 'string' && recipients(m.to).ok) {
-    return m as ClientMessage;
-  }
-  if (m.type === 'kild_spawn' && typeof m.agent === 'object' && m.agent !== null) {
-    if (m.task !== undefined && typeof m.task !== 'string') return null;
-    return m as ClientMessage;
-  }
-  if (m.type === 'kild_stop') return m as ClientMessage;
   return null;
 }
 
@@ -1046,18 +1021,10 @@ app.get(
   upgradeWebSocket(() => {
     let unsubscribeKilds: (() => void) | undefined;
     let unsubscribeAgents: (() => void) | undefined;
-    // Kild commands became async when create() gained validation, which broke the
-    // implicit frame ordering clients rely on (create immediately followed by the
-    // kickoff send raced, and the send was rejected with "no such kild"). Frames
-    // on one connection execute strictly in arrival order.
-    let queue: Promise<void> = Promise.resolve();
-    const enqueue = (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
-      queue = queue.then(async () => {
-        const result = await task();
-        if (!result.ok) console.warn(`kild: ${label} rejected: ${result.message}`);
-      });
-      queue = queue.catch((err) => console.warn(`kild: ${label} failed: ${errText(err)}`));
-    };
+    // No command queue any more. It existed because kild frames became async when create()
+    // gained validation, so a create immediately followed by its kickoff raced. REST removes
+    // the problem rather than sequencing it: a caller awaits the create's status code and
+    // only then sends.
     return {
       onOpen(_evt, ws) {
         unsubscribeKilds = kildManager.subscribe((msg) => ws.send(JSON.stringify(msg)));
@@ -1084,29 +1051,6 @@ app.get(
           agentManager.prompt(msg.id, msg.text, msg.from);
         } else if (msg.type === 'stop') {
           agentManager.stop(msg.id);
-        } else if (msg.type === 'kild_new') {
-          enqueue(`kild_new ${msg.id}`, () =>
-            kildManager.create(msg.id, {
-              name: msg.name,
-              cwd: msg.cwd,
-              agents: msg.agents,
-              worktree: msg.worktree,
-              base: msg.base,
-            }),
-          );
-        } else if (msg.type === 'kild_send') {
-          enqueue(`kild_send ${msg.id}`, () =>
-            kildManager.send(msg.id, UNATTRIBUTED, msg.to, msg.text),
-          );
-        } else if (msg.type === 'kild_spawn') {
-          enqueue(`kild_spawn ${msg.id}`, () =>
-            kildManager.spawnAgent(msg.id, msg.agent, {
-              invitedBy: UNATTRIBUTED,
-              task: msg.task,
-            }),
-          );
-        } else if (msg.type === 'kild_stop') {
-          enqueue(`kild_stop ${msg.id}`, () => kildManager.stop(msg.id));
         }
       },
       onClose() {

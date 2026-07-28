@@ -27,8 +27,8 @@ import {
   newKild,
   sendMessage,
   spawnKildAgent,
-  stopKild,
   stopKildAgent,
+  stopKild as stopKildRequest,
 } from './kild/engine-client.ts';
 import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
 import { GENERAL_PERSONA, listPersonas } from './kild/personas.ts';
@@ -56,6 +56,8 @@ const { values, positionals } = parseArgs({
     task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
   },
 });
+
+const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const json = values.json ?? false;
 const [group, action, ...rest] = positionals;
@@ -554,7 +556,7 @@ async function kildSend(id: string, text: string): Promise<void> {
  *  agent and leaves the kild running. */
 async function kildStop(id: string): Promise<void> {
   if (values.as) return kildStopAgent(id, values.as);
-  const res = await stopKild(id);
+  const res = await stopKildRequest(id);
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
 }
@@ -594,20 +596,49 @@ async function kildInteractive(goal: string): Promise<void> {
       agents.map((a) => a.handle),
       'this kild',
     );
-  const kildId = crypto.randomUUID();
   const ws = new WebSocket(`${ENGINE.replace(/^http/, 'ws')}/ws`);
+
+  // Subscribe BEFORE creating, so nothing said in the first instants is missed; then create
+  // over REST, which ANSWERS.
+  //
+  // Creation used to be a `kild_new` frame: fire-and-forget, rejected with a `console.warn`
+  // inside the engine, invisible to the caller. `kild new --agents not-a-persona` printed a
+  // confident header inviting you to type into a kild that never existed, and then hung
+  // forever. That is the exact silent-failure shape the REST spawn route exists to remove —
+  // it was fixed on the route and left on the transport the default verb actually used.
+  //
+  // So: the socket is a SUBSCRIPTION, and every mutation goes over REST where a rejection is
+  // a rejection. Nothing needs a rejection frame, because nothing mutates over the socket.
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener('open', () => resolve());
+    ws.addEventListener('error', () => reject(new Error(`engine socket error at ${ENGINE}`)));
+  });
+
+  let kildId: string;
+  try {
+    kildId = (
+      await newKild({
+        name,
+        cwd,
+        worktree: values.worktree,
+        base,
+        agents: agents.map((p) => ({ ...p, model: values.model })),
+        kickoff: { to, text: goal },
+      })
+    ).id;
+  } catch (err) {
+    ws.close(); // nothing to stream: the kild does not exist
+    throw err;
+  }
 
   await new Promise<void>((resolve, reject) => {
     const stopKild = () => {
-      try {
-        ws.send(JSON.stringify({ type: 'kild_stop', id: kildId }));
-      } catch {
-        // socket already gone — nothing to stop
-      }
-      setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 200); // let the stop frame flush before we exit
+      void stopKildRequest(kildId)
+        .catch((err) => console.error(`\x1b[31mstop failed:\x1b[0m ${errText(err)}`))
+        .finally(() => {
+          ws.close();
+          resolve();
+        });
     };
     process.on('SIGINT', () => {
       if (!json) console.error('\n\x1b[2m— stopping kild —\x1b[0m');
@@ -631,32 +662,22 @@ async function kildInteractive(goal: string): Promise<void> {
         for (const raw of chunk.split('\n')) {
           const text = raw.trim();
           if (!text) continue;
-          ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text }));
+          // Over REST for the same reason as create: a line you typed that nobody could
+          // receive must say so, not vanish into a server-side log line.
+          void sendMessage(kildId, to, text).catch((err) =>
+            console.error(`\x1b[31mnot sent:\x1b[0m ${errText(err)}`),
+          );
         }
       });
     }
 
-    ws.addEventListener('open', () => {
-      ws.send(
-        JSON.stringify({
-          type: 'kild_new',
-          id: kildId,
-          name,
-          cwd,
-          worktree: values.worktree,
-          base,
-          agents: agents.map((p) => ({ ...p, model: values.model })),
-        }),
+    if (!json) {
+      const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
+      console.error(
+        `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · ${kildId}\n` +
+          `# type to send to ${to.map((h) => `@${h}`).join(' ')} · Ctrl-C to stop\x1b[0m`,
       );
-      ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text: goal }));
-      if (!json) {
-        const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
-        console.error(
-          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · ${kildId}\n` +
-            `# type to send to ${to.map((h) => `@${h}`).join(' ')} · Ctrl-C to stop\x1b[0m`,
-        );
-      }
-    });
+    }
 
     ws.addEventListener('message', (e) => {
       let parsed: {
