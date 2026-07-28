@@ -200,6 +200,12 @@ chk "hook received the ledger path as a fact"  "$(cat $RIG/hook.log 2>/dev/null)
 AM=$(curl -s "$E/api/kilds/$ID/messages")
 chk "archived kild's log is still readable"    "$AM" "first"
 chkno "no state field on the archive"          "$(curl -s $E/api/kilds/archive)" '"state"'
+chkno "the archive listing carries NO log"     "$(curl -s $E/api/kilds/archive)" '"log"'
+chk "the archived kild's record is still there" "$(curl -s $E/api/kilds/archive)" "e2e"
+PJ=$(curl -s -o /dev/null -w '%{http_code}' $E/api/projects)
+chk "GET /api/projects is gone"                "$PJ" "404"
+PJP=$(curl -s -o /dev/null -w '%{http_code}' -X POST $E/api/projects -H 'content-type: application/json' -d '{"name":"x","path":"/tmp"}')
+chk "POST /api/projects is gone"               "$PJP" "404"
 
 echo "══ 10. no HUMAN, no lead, no lifecycle in the wire"
 ALL="$L$S$M$(curl -s $E/api/kilds/archive)"
