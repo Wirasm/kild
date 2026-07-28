@@ -605,27 +605,24 @@ async function kildInteractive(goal: string): Promise<void> {
       stopKild();
     });
 
-    // Mid-flight steering: each line you type is sent into the kild (address
-    // agents with @handle). Off in --json mode, which is machine-driven.
+    // Mid-flight steering: every line you type is sent into the kild, unconditionally.
+    //
+    // There is DELIBERATELY no slash-command here. A `/spawn <handle>` shortcut used to be
+    // matched out of the input first, which meant a line you typed could be swallowed and
+    // never delivered — and whether it was depended on its word count, since the pattern
+    // only accepted up to three tokens. Nothing should read your prose to decide what to
+    // do with it; that is the bug this whole restructure exists to remove, and it applies
+    // to a human's words as much as an agent's.
+    //
+    // What you type is a message. Always. To add an agent, run `kild spawn <id> --as
+    // <handle>` — the id is printed above, and a real command reports a real error.
     if (!json) {
       process.stdin.setEncoding('utf8');
       process.stdin.on('data', (chunk: string) => {
         for (const raw of chunk.split('\n')) {
           const text = raw.trim();
           if (!text) continue;
-          const spawn = text.match(/^\/spawn(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+(\S+))?$/);
-          if (spawn?.[1]) {
-            const [, handle, persona, model] = spawn;
-            ws.send(
-              JSON.stringify({
-                type: 'kild_spawn',
-                id: kildId,
-                agent: { handle, persona, model },
-              }),
-            );
-          } else {
-            ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text }));
-          }
+          ws.send(JSON.stringify({ type: 'kild_send', id: kildId, to, text }));
         }
       });
     }
@@ -646,7 +643,8 @@ async function kildInteractive(goal: string): Promise<void> {
       if (!json) {
         const where = values.worktree ? ` · tree kild/${values.worktree}` : '';
         console.error(
-          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · type to send to ${to.map((h) => `@${h}`).join(' ')} · /spawn <handle> [persona] [model] · Ctrl-C to stop\x1b[0m`,
+          `\x1b[2m# kild "${name}" — ${agents.map((p) => p.handle).join(', ')}${where} · ${kildId}\n` +
+            `# type to send to ${to.map((h) => `@${h}`).join(' ')} · Ctrl-C to stop\x1b[0m`,
         );
       }
     });
