@@ -63,10 +63,54 @@ function expandHome(p: string): string {
   return p;
 }
 
+/** One config field, narrowed to the type {@link KildConfig} promises. */
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+const strings = (v: unknown): string[] | undefined =>
+  Array.isArray(v) ? v.filter((item): item is string => typeof item === 'string') : undefined;
+const record = (v: unknown): Record<string, unknown> | undefined =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+
+/**
+ * Narrow a hand-edited file to the shape the type claims: every field of the wrong type is
+ * DROPPED, not passed through.
+ *
+ * This is the boundary, and it exists because the same class of bug already shipped once:
+ * `loadProjects` read `.projects` unchecked and 500'd routes across the engine for one
+ * malformed registry. Here the equivalent was `memory.dir: 42` — `expandHome` would call
+ * `.startsWith` on a number and throw out of a function documented as never throwing, which
+ * is a 500 on `POST /stop` for a typo in a config file. Every reader below can now trust its
+ * declared type because exactly one place checks.
+ */
+function sanitizeConfig(raw: Record<string, unknown>): KildConfig {
+  const memory = record(raw.memory);
+  const hooks = record(raw.hooks);
+  const models = record(raw.models);
+  return {
+    plugins: strings(raw.plugins),
+    agentPaths: strings(raw.agentPaths),
+    skillPaths: strings(raw.skillPaths),
+    baseBranch: str(raw.baseBranch),
+    // Both halves must be strings: the key is a model ref and the value is prompt text.
+    models: models
+      ? Object.fromEntries(
+          Object.entries(models).filter(
+            (entry): entry is [string, string] => str(entry[1]) !== undefined,
+          ),
+        )
+      : undefined,
+    memory: memory ? { dir: str(memory.dir) } : undefined,
+    // A hook's INSIDE is deliberately not validated — the engine does not interpret hook
+    // content (see KildHook), and `runCloseHook` already guards each form before running it.
+    hooks: hooks ? { onClose: record(hooks.onClose) as KildHook | undefined } : undefined,
+  };
+}
+
 async function readConfigFile(file: string): Promise<KildConfig | null> {
   try {
-    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as KildConfig;
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const raw = record(JSON.parse(await fs.readFile(file, 'utf8')));
+    return raw ? sanitizeConfig(raw) : null;
   } catch {
     return null; // missing or malformed config must never crash discovery
   }

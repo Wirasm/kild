@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configuredCloseHook, configuredMemoryDir, resolvePluginPaths } from './config.ts';
+import {
+  configuredBaseBranch,
+  configuredCloseHook,
+  configuredMemoryDir,
+  configuredModels,
+  resolvePluginPaths,
+} from './config.ts';
 
 let tmp: string;
 let prevHome: string | undefined;
@@ -133,4 +139,39 @@ test('missing or malformed config yields nothing and never throws', async () => 
   writeProjectConfig(proj, 'not an object');
   expect(await resolvePluginPaths(proj)).toEqual({ agentDirs: [], skillDirs: [] });
   expect(await configuredMemoryDir(proj)).toBe(path.join(proj, '.kild')); // falls back to default
+});
+
+// ── A hand-edited config is untrusted input ──────────────────────────────────────────
+// `loadProjects` read `.projects` unchecked and 500'd routes across the engine for one
+// malformed registry. Same class here, so the fix is the same: narrow at the read boundary,
+// once, so every reader can trust the type it declares.
+
+test('a field of the wrong type is dropped, not passed through to a caller that trusts it', async () => {
+  const proj = path.join(tmp, 'proj-wrong-types');
+  writeProjectConfig(proj, {
+    // The one that threw: expandHome() called .startsWith on a number, out of a function
+    // documented as never throwing — a 500 on POST /stop for a typo.
+    memory: { dir: 42 },
+    baseBranch: { name: 'dev' },
+    // A string here iterated its CHARACTERS and resolved a plugin dir per letter.
+    plugins: './prp-core',
+    skillPaths: ['/good/skills', 7, null],
+    models: { 'openai-codex/gpt-5.6-sol': 'strong', 'bad/entry': 42 },
+  });
+
+  expect(await configuredMemoryDir(proj)).toBe(path.join(proj, '.kild'));
+  expect(await configuredBaseBranch(proj)).toBeUndefined();
+  // The good entries survive alongside the dropped ones — a typo in one field does not
+  // silently disable the rest of the file.
+  const { agentDirs, skillDirs } = await resolvePluginPaths(proj);
+  expect(agentDirs).toEqual([]);
+  expect(skillDirs).toEqual(['/good/skills']);
+  expect(await configuredModels(proj)).toEqual({ 'openai-codex/gpt-5.6-sol': 'strong' });
+});
+
+test('a config that is a bare array is nothing, not an object with no fields', async () => {
+  const proj = path.join(tmp, 'proj-array');
+  writeProjectConfig(proj, [{ plugins: ['./x'] }]);
+  expect(await resolvePluginPaths(proj)).toEqual({ agentDirs: [], skillDirs: [] });
+  expect(await configuredCloseHook(proj)).toBeUndefined();
 });
