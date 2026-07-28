@@ -39,7 +39,7 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 ## REST
 
 > **These two tables are the RENAME only — stage one of two.** They show where each old route
-> went the moment `a63476d` landed, and several of them were deleted by the reshape that
+> went the moment `3902409` landed, and several of them were deleted by the reshape that
 > followed. Rows struck through below no longer exist. Port against **"The reshape — the final
 > surface"** further down; this stage is kept because it is what the pin boundary crosses, not
 > because it is the surface you build on.
