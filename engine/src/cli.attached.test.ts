@@ -38,6 +38,9 @@ let authHeaders: Array<string | null> = [];
 /** What an `attach` answers with, when a test needs it to differ from `drainResponse` — a
  *  send mints its credential through attach, so those tests need both to be distinct. */
 let attachResponse: { status: number; body: unknown } | undefined;
+/** What `GET /messages` answers with. `kild watch` reads the log, never the inbox, so its
+ *  tests drive this rather than `drainResponse`. */
+let messagesResponse: { status: number; body: unknown } | undefined;
 
 beforeAll(async () => {
   kildHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'kild-cli-')));
@@ -54,6 +57,9 @@ beforeAll(async () => {
       authHeaders.push(request.headers.get('authorization'));
       if (url.pathname.endsWith('/agents/attach') && attachResponse) {
         return Response.json(attachResponse.body, { status: attachResponse.status });
+      }
+      if (url.pathname.endsWith('/messages') && messagesResponse) {
+        return Response.json(messagesResponse.body, { status: messagesResponse.status });
       }
       return Response.json(drainResponse.body, { status: drainResponse.status });
     },
@@ -419,4 +425,106 @@ test('...but an ordinary `inbox` reports the real cause, not a usage message', a
   expect(human.exitCode).toBe(1);
   expect(human.stderr).toContain('unreadable attachment record');
   expect(human.stderr).not.toContain('usage: kild inbox');
+});
+
+/**
+ * `kild watch` — the wake path a turn-end hook cannot provide. Its EXIT CODE is the whole
+ * interface for whatever background facility runs it, so that is what these assert.
+ */
+const logMessage = (seq: number, from: string) => ({
+  id: `m-${seq}`,
+  kildId: 'kild-9',
+  from,
+  to: ['kild'],
+  text: 'x',
+  ts: seq,
+  seq,
+});
+
+test('watch exits 0 when somebody else speaks, and says who', async () => {
+  messagesResponse = { status: 200, body: [logMessage(5, 'claude')] };
+  const watched = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '4',
+    '--timeout',
+    '3',
+  ]);
+  expect(watched.exitCode).toBe(0);
+  expect(watched.stdout).toContain('@claude');
+  messagesResponse = undefined;
+});
+
+test("watch ignores the watcher's own messages", async () => {
+  // Otherwise every send would instantly wake the watcher that sent it.
+  messagesResponse = { status: 200, body: [logMessage(5, 'kild')] };
+  const watched = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '4',
+    '--timeout',
+    '1',
+  ]);
+  expect(watched.exitCode).toBe(2); // quiet, not mail
+  messagesResponse = undefined;
+});
+
+test('a quiet engine and a DEAD engine exit differently', async () => {
+  // The distinction that stops a harness inheriting the silent-failure shape: "nothing
+  // happened" must never look like "I no longer know".
+  messagesResponse = { status: 200, body: [] };
+  const quiet = await runCli(['watch', 'kild-9', '--as', 'kild', '--since', '1', '--timeout', '1']);
+  expect(quiet.exitCode).toBe(2);
+  expect(quiet.stderr).toContain('nothing new');
+  messagesResponse = undefined;
+
+  // Nothing listening on this port at all.
+  const dead = await runCli(
+    ['watch', 'kild-9', '--as', 'kild', '--since', '1', '--timeout', '30'],
+    'http://127.0.0.1:1',
+  );
+  expect(dead.exitCode).toBe(3);
+  expect(dead.stderr).toContain('unreachable');
+  expect(dead.exitCode).not.toBe(quiet.exitCode);
+});
+
+test('watch never drains — the hook keeps its mail', async () => {
+  messagesResponse = { status: 200, body: [logMessage(5, 'claude')] };
+  drainRequests = [];
+  await runCli(['watch', 'kild-9', '--as', 'kild', '--since', '4', '--timeout', '3']);
+  // A watcher that consumed the inbox would eat exactly what the Stop hook exists to deliver.
+  expect(drainRequests.map((r) => r.path)).not.toContain('/api/kilds/kild-9/inbox/drain');
+  expect(drainRequests.every((r) => r.method === 'GET')).toBe(true);
+  messagesResponse = undefined;
+});
+
+test('a dead engine is `unreachable` even with no --since to skip the first fetch', async () => {
+  // Every other watch test passes --since, which skips the initial cursor fetch entirely — so
+  // they all walked straight past the one call that was unguarded. Without this, a harness
+  // starting a watcher against a dead engine got exit 1 (usage) instead of 3 (unreachable),
+  // which is exactly the distinction these codes exist to make.
+  const dead = await runCli(
+    ['watch', 'kild-9', '--as', 'kild', '--timeout', '30'],
+    'http://127.0.0.1:1',
+  );
+  expect(dead.exitCode).toBe(3);
+  expect(dead.stderr).toContain('unreachable');
+});
+
+test('a bad --timeout is a loud usage error, never a silent default', async () => {
+  const bad = await runCli(['watch', 'kild-9', '--as', 'kild', '--timeout', 'soon']);
+  expect(bad.exitCode).toBe(1);
+  expect(bad.stderr).toContain('--timeout');
+});
+
+test('watch with nothing to resolve is a usage error', async () => {
+  const bare = await runCli(['watch']);
+  expect(bare.exitCode).toBe(1);
+  expect(bare.stderr).toContain('usage: kild watch');
 });

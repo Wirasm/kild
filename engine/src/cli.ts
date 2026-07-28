@@ -34,6 +34,14 @@ import {
 import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
 import { GENERAL_PERSONA, listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import {
+  pollResult,
+  WATCH_DEFAULT_TIMEOUT_S,
+  WATCH_EXIT,
+  WATCH_POLL_MS,
+  WATCH_TOLERATED_FAILURES,
+  watchSummary,
+} from './kild/watch.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -56,6 +64,7 @@ const { values, positionals } = parseArgs({
     execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
     task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
     session: { type: 'string' }, // `kild attach|inbox|send --session <id>`: the harness session
+    timeout: { type: 'string' }, // `kild watch --timeout <seconds>`: how long to wait
   },
 });
 
@@ -115,6 +124,8 @@ async function dispatch(): Promise<void> {
       return kildAttach(action);
     case 'inbox':
       return kildInbox(action);
+    case 'watch':
+      return kildWatch(action);
     case 'log': {
       if (!action) throw new Error('usage: kild log <id>');
       return kildLog(action);
@@ -127,7 +138,7 @@ async function dispatch(): Promise<void> {
       return agentsList();
     default:
       console.error(
-        'usage: kild <ls|new|send|spawn|stop|rm|land|attach|inbox|log|show|agents|persona|project|run> …',
+        'usage: kild <ls|new|send|spawn|stop|rm|land|attach|inbox|watch|log|show|agents|persona|project|run> …',
       );
       process.exit(2);
   }
@@ -330,6 +341,87 @@ async function kildAttach(id: string | undefined): Promise<void> {
  * never stop the operator from finishing a turn. Without the flag it is an ordinary CLI
  * verb and failures are ordinary loud errors.
  */
+/**
+ * `kild watch [<id> --as <handle>] [--since <seq>] [--timeout <seconds>]` — block until
+ * somebody else speaks in the kild, then exit.
+ *
+ * The wake path a turn-end hook cannot provide: a hook fires when a turn ends, so an idle
+ * harness is unreachable until its operator happens to prompt it. Run this in whatever
+ * background facility the harness has and react to its exit.
+ *
+ * It reads the LOG, never the inbox, so it is non-destructive and cannot eat what the Stop
+ * hook is there to deliver. Exit codes carry the outcome ({@link WATCH_EXIT}) — in particular
+ * a quiet engine and a dead one are different codes, so a harness built on this cannot inherit
+ * the silent-failure shape it exists to remove.
+ */
+async function kildWatch(idArg: string | undefined): Promise<never> {
+  const { kildId: id, handle } = await resolveAttachment(idArg, values.as);
+  if (!id || !handle) {
+    throw new Error(
+      'usage: kild watch [<id> --as <handle>] [--since <seq>] [--timeout <seconds>]\n' +
+        '  omit id/--as to use the kild this session attached to',
+    );
+  }
+  const timeout = values.timeout === undefined ? WATCH_DEFAULT_TIMEOUT_S : Number(values.timeout);
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    throw new Error(`--timeout must be a positive number of seconds (got ${values.timeout})`);
+  }
+
+  // Default to the log's current end, so a watcher started now waits for what happens NEXT
+  // rather than firing immediately on the conversation it was started in the middle of.
+  //
+  // This first call needs the same unreachable handling as the poll loop. Left bare it threw
+  // to the top-level catch and exited 1 — a *usage* code — so a harness starting a watcher
+  // against a dead engine could not tell "the engine is gone" from "you typed it wrong". That
+  // is the distinction the exit codes exist for, defeated at the one moment it matters most.
+  let cursor: number;
+  const explicitSince = parseSince();
+  if (explicitSince !== undefined) {
+    cursor = explicitSince;
+  } else {
+    try {
+      cursor = (await kildMessages(id)).at(-1)?.seq ?? 0;
+    } catch (err) {
+      console.error(`kild: engine unreachable: ${errText(err)}`);
+      process.exit(WATCH_EXIT.unreachable);
+    }
+  }
+  const deadline = Date.now() + timeout * 1000;
+  let failures = 0;
+
+  // Poll FIRST, then sleep: a watcher handed an explicit `--since` that is already behind the
+  // conversation reacts at once instead of after an interval of avoidable silence.
+  for (;;) {
+    let batch: Awaited<ReturnType<typeof kildMessages>>;
+    try {
+      batch = await kildMessages(id, cursor);
+      failures = 0;
+    } catch (err) {
+      // A restarting engine is not a gone one. Tolerate a few, then say so rather than
+      // waiting out the window and reporting silence we cannot vouch for.
+      if (++failures < WATCH_TOLERATED_FAILURES) continue;
+      console.error(`kild: engine unreachable after ${failures} attempts: ${errText(err)}`);
+      process.exit(WATCH_EXIT.unreachable);
+    }
+    const { incoming, cursor: next } = pollResult(batch, handle, cursor);
+    cursor = next;
+    if (incoming.length > 0) {
+      console.log(
+        json
+          ? JSON.stringify({ kildId: id, handle, since: cursor, messages: incoming }, null, 2)
+          : `${watchSummary(incoming)}\n  read with: kild log ${id} --since ${cursor - incoming.length}`,
+      );
+      process.exit(WATCH_EXIT.mail);
+    }
+    // Stop when there is no room left for another poll, rather than sleeping past the
+    // deadline and reporting a window longer than the one that was asked for.
+    if (Date.now() + WATCH_POLL_MS >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, WATCH_POLL_MS));
+  }
+  console.error(`kild: nothing new in ${timeout}s (cursor ${cursor})`);
+  process.exit(WATCH_EXIT.quiet);
+}
+
 async function kildInbox(idArg: string | undefined): Promise<void> {
   const claudeStop = values.format === 'claude-stop';
   // Omitting both resolves the kild this session attached to — the case the environment
