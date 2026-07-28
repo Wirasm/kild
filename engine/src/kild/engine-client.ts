@@ -29,11 +29,105 @@ export interface KildActionResponse {
   message: string;
 }
 
+/**
+ * How long any engine call may take before it is a failure rather than a wait.
+ *
+ * `fetch` has no timeout of its own, so a connection the engine ACCEPTS and then never
+ * answers hangs forever — the shape where a caller looks patient while it is actually dead,
+ * defeating every deadline built on top of it.
+ *
+ * Generous on purpose: a backstop against hanging forever, not a latency budget. The calls it
+ * actually has to clear are `land` (a `git merge --no-ff`) and `rm` (a forced worktree
+ * removal), which are synchronous end to end. `kild new` is NOT one of them — `spawn` returns
+ * without awaiting, and the worktree is created inside the spawned child — so do not reason
+ * about this bound from that call.
+ *
+ * Overridable because 30s is a guess about somebody else's disk. A large merge with rename
+ * detection, or a tree on a network mount, can legitimately exceed it, and an operator who
+ * hits that needs a way out that is not editing the source.
+ */
+
+/**
+ * The error `engineFetch` throws when OUR deadline fired — a TYPE, not a phrase.
+ *
+ * Callers need to tell "the engine never answered" from "the engine answered with a failure",
+ * because for a mutating call the first means the outcome is unknown and the second means it
+ * did not happen. Deciding that by looking for "timed out" in the message would be reading
+ * intent out of prose, which this codebase forbids for exactly the reason it is wrong here:
+ * an engine-side error relayed verbatim (a git message, a 409 body) can contain those words
+ * and would be misread as "your merge might have gone through".
+ */
+export class EngineTimeout extends Error {}
+
+/** A response the engine actually sent, carrying its status so a caller can branch on the
+ *  KIND of refusal without reading the message. `kild show` needs exactly this: a 404 for a
+ *  log means "nothing was ever said here", which for an orphan tree is a fact, not a failure. */
+export class EngineHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Read per call, not at import. Evaluated at module load it threw before `dispatch()`'s own
+ *  handler existed, so a fat-fingered override killed EVERY command — including ones that
+ *  never make an engine call — with a raw stack trace instead of this CLI's `error: <message>`.
+ *  A bad variable should break what it affects and nothing else.
+ *
+ *  Loudly, either way. An unusable override must not degrade into a timeout of zero, which
+ *  aborts every request the instant it is made — a misconfiguration that would look exactly
+ *  like an engine that is refusing to talk. */
+function engineTimeoutMs(): number {
+  const raw = process.env.KILD_ENGINE_TIMEOUT_MS;
+  if (raw === undefined) return 30_000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `KILD_ENGINE_TIMEOUT_MS must be a positive number of milliseconds (got ${JSON.stringify(raw)})`,
+    );
+  }
+  return parsed;
+}
+
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${ENGINE}${path}`, init);
+  // A caller's own signal wins outright rather than being combined: it is a narrower deadline
+  // chosen for a reason, and silently capping it at the default would make the tighter bound a
+  // lie. Nothing here may be slower than a caller asked for.
+  const ourDeadline = init?.signal === undefined;
+  const timeoutMs = engineTimeoutMs();
+  const signal = init?.signal ?? AbortSignal.timeout(timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${ENGINE}${path}`, { ...init, signal });
+  } catch (err) {
+    // Whether this was a deadline is decided by WHOSE signal fired, not by matching an error
+    // name. Name-matching would relabel the first future caller that cancels for any other
+    // reason — a Ctrl-C, say — as "the engine did not answer", which is the opposite of true.
+    // Branch on WHY the signal fired, read from the signal itself. `AbortSignal.timeout` sets
+    // a TimeoutError reason; a deliberate cancellation does not. Matching the error NAME
+    // instead conflated the two, and testing only "was it our signal" left a caller's own
+    // deadline — the drain's — reported as a bare "The operation timed out." naming neither
+    // the path nor the cause.
+    if (signal.aborted) {
+      const reason = signal.reason as { name?: string } | undefined;
+      if (reason?.name === 'TimeoutError') {
+        const bound = ourDeadline
+          ? `${timeoutMs}ms (set KILD_ENGINE_TIMEOUT_MS to allow longer)`
+          : "the caller's own deadline";
+        throw new EngineTimeout(
+          `${path} timed out after ${bound} — the engine accepted the connection and did not answer`,
+          { cause: err },
+        );
+      }
+      throw new Error(`${path} was cancelled before the engine answered`, { cause: err });
+    }
+    throw err;
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `${path} failed (${response.status})`);
+    throw new EngineHttpError(body.error ?? `${path} failed (${response.status})`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -127,9 +221,16 @@ export async function getKild(kildId: string): Promise<KildStatus> {
 
 /** A kild's message log, cursored by `seq`. `since` is exclusive — pass the last seq you
  *  saw. Works for an archived kild too: its log is the read-only record. */
-export async function kildMessages(kildId: string, since?: number): Promise<Message[]> {
+export async function kildMessages(
+  kildId: string,
+  since?: number,
+  timeoutMs?: number,
+): Promise<Message[]> {
   const suffix = since === undefined ? '' : `?since=${since}`;
-  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`);
+  return engineFetch(
+    `/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`,
+    timeoutMs === undefined ? undefined : { signal: AbortSignal.timeout(timeoutMs) },
+  );
 }
 
 export interface AttachResponse extends KildActionResponse {

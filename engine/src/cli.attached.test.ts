@@ -38,6 +38,16 @@ let authHeaders: Array<string | null> = [];
 /** What an `attach` answers with, when a test needs it to differ from `drainResponse` — a
  *  send mints its credential through attach, so those tests need both to be distinct. */
 let attachResponse: { status: number; body: unknown } | undefined;
+/** Milliseconds a `/messages` request is left hanging before answering. The failure mode this
+ *  models is NOT a refused connection — it is one the engine ACCEPTS and never answers, which
+ *  `fetch` will wait on forever unless something bounds it. */
+let messagesHangMs = 0;
+/** Same, for the drain — it carries its own tighter bound, so it needs its own hang. */
+let drainHangMs = 0;
+/** What the CLI under test uses as its default backstop. */
+let engineTimeoutMs = '30000';
+/** Hang the land route, to drive a MUTATING call through a real timeout. */
+let landHangMs = 0;
 /** What `GET /messages` answers with. `kild watch` reads the log, never the inbox, so its
  *  tests drive this rather than `drainResponse`. */
 let messagesResponse: { status: number; body: unknown } | undefined;
@@ -57,6 +67,15 @@ beforeAll(async () => {
       authHeaders.push(request.headers.get('authorization'));
       if (url.pathname.endsWith('/agents/attach') && attachResponse) {
         return Response.json(attachResponse.body, { status: attachResponse.status });
+      }
+      if (url.pathname.endsWith('/land') && landHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, landHangMs));
+      }
+      if (url.pathname.endsWith('/inbox/drain') && drainHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, drainHangMs));
+      }
+      if (url.pathname.endsWith('/messages') && messagesHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, messagesHangMs));
       }
       if (url.pathname.endsWith('/messages') && messagesResponse) {
         return Response.json(messagesResponse.body, { status: messagesResponse.status });
@@ -98,6 +117,9 @@ async function runCli(
     ...process.env,
     KILD_ENGINE: engineOverride ?? engineUrl,
     KILD_HOME: kildHome,
+    // Keep the backstop testable. Without an override the only way to exercise the DEFAULT is
+    // a 30s test, so nothing covered it and removing it entirely left the suite green.
+    KILD_ENGINE_TIMEOUT_MS: engineTimeoutMs,
   };
   for (const key of IDENTITY_ENV) delete env[key];
   Object.assign(env, identity);
@@ -619,8 +641,11 @@ test('the BOOTSTRAP path respects the window too, not just the poll loop', async
     'http://127.0.0.1:1',
   );
   const elapsed = Date.now() - started;
-  expect(overrun.exitCode).toBe(2); // quiet — the window closed, the engine was not declared dead
-  // A 1s window must not become a 6s one because the first fetch happened to fail.
+  // Exit 3, not 2. This assertion USED to expect quiet, and that expectation was wrong: the
+  // engine never answered once, so "nothing new" would assert a response that never came.
+  // What this test is actually for is the elapsed time — a 1s window must not become a 6s one
+  // because the first fetch happened to fail — and that is unchanged.
+  expect(overrun.exitCode).toBe(3);
   expect(elapsed).toBeLessThan(3_000);
 }, 15_000);
 
@@ -644,4 +669,201 @@ test('the quiet message reports the time that actually elapsed', async () => {
   expect(quiet.exitCode).toBe(2);
   expect(quiet.stderr).toMatch(/nothing new in \d+s/);
   messagesResponse = undefined;
+});
+
+test('a hung engine is unreachable, not patient', async () => {
+  // The gap that survived the watch review: `fetch` has no timeout, so a connection the engine
+  // ACCEPTS and never answers hangs inside a single poll regardless of any deadline built on
+  // top of it. A watcher would sit past its whole window reporting neither mail nor a dead
+  // engine — defeating the exit-3 distinction it exists to draw.
+  messagesHangMs = 30_000;
+  const started = Date.now();
+  const hung = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '1',
+    '--timeout',
+    '60',
+    '--interval',
+    '0.1',
+  ]);
+  const elapsed = Date.now() - started;
+  expect(hung.exitCode).toBe(3);
+  expect(hung.stderr).toContain('unreachable');
+  expect(hung.stderr).toContain('timed out'); // the cause rides the report, not just "aborted"
+
+  // Three attempts, each bounded by the 1s request floor — not the 60s window, and certainly
+  // not the 30s hang.
+  expect(elapsed).toBeLessThan(15_000);
+  messagesHangMs = 0;
+}, 30_000);
+
+test('a drain against a hung engine times out, and says so', async () => {
+  // The drain carries its own 1.5s bound because it runs inside a turn-end hook. This proves
+  // the bound is actually applied and that the message names the cause — an opaque "aborted"
+  // tells a caller nothing about whether to retry.
+  messagesHangMs = 0;
+  drainHangMs = 10_000;
+  const loud = await runCli(['inbox', 'kild-9', '--as', 'kild']);
+  expect(loud.exitCode).toBe(1);
+  expect(loud.stderr).toContain('timed out');
+
+  // ...and the same failure inside the hook is silence, because a hook may never block a turn.
+  const hook = await runCli(['inbox', 'kild-9', '--as', 'kild', '--format', 'claude-stop']);
+  expect(hook.stdout).toBe('');
+  expect(hook.exitCode).toBe(0);
+  drainHangMs = 0;
+}, 30_000);
+
+test('a hung engine is UNREACHABLE even when the interval outlasts the window', async () => {
+  // Confirmed regression: with --interval >= --timeout the first poll blocked for its own
+  // bound (10s against a 3s window), the deadline was then already gone, and it reported
+  // QUIET — asserting the engine answered and had nothing, after every request had failed.
+  // Two answers to one question: the request bound used the interval, the loop used the
+  // deadline. The bound now takes what remains, and "quiet" is refused unless the engine
+  // actually answered at least once.
+  messagesHangMs = 30_000;
+  const started = Date.now();
+  const hung = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '1',
+    '--timeout',
+    '3',
+    '--interval',
+    '10',
+  ]);
+  const elapsed = Date.now() - started;
+  expect(hung.exitCode).toBe(3);
+  expect(hung.stderr).not.toContain('nothing new'); // never claim quiet on an unanswered engine
+  expect(elapsed).toBeLessThan(9_000); // and never blow through the window by 3x
+  messagesHangMs = 0;
+}, 30_000);
+
+test('the default backstop is applied when no caller supplies a signal', async () => {
+  // Removing the default left every test passing, because the two hang tests are protected by
+  // their own explicit signals and bypass it entirely. This one goes through `kild log`, which
+  // supplies none.
+  engineTimeoutMs = '600';
+  messagesHangMs = 5_000;
+  const hung = await runCli(['log', 'kild-9', '--since', '1']);
+  expect(hung.exitCode).toBe(1);
+  expect(hung.stderr).toContain('timed out');
+  messagesHangMs = 0;
+  engineTimeoutMs = '30000';
+});
+
+test('`kild show` reports an unreachable engine instead of an empty log', async () => {
+  // It swallowed every failure into `[]`. Invisible while a hung engine simply hung; a
+  // confident wrong answer the moment a timeout made the call return.
+  engineTimeoutMs = '600';
+  messagesHangMs = 5_000;
+  const shown = await runCli(['show', 'kild-9']);
+  expect(shown.exitCode).toBe(1);
+  expect(shown.stderr).toContain('timed out');
+  messagesHangMs = 0;
+  engineTimeoutMs = '30000';
+}, 20_000);
+
+test.each([
+  ['abc', 'non-numeric'],
+  ['', 'empty'],
+  ['0', 'zero'],
+  ['-5', 'negative'],
+  ['30s', 'a unit suffix'],
+])('KILD_ENGINE_TIMEOUT_MS=%s is refused (%s)', async (value) => {
+  // An unusable override must not degrade into a timeout of zero, which aborts every request
+  // the instant it is made and looks exactly like an engine refusing to talk. Nor into a
+  // cryptic RangeError from AbortSignal, which names neither the variable nor the fix.
+  engineTimeoutMs = value;
+  const bad = await runCli(['log', 'kild-9']);
+  expect(bad.exitCode).toBe(1);
+  expect(bad.stderr).toContain('KILD_ENGINE_TIMEOUT_MS');
+  // ...and as a FORMATTED CLI error, not a raw crash. Validating at module load threw before
+  // dispatch()'s handler existed, so every command died with a Bun stack trace naming a source
+  // line instead of the fix. Both exited 1 with the variable's name in the text, so asserting
+  // only that could not tell them apart — which is how this fix had no coverage at all.
+  expect(bad.stderr).not.toContain('Bun v');
+  expect(bad.stderr).not.toContain('function engineTimeoutMs');
+  engineTimeoutMs = '30000';
+});
+
+test('an engine failure whose text contains "timed out" is NOT reported as maybe-completed', async () => {
+  // `land`/`rm` report an unknown outcome on a real timeout, because a client abort does not
+  // stop server-side work. Deciding that by searching the message for "timed out" would
+  // misread a relayed git error as "your merge may have gone through" — and send an operator
+  // looking for a merge that never happened.
+  drainResponse = {
+    status: 409,
+    body: { error: 'git merge failed: operation timed out talking to the object store' },
+  };
+  const landed = await runCli(['land', 'kild-9', '--execute']);
+  expect(landed.exitCode).toBe(1);
+  expect(landed.stderr).toContain('timed out talking to the object store');
+  expect(landed.stderr).not.toContain('may still be completing');
+  withNoMail();
+});
+
+test('a timed-out land reports an UNKNOWN outcome, not a failure', async () => {
+  // A client abort does not reach the engine — no signal is passed server-side and no git
+  // command it runs is cancellable — so a timed-out merge may well have happened. Reporting
+  // it as a plain failure sends the operator to retry a merge that already landed. Reverting
+  // `mayHaveHappened` left the whole suite green, so this is the test that pins it.
+  engineTimeoutMs = '600';
+  landHangMs = 5_000;
+  const landed = await runCli(['land', 'kild-9', '--execute']);
+  expect(landed.exitCode).toBe(1);
+  expect(landed.stderr).toContain('may still be completing');
+  expect(landed.stderr).toContain('kild ls');
+  landHangMs = 0;
+  engineTimeoutMs = '30000';
+}, 20_000);
+
+test("a caller's own deadline is still a timeout, and says whose", async () => {
+  // The drain supplies its own 1.5s signal. Deciding "is this a timeout" by whether OUR signal
+  // fired reported the drain's deadline as a bare "The operation timed out." — naming neither
+  // the path nor the cause. The branch reads the signal's REASON instead, so both deadlines
+  // are timeouts and each says which one it was.
+  drainHangMs = 10_000;
+  const drained = await runCli(['inbox', 'kild-9', '--as', 'kild']);
+  expect(drained.exitCode).toBe(1);
+  expect(drained.stderr).toContain('timed out');
+  expect(drained.stderr).toContain("caller's own deadline");
+  expect(drained.stderr).toContain('/inbox/drain'); // the path, not an opaque abort
+  drainHangMs = 0;
+}, 20_000);
+
+test('`kild show` still works on an ORPHAN, whose log legitimately 404s', async () => {
+  // `GET /:id` answers for an orphan tree; `GET /:id/messages` 404s, because the registry's
+  // log map holds live and archived kilds only. Removing the blanket catch turned that
+  // disagreement into a crash with no output at all — against a case this command has an
+  // explicit display branch for.
+  drainRequests = [];
+  drainResponse = {
+    status: 200,
+    body: { id: 'live-demo', name: 'live-demo', orphan: true, agents: [] },
+  };
+  messagesResponse = { status: 404, body: { error: 'no such kild: live-demo' } };
+  const shown = await runCli(['show', 'live-demo']);
+  expect(shown.exitCode).toBe(0);
+  expect(shown.stdout).toContain('orphan tree');
+  messagesResponse = undefined;
+  withNoMail();
+});
+
+test('...but `kild show` still reports a non-404 log failure', async () => {
+  // Only "nothing was ever said here" is tolerated. An unreachable engine is not that.
+  drainResponse = { status: 200, body: { id: 'kild-9', name: 'k', agents: [] } };
+  messagesResponse = { status: 500, body: { error: 'registry exploded' } };
+  const shown = await runCli(['show', 'kild-9']);
+  expect(shown.exitCode).toBe(1);
+  expect(shown.stderr).toContain('registry exploded');
+  messagesResponse = undefined;
+  withNoMail();
 });
