@@ -56,7 +56,7 @@ One word per concept. See `docs/VOCABULARY.md`.
 | `kild project ls` | List registered projects |
 | `kild project add <name> <path>` | Register a project directory (`~` is expanded) |
 | `kild project rm <name>` | Remove a project |
-| `kild persona ls [--project <dir>]` | List available personas (built-in `default` + convention dirs + config plugins) |
+| `kild persona ls [--project <dir>]` | List available personas (built-in `general` + convention dirs + config plugins) |
 | `kild persona show <name> [--project <dir>]` | Print a persona's resolved system prompt |
 
 There is **no `kild worktree` group**: a kild *is* a worktree, so it has one set of verbs.
@@ -92,8 +92,8 @@ kild send "$ID" --to reviewer "check the auth path"   # address one agent
 kild stop "$ID"               # end it
 ```
 
-Agents come from the project's own personas (`--agents a,b,c`; default: one
-general-purpose `default` agent). Each gets kild's mechanism prompt plus any skills the
+Agents come from the project's own personas (`--agents a,b,c`; with none, one
+`general` agent). Each gets kild's default prompt plus any skills the
 project's config plugs in — so you can send `use the prp-X skill to …` and the agent
 loads it.
 
@@ -180,8 +180,9 @@ kild run [--project <name>] [--persona <name>] [--model <ref>] [--worktree <name
 
 - **cwd** — defaults to the **current directory**. `--project <name>` instead runs in a
   registered project's path. Common pattern: `cd <some-dir> && kild run …`.
-- **`--persona <name>`** — layer a named system prompt on pi's default. Omit for the plain
-  `default` persona. List options with `kild persona ls`.
+- **`--persona <name>`** — layer a named system prompt. Omit for the built-in `general`
+  persona: no specialisation, for when no other persona fits. List options with
+  `kild persona ls`.
 - **`--model <ref>`** — e.g. `claude-opus-4-8`, `claude-haiku-4-5`. Omit for pi's default.
 - **`--worktree <name>`** — run in an isolated `kild/<name>` worktree. Created if missing,
   **attached** if it exists. The worktree **persists** after the run.
@@ -235,7 +236,7 @@ kild persona ls --project ~/projects/myapp --json | jq -r '.[].name'
 
 - **Personas are files.** A persona named `<name>` is a `<name>.md` file (its body is the
   system prompt) in a project's `.kild/agents/`, `.claude/agents/`, or `.pi/agents/`, or
-  globally in `~/.config/kild/agents/` or `~/.claude/agents/`. The built-in `default` uses
+  globally in `~/.config/kild/agents/` or `~/.claude/agents/`. The built-in `general` uses
   pi's own prompt. To add one, drop a file — kild only reads them.
 - **`kild run` is one-shot.** It blocks until the agent finishes; tool progress streams to
   stderr. To steer an agent mid-flight, use a kild and `kild send`.

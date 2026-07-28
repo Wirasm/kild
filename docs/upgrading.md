@@ -69,7 +69,40 @@ describes itself the same way an owned one does.
 
 ---
 
-## 4. Relearn the CLI verbs
+## 4. The built-in persona is `general`, not `default`
+
+**Symptom if skipped:** anything naming `default` fails loudly with
+`unknown persona: default`. Loud, but it will stop a script or a config mid-run.
+
+The persona you get when you name none is now **`general`**, and it has a description so a
+delegating agent can actually choose it:
+
+> General-purpose, no specialisation. Use when no other persona fits — it can take on
+> anything, given a clear goal, the outcome you want, and how you will judge it done.
+
+`default` named its place in the system rather than what it is; "spawn `default`" tells an
+agent nothing about what it would get. There is **no alias** — per the no-shims rule, the old
+name is gone.
+
+Change anywhere you name it explicitly:
+
+```diff
+- kild run --persona default …
++ kild run --persona general …
+
+- {"agents":[{"handle":"coder","persona":"default"}]}
++ {"agents":[{"handle":"coder","persona":"general"}]}
+
+- {"hooks":{"onClose":{"agent":{"persona":"default", …}}}}
++ {"hooks":{"onClose":{"agent":{"persona":"general", …}}}}
+```
+
+Omitting `persona` entirely still works and still means the built-in — only the explicit
+spelling changed. A persona file named `general.md` does **not** shadow the built-in.
+
+---
+
+## 5. Relearn the CLI verbs
 
 **Symptom if skipped:** commands fail loudly with a usage line. The least dangerous item here.
 
@@ -96,7 +129,7 @@ Full reference: `.claude/skills/kild-cli/SKILL.md`.
 
 ---
 
-## 5. Reclaim stranded worktrees
+## 6. Reclaim stranded worktrees
 
 **Symptom if skipped:** disk fills. Measured on one machine: 116 kild worktrees, **zero**
 reclaimable by `prune`.

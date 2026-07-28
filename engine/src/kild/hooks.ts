@@ -1,4 +1,5 @@
 import { spawn as spawnProcess } from 'node:child_process';
+import { GENERAL_PERSONA } from './personas.ts';
 
 /**
  * Lifecycle hooks — the mechanism half of "something should happen when a kild ends".
@@ -140,7 +141,7 @@ export async function runCloseHook(
         // The MAIN checkout: a hook runs after the kild's agents are gone, and the
         // worktree may be pruned out from under it.
         cwd: event.cwd,
-        persona: hook.agent.persona ?? 'default',
+        persona: hook.agent.persona ?? GENERAL_PERSONA,
         label: `onClose:${event.name}`,
       },
       renderHookText(hook.agent.prompt, event),

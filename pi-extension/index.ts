@@ -903,7 +903,7 @@ export default function (pi: PiExtensionAPI) {
         worktree?: string;
         base?: string;
       };
-      const agents = p.agents?.length ? p.agents : [{ handle: 'agent', persona: 'default' }];
+      const agents = p.agents?.length ? p.agents : [{ handle: 'agent', persona: 'general' }];
       const to = (p.kickoffTo ?? []).map((h) => h.replace(/^@/, '')).filter(Boolean);
       if (to.length === 0) throw new Error('kickoffTo must name at least one agent');
       // Checked here, before anything is spawned: the engine rejects a kickoff addressed to
@@ -1395,7 +1395,7 @@ export default function (pi: PiExtensionAPI) {
       if (agents.length === 0) return { content: [{ type: 'text', text: 'no live agents' }] };
       const lines = agents.map(
         (a) =>
-          `${a.id}\t${a.persona ?? 'default'}${a.model ? ` (${a.model})` : ''}${a.worktree ? ` · kild/${a.worktree}` : a.cwd ? ` · ${a.cwd}` : ''}`,
+          `${a.id}\t${a.persona ?? 'general'}${a.model ? ` (${a.model})` : ''}${a.worktree ? ` · kild/${a.worktree}` : a.cwd ? ` · ${a.cwd}` : ''}`,
       );
       return {
         content: [{ type: 'text', text: truncate(lines.join('\n')) }],

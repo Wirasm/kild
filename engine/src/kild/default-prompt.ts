@@ -125,18 +125,17 @@ ${lines}
 export function formatPersonasSection(
   personas: Array<{ name: string; description: string }>,
 ): string {
-  // `default` is the no-persona persona: spawning it deliberately is legitimate, but it
-  // describes nothing, so it earns no line in a catalog meant to say what things are FOR.
-  const named = personas.filter((persona) => persona.name !== 'default');
-  if (named.length === 0) return '';
-  const lines = named
+  // No exclusions. An earlier version filtered out the built-in because it had no
+  // description and a catalog of what-things-are-FOR could not place it — the fix was to
+  // describe it, not to hide it. Every persona an agent may spawn appears here.
+  if (personas.length === 0) return '';
+  const lines = personas
     .map(({ name, description }) => `- ${name}${description ? ` — ${description}` : ''}`)
     .join('\n');
   return `<available-personas>
 Personas you can spawn into this kild, as \`persona\` on the \`spawn\` tool. The handle you
 give an agent is separate: spawn the same persona twice under two handles and you get two
-agents you can address independently. Pick the persona whose description fits the work; use
-\`default\` (not listed) for a general-purpose agent with no specialisation:
+agents you can address independently. Pick the persona whose description fits the work:
 ${lines}
 </available-personas>`;
 }
