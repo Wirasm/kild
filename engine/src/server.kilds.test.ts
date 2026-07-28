@@ -143,6 +143,11 @@ test('GET /api/kilds/archive carries the record, never the log', async () => {
   // …and the log is still readable, from the one resource that serves logs.
   const log = (await (await get(`/api/kilds/${ARCHIVED}/messages`)).json()) as unknown[];
   expect(log).toHaveLength(3);
+  // It carries TIME as its own field now: dropping the log dropped the only temporal signal
+  // with it, so ordering history newest-first meant one /messages call per archived kild.
+  // This seeded fixture predates the field and therefore has none — stated, never inferred
+  // from its last message.
+  expect(record?.endedAt).toBeUndefined();
 });
 
 test('an archive written before `ownership` existed still states it', async () => {

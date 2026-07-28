@@ -66,7 +66,9 @@ export class KildRegistry {
   private readonly kilds = new Map<string, Kild>();
   /** Past kilds recovered from disk (read-only logs), loaded on first read. */
   private readonly archive = new Map<string, ArchivedKild>();
-  private archiveLoaded = false;
+  /** The directory the archive in memory was loaded FROM — not a boolean. See
+   *  {@link ensureArchive}. */
+  private archiveLoadedFrom: string | undefined;
 
   /**
    * Where history lives — read per call, never captured.
@@ -83,12 +85,26 @@ export class KildRegistry {
     return path.join(kildHome(), 'kilds');
   }
 
-  /** Load history the first time anything asks for it, rather than at construction, for
-   *  the same reason: construction happens at import, and the answer depends on state the
-   *  caller may not have set yet. */
+  /**
+   * The archive for the CURRENT `$KILD_HOME`, loading it if that is not what is in memory.
+   *
+   * Moving the read off the constructor was only half the fix. A boolean latch just moved
+   * the deciding moment from "whoever imported first" to "whoever read first" — still one
+   * caller silently choosing the directory for every later one, and still a suite that
+   * passes or fails on which test file happens to touch a not-found route first (`kildDir`
+   * consults the archive to tell "archived" from "never existed", so almost any route can
+   * be the one that latches).
+   *
+   * Keyed on the resolved directory, there is no deciding moment at all: the archive in
+   * memory is always the archive of the home in effect. `clear()` matters — kilds archived
+   * under a previous home belong to that home, and carrying them across would be inventing
+   * history for the new one.
+   */
   private ensureArchive(): Map<string, ArchivedKild> {
-    if (!this.archiveLoaded) {
-      this.archiveLoaded = true;
+    const dir = this.dir;
+    if (this.archiveLoadedFrom !== dir) {
+      this.archive.clear();
+      this.archiveLoadedFrom = dir;
       this.loadArchive();
     }
     return this.archive;
@@ -216,6 +232,13 @@ export class KildRegistry {
       base: kild.base,
       landedSha: kild.landedSha,
       landed: kild.landed,
+      // Stamped on every persist, not only on `remove()`. Stamping at the end alone would
+      // leave one shape of archive with no time at all: a kild the engine died under, whose
+      // file exists from write-through and never reached `remove()`. It would then need a
+      // decode-time fallback — an inference where a fact will do. Written on each save, the
+      // value is the last moment the engine knew this kild was alive, which for one that
+      // stopped normally IS when it stopped, because stopping is the last thing it does.
+      endedAt: Date.now(),
     };
   }
 

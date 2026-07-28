@@ -324,6 +324,25 @@ export interface ArchivedKild {
   landedSha?: string;
   /** What that land carried, counted when it merged (see {@link Kild.landed}). */
   landed?: { commits: number; files: number };
+  /**
+   * Epoch millis for the last moment the engine knew this kild was alive — which, for one
+   * that stopped normally, is when it stopped. The archive's only temporal field, and the
+   * one thing a client needs to show history newest-first.
+   *
+   * It exists because dropping `log` from the listing dropped time with it: the last
+   * message's `ts` was carrying that job by accident, so a cheap archive was unsortable and
+   * ordering it meant one `/messages` request per archived kild — N requests to sort a list,
+   * which costs more than the fat payload the projection removed.
+   *
+   * Wall-clock on purpose. `ts` cannot be a CURSOR because it can go backwards (that is what
+   * `seq` is for), but "when did this end" is a fact about the world and no monotonic counter
+   * can answer it. Sorting by it is display order, never paging.
+   *
+   * Optional only because archives written before this field exist on disk. There is NO
+   * decode-time fallback: an archive from before the field has no end time, and inventing one
+   * from its last message would be a guess dressed as a fact. Sort those last.
+   */
+  endedAt?: number;
 }
 
 /**

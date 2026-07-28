@@ -105,6 +105,58 @@ test('a message that is not a message is dropped, and the rest of the log surviv
   expect(found?.log.map((m) => m.text)).toEqual(['real']);
 });
 
+// ── The archive has to be sortable ────────────────────────────────────────────────────
+// Dropping `log` from the listing dropped time with it — the last message's `ts` had been
+// carrying that job by accident. Without a timestamp, ordering history newest-first costs one
+// `/messages` request per archived kild: N requests to sort a list, which is more expensive
+// than the payload the projection removed.
+
+test('a kild archived now carries the moment it ended', () => {
+  const reg = new KildRegistry();
+  reg.create(kild('kild-ended'));
+  reg.appendMessage('kild-ended', msg('kild-ended', 'work'));
+  const before = Date.now();
+  const snap = reg.remove('kild-ended');
+  expect(snap?.endedAt).toBeGreaterThanOrEqual(before);
+  // …and it survives the round trip to disk, which is where a client reads it from.
+  const reloaded = new KildRegistry().archived().find((a) => a.id === 'kild-ended');
+  expect(reloaded?.endedAt).toBe(snap?.endedAt as number);
+});
+
+test('a kild the engine died under still has a time — it is stamped on every save', () => {
+  // The shape that would otherwise need a decode-time fallback: write-through persisted it,
+  // `remove()` never ran. Stamping at save instead of at stop means there is no hole to
+  // infer a value for, so nothing has to guess one from the last message.
+  const reg = new KildRegistry();
+  reg.create(kild('kild-crashed'));
+  const before = Date.now();
+  reg.appendMessage('kild-crashed', msg('kild-crashed', 'mid-flight')); // write-through only
+  const onDisk = JSON.parse(
+    fs.readFileSync(path.join(tmp, 'kilds', 'kild-crashed.json'), 'utf8'),
+  ) as { endedAt?: number };
+  expect(onDisk.endedAt).toBeGreaterThanOrEqual(before);
+});
+
+test('an archive written before `endedAt` has none — no fallback invents one', () => {
+  // We own both sides of this wire, so an old file is a fact to state, not a shape to shim.
+  // Inferring an end time from the last message would be a guess dressed as a fact; a client
+  // sorts the unknowns last.
+  const dir = path.join(tmp, 'kilds');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'no-end.json'),
+    JSON.stringify({
+      id: 'no-end',
+      name: 'demo',
+      agents: [],
+      log: [{ ...msg('no-end', 'last'), ts: 2000, seq: 1 }],
+    }),
+  );
+  const found = new KildRegistry().archived().find((a) => a.id === 'no-end');
+  expect(found).toBeDefined();
+  expect(found?.endedAt).toBeUndefined();
+});
+
 test('remove() moves a kild with history straight into the archive and returns the snapshot', () => {
   const reg = new KildRegistry();
   reg.create(kild('kild-b'));
