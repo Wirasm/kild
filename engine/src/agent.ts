@@ -10,12 +10,17 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import { configuredMemoryDir, configuredModels, resolvePluginPaths } from './kild/config.ts';
-import { composeSessionTurn, DEFAULT_PROMPT, formatModelsSection } from './kild/default-prompt.ts';
+import {
+  composeSessionTurn,
+  DEFAULT_PROMPT,
+  formatModelsSection,
+  formatPersonasSection,
+} from './kild/default-prompt.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
 import type { CommandAck, SendOut, SpawnOut, StopOut } from './kild/kild-types.ts';
 import { projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withPersona } from './kild/models.ts';
-import { resolvePersonaInstructions } from './kild/personas.ts';
+import { listPersonas, resolvePersonaInstructions } from './kild/personas.ts';
 import { createSendTool } from './kild/send-tool.ts';
 import { createSpawnTool } from './kild/spawn-tool.ts';
 import { createStopTool } from './kild/stop-tool.ts';
@@ -153,13 +158,21 @@ export async function runAgent(): Promise<never> {
   // A delegating (in-kild) session also gets the configured model catalog so it can pick
   // a model per fan-out agent.
   const modelsSection = inKild ? formatModelsSection(await configuredModels(cwd)) : '';
+  // ...and the persona catalog, so it delegates to a persona that exists instead of
+  // guessing a name and taking a rejection. Only for a session that can spawn.
+  const personasSection = inKild ? formatPersonasSection(await listPersonas(cwd)) : '';
   // Persistent memory rides the first turn: every session gets the project's curated
   // memory + direction, read from the resolved memory dir (config `memory.dir`, default
   // `.kild/` — gitignored, so worktree checkouts never carry the default-dir files).
   const memorySections = [projectMemorySection(cwd, await configuredMemoryDir(cwd))]
     .filter(Boolean)
     .join('\n\n');
-  let sessionPrefix: string | null = [DEFAULT_PROMPT, modelsSection, memorySections]
+  let sessionPrefix: string | null = [
+    DEFAULT_PROMPT,
+    personasSection,
+    modelsSection,
+    memorySections,
+  ]
     .filter(Boolean)
     .join('\n\n');
 

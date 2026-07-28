@@ -105,6 +105,42 @@ ${lines}
 </available-models>`;
 }
 
+/**
+ * Render the discoverable personas as a prompt section for a delegating session, so it knows
+ * who it CAN spawn without guessing a name.
+ *
+ * `description` (frontmatter) is the whole point — it is the signal a persona author writes
+ * to say what the persona is for, and the only reason a catalog beats a bare name list. A
+ * persona with no description is still listed, because a name it can spawn beats a name it
+ * cannot see.
+ *
+ * This is the personas half of the same idea as {@link formatModelsSection}: a catalog of
+ * what EXISTS, carrying no opinion about when to use any of it. The engine does not read a
+ * description or rank one persona over another — it passes them through verbatim.
+ *
+ * Note this is the *available* set, not the current roster. It is accurate for the lifetime
+ * of the session because personas are files on disk; who is actually in the kild changes as
+ * agents spawn and stop, so it is not answered here (see `spawn`/`send` tool results).
+ */
+export function formatPersonasSection(
+  personas: Array<{ name: string; description: string }>,
+): string {
+  // `default` is the no-persona persona: spawning it deliberately is legitimate, but it
+  // describes nothing, so it earns no line in a catalog meant to say what things are FOR.
+  const named = personas.filter((persona) => persona.name !== 'default');
+  if (named.length === 0) return '';
+  const lines = named
+    .map(({ name, description }) => `- ${name}${description ? ` — ${description}` : ''}`)
+    .join('\n');
+  return `<available-personas>
+Personas you can spawn into this kild, as \`persona\` on the \`spawn\` tool. The handle you
+give an agent is separate: spawn the same persona twice under two handles and you get two
+agents you can address independently. Pick the persona whose description fits the work; use
+\`default\` (not listed) for a general-purpose agent with no specialisation:
+${lines}
+</available-personas>`;
+}
+
 /** Compose the first delivered turn: the default prompt (if any) on top of the
  *  already-persona-wrapped user turn (persona `<persona>` + text, from `withPersona`). The
  *  prefix is null only when explicitly disabled; normally every session's first turn
