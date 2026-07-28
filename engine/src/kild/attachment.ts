@@ -63,7 +63,15 @@ function attachmentsDir(): string {
  * gets a loud error here, not a write to somewhere else.
  */
 function safeSegment(kind: string, value: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(value)) throw new Error(`invalid ${kind}: ${value}`);
+  // `.` is allowed inside a value (worktree names carry dots), which means the character
+  // class alone lets `.` and `..` through whole — and `path.join` then collapses `..` against
+  // the segment before it, so `<kild>/..` resolves to the shared `claims` directory itself
+  // rather than to a file in it. One such write turns that directory into a plain file and
+  // every later attach fails with ENOTDIR, permanently. Blocking `/` is not enough; the
+  // traversal tokens have to go too.
+  if (value === '.' || value === '..' || !/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new Error(`invalid ${kind}: ${value}`);
+  }
   return value;
 }
 
@@ -149,7 +157,6 @@ export async function recordAttachment(
   await writeAtomic(claim, `${session}\n`);
   const record: Attachment = { kildId, handle, attachedAt: Date.now() };
   await writeAtomic(file, `${JSON.stringify(record)}\n`);
-  await sweepSuperseded();
 }
 
 /** Write via a unique temp file in the same directory, then rename over the target. Same
@@ -167,43 +174,20 @@ async function writeAtomic(file: string, contents: string): Promise<void> {
 }
 
 /**
- * Delete session records whose handle is now claimed by somebody else.
+ * Records of superseded sessions are NOT deleted, and that is deliberate.
  *
- * Bounded growth, nothing more: without it a forked session leaves an inert record behind on
- * every relaunch. It is safe to run concurrently with any other attach because it only
- * removes records that ALREADY resolve to null — the claim is the single source of truth, and
- * a record the claim does not name is not an attachment whichever way the race went.
+ * A sweep used to run here to bound growth. It could not be made safe: it decided from a
+ * snapshot it had already read but unlinked the live path, so an ordinary re-attach racing
+ * any other session's sweep deleted a record whose claim still named it — leaving a session
+ * holding a claim with no record, which resolves to "not attached", which makes the next send
+ * go out with no credential. That is the exact failure this module exists to prevent, so a
+ * disk-tidiness pass is not worth reaching for it.
  *
- * Failures are reported, not swallowed, but are not fatal: the attachment itself is complete
- * before this runs, and a record left behind costs disk, never a wrong answer.
+ * Leaving them costs one small inert file per forked session. Nothing scans this directory —
+ * every read is a direct path lookup — so the cost is bytes and never latency or a wrong
+ * answer. If it ever needs reclaiming, that belongs in an explicit maintenance verb the
+ * operator runs, not in an implicit delete on somebody else's attach.
  */
-async function sweepSuperseded(): Promise<void> {
-  const dir = attachmentsDir();
-  let entries: string[];
-  try {
-    entries = await fs.readdir(dir);
-  } catch (err) {
-    console.error(`kild: could not tidy ${dir}: ${(err as Error).message}`);
-    return;
-  }
-  await Promise.all(
-    entries
-      .filter((entry) => entry.endsWith('.json'))
-      .map(async (entry) => {
-        const file = path.join(dir, entry);
-        try {
-          const record = await readRecord(file);
-          if (!record) return;
-          const owner = await readClaim(record.kildId, record.handle);
-          if (owner !== null && owner !== path.basename(entry, '.json')) {
-            await fs.rm(file, { force: true });
-          }
-        } catch (err) {
-          console.error(`kild: could not tidy ${file}: ${(err as Error).message}`);
-        }
-      }),
-  );
-}
 
 /**
  * The session's attachment, or null when it has none.

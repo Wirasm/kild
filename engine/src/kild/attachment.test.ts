@@ -71,14 +71,15 @@ describe('supersession — the fork case', () => {
     expect(await findAttachment('sess-other')).toMatchObject({ kildId: 'kild-b' });
   });
 
-  test('forks do not accumulate records', async () => {
-    for (const session of ['s1', 's2', 's3', 's4']) {
-      await recordAttachment(session, 'kild-a', 'kild');
+  test('only the newest fork resolves, however many came before it', async () => {
+    const sessions = ['s1', 's2', 's3', 's4'];
+    for (const session of sessions) await recordAttachment(session, 'kild-a', 'kild');
+    // Their records are all still on disk — deleting them cannot be made race-free and is not
+    // what makes this correct. The claim is: exactly one session resolves.
+    for (const stale of sessions.slice(0, -1)) {
+      expect(await findAttachment(stale)).toBeNull();
     }
-    const records = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
-      f.endsWith('.json'),
-    );
-    expect(records).toEqual(['s4.json']);
+    expect(await findAttachment('s4')).toMatchObject({ kildId: 'kild-a', handle: 'kild' });
   });
 });
 
@@ -196,5 +197,38 @@ describe('session ids reach the filesystem', () => {
   test('a traversing id cannot write outside the directory', async () => {
     await expect(recordAttachment('../../escaped', 'kild-a', 'kild')).rejects.toThrow();
     await expect(fs.readFile(path.join(home, '..', '..', 'escaped.json'))).rejects.toThrow();
+  });
+});
+
+describe('path segments cannot escape the directory', () => {
+  test.each([
+    ['..', 'traversal token'],
+    ['.', 'current directory'],
+  ])('a handle of %s is refused (%s)', async (handle) => {
+    // `path.join` collapses `..` against the segment before it, so this would target the
+    // shared claims DIRECTORY rather than a file in it — turning it into a plain file and
+    // breaking every later attach with ENOTDIR, permanently.
+    expect(recordAttachment('sess', 'kild-a', handle)).rejects.toThrow('invalid handle');
+  });
+
+  test.each([
+    ['..', 'traversal token'],
+    ['.', 'current directory'],
+  ])('a kild id of %s is refused (%s)', async (kildId) => {
+    expect(recordAttachment('sess', kildId, 'kild')).rejects.toThrow('invalid kild id');
+  });
+
+  test('a rejected segment leaves the claims directory intact', async () => {
+    await recordAttachment('good', 'kild-real', 'kild');
+    await expect(recordAttachment('sess', 'kild-a', '..')).rejects.toThrow();
+    // The decisive check: a normal attach still works afterwards.
+    await recordAttachment('after', 'kild-other', 'kild');
+    expect(await findAttachment('after')).toMatchObject({ kildId: 'kild-other' });
+    expect(await findAttachment('good')).toMatchObject({ kildId: 'kild-real' });
+  });
+
+  test('dots are still allowed INSIDE a value', async () => {
+    await recordAttachment('sess.1', 'kild.v1.2', 'agent.one');
+    expect(await findAttachment('sess.1')).toMatchObject({ kildId: 'kild.v1.2' });
   });
 });
