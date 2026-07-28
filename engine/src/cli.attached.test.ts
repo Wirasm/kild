@@ -785,6 +785,12 @@ test.each([
   const bad = await runCli(['log', 'kild-9']);
   expect(bad.exitCode).toBe(1);
   expect(bad.stderr).toContain('KILD_ENGINE_TIMEOUT_MS');
+  // ...and as a FORMATTED CLI error, not a raw crash. Validating at module load threw before
+  // dispatch()'s handler existed, so every command died with a Bun stack trace naming a source
+  // line instead of the fix. Both exited 1 with the variable's name in the text, so asserting
+  // only that could not tell them apart — which is how this fix had no coverage at all.
+  expect(bad.stderr).not.toContain('Bun v');
+  expect(bad.stderr).not.toContain('function engineTimeoutMs');
   engineTimeoutMs = '30000';
 });
 
