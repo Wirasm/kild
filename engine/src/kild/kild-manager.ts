@@ -66,6 +66,17 @@ function unknownRecipients(kild: Kild, to: string[]): string[] {
   return to.filter((recipient) => !handles.has(recipient));
 }
 
+/** Named recipients whose session is gone. A stopped agent STAYS on the roster — its handle
+ *  never rebinds and its transcript stays addressable — so membership alone said "yes" to a
+ *  send nothing could receive: it validated, `prompt()` returned false into a discarded
+ *  return value, and the sender was told "Sent to the kild." A stopped handle is a real
+ *  address with no reader, which is a rejection, not a delivery. */
+function stoppedRecipients(kild: Kild, to: string[]): string[] {
+  return to.filter((recipient) =>
+    kild.agents.some((agent) => agent.handle === recipient && agent.stopped),
+  );
+}
+
 interface AgentRuntime {
   subscribe(
     fn: (msg: { agent: string; event: unknown } | { agents: unknown[] }) => void,
@@ -730,6 +741,23 @@ export class KildManager {
       created = result.value;
     }
 
+    // Checked AFTER creation (a fresh agent is never stopped) and before the log: a message
+    // nothing can receive must not be recorded as if it were read. Refused wholesale for a
+    // mixed list, exactly as an unknown recipient already is — a partial send is the thing
+    // the sender would not be told about.
+    const stopped = stoppedRecipients(kild, to);
+    if (stopped.length > 0) {
+      const live = kild.agents
+        .filter((agent) => !agent.stopped)
+        .map((agent) => `@${agent.handle}`)
+        .join(', ');
+      return fail(
+        'rejected',
+        `stopped, nothing would read this: ${stopped.map((h) => `@${h}`).join(', ')} ` +
+          `(still working: ${live || 'nobody'})`,
+      );
+    }
+
     // The registry stamps `seq` as it appends, and the STAMPED message is what gets
     // broadcast — so a WS `{message}` frame carries the same cursor a later
     // `GET …/messages?since=` will report, and a client can tell new from replay.
@@ -744,12 +772,16 @@ export class KildManager {
     if (!message) return fail('not_found', `no such kild: ${kildId}`);
     traceSend(kild.name, message);
     this.broadcast({ message });
-    this.deliver(kild, message);
+    const undelivered = this.deliver(kild, message);
+    const intended = to.filter((t) => t !== from);
     return ok({
-      message: created.length
-        ? `Brought ${created.map((h) => `@${h}`).join(', ')} into the kild and sent to them.`
-        : 'Sent to the kild.',
-      deliveredTo: to.filter((t) => t !== from),
+      message: undelivered.length
+        ? `Sent, but ${undelivered.map((h) => `@${h}`).join(', ')} did not receive it — ` +
+          'its session is gone; it is marked stopped.'
+        : created.length
+          ? `Brought ${created.map((h) => `@${h}`).join(', ')} into the kild and sent to them.`
+          : 'Sent to the kild.',
+      deliveredTo: intended.filter((t) => !undelivered.includes(t)),
       created: created.length ? created : undefined,
     });
   }
@@ -801,13 +833,22 @@ export class KildManager {
   }
 
   /**
-   * The whole of delivery: for each named recipient, push or queue.
+   * The whole of delivery: for each named recipient, push or queue. Returns the handles that
+   * could NOT be reached.
    *
    * Two branches, and they differ only in transport — an `owned` agent is a process kild
    * can prompt, an `attached` one is a harness that pulls from its inbox. The single
    * exception is the sender: an agent is never delivered its own message.
+   *
+   * `prompt()` answers whether the process was there, and that answer used to be discarded:
+   * a session that had died on its own (a crash — not a `stop`, so nothing marked the roster)
+   * reported a successful send into nothing, and flipped `idle` false on an agent that would
+   * never emit `agent_end` to flip it back. Delivery is the moment the engine finds out, so
+   * it is the moment the roster learns: an unreachable agent is marked stopped, its idle
+   * state is left honest, and the sender is told.
    */
-  private deliver(kild: Kild, message: Message): void {
+  private deliver(kild: Kild, message: Message): string[] {
+    const undelivered: string[] = [];
     for (const handle of message.to) {
       if (handle === message.from) continue;
       const agent = kild.agents.find((candidate) => candidate.handle === handle);
@@ -816,16 +857,27 @@ export class KildManager {
         // `idle` deliberately does NOT flip here — the harness really is idle until it
         // takes its next turn; the drain is what moves it.
         agent.inbox.enqueue({ from: message.from, text: message.text, ts: Date.now() });
-      } else {
+        continue;
+      }
+      const delivered = this.sessions.prompt(
+        agent.id,
+        formatDelivery(kild.name, message.from, message.text),
+        message.from,
+      );
+      if (delivered) {
         // A delivered turn reactivates the agent: it is no longer waiting.
         agent.idle = false;
-        this.sessions.prompt(
-          agent.id,
-          formatDelivery(kild.name, message.from, message.text),
-          message.from,
-        );
+        continue;
       }
+      undelivered.push(agent.handle);
+      agent.stopped = true;
+      agent.idle = true;
     }
+    if (undelivered.length > 0) {
+      this.registry.persistNow(kild.id);
+      this.broadcast({ kilds: this.registry.summaries() });
+    }
+    return undelivered;
   }
 
   private async validateAgents(
