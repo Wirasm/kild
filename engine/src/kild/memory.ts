@@ -117,6 +117,7 @@ export async function collectLedgerFacts(
   dir: string,
   base?: string,
   landedSha?: string,
+  carried?: { commits: number; files: number },
 ): Promise<KildLedgerFacts> {
   const status = await kildGitStatus(dir, base);
   const review = await reviewCommits(dir, status.base);
@@ -125,9 +126,13 @@ export async function collectLedgerFacts(
   return {
     base: status.base,
     branch: status.branch ?? undefined,
-    commits: review.commits.length,
+    // A landed kild's work is no longer measurable here — `base..HEAD` is empty once the
+    // branch is contained in base — so the counts the land itself recorded win. Without
+    // them the ledger wrote `code: 0 commits, 0 files changed` directly beneath
+    // `landed: yes`, i.e. the kild that finished its work recorded none of it.
+    commits: carried?.commits ?? review.commits.length,
     tip,
-    changedFiles: status.changedFiles.length,
+    changedFiles: carried?.files ?? status.changedFiles.length,
     uncommittedFiles: status.uncommittedFiles,
     landed:
       landedSha !== undefined ||
@@ -165,11 +170,16 @@ function landLine(facts: KildLedgerFacts): string {
   );
 }
 
-/** The code-state line: commits vs base, changed files, and what is still uncommitted. */
+/** The code-state line: what the kild produced, and what is still uncommitted.
+ *
+ *  "vs base" is only true while the work is still outside base. For a landed kild the same
+ *  numbers are what it merged IN, so the line says so rather than claiming a branch is
+ *  somehow still ahead of the base it is now part of. */
 function codeLine(facts: KildLedgerFacts): string {
   const uncommitted = facts.uncommittedFiles > 0 ? `, ${facts.uncommittedFiles} uncommitted` : '';
+  const where = facts.landedSha ? `landed into ${facts.base}` : `vs ${facts.base}`;
   return (
-    `- code: ${facts.commits} commit${facts.commits === 1 ? '' : 's'} vs ${facts.base}, ` +
+    `- code: ${facts.commits} commit${facts.commits === 1 ? '' : 's'} ${where}, ` +
     `${facts.changedFiles} file${facts.changedFiles === 1 ? '' : 's'} changed${uncommitted}`
   );
 }

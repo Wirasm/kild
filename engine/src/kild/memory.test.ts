@@ -123,6 +123,31 @@ test('a kild stopped without landing says so plainly, with or without commits', 
   expect(landed).toContain('- landed: yes — kild/fix-auth is contained in main');
 });
 
+test('a landed kild records what it landed, not what is left over afterwards', () => {
+  // The contradiction this pins: `collectLedgerFacts` runs at close, AFTER the merge, and
+  // `base..HEAD` is empty once the branch is contained in base — so a landed kild wrote
+  // `code: 0 commits, 0 files changed` directly beneath `landed: yes`. The kild that
+  // finished its work recorded none of it. The counts now come from the land itself.
+  const entry = formatKildLogEntry(
+    kild('/p'),
+    facts({ commits: 4, changedFiles: 7, landed: true, landedSha: 'abcdef1234567890' }),
+    new Date('2026-07-24T12:00:00Z'),
+  );
+  expect(entry).toContain('- landed: yes — kild/fix-auth merged into main as abcdef1');
+  expect(entry).toContain('- code: 4 commits landed into main, 7 files changed');
+  // …and "vs main" is not claimed for a branch that IS main's history now.
+  expect(entry).not.toContain('commits vs main');
+});
+
+test('an UNLANDED kild still measures against base — the wording tracks the state', () => {
+  const entry = formatKildLogEntry(
+    kild('/p'),
+    facts({ commits: 2, changedFiles: 3, landed: false }),
+    new Date('2026-07-24T12:00:00Z'),
+  );
+  expect(entry).toContain('- code: 2 commits vs main, 3 files changed');
+});
+
 test('a RECORDED merge sha wins over inference — the ledger names the commit', () => {
   // Inference can only ever assert containment ("is contained in main"). When the engine
   // performed the land it holds the sha, so the entry says which commit it became — and

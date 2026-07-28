@@ -8,9 +8,11 @@
 #
 # Binds $KILD_E2E_PORT (default 4611) and NEVER 4517: the operator's own engine must survive this running.
 #
-# Two checks depend on a working model provider (an agent has to reach `ensureWorktree`
-# before there is a branch to land). Without auth they report INFO, not FAIL — land itself
-# is covered by src/kild/kild-land.test.ts against real temp repos.
+# NO check depends on a model provider. Land used to, by waiting for an agent to create the
+# worktree — so without auth the setup silently no-op'd, land found nothing to merge, and the
+# section degraded to INFO while the harness still exited 0. It had never actually run. The
+# rig now creates that worktree itself (the same `kild/<name>` tree `ensureWorktree` makes and
+# attaches to), so every check here can fail, which is the only kind worth having.
 #
 #   Usage:  ./scripts/e2e.sh          (exit 0 = every check passed)
 set -u
@@ -45,6 +47,10 @@ mkdir -p "$REPO/.kild"
 cat > "$REPO/.kild/config.json" <<JSON
 { "hooks": { "onClose": { "command": ["sh","-c","echo fired kild={{name}} ledger=\$KILD_CLOSE_LEDGER_PATH > $RIG/hook.log"] } } }
 JSON
+# COMMIT it: land refuses to merge into a dirty checkout, and an untracked config file left
+# lying in the main checkout is exactly that. The rig was making its own land check
+# impossible, which stayed invisible while the check silently no-op'd for other reasons.
+git -C "$REPO" add .kild && git -C "$REPO" commit -qm "kild config"
 
 cd "$ENGINE_DIR"
 KILD_PORT=$PORT bun run src/server.ts > "$RIG/engine.log" 2>&1 &
@@ -149,18 +155,34 @@ done
 chk "GET /api/agents survives (process inventory)" "$(curl -s -o /dev/null -w '%{http_code}' $E/api/agents)" "200"
 
 echo "══ 8. land: dry run touches nothing, execute records a sha"
-( cd "$KILD_HOME/worktrees/e2e" 2>/dev/null && echo landed > l.txt && git add . && git commit -qm "kild work" ) 2>/dev/null
+# Set the tree up OURSELVES rather than waiting on an agent to do it.
+#
+# This used to be a `2>/dev/null` subshell that no-op'd whenever the worktree was not there
+# yet — which is always, unless a model provider is authenticated and the first agent got far
+# enough to call `ensureWorktree`. Land then found nothing to merge and the section degraded
+# to INFO while the harness still exited 0: a check that cannot fail is not a check, and this
+# one had never run.
+#
+# The worktree is `kild/<name>` under $KILD_HOME/worktrees — the same tree `ensureWorktree`
+# would create and attach to — so creating it here tests exactly the same path and makes land
+# a real assertion with no provider needed.
+WT="$KILD_HOME/worktrees/e2e"
+if [ ! -d "$WT/.git" ]; then
+  ( cd "$REPO" && git worktree add -q -b kild/e2e "$WT" main ) || no "e2e worktree created" "git worktree add failed"
+fi
+( cd "$WT" && echo landed > l.txt && git add . && git commit -qm "kild work" ) \
+  || no "e2e worktree setup commit" "commit failed in $WT"
 BEFORE=$(cd $REPO && git rev-parse HEAD)
 LD=$(curl -s "$E/api/kilds/$ID/land")
 chk "dry run reports"                          "$LD" "dryRun"
 chk "dry run changed nothing"                  "$([ "$BEFORE" = "$(cd $REPO && git rev-parse HEAD)" ] && echo same)" "same"
 LX=$(curl -s -X POST "$E/api/kilds/$ID/land")
-if echo "$LX" | grep -q '"merged":true'; then
-  ok "execute merged"
-  chk "and returned a sha"                     "$LX" '"sha"'
-else
-  echo "  INFO  land: $(echo "$LX"|head -c 160)"
-fi
+chk "execute merged"                           "$LX" '"merged":true'
+# The TOP-LEVEL sha, not any sha: every commit in `commits[]` carries one, so grepping for
+# `"sha"` passes on a land that merged nothing.
+MERGE_SHA=$(echo "$LX" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("sha") or "")' 2>/dev/null)
+chk "and returned the merge sha"               "${MERGE_SHA:-none}" "^[0-9a-f]\{7,\}$"
+chk "base really moved"                        "$(cd $REPO && git rev-parse HEAD)" "^${MERGE_SHA:-nope}$"
 
 echo "══ 9. stop → archive, ledger facts, hooks.onClose fires"
 ST=$(curl -s -X POST $E/api/kilds/$ID/stop)
@@ -170,6 +192,9 @@ LOG=$(cat "$REPO/.kild/LOG.md" 2>/dev/null)
 chkno "ledger has NO prose outcome line"       "$LOG" "outcome:"
 chk "ledger records land state"                "$LOG" "landed:"
 chk "ledger records code facts"                "$LOG" "code:"
+# The contradiction: facts are collected AFTER the merge, so base..HEAD is empty and a
+# landed kild reported "0 commits" beside "landed: yes". The land records what it carried.
+chkno "a landed kild does not report zero work" "$LOG" "code: 0 commits"
 chk "hooks.onClose fired"                      "$(cat $RIG/hook.log 2>/dev/null)" "fired"
 chk "hook received the ledger path as a fact"  "$(cat $RIG/hook.log 2>/dev/null)" "LOG.md"
 AM=$(curl -s "$E/api/kilds/$ID/messages")

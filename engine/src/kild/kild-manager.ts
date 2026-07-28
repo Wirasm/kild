@@ -346,10 +346,17 @@ export class KildManager {
 
   /** Record the merge a land produced, so the ledger can name the commit instead of
    *  inferring containment. */
-  recordLand(kildId: string, sha: string): CommandResult<KildActionSuccess> {
+  recordLand(
+    kildId: string,
+    sha: string,
+    carried?: { commits: number; files: number },
+  ): CommandResult<KildActionSuccess> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
     kild.landedSha = sha;
+    // Counted at the moment of the merge, because afterwards they are gone: `base..HEAD` is
+    // empty once the branch is contained in base.
+    kild.landed = carried;
     this.registry.persistNow(kildId);
     return ok({ message: `Kild '${kild.name}' landed as ${sha.slice(0, 7)}.` });
   }
@@ -565,7 +572,11 @@ export class KildManager {
     try {
       // Facts at the moment of stopping — after this the worktree can be landed or
       // pruned and the answers change.
-      appendKildLog(kild, memoryDir, await collectLedgerFacts(dir, kild.base, kild.landedSha));
+      appendKildLog(
+        kild,
+        memoryDir,
+        await collectLedgerFacts(dir, kild.base, kild.landedSha, kild.landed),
+      );
     } catch (err) {
       console.error(
         `kild: ledger append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
