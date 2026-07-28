@@ -917,7 +917,12 @@ app.post('/api/kilds/:id/land', async (c) => {
   const result = await landMerge(target.value.repo, target.value.dir, target.value.base);
   // A land that did not happen is NOT a success — the caller must be able to tell.
   if (!result.merged) return c.json({ ...result, dryRun: false }, 409);
-  if (target.value.live && result.sha) kildManager.recordLand(id, result.sha);
+  if (target.value.live && result.sha) {
+    kildManager.recordLand(id, result.sha, {
+      commits: result.commits.length,
+      files: result.files.length,
+    });
+  }
   return c.json({ ...result, dryRun: false });
 });
 

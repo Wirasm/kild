@@ -223,6 +223,13 @@ export interface Kild {
    *  The ledger prefers it over inferring containment from git, so a landed run can name
    *  the sha it became instead of only asserting it is contained. */
   landedSha?: string;
+  /** What the land carried, counted at the moment it merged.
+   *
+   *  Measuring afterwards is measuring the wrong thing: `base..HEAD` is empty once the
+   *  branch is in base, so the ledger reported `code: 0 commits, 0 files changed` beside
+   *  `landed: yes` — the kild that did the most work recorded the least. The land is the
+   *  only moment these numbers exist, so it is the moment they are captured. */
+  landed?: { commits: number; files: number };
 }
 
 /** An agent to spawn into a kild. */
@@ -298,6 +305,8 @@ export interface ArchivedKild {
   base?: string;
   /** Merge commit the kild landed as, when it was landed through the engine. */
   landedSha?: string;
+  /** What that land carried, counted when it merged (see {@link Kild.landed}). */
+  landed?: { commits: number; files: number };
 }
 
 /**
@@ -338,6 +347,8 @@ export interface KildStatus extends KildIdentity {
   totals?: CostTotals;
   /** Merge commit this kild's branch landed as (see {@link Kild.landedSha}). */
   landedSha?: string;
+  /** What that land carried, counted when it merged (see {@link Kild.landed}). */
+  landed?: { commits: number; files: number };
 }
 
 /** The identity half of one live kild — the single mapping every cheap-listing producer
