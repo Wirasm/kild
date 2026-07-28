@@ -33,32 +33,40 @@ export interface KildActionResponse {
  * How long any engine call may take before it is a failure rather than a wait.
  *
  * `fetch` has no timeout of its own, so a connection the engine ACCEPTS and then never
- * answers hangs forever. That is not a hypothetical: it is the shape where a caller looks
- * patient while it is actually dead, and it defeats every deadline built on top of it —
- * `kild watch` could sit inside one poll past its whole window and report neither mail nor
- * an unreachable engine, which is exactly the distinction its exit codes exist to draw.
+ * answers hangs forever — the shape where a caller looks patient while it is actually dead,
+ * defeating every deadline built on top of it.
  *
- * Generous on purpose. This is a backstop against hanging forever, not a latency budget: it
- * has to clear the slowest legitimate call (a land's merge, a new kild's worktree) without
- * argument. Anything needing tighter bounds passes its own `signal` — the drain does, because
- * it runs inside a turn-end hook where a stall costs the operator a visible pause.
+ * Generous on purpose: a backstop against hanging forever, not a latency budget. The calls it
+ * actually has to clear are `land` (a `git merge --no-ff`) and `rm` (a forced worktree
+ * removal), which are synchronous end to end. `kild new` is NOT one of them — `spawn` returns
+ * without awaiting, and the worktree is created inside the spawned child — so do not reason
+ * about this bound from that call.
+ *
+ * Overridable because 30s is a guess about somebody else's disk. A large merge with rename
+ * detection, or a tree on a network mount, can legitimately exceed it, and an operator who
+ * hits that needs a way out that is not editing the source.
  */
-const ENGINE_TIMEOUT_MS = 30_000;
+const ENGINE_TIMEOUT_MS = Number(process.env.KILD_ENGINE_TIMEOUT_MS ?? 30_000);
 
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // A caller's own signal wins outright rather than being combined: it is a narrower deadline
   // chosen for a reason, and silently capping it at the default would make the tighter bound a
   // lie. Nothing here may be slower than a caller asked for.
+  const ourDeadline = init?.signal === undefined;
   const signal = init?.signal ?? AbortSignal.timeout(ENGINE_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(`${ENGINE}${path}`, { ...init, signal });
   } catch (err) {
-    // A timeout arrives as an opaque abort. Say what actually happened — "the operation was
-    // aborted" tells a caller nothing about whether to retry, and a hook that swallows it
-    // would be swallowing the one symptom that distinguishes a wedged engine from a quiet one.
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new Error(`${path} timed out — the engine accepted the connection and did not answer`);
+    // Whether this was a deadline is decided by WHOSE signal fired, not by matching an error
+    // name. Name-matching would relabel the first future caller that cancels for any other
+    // reason — a Ctrl-C, say — as "the engine did not answer", which is the opposite of true.
+    if (signal.aborted && ourDeadline) {
+      throw new Error(
+        `${path} timed out after ${ENGINE_TIMEOUT_MS}ms — the engine accepted the connection ` +
+          'and did not answer (set KILD_ENGINE_TIMEOUT_MS to allow longer)',
+        { cause: err },
+      );
     }
     throw err;
   }

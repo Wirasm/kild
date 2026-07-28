@@ -44,6 +44,8 @@ let attachResponse: { status: number; body: unknown } | undefined;
 let messagesHangMs = 0;
 /** Same, for the drain — it carries its own tighter bound, so it needs its own hang. */
 let drainHangMs = 0;
+/** What the CLI under test uses as its default backstop. */
+let engineTimeoutMs = '30000';
 /** What `GET /messages` answers with. `kild watch` reads the log, never the inbox, so its
  *  tests drive this rather than `drainResponse`. */
 let messagesResponse: { status: number; body: unknown } | undefined;
@@ -110,6 +112,9 @@ async function runCli(
     ...process.env,
     KILD_ENGINE: engineOverride ?? engineUrl,
     KILD_HOME: kildHome,
+    // Keep the backstop testable. Without an override the only way to exercise the DEFAULT is
+    // a 30s test, so nothing covered it and removing it entirely left the suite green.
+    KILD_ENGINE_TIMEOUT_MS: engineTimeoutMs,
   };
   for (const key of IDENTITY_ENV) delete env[key];
   Object.assign(env, identity);
@@ -631,8 +636,11 @@ test('the BOOTSTRAP path respects the window too, not just the poll loop', async
     'http://127.0.0.1:1',
   );
   const elapsed = Date.now() - started;
-  expect(overrun.exitCode).toBe(2); // quiet — the window closed, the engine was not declared dead
-  // A 1s window must not become a 6s one because the first fetch happened to fail.
+  // Exit 3, not 2. This assertion USED to expect quiet, and that expectation was wrong: the
+  // engine never answered once, so "nothing new" would assert a response that never came.
+  // What this test is actually for is the elapsed time — a 1s window must not become a 6s one
+  // because the first fetch happened to fail — and that is unchanged.
+  expect(overrun.exitCode).toBe(3);
   expect(elapsed).toBeLessThan(3_000);
 }, 15_000);
 
@@ -704,3 +712,56 @@ test('a drain against a hung engine times out, and says so', async () => {
   expect(hook.exitCode).toBe(0);
   drainHangMs = 0;
 }, 30_000);
+
+test('a hung engine is UNREACHABLE even when the interval outlasts the window', async () => {
+  // Confirmed regression: with --interval >= --timeout the first poll blocked for its own
+  // bound (10s against a 3s window), the deadline was then already gone, and it reported
+  // QUIET — asserting the engine answered and had nothing, after every request had failed.
+  // Two answers to one question: the request bound used the interval, the loop used the
+  // deadline. The bound now takes what remains, and "quiet" is refused unless the engine
+  // actually answered at least once.
+  messagesHangMs = 30_000;
+  const started = Date.now();
+  const hung = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '1',
+    '--timeout',
+    '3',
+    '--interval',
+    '10',
+  ]);
+  const elapsed = Date.now() - started;
+  expect(hung.exitCode).toBe(3);
+  expect(hung.stderr).not.toContain('nothing new'); // never claim quiet on an unanswered engine
+  expect(elapsed).toBeLessThan(9_000); // and never blow through the window by 3x
+  messagesHangMs = 0;
+}, 30_000);
+
+test('the default backstop is applied when no caller supplies a signal', async () => {
+  // Removing the default left every test passing, because the two hang tests are protected by
+  // their own explicit signals and bypass it entirely. This one goes through `kild log`, which
+  // supplies none.
+  engineTimeoutMs = '600';
+  messagesHangMs = 5_000;
+  const hung = await runCli(['log', 'kild-9', '--since', '1']);
+  expect(hung.exitCode).toBe(1);
+  expect(hung.stderr).toContain('timed out');
+  messagesHangMs = 0;
+  engineTimeoutMs = '30000';
+});
+
+test('`kild show` reports an unreachable engine instead of an empty log', async () => {
+  // It swallowed every failure into `[]`. Invisible while a hung engine simply hung; a
+  // confident wrong answer the moment a timeout made the call return.
+  engineTimeoutMs = '600';
+  messagesHangMs = 5_000;
+  const shown = await runCli(['show', 'kild-9']);
+  expect(shown.exitCode).toBe(1);
+  expect(shown.stderr).toContain('timed out');
+  messagesHangMs = 0;
+  engineTimeoutMs = '30000';
+}, 20_000);

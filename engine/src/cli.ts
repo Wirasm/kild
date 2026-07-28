@@ -393,6 +393,11 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     return new Promise((resolve) => setTimeout(resolve, interval));
   }
   let failures = 0;
+  /** Whether the engine has answered even once. "Quiet" is a claim ABOUT the engine — that it
+   *  responded and had nothing — so it cannot be reported by a watcher that never heard from
+   *  it. Without this, a window that closed after nothing but failures exited 2, asserting the
+   *  opposite of what was observed. */
+  let answered = false;
 
   /**
    * Ask once. Returns the batch, or null when the failure was tolerated and the caller should
@@ -408,8 +413,14 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     since: number | undefined,
   ): Promise<Awaited<ReturnType<typeof kildMessages>> | null> {
     try {
-      const batch = await kildMessages(kildId, since, watchRequestTimeout(interval));
+      // The bound and the deadline are one question, asked once: never wait past the window.
+      const batch = await kildMessages(
+        kildId,
+        since,
+        watchRequestTimeout(interval, deadline - Date.now()),
+      );
       failures = 0;
+      answered = true;
       return batch;
     } catch (err) {
       if (++failures < WATCH_TOLERATED_FAILURES) return null;
@@ -437,7 +448,14 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
   function expire(): never {
     // Report the window that actually elapsed. Printing the requested `--timeout` made the
     // message a lie in exactly the case worth reporting — the one where waiting overran it.
-    console.error(`kild: nothing new in ${Math.round((Date.now() - started) / 1000)}s`);
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    if (!answered) {
+      // Never heard from it. Saying "nothing new" would assert the engine responded and had
+      // nothing, which is the dead-looks-quiet conflation these codes exist to prevent.
+      console.error(`kild: engine did not answer within ${elapsed}s`);
+      process.exit(WATCH_EXIT.unreachable);
+    }
+    console.error(`kild: nothing new in ${elapsed}s`);
     process.exit(WATCH_EXIT.quiet);
   }
 
@@ -537,6 +555,31 @@ async function kildInbox(idArg: string | undefined): Promise<void> {
   if (drained.messages.length === 0) console.error(drained.capped ? 'wake cap reached' : 'no mail');
 }
 
+/**
+ * Run a MUTATING call, and if it times out, say the outcome is unknown rather than failed.
+ *
+ * A client-side abort does not reach the engine: nothing here passes a signal into the
+ * server, and no git command it runs is cancellable, so a timed-out `land` may still merge
+ * and a timed-out `rm` may still remove the tree. Reporting that as a plain failure would be
+ * the worst kind of wrong — the operator retries a merge that already happened, or treats a
+ * deleted worktree as surviving.
+ *
+ * This is the same rule the disposal path already follows for its discard list: an
+ * unanswerable question is not an empty list, and it is not a `no` either.
+ */
+async function mayHaveHappened<T>(verb: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (!errText(err).includes('timed out')) throw err;
+    throw new Error(
+      `${verb} timed out — the engine does NOT cancel work when the client gives up, so this ` +
+        `may still be completing or already done. Check with \`kild ls\` and git before ` +
+        `retrying. (${errText(err)})`,
+    );
+  }
+}
+
 /** `--since <seq>` as a message cursor. A non-number is a usage error, never "from the
  *  start" — a silently-ignored cursor replays the whole log as if it were new. */
 function parseSince(): number | undefined {
@@ -563,7 +606,11 @@ async function kildShow(id: string): Promise<void> {
   // The detail route is what decides whether this kild exists; a missing LOG does not mean a
   // missing kild — an orphan tree is a kild with nothing ever said in it.
   const kild = await getKild(id);
-  const messages = await kildMessages(id).catch(() => []);
+  // NOT swallowed. This used to be `.catch(() => [])`, which reported an empty log for any
+  // failure — invisible while a hung engine simply hung, and a confident lie the moment a
+  // timeout made the call return. An archived kild's log is a real answer; an unreachable
+  // engine is not the same as a kild that said nothing.
+  const messages = await kildMessages(id);
   const compact = compactLiveKilds([kild])[0];
   if (!compact) throw new Error(`no such kild: ${id}`);
 
@@ -685,7 +732,7 @@ async function kildSpawn(id: string, handle: string): Promise<void> {
  * `kild/<name>` branch always survives, which is why `--force` costs no commits.
  */
 async function kildRm(id: string): Promise<void> {
-  const res = await disposeKild(id, values.force);
+  const res = await mayHaveHappened('rm', () => disposeKild(id, values.force));
   if (json) return void console.log(JSON.stringify(res, null, 2));
   console.log(res.message);
   // An unanswerable question is not an empty list, and this is the one moment the operator
@@ -707,7 +754,9 @@ function formatLand(res: LandResponse): string {
  *  that touches nothing; with it, the branch is merged into its base in the project's main
  *  checkout and the merge sha is reported (and recorded on the kild for the ledger). */
 async function kildLand(id: string): Promise<void> {
-  const res = values.execute ? await landKild(id) : await landPreview(id);
+  const res = values.execute
+    ? await mayHaveHappened('land', () => landKild(id))
+    : await landPreview(id);
   if (json) return void console.log(JSON.stringify(res, null, 2));
   console.log(formatLand(res));
   if (res.collides.length > 0) console.error(`collides: ${res.collides.join(', ')}`);

@@ -53,14 +53,20 @@ export const WATCH_REQUEST_FLOOR_MS = 1_000;
 /**
  * How long ONE poll may wait for an answer.
  *
- * A poll that outlasts its own cadence is not waiting, it is stuck: without this the request
- * inherits the client's 30s backstop and a single hung call can swallow a whole short window,
+ * A poll that outlasts its own cadence is not waiting, it is stuck: without a bound the
+ * request inherits the client's backstop and a single hung call swallows a whole short window,
  * so a wedged engine looks patient rather than unreachable — the precise distinction the exit
- * codes exist to draw. Bounding each attempt turns a hang into a tolerated failure, and three
- * of those into an honest `unreachable`.
+ * codes exist to draw.
+ *
+ * **`msRemaining` is not optional, and that is the point.** The bound and the loop's deadline
+ * are the same question — how much time is left — and answering it in two places is what made
+ * `--interval 10 --timeout 3` block ten seconds on its first poll, overrun the requested
+ * window threefold, and then report a QUIET engine after every single request had failed.
+ * Requiring the caller to pass what remains means the two answers cannot drift, because there
+ * is only one.
  */
-export function watchRequestTimeout(intervalMs: number): number {
-  return Math.max(intervalMs, WATCH_REQUEST_FLOOR_MS);
+export function watchRequestTimeout(intervalMs: number, msRemaining: number): number {
+  return Math.min(Math.max(intervalMs, WATCH_REQUEST_FLOOR_MS), Math.max(msRemaining, 1));
 }
 
 /** What one poll concluded. */
