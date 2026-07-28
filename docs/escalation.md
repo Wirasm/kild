@@ -27,7 +27,7 @@ This is the point worth defending. kild already has everything required:
 - **`idle`** — an agent that went idle after sending to the honryo *is* a blocked agent. This is
   exactly why `idle` survived the process-norms cut: it is observable state, not a norm.
 - **the message log** — what was asked, by whom, in which kild.
-- **`seq`** (planned, `api-surface.md` §5) — a monotonic cursor so a client can distinguish "new
+- **`seq`** (shipped; `api-surface.md` §5) — a monotonic cursor so a client can distinguish "new
   since I last looked" from "the same thing I already saw." `ts` is `Date.now()` and can go
   backwards, so it cannot do this.
 

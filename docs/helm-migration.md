@@ -38,6 +38,12 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 
 ## REST
 
+> **These two tables are the RENAME only — stage one of two.** They show where each old route
+> went the moment `a63476d` landed, and several of them were deleted by the reshape that
+> followed. Rows struck through below no longer exist. Port against **"The reshape — the final
+> surface"** further down; this stage is kept because it is what the pin boundary crosses, not
+> because it is the surface you build on.
+
 ### Kilds (was rooms)
 
 | Was | Now |
@@ -58,36 +64,42 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 
 | Was | Now |
 |---|---|
-| `GET /api/sessions` | `GET /api/agents` |
-| `POST /api/sessions` | `POST /api/agents` |
-| `POST /api/sessions/:id/prompt` | `POST /api/agents/:id/prompt` |
-| `POST /api/sessions/:id/stop` | `POST /api/agents/:id/stop` |
-| `GET /api/sessions/:id/transcript` | `GET /api/agents/:id/transcript` |
+| `GET /api/sessions` | `GET /api/agents` — **survives** (the inventory of processes on no roster) |
+| `POST /api/sessions` | ~~`POST /api/agents`~~ — **deleted**; spawn into a kild |
+| `POST /api/sessions/:id/prompt` | ~~`POST /api/agents/:id/prompt`~~ — **deleted**; prompting is a message |
+| `POST /api/sessions/:id/stop` | ~~`POST /api/agents/:id/stop`~~ — **deleted**; `DELETE /api/kilds/:id/agents/:handle` |
+| `GET /api/sessions/:id/transcript` | ~~`GET /api/agents/:id/transcript`~~ — **deleted**; the kild-scoped route is the only one |
 
-### Unchanged
+### Unchanged by the rename
 
-`GET /api/health` · `GET|POST /api/projects` · `GET /api/personas` ·
-`GET|DELETE /api/worktrees` · `POST /api/worktrees/prune` · `POST /api/open` ·
+`GET /api/health` · `GET|POST /api/projects` · `GET /api/personas` · `POST /api/open` ·
 `POST /api/open-url`
 
-**Why `/api/worktrees` survives alongside `/api/kilds`,** given a kild *is* a worktree: a
-worktree outlives the kild that created it. An archived kild's tree is still on disk, and
-listing or pruning a tree whose kild is long gone has to work when there is no kild to ask
-about. So `/api/kilds` is the **live** view (workstreams with agents in them) and
-`/api/worktrees` is the **disk** view (what exists on the filesystem, reclaimable or not).
-They are two lifetimes, not two names for one thing.
+**`GET|DELETE /api/worktrees` and `POST /api/worktrees/prune` were unchanged by the rename and
+are DELETED by the reshape.** The argument for keeping them was that a worktree outlives the
+kild that created it, so the disk view needs its own family — but the reshape made
+`GET /api/kilds` enumerate `kild/*` trees from git, which gives a record-less tree an id and
+therefore an address. With that, one collection answers both lifetimes and the second family
+is duplication. See "Worktrees folded in" below.
 
-### Known duplication, to be resolved before you migrate
+### Known duplication — resolved, and the other way round
 
-`GET /api/agents/:id/transcript` and `GET /api/kilds/:id/agents/:handle/transcript` are two
-routes to the same resource — one keyed by machine `id`, one by kild-scoped `handle`. That is
+`GET /api/agents/:id/transcript` and `GET /api/kilds/:id/agents/:handle/transcript` were two
+routes to the same resource — one keyed by machine `id`, one by kild-scoped `handle`. That was
 the old participant-vs-session split surviving the rename in new clothes, and it is the exact
 shape that let "who is this addressed to?" hide for so long.
 
-**Resolution:** `handle` is an *addressing* concept — it names a recipient for `send`. It is not
-a routing key. One canonical resource family keyed by `id` (`/api/agents/:id/...`) wins, and the
-kild payload already carries the `id`→`handle` mapping in its `agents[]`. The kild-scoped
-transcript route is removed in the follow-up commit; do not build against it.
+**Resolution: `GET /api/kilds/:id/agents/:handle/transcript` WINS, and is the only transcript
+route.** `/api/agents/:id/transcript` is deleted.
+
+An earlier draft of this section said the opposite — that `handle` is an addressing concept
+and `id` should be the routing key, so the kild-scoped route would be removed. Build against
+the kild-scoped one. Reasoning for the reversal is in `docs/api-surface.md` §1: two identifier
+schemes for one object is the shape being deleted, and a handle is unique for a kild's
+lifetime (a stopped agent stays on the roster, so a handle never rebinds), which makes it a
+perfectly good key. The session id is also not the "pi implementation detail" that argument
+assumed — it is a `randomUUID()` the manager assigns; `piSessionId` is the separate pi-level
+handle.
 
 ## Payload shapes
 
@@ -146,7 +158,8 @@ Deriving them in helm from `git.changedFiles` is the correct approach, not a wor
 
 - `POST /api/kilds` — `participants: [{name, persona, model}]` → `agents: [{handle, persona, model}]`
 - `POST /api/kilds/:id/agents/attach` — `{name}` → `{handle}`
-- `POST /api/kilds/:id/inbox/drain` — `{name}` → `{handle}`
+- `POST /api/kilds/:id/inbox/drain` — `{name}` → `{handle}`; the response's `posts[]` is now
+  `messages[]` (`post` is a dead word: you post to a board, you send to a person)
 - `POST /api/kilds/:id/stop` — the `force` field is **gone** (it existed only to bury open
   decisions, which no longer exist)
 - `POST /api/kilds/:id/agents` — takes an optional **`task`**, the new agent's first message.
@@ -175,27 +188,29 @@ Connect to `/ws` as before. Frame names changed.
 
 ### Client → server
 
+**The socket is a SUBSCRIPTION now — every kild mutation is a REST call.** `kild_new`,
+`kild_send`, `kild_spawn` and `kild_stop` are **deleted**, and the old `room_*` frames with
+them.
+
+They could not answer: the frame was enqueued, a rejection was `console.warn`ed inside the
+engine, and the caller was told nothing. `kild new --agents not-a-persona` printed a header
+inviting you to type into a kild that never existed, then hung forever. Adding a rejection
+frame would have meant a second request/response protocol beside the one that already works,
+so the frames went instead.
+
 | Was | Now |
 |---|---|
-| `room_open` | `kild_new` |
-| `room_post` | `kild_send` |
-| `room_add` | `kild_spawn` |
-| `room_halt` | `kild_halt` |
-| `room_close` | `kild_stop` |
+| `room_open` → `kild_new` | `POST /api/kilds` |
+| `room_post` → `kild_send` | `POST /api/kilds/:id/messages` |
+| `room_add` → `kild_spawn` | `POST /api/kilds/:id/agents` |
+| `room_close` → `kild_stop` | `POST /api/kilds/:id/stop` |
+| `room_halt` → `kild_halt` | *(deleted with the lifecycle states)* |
 
-`spawn`, `prompt`, and `stop` (the bare-agent verbs) keep their names.
+`spawn`, `prompt`, and `stop` (the bare-agent session verbs, for one-shot `kild run`) keep
+their names and stay on the socket — they have no kild to answer for.
 
-**Agents inside a kild now create by addressing** — their `send` tool spawns a recipient the
-kild does not have — but **nothing changes for a client.** `POST /api/kilds/:id/messages`
-still refuses an unknown recipient naming the roster, deliberately: a typo from a UI must not
-cost a process. Adding an agent stays the explicit `POST /api/kilds/:id/agents`. The one
-visible consequence is that agents will appear on rosters without a client having asked for
-them, carrying `invitedBy` — so treat the roster as something that grows under you.
-
-`kild_spawn` also takes an optional `task` — `{ type, id, agent, task? }` — with the same
-meaning as on the REST route. This transport carries no credential, so the task is sent from
-`"human"`, exactly as `kild_send` is. Prefer `POST /api/kilds/:id/agents` when you care
-whether the spawn worked: the frame is still fire-and-forget.
+Subscribe first, then create: open the socket, wait for `open`, and only then `POST`. The
+create's response is your answer, and nothing said in the first instants is missed.
 
 `UiEvent` payloads are unchanged — `text`, `tool_start`, `stats`, `model`, `pi_session`,
 `agent_end`, `session_end`, `error` all keep their shapes.
@@ -286,7 +301,7 @@ out — deliberate, but it will surface in the UI.
 - [ ] Swap `/api/rooms*` → `/api/kilds*` and `/api/sessions*` → `/api/agents*`
 - [ ] `participant.name` → `agent.handle`; `kind` → `ownership` (`spawned`→`owned`)
 - [ ] `message.roomId` → `kildId`
-- [ ] Rename WS frame handlers
+- [ ] Move every kild mutation off the socket onto REST (the `kild_*` frames are gone); keep the socket as a subscription
 - [ ] Delete the `[narration]` / `implicit` rendering path
 - [ ] Delete open-decisions rendering
 - [ ] Delete any `posted` attention logic; keep `idle`

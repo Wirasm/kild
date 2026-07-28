@@ -19,11 +19,11 @@ command-line agent can drive.
   REST + WebSocket surface is the contract any client consumes. External clients
   such as [helm](https://github.com/Wirasm/helm) (a native UI) talk to the engine
   over that API.
-- **pi extension** (`pi-extension/`) — drive kild rooms from a pi
-  session; a thin client over the engine's REST API.
+- **pi extension** (`pi-extension/`) — drive kilds from a pi session; the pi implementation
+  of the attached-harness contract, over the engine's REST/WS API.
 
 pi owns the agent runtime (providers, sessions, compaction, auth); kild owns
-orchestration (sessions, worktrees, projects, rooms). We don't reimplement
+orchestration (agents, worktrees, projects, kilds). We don't reimplement
 what pi already does.
 
 ## Run
