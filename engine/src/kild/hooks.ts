@@ -5,7 +5,8 @@ import { GENERAL_PERSONA } from './personas.ts';
  * Lifecycle hooks — the mechanism half of "something should happen when a kild ends".
  *
  * The engine holds facts (which kild, where it ran, where its transcript and ledger
- * landed) and it holds the moment (stop/land). What should HAPPEN at that moment is
+ * landed) and it holds the moment a kild ENDS — stop only; landing does not end a kild, and
+ * no hook fires on it. What should HAPPEN at that moment is
  * never the engine's call: a hook is declared in config (`hooks.onClose`) and the engine
  * runs it verbatim. kild therefore has no idea what any hook is *for* — no hook name is
  * special-cased, no hook payload is interpreted, and nothing here knows what an
