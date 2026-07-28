@@ -183,8 +183,11 @@ export interface DisposeKildResponse {
   branch: string;
   branchKept: true;
   removed: string;
-  /** Uncommitted/untracked files the removal discarded — named, never hidden. */
+  /** Uncommitted/untracked files the removal discarded — named, never hidden. Empty means
+   *  empty only when `discardedError` is absent. */
   discarded: string[];
+  /** Why the list could not be determined. Present ⇒ `discarded` is unknown, not empty. */
+  discardedError?: string;
   forced: boolean;
   message: string;
 }

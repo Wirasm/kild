@@ -444,7 +444,10 @@ async function kildRm(id: string): Promise<void> {
   const res = await disposeKild(id, values.force);
   if (json) return void console.log(JSON.stringify(res, null, 2));
   console.log(res.message);
-  if (res.discarded.length > 0) console.error(`discarded: ${res.discarded.join(', ')}`);
+  // An unanswerable question is not an empty list, and this is the one moment the operator
+  // could still have acted on the difference.
+  if (res.discardedError) console.error(`discarded: UNKNOWN (git: ${res.discardedError})`);
+  else if (res.discarded.length > 0) console.error(`discarded: ${res.discarded.join(', ')}`);
 }
 
 function formatLand(res: LandResponse): string {
