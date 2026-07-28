@@ -46,7 +46,6 @@ export interface KildActionResponse {
  * detection, or a tree on a network mount, can legitimately exceed it, and an operator who
  * hits that needs a way out that is not editing the source.
  */
-const ENGINE_TIMEOUT_MS = engineTimeoutMs();
 
 /**
  * The error `engineFetch` throws when OUR deadline fired — a TYPE, not a phrase.
@@ -60,7 +59,24 @@ const ENGINE_TIMEOUT_MS = engineTimeoutMs();
  */
 export class EngineTimeout extends Error {}
 
-/** Parsed once, loudly. An unusable override must not degrade into a timeout of zero, which
+/** A response the engine actually sent, carrying its status so a caller can branch on the
+ *  KIND of refusal without reading the message. `kild show` needs exactly this: a 404 for a
+ *  log means "nothing was ever said here", which for an orphan tree is a fact, not a failure. */
+export class EngineHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Read per call, not at import. Evaluated at module load it threw before `dispatch()`'s own
+ *  handler existed, so a fat-fingered override killed EVERY command — including ones that
+ *  never make an engine call — with a raw stack trace instead of this CLI's `error: <message>`.
+ *  A bad variable should break what it affects and nothing else.
+ *
+ *  Loudly, either way. An unusable override must not degrade into a timeout of zero, which
  *  aborts every request the instant it is made — a misconfiguration that would look exactly
  *  like an engine that is refusing to talk. */
 function engineTimeoutMs(): number {
@@ -80,7 +96,8 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // chosen for a reason, and silently capping it at the default would make the tighter bound a
   // lie. Nothing here may be slower than a caller asked for.
   const ourDeadline = init?.signal === undefined;
-  const signal = init?.signal ?? AbortSignal.timeout(ENGINE_TIMEOUT_MS);
+  const timeoutMs = engineTimeoutMs();
+  const signal = init?.signal ?? AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
     response = await fetch(`${ENGINE}${path}`, { ...init, signal });
@@ -88,18 +105,29 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
     // Whether this was a deadline is decided by WHOSE signal fired, not by matching an error
     // name. Name-matching would relabel the first future caller that cancels for any other
     // reason — a Ctrl-C, say — as "the engine did not answer", which is the opposite of true.
-    if (signal.aborted && ourDeadline) {
-      throw new EngineTimeout(
-        `${path} timed out after ${ENGINE_TIMEOUT_MS}ms — the engine accepted the connection ` +
-          'and did not answer (set KILD_ENGINE_TIMEOUT_MS to allow longer)',
-        { cause: err },
-      );
+    // Branch on WHY the signal fired, read from the signal itself. `AbortSignal.timeout` sets
+    // a TimeoutError reason; a deliberate cancellation does not. Matching the error NAME
+    // instead conflated the two, and testing only "was it our signal" left a caller's own
+    // deadline — the drain's — reported as a bare "The operation timed out." naming neither
+    // the path nor the cause.
+    if (signal.aborted) {
+      const reason = signal.reason as { name?: string } | undefined;
+      if (reason?.name === 'TimeoutError') {
+        const bound = ourDeadline
+          ? `${timeoutMs}ms (set KILD_ENGINE_TIMEOUT_MS to allow longer)`
+          : "the caller's own deadline";
+        throw new EngineTimeout(
+          `${path} timed out after ${bound} — the engine accepted the connection and did not answer`,
+          { cause: err },
+        );
+      }
+      throw new Error(`${path} was cancelled before the engine answered`, { cause: err });
     }
     throw err;
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `${path} failed (${response.status})`);
+    throw new EngineHttpError(body.error ?? `${path} failed (${response.status})`, response.status);
   }
   return response.json() as Promise<T>;
 }

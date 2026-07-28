@@ -17,6 +17,7 @@ import {
   attachAgent,
   disposeKild,
   drainInbox,
+  EngineHttpError,
   EngineTimeout,
   getKild,
   kildMessages,
@@ -610,11 +611,18 @@ async function kildShow(id: string): Promise<void> {
   // The detail route is what decides whether this kild exists; a missing LOG does not mean a
   // missing kild — an orphan tree is a kild with nothing ever said in it.
   const kild = await getKild(id);
-  // NOT swallowed. This used to be `.catch(() => [])`, which reported an empty log for any
-  // failure — invisible while a hung engine simply hung, and a confident lie the moment a
-  // timeout made the call return. An archived kild's log is a real answer; an unreachable
-  // engine is not the same as a kild that said nothing.
-  const messages = await kildMessages(id);
+  // A missing LOG does not mean a missing kild. An ORPHAN is a tree git reports with no kild
+  // record, so `GET /:id` answers for it (resolveKild falls back to an orphan identity) while
+  // `GET /:id/messages` 404s — the registry's log map holds live and archived kilds only. Two
+  // routes, two answers to "does this exist", and this is the seam between them.
+  //
+  // So a 404 is tolerated and nothing else is. The blanket `.catch(() => [])` this replaced
+  // reported an empty log for EVERY failure, which hid an unreachable engine behind a kild
+  // that looked simply quiet.
+  const messages = await kildMessages(id).catch((err) => {
+    if (err instanceof EngineHttpError && err.status === 404) return [];
+    throw err;
+  });
   const compact = compactLiveKilds([kild])[0];
   if (!compact) throw new Error(`no such kild: ${id}`);
 

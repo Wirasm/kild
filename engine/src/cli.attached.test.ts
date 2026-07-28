@@ -46,6 +46,8 @@ let messagesHangMs = 0;
 let drainHangMs = 0;
 /** What the CLI under test uses as its default backstop. */
 let engineTimeoutMs = '30000';
+/** Hang the land route, to drive a MUTATING call through a real timeout. */
+let landHangMs = 0;
 /** What `GET /messages` answers with. `kild watch` reads the log, never the inbox, so its
  *  tests drive this rather than `drainResponse`. */
 let messagesResponse: { status: number; body: unknown } | undefined;
@@ -65,6 +67,9 @@ beforeAll(async () => {
       authHeaders.push(request.headers.get('authorization'));
       if (url.pathname.endsWith('/agents/attach') && attachResponse) {
         return Response.json(attachResponse.body, { status: attachResponse.status });
+      }
+      if (url.pathname.endsWith('/land') && landHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, landHangMs));
       }
       if (url.pathname.endsWith('/inbox/drain') && drainHangMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, drainHangMs));
@@ -796,5 +801,63 @@ test('an engine failure whose text contains "timed out" is NOT reported as maybe
   expect(landed.exitCode).toBe(1);
   expect(landed.stderr).toContain('timed out talking to the object store');
   expect(landed.stderr).not.toContain('may still be completing');
+  withNoMail();
+});
+
+test('a timed-out land reports an UNKNOWN outcome, not a failure', async () => {
+  // A client abort does not reach the engine — no signal is passed server-side and no git
+  // command it runs is cancellable — so a timed-out merge may well have happened. Reporting
+  // it as a plain failure sends the operator to retry a merge that already landed. Reverting
+  // `mayHaveHappened` left the whole suite green, so this is the test that pins it.
+  engineTimeoutMs = '600';
+  landHangMs = 5_000;
+  const landed = await runCli(['land', 'kild-9', '--execute']);
+  expect(landed.exitCode).toBe(1);
+  expect(landed.stderr).toContain('may still be completing');
+  expect(landed.stderr).toContain('kild ls');
+  landHangMs = 0;
+  engineTimeoutMs = '30000';
+}, 20_000);
+
+test("a caller's own deadline is still a timeout, and says whose", async () => {
+  // The drain supplies its own 1.5s signal. Deciding "is this a timeout" by whether OUR signal
+  // fired reported the drain's deadline as a bare "The operation timed out." — naming neither
+  // the path nor the cause. The branch reads the signal's REASON instead, so both deadlines
+  // are timeouts and each says which one it was.
+  drainHangMs = 10_000;
+  const drained = await runCli(['inbox', 'kild-9', '--as', 'kild']);
+  expect(drained.exitCode).toBe(1);
+  expect(drained.stderr).toContain('timed out');
+  expect(drained.stderr).toContain("caller's own deadline");
+  expect(drained.stderr).toContain('/inbox/drain'); // the path, not an opaque abort
+  drainHangMs = 0;
+}, 20_000);
+
+test('`kild show` still works on an ORPHAN, whose log legitimately 404s', async () => {
+  // `GET /:id` answers for an orphan tree; `GET /:id/messages` 404s, because the registry's
+  // log map holds live and archived kilds only. Removing the blanket catch turned that
+  // disagreement into a crash with no output at all — against a case this command has an
+  // explicit display branch for.
+  drainRequests = [];
+  drainResponse = {
+    status: 200,
+    body: { id: 'live-demo', name: 'live-demo', orphan: true, agents: [] },
+  };
+  messagesResponse = { status: 404, body: { error: 'no such kild: live-demo' } };
+  const shown = await runCli(['show', 'live-demo']);
+  expect(shown.exitCode).toBe(0);
+  expect(shown.stdout).toContain('orphan tree');
+  messagesResponse = undefined;
+  withNoMail();
+});
+
+test('...but `kild show` still reports a non-404 log failure', async () => {
+  // Only "nothing was ever said here" is tolerated. An unreachable engine is not that.
+  drainResponse = { status: 200, body: { id: 'kild-9', name: 'k', agents: [] } };
+  messagesResponse = { status: 500, body: { error: 'registry exploded' } };
+  const shown = await runCli(['show', 'kild-9']);
+  expect(shown.exitCode).toBe(1);
+  expect(shown.stderr).toContain('registry exploded');
+  messagesResponse = undefined;
   withNoMail();
 });
