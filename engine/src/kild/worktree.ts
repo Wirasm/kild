@@ -22,8 +22,31 @@ export interface Worktree {
   name?: string;
 }
 
+/**
+ * The canonical spelling of a path — symlinks resolved, whether or not it exists yet.
+ *
+ * One directory must have ONE spelling in this engine, because half the paths here come
+ * from git (which always reports the resolved form) and half are built from `$KILD_HOME`
+ * (which is whatever the operator's environment says). On macOS those differ for anything
+ * under `/var`, which is a symlink to `/private/var` — so a tree kild had just created did
+ * not compare equal to the same tree in `git worktree list`, and every comparison between
+ * the two sides was quietly false on one platform and true on another.
+ *
+ * `realpathSync` alone cannot do it: the path often does not exist yet (it is about to be
+ * created). So resolve the longest prefix that does exist and rebuild the rest onto it.
+ */
+export function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    // At the filesystem root `dirname` is a fixed point; stop rather than recurse forever.
+    return parent === p ? p : path.join(canonicalPath(parent), path.basename(p));
+  }
+}
+
 export function worktreesRoot(): string {
-  return path.join(kildHome(), 'worktrees');
+  return canonicalPath(path.join(kildHome(), 'worktrees'));
 }
 
 export function assertSafeBranch(branch: string): void {

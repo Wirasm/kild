@@ -1,6 +1,4 @@
-import { realpathSync } from 'node:fs';
-
-import { listWorktrees } from './worktree.ts';
+import { canonicalPath, listWorktrees } from './worktree.ts';
 
 /**
  * The kild inventory **as git knows it**.
@@ -29,11 +27,7 @@ export interface KildTree {
 }
 
 function samePath(a: string, b: string): boolean {
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch {
-    return a === b;
-  }
+  return canonicalPath(a) === canonicalPath(b);
 }
 
 /**
@@ -63,7 +57,15 @@ export async function kildTrees(repos: Iterable<string>): Promise<KildTree[]> {
       found.set(tree.path, {
         worktree: tree.name,
         branch: tree.branch,
-        path: tree.path,
+        // Canonical: this is a fact about disk, and it has to compare equal to the same
+        // directory arrived at from the other side — `worktreePath()`, which builds from
+        // `$KILD_HOME`. On macOS those were two spellings of one tree (`/var` is a symlink
+        // to `/private/var`, and git always reports the resolved form), so the comparison
+        // was true on Linux and false on the operator's own machine.
+        path: canonicalPath(tree.path),
+        // NOT canonical, deliberately: `repo` echoes the identifier the caller asked
+        // about, so their own `?path=` / project-registry join keeps working. Compare
+        // repos with `samePath`, never with `===`.
         repo,
       });
     }
