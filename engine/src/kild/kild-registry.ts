@@ -268,7 +268,17 @@ export class KildRegistry {
           ...message,
           seq: message.seq ?? index + 1,
         }));
-        this.archive.set(data.id, { ...data, log } as ArchivedKild);
+        // Same decoding job for `ownership`, and it had a hole. A live kild's roster goes
+        // out through `agentView`, which resolves absent → `'owned'`, so the wire promise is
+        // "always present". An archive loaded from disk went straight to the route, so a file
+        // written before the field existed served agents with NO ownership — the one field a
+        // client switches on, missing, in the one payload nobody re-derives. Resolved here,
+        // so the promise holds for every kild the engine can name.
+        const agents = (Array.isArray(data.agents) ? data.agents : []).map((agent) => ({
+          ...agent,
+          ownership: agent?.ownership ?? ('owned' as const),
+        }));
+        this.archive.set(data.id, { ...data, agents, log } as ArchivedKild);
       } catch (err) {
         // A corrupt/partial history file must not crash startup — but it says so.
         console.error(

@@ -72,8 +72,12 @@ Full rationale: `docs/VOCABULARY.md` and `docs/DEMOLITION.md`.
 
 ### Unchanged by the rename
 
-`GET /api/health` · `GET|POST /api/projects` · `GET /api/personas` · `POST /api/open` ·
-`POST /api/open-url`
+`GET /api/health` · `GET /api/personas` · `POST /api/open` · `POST /api/open-url`
+
+~~`GET|POST /api/projects`~~ were unchanged by the rename and are **deleted** by the reshape —
+nothing called them (the CLI writes `$KILD_HOME/projects.json` directly, the extension passes a
+registered name in a body, helm confirmed zero references). The registry still scopes the
+unscoped `GET /api/kilds`; it simply has no REST surface. See `api-surface.md` §9.
 
 **`GET|DELETE /api/worktrees` and `POST /api/worktrees/prune` were unchanged by the rename and
 are DELETED by the reshape.** The argument for keeping them was that a worktree outlives the
@@ -111,7 +115,12 @@ handle.
 ```
 
 - `name` → **`handle`** (the `@name` you address)
-- `kind` → **`ownership`**, values `spawned`→`owned`, `attached` unchanged
+- `kind` → **`ownership`**, values `spawned`→`owned`, `attached` unchanged. **Always present on
+  the wire — do not write `?? 'owned'`.** `OwnedAgent.ownership` is optional in
+  `kild-types.ts`, but that is the STORED shape; every wire payload goes through
+  `agentIdentity()`/`agentView()`, which resolve it. (One payload used to escape that: an
+  archive loaded from a file written before the field existed went to the route untouched.
+  It is now resolved on decode, like `seq`.)
 - **`posted` is gone.** It backed a reporting norm that moved to PRP.
 - **`idle` stays** — it is state, not a norm: an agent that finished a turn and is waiting.
   Still safe to render as an attention signal.
@@ -134,6 +143,21 @@ handle.
   delete it — the case cannot occur.
 - `from` and `to[]` are unchanged. `to` remains the authoritative recipient list; it is never
   parsed from message text.
+
+### Archived kild
+
+```diff
+- { id, name, worktree, agents[], log[], cwd, base, landedSha }
++ { id, name, worktree, agents[],        cwd, base, landedSha, landed? }
+```
+
+**`log` is gone from `GET /api/kilds/archive` and from the WS `{archivedKild}` frame.** One
+rule, no exceptions: no listing and no broadcast carries a log. Read an archived kild's log the
+same way you read a live one — `GET /api/kilds/:id/messages`, cursored by `seq`. The archive
+only grows, so this was the most expensive payload in the engine.
+
+`landed?: {commits, files}` is new: what the land carried, counted when it merged. Measuring
+afterwards is measuring the wrong thing (`base..HEAD` is empty once the branch is in base).
 
 ### Kild (was room)
 
@@ -319,7 +343,9 @@ out — deliberate, but it will surface in the UI.
 - [ ] Add the land gate against `GET`/`POST .../land`, and handle the `409`-with-result case
 - [ ] Handle land's refusal when the main checkout is off-base or dirty
 - [ ] Derive `collidesWith` client-side from `status`'s `changedFiles[]` — it is not a server field
-- [ ] Drop any `ownership ?? 'owned'` — it is always present now
+- [ ] Drop any `ownership ?? 'owned'` — it is always present now, archives included
+- [ ] Stop reading `log` off `GET /api/kilds/archive` and the `{archivedKild}` frame — use `/messages`
+- [ ] Drop `/api/projects` (deleted; the registry has no REST surface)
 - [ ] Spawn with `task` instead of spawn-then-post; stop sending `invitedBy` (it is a `409`)
 - [ ] Render `agent.invitedBy` if you want the delegation tree — it is ground truth now
 - [ ] Optional: keep the token from `attach` and send it as `Bearer`, so helm's own messages read as its handle rather than `human`

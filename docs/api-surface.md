@@ -177,9 +177,39 @@ capped by `MAX_AGENTS` (8) and gated on the persona resolving. A hallucinated ha
 name happens to match a persona file creates an agent. That is the accepted downside; the
 alternative — a confirmation step — is ceremony the engine cannot enforce anyway.
 
-## Not adopted yet
+## 8. Two things the reshape did NOT fold, and why
 
-Deleting `GET|POST /api/projects` is proposed on the grounds that no client uses them. Confirmed
-for the CLI — it calls `loadProjects()` directly rather than over REST. Whether helm needs them
-is helm's call; the registry itself stays either way, since `--project` name resolution depends
-on it.
+Asked while helm was porting, so the answers are recorded rather than left to look like
+omissions. Neither was ever in the proposed surface above.
+
+**`git/commits`, `git/files` and `git/diff` stay three routes.** They are three different
+resources, not three names for one: the commit list, the per-file diff stats, and one file's
+patch (which needs `?path=` and can 404 on a path git did not report). §1's rule is *one
+address per object* — it is about two identifier schemes for a single object, not about
+merging distinct resources behind a mode parameter, which would give one route three response
+shapes.
+
+**`/api/kilds/archive` stays its own route rather than `?state=archived`.** A stopped kild is
+not a filter over live kilds: it has no git state, no agents to address and no worktree that
+is guaranteed to exist, so a `?state=` union would return a shape where half the fields are
+structurally absent. `?state=` filters what a listing already contains; the archive is a
+different collection.
+
+**But the archive is a LISTING, so it now obeys the listing rule: no log.** It used to carry
+every archived kild's full message history — and the archive only grows, so "list my stopped
+kilds" meant "send me every conversation I have ever had", which is exactly the cost the
+cheap/costly split removed for live kilds. `GET /api/kilds/:id/messages` already serves an
+archived kild's log. Same for the WS `{archivedKild}` frame: a subscribed client already
+received every `{message}`, and one that was not reads `/messages`.
+
+## 9. The project registry has no REST surface
+
+`GET|POST /api/projects` are **deleted**. Nothing called them: the CLI reads and writes
+`$KILD_HOME/projects.json` directly (`kild project ls|add|rm`), the pi extension passes a
+registered NAME in a request body and lets the engine resolve it, and helm confirmed zero
+references in its source while porting.
+
+The registry itself is load-bearing and stays — it scopes the unscoped `GET /api/kilds` and
+resolves `--project` / `project=` — but a loopback write route for a local file the operator
+owns was a second way to do what `kild project add` already does. Cheap to reinstate if a UI
+ever wants a project picker; there is no reason to carry it until one does.

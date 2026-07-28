@@ -10,8 +10,10 @@ import { KildRegistry } from './kild-registry.ts';
 import {
   type AgentSpec,
   type ArchivedKild,
+  type ArchivedKildView,
   agentProcessId,
   agentView,
+  archivedKildView,
   type CommandResult,
   type CreateMissing,
   costTotals,
@@ -251,7 +253,14 @@ export class KildManager {
     return since === undefined ? log : log.filter((message) => message.seq > since);
   }
 
-  /** Past kilds recovered from disk (read-only logs from previous engine runs). */
+  /** Past kilds recovered from disk — their records, without their logs. A log is
+   *  `messages(id)`, which answers for an archived kild too. */
+  archivedViews(): ArchivedKildView[] {
+    return this.registry.archived().map(archivedKildView);
+  }
+
+  /** The stored archive, log included — for the engine's own lookups (an agent's
+   *  `piSessionFile` outlives its session). Never a response body. */
   archived(): ArchivedKild[] {
     return this.registry.archived();
   }
@@ -551,7 +560,7 @@ export class KildManager {
     // handles, so a credential naming one would outlive the only thing it meant.
     this.tokens.forget(kildId);
     const archived = this.registry.remove(kildId);
-    if (archived) this.broadcast({ archivedKild: archived });
+    if (archived) this.broadcast({ archivedKild: archivedKildView(archived) });
     this.broadcast({ kilds: this.registry.summaries() });
     if (archived) await this.close(kild);
     return ok({ message: `Kild '${kild.name}' stopped.` });

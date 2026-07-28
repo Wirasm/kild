@@ -290,8 +290,25 @@ export interface KildSummary {
   agents: AgentView[];
 }
 
+/** A stopped kild as the wire serves it: its record, WITHOUT the log.
+ *
+ *  The log is `GET /api/kilds/:id/messages`, which works for an archived kild precisely
+ *  because its log is the whole of what it still is. Carrying it in the listing as well is
+ *  the duplication the cheap/costly split deleted for live kilds — and it is worse here,
+ *  because the archive only grows: on a machine with hundreds of stopped kilds, "list the
+ *  archive" meant "send me every conversation I have ever had". One rule, no exceptions:
+ *  **no listing and no broadcast carries a log.** */
+export type ArchivedKildView = Omit<ArchivedKild, 'log'>;
+
+/** The one mapping from a stored archive to its wire view. */
+export function archivedKildView(archived: ArchivedKild): ArchivedKildView {
+  const { log: _log, ...view } = archived;
+  return view;
+}
+
 /** A kild recovered from disk after an engine restart — its conversation log with no
- *  live agents (their sessions are gone). UI clients render it read-only. */
+ *  live agents (their sessions are gone). This is the STORED shape (and what the registry
+ *  holds in memory); {@link ArchivedKildView} is what goes on the wire. */
 export interface ArchivedKild {
   id: string;
   name: string;
@@ -391,9 +408,10 @@ export interface NewKildSuccess extends KildActionSuccess {
 export type KildOutbound =
   | { message: Message }
   | { kilds: KildSummary[] }
-  /** A kild that just stopped with history — pushed so clients show it as read-only
-   *  history immediately, without refetching the archive or restarting. */
-  | { archivedKild: ArchivedKild }
+  /** A kild that just stopped — pushed so clients move it to read-only history immediately,
+   *  without refetching the archive or restarting. Carries no log: a subscribed client
+   *  already received every `{message}` frame, and one that did not reads `/messages`. */
+  | { archivedKild: ArchivedKildView }
   /** The close lifecycle event: the facts the engine holds about a kild that just
    *  stopped, emitted alongside whatever `hooks.onClose` runs — so a subscribed client
    *  or harness can react to the same moment on the same facts. */

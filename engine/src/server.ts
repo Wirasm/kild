@@ -21,7 +21,7 @@ import { kildManager } from './kild/kild-manager.ts';
 import { type KildTree, kildTrees, orphanTrees } from './kild/kild-trees.ts';
 import type { AgentSpec, CommandResult, KildIdentity, KildStatus } from './kild/kild-types.ts';
 import { listPersonas } from './kild/personas.ts';
-import { addProject, findProject, loadProjects } from './kild/projects.ts';
+import { findProject, loadProjects } from './kild/projects.ts';
 import {
   resolveNewKildActor,
   resolveSendActor,
@@ -63,21 +63,14 @@ app.use('/*', cors({ origin: (origin) => (origin && ALLOWED_ORIGINS.has(origin) 
 const BOOT_ID = randomUUID();
 app.get('/api/health', (c) => c.json({ ok: true, name: 'kild-engine', bootId: BOOT_ID }));
 
-// ── Projects ────────────────────────────────────────────────────────────────
-app.get('/api/projects', async (c) => c.json(await loadProjects()));
-app.post('/api/projects', async (c) => {
-  const { name, path } = (await jsonBody(c)) as { name?: string; path?: string };
-  if (typeof name !== 'string' || typeof path !== 'string') {
-    return c.json({ error: 'name and path are both required' }, 400);
-  }
-  try {
-    return c.json(await addProject(name, path));
-  } catch (err) {
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
-  }
-});
-
 // ── Project references ────────────────────────────────────────────────────────
+// The project REGISTRY has no REST surface. `GET|POST /api/projects` existed and nothing
+// called them: the CLI reads and writes `$KILD_HOME/projects.json` directly (`kild project
+// ls|add|rm`), the pi extension passes a registered NAME in a request body and lets the
+// engine resolve it, and helm confirmed zero references while porting. A registry is a
+// local file the operator owns; a loopback write route for it was a second way to do a
+// thing the CLI already does, which is the duplication this reshape exists to delete.
+//
 // Endpoints that need a project directory take an EXPLICIT reference: `project` is a
 // registered project name, `path` an absolute directory. Exactly one of the two — the
 // old polymorphic name-or-path guessing is gone.
@@ -308,7 +301,10 @@ app.get('/api/agents', (c) => c.json(agentManager.list()));
 // Past kilds recovered from disk (read-only history). Live kilds flow over the WS
 // (`{kilds}` summaries + `{message}` sends); this is the conversation record of
 // kilds from previous engine runs — their agent subprocesses are long gone.
-app.get('/api/kilds/archive', (c) => c.json(kildManager.archived()));
+// The archive is a listing, so it carries no log — `GET /api/kilds/:id/messages` serves an
+// archived kild's log exactly as it serves a live one. The archive only grows, so shipping
+// every stopped kild's full conversation here was the most expensive listing in the engine.
+app.get('/api/kilds/archive', (c) => c.json(kildManager.archivedViews()));
 
 // ── The kild collection ───────────────────────────────────────────────────────
 // A kild IS a worktree, so there is ONE resource family for it. `/api/worktrees` is gone:

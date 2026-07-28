@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { addProject } from './kild/projects.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
 /**
@@ -94,8 +95,10 @@ beforeAll(async () => {
   const server = (await import('./server.ts')).default;
   fetchApp = server.fetch as typeof fetchApp;
   // Registering the project is what puts this repo in the enumeration's scope for the
-  // UNSCOPED `GET /api/kilds` — the call helm makes.
-  expect((await message('/api/projects', { name: 'proj', path: repo })).status).toBe(200);
+  // UNSCOPED `GET /api/kilds` — the call helm makes. Registration is a local-file act with
+  // no REST surface (see the route-is-gone test below), so this is the same call the CLI's
+  // `kild project add` makes.
+  await addProject('proj', repo);
 });
 
 // ── §1: one address for an agent ─────────────────────────────────────────────────────
@@ -120,6 +123,47 @@ test('an agent transcript is addressed one way: on its kild, by handle', async (
 });
 
 // ── §3: the worktree family is folded into the kild collection ───────────────────────
+
+// The project registry has no REST surface: nothing called it (CLI writes the file, the
+// extension passes a name in a body, helm confirmed zero references), and a loopback write
+// route for a local file the operator owns was a second way to do what `kild project add`
+// already does. The registry itself is load-bearing — it scopes the unscoped `GET /api/kilds`
+// — which is why this asserts the ROUTES are gone and the scoping still works.
+// The archive is a LISTING, so the one rule holds for it too: no listing carries a log.
+// The archive only grows, so this was the most expensive payload in the engine — "list my
+// stopped kilds" meant "send me every conversation I have ever had". The seeded archive's
+// agents also predate `ownership`, which is the case that broke the wire promise.
+test('GET /api/kilds/archive carries the record, never the log', async () => {
+  const archive = (await (await get('/api/kilds/archive')).json()) as Array<
+    Record<string, unknown> & { id: string; agents: Array<{ ownership?: string }> }
+  >;
+  const record = archive.find((k) => k.id === ARCHIVED);
+  expect(record).toBeDefined();
+  expect(record).not.toHaveProperty('log');
+  // …and the log is still readable, from the one resource that serves logs.
+  const log = (await (await get(`/api/kilds/${ARCHIVED}/messages`)).json()) as unknown[];
+  expect(log).toHaveLength(3);
+});
+
+test('an archive written before `ownership` existed still states it', async () => {
+  // ARCHIVED's agents on disk are `[{handle:'coder'}]` — no ownership, as an older engine
+  // wrote them. A live roster is resolved through `agentView`; an archive went to the route
+  // untouched, so the one field a client switches on was missing in the one payload nobody
+  // re-derives. Decoded on load now, like `seq`.
+  const archive = (await (await get('/api/kilds/archive')).json()) as Array<{
+    id: string;
+    agents: Array<{ handle: string; ownership?: string }>;
+  }>;
+  const record = archive.find((k) => k.id === ARCHIVED);
+  expect(record?.agents).toEqual([{ handle: 'coder', ownership: 'owned' }]);
+});
+
+test('the /api/projects family is gone', async () => {
+  expect((await get('/api/projects')).status).toBe(404);
+  expect((await message('/api/projects', { name: 'x', path: repo })).status).toBe(404);
+  // The registry itself still scopes the unscoped listing — proven by the enumeration test
+  // below, which finds an orphan tree in `repo` having registered it only through the file.
+});
 
 test('the /api/worktrees family is gone', async () => {
   expect((await get(`/api/worktrees?path=${encodeURIComponent(repo)}`)).status).toBe(404);
@@ -455,7 +499,6 @@ const postRaw = (url: string, body?: string) =>
   });
 
 const BODY_ROUTES = [
-  '/api/projects',
   '/api/open',
   '/api/open-url',
   '/api/kilds',
@@ -487,12 +530,6 @@ test('a required field still fails loudly, naming itself', async () => {
   const messages = await message('/api/kilds/some-id/messages', {});
   expect(messages.status).toBe(400);
   expect((await messages.json()) as { error: string }).toMatchObject({ error: 'text required' });
-
-  const projects = await message('/api/projects', {});
-  expect(projects.status).toBe(400);
-  expect((await projects.json()) as { error: string }).toMatchObject({
-    error: 'name and path are both required',
-  });
 
   expect((await message('/api/kilds/some-id/agents/attach', {})).status).toBe(400);
 });
