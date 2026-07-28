@@ -108,6 +108,10 @@ a cursor. Add `seq` and let clients page with `?since=<seq>`.
 
 ## 6. `task` on spawn, and `invitedBy` on the wire
 
+> Superseded in part by §7: the REST route below is unchanged, but the agent-facing `spawn`
+> tool it describes no longer exists — an agent creates by addressing. `invitedBy` and the
+> derived-spawner rule are unaffected and are what §7 is built on.
+
 **Decision: `spawn` takes an optional `task`, delivered as the new agent's first message.**
 Not a new concept and not a stored field — it fuses `spawn` + `send` exactly as `kickoff`
 already does for `POST /api/kilds`, because every real delegation was spawn-then-send and a
@@ -137,6 +141,41 @@ from the log would be guesswork.
 unique), `invitedBy` says who spawned it, and the first message says what it was for. No
 generated ids for the agent to juggle, no `task` index, no per-instance naming scheme in the
 engine.
+
+## 7. An agent has one verb: `send` creates what it addresses
+
+**Decision: the agent-facing `spawn` tool is deleted.** Inside a kild, addressing a handle
+nobody holds creates that agent and delivers the message to it. `persona` and `model` on
+`send` say who a created recipient should be; the handle names the instance.
+
+This is §6 taken to its conclusion. `task`-on-spawn fused the two calls but left two tools,
+and the seam showed: `spawn` could do a send, `send` could not do a spawn, and an agent had
+to know which to reach for. Spawning was never the goal — it is what you do *in order to*
+say something — so the create step disappears into the verb that has the message. The
+idle-just-created agent is now unreachable rather than warned about, and an agent learns two
+tools (`send`, `stop`) instead of three.
+
+**It is not an inference.** The handles come from the caller as data, never from the text.
+What changed is what an unknown handle *means*, and only for a caller that may grow the
+kild: the manager's `send` takes a `createMissing` spec, agents pass it, REST does not. At
+the boundary an unknown recipient stays a rejection naming the roster — a typo from a client
+must not quietly cost a process, and `POST /api/kilds/:id/agents` is right there for the
+explicit act. Same reasoning for `kild send` and the pi extension's `kild_send`.
+
+**Batch-validated, so it is atomic in the way that matters.** One call naming three new
+handles validates all three personas before starting any; one bad name creates none of them.
+A create that throws mid-batch rolls back its siblings.
+
+**The rejection is the discovery path.** A persona that cannot be resolved comes back naming
+the personas that exist *and* the current roster — which is the whole answer to "how does an
+agent learn who is in its kild": progressive disclosure at the moment of use, not a roster
+tool returning a snapshot that is stale before the turn ends. `kild show` / `kild ls` /
+`GET /api/kilds` remain the roster view for humans and clients.
+
+**Cost of the fusion, stated plainly:** an agent can now create processes by naming handles,
+capped by `MAX_AGENTS` (8) and gated on the persona resolving. A hallucinated handle whose
+name happens to match a persona file creates an agent. That is the accepted downside; the
+alternative — a confirmation step — is ceremony the engine cannot enforce anyway.
 
 ## Not adopted yet
 

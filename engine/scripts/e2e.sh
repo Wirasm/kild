@@ -98,6 +98,7 @@ N2=$(curl -s -X POST $E/api/kilds/$ID/messages -H 'content-type: application/jso
 chk "send with empty to is rejected"           "$N2" "error"
 N3=$(curl -s -X POST $E/api/kilds/$ID/messages -H 'content-type: application/json' -d '{"text":"x","to":["ghost"]}')
 chk "unknown recipient names the roster"       "$N3" "coder"
+chkno "and does NOT create it — a client typo costs no process" "$(curl -s $E/api/kilds)" "ghost"
 curl -s -X POST $E/api/kilds/$ID/messages -H 'content-type: application/json' -d '{"text":"first","to":["honryo"]}' >/dev/null
 curl -s -X POST $E/api/kilds/$ID/messages -H 'content-type: application/json' -d '{"text":"second","to":["honryo"]}' >/dev/null
 DR=$(curl -s -X POST $E/api/kilds/$ID/inbox/drain -H 'content-type: application/json' -d '{"handle":"honryo"}')

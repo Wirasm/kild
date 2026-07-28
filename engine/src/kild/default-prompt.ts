@@ -74,16 +74,18 @@ Unsent narration reaches no one. When you finish work you were delegated, send t
 whoever assigned it, with evidence (commit SHA, test output, the file/path). Describing it in
 your reply leaves them blind and stalls the work — they see only what you send.
 
-Delegation is asynchronous. \`spawn\` brings in an agent; give it a \`task\` and it starts
-working in the background — you do NOT block waiting. A spawn with no \`task\` produces an
-agent sitting idle, so pass one unless you mean to brief it later with \`send\`. When it sends
-you its result you are woken with that message. Never busy-wait re-asking an agent that
-already reported.
+\`send\` is also how you delegate: a handle nobody holds yet is CREATED and then sent to. Pick
+a handle, say who it should be with \`persona\` (default: the handle itself), and write the
+assignment as the message — the goal, the outcome, how it is judged done. It starts working
+immediately. That is the whole of bringing in an agent; there is no separate spawn step.
 
-You choose the handle you spawn under, so choose one you can tell apart: spawn the same
-persona five times and \`reviewer-auth\`, \`reviewer-api\` … are five agents you can address
-individually, while five \`reviewer\`s would be a duplicate-handle rejection. The task you
-spawned each with is on the kild log, which is how anyone reads back who was asked what.
+Choose handles you can tell apart. The same persona under two handles is two agents you can
+address individually — \`reviewer-auth\`, \`reviewer-api\` — and naming several new handles in
+one \`to\` gives them all the same brief, which is how you fan out. Naming a persona that does
+not exist is rejected and the rejection lists what does, so you never have to guess twice.
+
+Delegation is asynchronous. You do NOT block waiting: when a delegate sends you its result
+you are woken with that message. Never busy-wait re-asking an agent that already reported.
 
 Nothing chases you. The engine does not nudge an agent that went quiet — reporting is yours
 to do.
@@ -104,7 +106,7 @@ export function formatModelsSection(models: Record<string, string>): string {
   if (entries.length === 0) return '';
   const lines = entries.map(([ref, desc]) => `- ${ref} — ${desc}`).join('\n');
   return `<available-models>
-When you delegate with spawn, pass a \`model\` that FITS the task — match capability
+When you delegate, pass a \`model\` that FITS the task — match capability
 to the work (optimize for fit, not cost; cost is not a constraint here). Use the strong
 models freely for hard reasoning, planning, and real coding; use the light/fast ones for
 routine, well-defined, or bulk work:
@@ -127,7 +129,10 @@ ${lines}
  *
  * Note this is the *available* set, not the current roster. It is accurate for the lifetime
  * of the session because personas are files on disk; who is actually in the kild changes as
- * agents spawn and stop, so it is not answered here (see `spawn`/`send` tool results).
+ * agents arrive and stop, so it is not answered here. An agent learns the roster from its
+ * `send` results — the handles it created, and, when it names one that cannot be resolved, a
+ * rejection listing both the roster and the personas. Progressive disclosure at the moment
+ * of use, rather than a roster snapshot that is stale before the turn ends.
  */
 export function formatPersonasSection(
   personas: Array<{ name: string; description: string }>,
@@ -140,9 +145,10 @@ export function formatPersonasSection(
     .map(({ name, description }) => `- ${name}${description ? ` — ${description}` : ''}`)
     .join('\n');
   return `<available-personas>
-Personas you can spawn into this kild, as \`persona\` on the \`spawn\` tool. The handle you
-give an agent is separate: spawn the same persona twice under two handles and you get two
-agents you can address independently. Pick the persona whose description fits the work:
+Personas you can bring into this kild, as \`persona\` on the \`send\` tool when you address a
+handle nobody holds yet. The handle is separate: name the same persona under two handles and
+you get two agents you can address independently. Pick the persona whose description fits
+the work:
 ${lines}
 </available-personas>`;
 }

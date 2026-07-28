@@ -1000,7 +1000,10 @@ export default function (pi: PiExtensionAPI) {
       'those agents are prompted with it (owned agents immediately, attached ones at their ' +
       'next drain). There is no lead and no default recipient: an empty `to` is rejected, ' +
       'not broadcast. Recipients are never parsed from the text either, so an @handle in ' +
-      'the body addresses nobody. Use kild_show to see who is in the kild.',
+      'the body addresses nobody. An unknown recipient is REFUSED here (unlike the `send` ' +
+      'tool agents have inside a kild, which creates it) — from outside, a typo must not ' +
+      'cost a process, so use kild_spawn to add an agent. Use kild_show to see who is in ' +
+      'the kild.',
     parameters: Type.Object({
       id: Type.String({ description: 'Kild id.' }),
       text: Type.String({ description: 'The message body.' }),

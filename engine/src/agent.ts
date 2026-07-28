@@ -17,12 +17,11 @@ import {
   formatPersonasSection,
 } from './kild/default-prompt.ts';
 import { type RawAgentEvent, translate, type UiEvent } from './kild/events.ts';
-import type { CommandAck, SendOut, SpawnOut, StopOut } from './kild/kild-types.ts';
+import type { CommandAck, SendOut, StopOut } from './kild/kild-types.ts';
 import { projectMemorySection } from './kild/memory.ts';
 import { resolveModel, withPersona } from './kild/models.ts';
 import { listPersonas, resolvePersonaInstructions } from './kild/personas.ts';
 import { createSendTool } from './kild/send-tool.ts';
-import { createSpawnTool } from './kild/spawn-tool.ts';
 import { createStopTool } from './kild/stop-tool.ts';
 import { ensureWorktree } from './kild/worktree.ts';
 
@@ -49,7 +48,7 @@ export async function runAgent(): Promise<never> {
     { resolve: (text: string) => void; reject: (error: Error) => void }
   >();
 
-  const emitKildCommand = <T extends SendOut | SpawnOut | StopOut>(command: T): Promise<string> => {
+  const emitKildCommand = <T extends SendOut | StopOut>(command: T): Promise<string> => {
     const requestId = randomUUID();
     process.stdout.write(`${JSON.stringify({ ...command, requestId })}\n`);
     return new Promise<string>((resolve, reject) => {
@@ -78,12 +77,13 @@ export async function runAgent(): Promise<never> {
     const modelRuntime = await ModelRuntime.create();
     const registry = new ModelRegistry(modelRuntime);
     model = resolveModel(registry, modelPattern);
-    // Every agent in a kild gets the same three tools — there is no rank, so there is no
-    // tool only some agents hold. A non-kild session gets no custom tools.
+    // Every agent in a kild gets the same two tools — there is no rank, so there is no
+    // tool only some agents hold. A non-kild session gets no custom tools. `send` also
+    // covers growing the kild: addressing a handle nobody holds creates that agent, which
+    // is why there is no third tool here.
     const customTools = inKild
       ? [
-          createSendTool((to, text) => emitKildCommand({ kind: 'send', to, text })),
-          createSpawnTool((spec) => emitKildCommand({ kind: 'spawn', ...spec })),
+          createSendTool((spec) => emitKildCommand({ kind: 'send', ...spec })),
           createStopTool((spec) => emitKildCommand({ kind: 'stop', ...spec })),
         ]
       : undefined;

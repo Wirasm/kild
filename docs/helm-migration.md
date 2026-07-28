@@ -185,6 +185,13 @@ Connect to `/ws` as before. Frame names changed.
 
 `spawn`, `prompt`, and `stop` (the bare-agent verbs) keep their names.
 
+**Agents inside a kild now create by addressing** — their `send` tool spawns a recipient the
+kild does not have — but **nothing changes for a client.** `POST /api/kilds/:id/messages`
+still refuses an unknown recipient naming the roster, deliberately: a typo from a UI must not
+cost a process. Adding an agent stays the explicit `POST /api/kilds/:id/agents`. The one
+visible consequence is that agents will appear on rosters without a client having asked for
+them, carrying `invitedBy` — so treat the roster as something that grows under you.
+
 `kild_spawn` also takes an optional `task` — `{ type, id, agent, task? }` — with the same
 meaning as on the REST route. This transport carries no credential, so the task is sent from
 `"human"`, exactly as `kild_send` is. Prefer `POST /api/kilds/:id/agents` when you care

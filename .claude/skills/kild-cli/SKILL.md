@@ -126,14 +126,23 @@ at its own turn boundary rather than being pushed to.
 
 ## Delegation is asynchronous
 
-Inside a kild, spawning is fire-and-forget: you delegate and keep going; a delegate's
-message wakes you automatically. Don't busy-wait re-asking an agent that already replied.
+Inside a kild, delegating is fire-and-forget: you keep going, and a delegate's message wakes
+you automatically. Don't busy-wait re-asking an agent that already replied.
 
-Pass `task` (the tool) or `--task` (the CLI) when you spawn — it is delivered as the new
-agent's first message, from you, so it starts working immediately. A spawn with no task
-produces an agent sitting idle until something sends to it. The handle is yours to choose,
-so make it tell things apart: five `reviewer`s collide, `reviewer-auth` / `reviewer-api` do
-not, and what each was asked is the first message on the log.
+**An agent in a kild has one verb for both: `send`.** Addressing a handle nobody holds
+creates that agent and delivers your message to it, so delegation is "pick a handle, say who
+it should be with `persona`, write the assignment". Naming several new handles in one `to`
+gives them all the same brief — that is a fan-out. There is no spawn step and no idle
+just-created agent to remember to brief.
+
+From outside (this CLI, the REST API, the pi extension) the two stay separate on purpose: a
+typo'd handle must not quietly cost a process, so `kild send` refuses an unknown recipient
+and `kild spawn <id> --as <handle> [--task <text>]` is the explicit way to add one.
+
+**Seeing who is in a kild:** `kild show <id>` prints the roster (with each agent's persona,
+model, and `invitedBy`), `kild ls` prints it per kild in one line. An agent inside a kild does
+not need a roster tool — its `send` result names anyone it just created, and a `to` that
+cannot be resolved comes back listing both the current roster and the available personas.
 
 **Reaching another agent requires an explicit `send`.** Your normal output is private —
 narration is not delivered to anyone. If you finish delegated work without sending your

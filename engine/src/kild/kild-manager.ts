@@ -13,6 +13,7 @@ import {
   agentProcessId,
   agentView,
   type CommandResult,
+  type CreateMissing,
   costTotals,
   type Kild,
   type KildActionSuccess,
@@ -25,7 +26,6 @@ import {
   type NewKildSuccess,
   type SendOut,
   type SpawnContext,
-  type SpawnOut,
   type StopOut,
 } from './kild-types.ts';
 import { appendKildLog, collectLedgerFacts, kildTranscriptPath } from './memory.ts';
@@ -640,7 +640,6 @@ export class KildManager {
         'cli',
         {
           onSend: (m) => this.handleSend(agentId, m),
-          onSpawn: (s) => this.handleSpawn(agentId, s),
           onStop: (s) => this.handleStop(agentId, s),
         },
       );
@@ -651,28 +650,26 @@ export class KildManager {
     return ok({ agentId });
   }
 
-  /** An agent called `send`: resolve its kild/handle and deliver. */
+  /**
+   * An agent called `send`: resolve its kild/handle and deliver — creating any recipient the
+   * kild does not have yet.
+   *
+   * This is why an agent has no separate `spawn` tool. Spawning was never the goal: every
+   * real delegation was spawn-then-send, and a spawn on its own produced an agent sitting
+   * idle. An agent addresses a handle; if nobody holds that handle, naming it brings the
+   * agent in. One verb, and the idle-agent state is unreachable rather than warned about.
+   *
+   * The creator is the calling agent, taken from the session the control line arrived on —
+   * never from the line itself. The agent says who it is addressing and what it wants; the
+   * engine says who asked.
+   */
   private async handleSend(agentId: string, m: SendOut): Promise<CommandResult<KildActionSuccess>> {
     const located = this.registry.locateAgent(agentId);
     if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
-    return this.send(located.kild.id, located.agent.handle, m.to, m.text);
-  }
-
-  /** An agent called `spawn`: add the named agent to its kild. */
-  private async handleSpawn(
-    agentId: string,
-    spec: SpawnOut,
-  ): Promise<CommandResult<KildActionSuccess>> {
-    const located = this.registry.locateAgent(agentId);
-    if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
-    // The spawner is the calling agent — recorded as the new agent's `invitedBy` and used as
-    // the sender of its `task`. Taken from the located session, never from the control line:
-    // the agent says what it wants done, the engine says who asked.
-    return this.spawnAgent(
-      located.kild.id,
-      { handle: spec.handle, persona: spec.persona, model: spec.model },
-      { invitedBy: located.agent.handle, task: spec.task },
-    );
+    return this.send(located.kild.id, located.agent.handle, m.to, m.text, {
+      persona: m.persona,
+      model: m.model,
+    });
   }
 
   /** An agent called `stop`: tear the kild down. Any agent in the kild may do it —
@@ -694,12 +691,20 @@ export class KildManager {
    * addressing question left is whether those handles exist — a typo comes back as a
    * clean error naming the roster, so the caller (an agent's tool result, a CLI user) can
    * correct itself. Such a message is never recorded, never delivered, never kild spam.
+   *
+   * `createMissing` flips what an unknown recipient MEANS, and only a caller with the
+   * authority to grow the kild passes it: with it, a handle nobody holds is created and then
+   * delivered to (see {@link createRecipients}); without it, it stays a rejection. That is
+   * the one difference between an agent inside the kild — for which addressing someone new
+   * IS how delegation starts — and a client at the REST boundary, where a typo must never
+   * quietly cost a process. Neither reads intent from the text; both are told the handles.
    */
   async send(
     kildId: string,
     from: string,
     to: string[],
     text: string,
+    createMissing?: CreateMissing,
   ): Promise<CommandResult<KildActionSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
@@ -707,14 +712,22 @@ export class KildManager {
       return fail('rejected', 'a message must name at least one recipient');
     }
 
+    // Handles this send brought into the kild, reported back so the sender knows a name it
+    // used is now an agent (and, when a persona was resolved from the handle, which one).
+    let created: string[] = [];
     const unknown = unknownRecipients(kild, to);
     if (unknown.length > 0) {
-      const known = kild.agents.map((agent) => `@${agent.handle}`).join(', ');
-      return fail(
-        'rejected',
-        `no such agent: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
-          `(in the kild: ${known || 'none'})`,
-      );
+      if (!createMissing) {
+        const known = kild.agents.map((agent) => `@${agent.handle}`).join(', ');
+        return fail(
+          'rejected',
+          `no such agent: ${unknown.map((recipient) => `@${recipient}`).join(', ')} ` +
+            `(in the kild: ${known || 'none'})`,
+        );
+      }
+      const result = await this.createRecipients(kild, unknown, from, createMissing);
+      if (!result.ok) return result;
+      created = result.value;
     }
 
     // The registry stamps `seq` as it appends, and the STAMPED message is what gets
@@ -732,7 +745,59 @@ export class KildManager {
     traceSend(kild.name, message);
     this.broadcast({ message });
     this.deliver(kild, message);
-    return ok({ message: 'Sent to the kild.', deliveredTo: to.filter((t) => t !== from) });
+    return ok({
+      message: created.length
+        ? `Brought ${created.map((h) => `@${h}`).join(', ')} into the kild and sent to them.`
+        : 'Sent to the kild.',
+      deliveredTo: to.filter((t) => t !== from),
+      created: created.length ? created : undefined,
+    });
+  }
+
+  /**
+   * Create the recipients a sender named but the kild does not have yet — the creating half
+   * of "addressing an agent that isn't here brings it in".
+   *
+   * Validated as a BATCH before anything starts, so a call naming one good and one unknown
+   * persona spawns neither. That is what keeps the fused verb honest: either every named
+   * recipient exists afterwards, or the send is refused and the kild is untouched. A spawn
+   * that throws mid-batch rolls its own siblings back for the same reason.
+   */
+  private async createRecipients(
+    kild: Kild,
+    handles: string[],
+    invitedBy: string,
+    spec: CreateMissing,
+  ): Promise<CommandResult<string[]>> {
+    const validated = await this.validateAgents(
+      kild.cwd,
+      handles.map((handle) => ({ handle, persona: spec.persona, model: spec.model })),
+      kild.agents,
+    );
+    if (!validated.ok) {
+      // The sender may have meant somebody who is already here and mistyped the handle, so
+      // the refusal names the roster too. Between this and the persona list, one rejection
+      // tells an agent everything it needs to correct itself without a probe.
+      const roster = kild.agents.map((agent) => `@${agent.handle}`).join(', ');
+      return fail(validated.code, `${validated.message} (in the kild: ${roster || 'none'})`);
+    }
+
+    const started: string[] = [];
+    for (const agent of validated.value) {
+      const result = this.startAgent(kild, agent, invitedBy);
+      if (!result.ok) {
+        for (const agentId of started) this.sessions.stop(agentId);
+        kild.agents = kild.agents.filter((a) => {
+          const id = agentProcessId(a);
+          return id === undefined || !started.includes(id);
+        });
+        return result;
+      }
+      started.push(result.value.agentId);
+    }
+    this.registry.persistNow(kild.id);
+    this.broadcast({ kilds: this.registry.summaries() });
+    return ok(handles);
   }
 
   /**
@@ -784,7 +849,17 @@ export class KildManager {
 
       const resolvedPersona = spec.persona ?? spec.handle;
       if (resolvedPersona !== GENERAL_PERSONA && !knownPersonas.has(resolvedPersona)) {
-        return fail('rejected', `unknown persona: ${resolvedPersona}`);
+        // Naming what DOES exist is the whole point: a persona is also how a handle nobody
+        // holds becomes an agent, so this rejection is the discovery path. Without the list
+        // the caller's only recourse is another guess.
+        const available = [
+          GENERAL_PERSONA,
+          ...[...knownPersonas].filter((p) => p !== GENERAL_PERSONA),
+        ];
+        return fail(
+          'rejected',
+          `unknown persona: ${resolvedPersona} (available: ${available.join(', ')})`,
+        );
       }
       validated.push({ ...spec, resolvedPersona });
     }
