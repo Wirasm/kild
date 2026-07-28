@@ -883,13 +883,18 @@ app.delete('/api/kilds/:id', async (c) => {
     branchKept: true,
     removed: dir,
     discarded: assessment.discarded,
+    // Present only when git could not produce the list. An empty `discarded` beside this is
+    // "unknown", not "nothing" — the one distinction a disposal report must never lose.
+    discardedError: assessment.discardedError,
     forced: assessment.forced,
     message:
       `Removed worktree '${worktree}'${assessment.forced ? ` (forced past ${assessment.commits} unlanded commit${assessment.commits === 1 ? '' : 's'})` : ''}. ` +
       `Branch kild/${worktree} kept.` +
-      (assessment.discarded.length > 0
-        ? ` Discarded ${assessment.discarded.length} uncommitted file${assessment.discarded.length === 1 ? '' : 's'}.`
-        : ''),
+      (assessment.discardedError
+        ? ` Could not determine what was discarded (git: ${assessment.discardedError}).`
+        : assessment.discarded.length > 0
+          ? ` Discarded ${assessment.discarded.length} uncommitted file${assessment.discarded.length === 1 ? '' : 's'}.`
+          : ''),
   });
 });
 

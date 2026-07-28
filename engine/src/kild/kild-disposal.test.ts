@@ -85,6 +85,30 @@ test('uncommitted changes to TRACKED files are not a refusal either', async () =
   expect(assessment.discarded).toEqual(['a.txt']);
 });
 
+test('an undeterminable discard list says so, instead of reporting nothing lost', async () => {
+  // The list is the whole of what the operator is told they are about to destroy, and it
+  // used to be `.catch(() => [])` — so a git failure rendered as a confident "nothing will
+  // be lost" at the exact moment force-removal was about to lose it. Reproduced by deleting
+  // the tree's `.git` pointer: git can no longer answer, but the guard above already did.
+  const wt = await ensureWorktree(repo, 'unreadable', 'main');
+  writeFileSync(path.join(wt.path, 'work.txt'), 'never committed\n');
+  rmSync(path.join(wt.path, '.git'), { recursive: true, force: true });
+
+  const assessment = await assessDisposal({
+    repo,
+    dir: wt.path,
+    branch: 'kild/unreadable',
+    base: 'main',
+    inUse: false,
+    force: true, // past the commits guard, which refuses `undetermined` on its own
+  });
+  expect(assessment.ok).toBe(true);
+  if (!assessment.ok) return;
+  expect(assessment.discarded).toEqual([]);
+  // …but empty means UNKNOWN here, and the caller can tell the two apart.
+  expect(assessment.discardedError).toBeTruthy();
+});
+
 test('a branch carrying commits base does not have is REFUSED, with the count and tip', async () => {
   const wt = await ensureWorktree(repo, 'authored', 'main');
   writeFileSync(path.join(wt.path, 'work.ts'), 'real work\n');

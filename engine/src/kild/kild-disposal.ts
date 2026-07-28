@@ -37,8 +37,17 @@ export interface DisposalRefusal {
 export interface DisposalPlan {
   ok: true;
   branch?: string;
-  /** Uncommitted + untracked files the removal will discard. Named, never hidden. */
+  /** Uncommitted + untracked files the removal will discard. Named, never hidden.
+   *  **Empty means empty only when {@link discardedError} is absent** — see it. */
   discarded: string[];
+  /** Why the discard list could not be determined, when git failed to produce one.
+   *
+   *  This list is the whole of what the operator is told they are about to destroy, and it
+   *  used to be `.catch(() => [])`: any git failure rendered as a confident "nothing will
+   *  be lost" at the exact moment force-removal was about to lose it. An empty list and an
+   *  unanswerable question are not the same claim, and only the caller can decide what to
+   *  do about the difference — so it is reported rather than flattened. */
+  discardedError?: string;
   /** Authored commits found (non-zero only when `force` overrode the refusal). */
   commits: number;
   tip?: string;
@@ -110,10 +119,20 @@ export async function assessDisposal(req: DisposalRequest): Promise<DisposalAsse
     };
   }
 
+  // `reviewCommits` above refuses rather than guessing when git cannot answer; this list
+  // gets the same treatment one level down. It cannot refuse the disposal — the working
+  // tree is not evidence, which is the guard's whole point — but it must not report an
+  // empty list it did not observe.
+  const discarded = await changedFiles(req.dir).then(
+    (files) => ({ files, error: undefined as string | undefined }),
+    (err) => ({ files: [], error: err instanceof Error ? err.message : String(err) }),
+  );
+
   return {
     ok: true,
     branch: req.branch,
-    discarded: await changedFiles(req.dir).catch(() => []),
+    discarded: discarded.files,
+    discardedError: discarded.error,
     commits,
     tip,
     forced: Boolean(req.force) && commits > 0,
