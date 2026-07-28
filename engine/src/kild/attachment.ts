@@ -22,6 +22,27 @@ import { kildHome } from './config.ts';
  * (`attach-token.ts`), so a copy on disk would outlive the thing it names and be rejected as
  * unknown on the next send. The token is fetched at call time from the idempotent `attach`
  * instead, which is always fresh and needs no secret on disk.
+ *
+ * ## Two files, because a handle is one identity
+ *
+ * A handle is held by exactly one session: two sessions sharing one would race on a
+ * destructive inbox, each eating mail meant for the other. And session ids are not stable —
+ * `--resume`/`--fork-session` mints a new one for what the operator experiences as the same
+ * session — so "who holds this handle" changes and must have a single answer at all times.
+ *
+ *   `attached/<session>.json`            what this session attached to
+ *   `attached/claims/<kild>/<handle>`    which session currently holds that handle
+ *
+ * The claim is written by **atomic rename**, so concurrent attaches to one handle resolve to
+ * exactly one winner with no lock, no timeout and no staleness heuristic — the last rename
+ * wins and no intermediate state is ever observable. A session resolves only if the claim
+ * still names it.
+ *
+ * The obvious alternative — one file per session plus a scan that deletes the others — is
+ * what this replaced. It is a read-modify-write over a shared directory: two sessions each
+ * saw the other's freshly written record as somebody else's and deleted it, leaving NEITHER
+ * attached. Guarding it with a lock re-introduced timing questions (how old is too old, who
+ * owns the lock, what if acquisition fails) that an atomic rename simply does not raise.
  */
 export interface Attachment {
   /** The kild this session holds a handle in. */
@@ -37,15 +58,28 @@ function attachmentsDir(): string {
 }
 
 /**
- * Session ids reach the filesystem as filenames, so anything that is not a plain handle is
- * refused rather than allowed to walk out of the directory with `../`. A harness that
- * reports an exotic id gets a loud error here, not a write to somewhere else.
+ * These strings become path segments, so anything that is not a plain token is refused rather
+ * than allowed to walk out of the directory with `../`. A caller that supplies an exotic id
+ * gets a loud error here, not a write to somewhere else.
  */
+function safeSegment(kind: string, value: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) throw new Error(`invalid ${kind}: ${value}`);
+  return value;
+}
+
 function recordPath(session: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(session)) {
-    throw new Error(`invalid session id: ${session}`);
-  }
-  return path.join(attachmentsDir(), `${session}.json`);
+  return path.join(attachmentsDir(), `${safeSegment('session id', session)}.json`);
+}
+
+/** Kild and handle are separate path segments rather than one joined name: a separator
+ *  inside either value could otherwise make two different pairs collide on one filename. */
+function claimPath(kildId: string, handle: string): string {
+  return path.join(
+    attachmentsDir(),
+    'claims',
+    safeSegment('kild id', kildId),
+    safeSegment('handle', handle),
+  );
 }
 
 /**
@@ -84,99 +118,72 @@ async function readRecord(file: string): Promise<Attachment | null> {
   };
 }
 
-/** How long to wait for another attach to finish before treating its lock as abandoned.
- *  Attaching is one small write and a scan of a handful of files, so a lock still held after
- *  this long is a crashed process, not a slow one. */
-const LOCK_STALE_MS = 5_000;
-const LOCK_POLL_MS = 25;
-
-/**
- * Run `fn` with exclusive access to the attachments directory.
- *
- * `mkdir` is atomic and fails with EEXIST when the directory is already there, which makes it
- * the smallest mutual exclusion available without a dependency. It is needed because
- * superseding is a read-modify-write over a shared directory: two sessions attaching to the
- * same (kild, handle) at once would each scan, each see the other's freshly written record as
- * "somebody else's", and each delete it — leaving NEITHER session attached rather than the
- * last one. That is data loss, and it is the fork case this whole record exists to serve.
- *
- * Failing to acquire is not fatal. The record itself is written under the lock either way;
- * only superseding is skipped, and it says so. A wedged lock must never stop an operator
- * attaching.
- */
-async function withLock<T>(fn: () => Promise<T>): Promise<T | undefined> {
-  const lock = path.join(attachmentsDir(), '.lock');
-  const deadline = Date.now() + LOCK_STALE_MS;
-  for (;;) {
-    try {
-      await fs.mkdir(lock);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (Date.now() >= deadline) {
-        // Break a lock this old rather than spin forever, then take it ourselves. If that
-        // race is lost too, give up loudly instead of looping.
-        await fs.rm(lock, { recursive: true, force: true });
-        try {
-          await fs.mkdir(lock);
-          break;
-        } catch {
-          console.error(`kild: could not lock ${attachmentsDir()}; skipped superseding`);
-          return undefined;
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
-    }
-  }
+/** The session currently holding a handle, or null when nobody does. Absent is the only
+ *  null; an unreadable claim throws, for the same reason an unreadable record does. */
+async function readClaim(kildId: string, handle: string): Promise<string | null> {
   try {
-    return await fn();
-  } finally {
-    await fs.rm(lock, { recursive: true, force: true });
+    return (await fs.readFile(claimPath(kildId, handle), 'utf8')).trim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
   }
 }
 
 /**
- * Record (or re-point) a session's attachment, and **supersede** any other session holding
- * the same (kild, handle).
+ * Record a session's attachment and claim the handle for it.
  *
- * Superseding is not tidiness. A session id is not stable: `--resume`/`--fork-session` mints
- * a new one for what the operator experiences as the same session, so without this every fork
- * leaves an orphan record and the directory grows one entry per relaunch. And a handle is one
- * identity — two live sessions sharing it would race on one destructive inbox, each eating
- * mail meant for the other. Last attach wins.
+ * The claim is written FIRST, so a crash between the two writes leaves an unreferenced claim
+ * (harmless) rather than a record that resolves against a claim that was never made. Both
+ * writes go through a temp file and `rename`, which is atomic: a reader sees the old content
+ * or the new one, never a half-written file, and concurrent writers produce exactly one
+ * winner without coordinating.
  */
 export async function recordAttachment(
   session: string,
   kildId: string,
   handle: string,
 ): Promise<void> {
+  const claim = claimPath(kildId, handle);
   const file = recordPath(session);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await withLock(async () => {
-    const record: Attachment = { kildId, handle, attachedAt: Date.now() };
-    await fs.writeFile(file, `${JSON.stringify(record)}\n`);
-    await supersede(file, kildId, handle);
-  });
+  await fs.mkdir(path.dirname(claim), { recursive: true });
+  await writeAtomic(claim, `${session}\n`);
+  const record: Attachment = { kildId, handle, attachedAt: Date.now() };
+  await writeAtomic(file, `${JSON.stringify(record)}\n`);
+  await sweepSuperseded();
+}
+
+/** Write via a unique temp file in the same directory, then rename over the target. Same
+ *  directory so the rename never crosses a filesystem, and unique so two concurrent writers
+ *  cannot share a temp path. */
+async function writeAtomic(file: string, contents: string): Promise<void> {
+  const temp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  await fs.writeFile(temp, contents);
+  try {
+    await fs.rename(temp, file);
+  } catch (err) {
+    await fs.rm(temp, { force: true });
+    throw err;
+  }
 }
 
 /**
- * Drop every OTHER session's record of this (kild, handle). Runs under the lock.
+ * Delete session records whose handle is now claimed by somebody else.
  *
- * Not fatal to the attach that just succeeded — its own record is written and correct. But it
- * is not nothing either: superseding is what backs "two sessions can never race on one
- * destructive inbox", so a failure means that guarantee quietly does not hold. Each failure is
- * REPORTED rather than swallowed; the attach stands, and the operator is told a stale sibling
- * may have survived it.
+ * Bounded growth, nothing more: without it a forked session leaves an inert record behind on
+ * every relaunch. It is safe to run concurrently with any other attach because it only
+ * removes records that ALREADY resolve to null — the claim is the single source of truth, and
+ * a record the claim does not name is not an attachment whichever way the race went.
+ *
+ * Failures are reported, not swallowed, but are not fatal: the attachment itself is complete
+ * before this runs, and a record left behind costs disk, never a wrong answer.
  */
-async function supersede(keep: string, kildId: string, handle: string): Promise<void> {
+async function sweepSuperseded(): Promise<void> {
   const dir = attachmentsDir();
   let entries: string[];
   try {
     entries = await fs.readdir(dir);
   } catch (err) {
-    console.error(
-      `kild: could not check ${dir} for other sessions holding @${handle}: ${(err as Error).message}`,
-    );
+    console.error(`kild: could not tidy ${dir}: ${(err as Error).message}`);
     return;
   }
   await Promise.all(
@@ -184,16 +191,15 @@ async function supersede(keep: string, kildId: string, handle: string): Promise<
       .filter((entry) => entry.endsWith('.json'))
       .map(async (entry) => {
         const file = path.join(dir, entry);
-        if (file === keep) return;
-        // One unreadable sibling must not fail the attach, but it is exactly the case where a
-        // duplicate claim could survive unseen — so say so instead of skipping in silence.
         try {
           const record = await readRecord(file);
-          if (record?.kildId === kildId && record.handle === handle) {
+          if (!record) return;
+          const owner = await readClaim(record.kildId, record.handle);
+          if (owner !== null && owner !== path.basename(entry, '.json')) {
             await fs.rm(file, { force: true });
           }
         } catch (err) {
-          console.error(`kild: could not supersede ${file}: ${(err as Error).message}`);
+          console.error(`kild: could not tidy ${file}: ${(err as Error).message}`);
         }
       }),
   );
@@ -202,10 +208,18 @@ async function supersede(keep: string, kildId: string, handle: string): Promise<
 /**
  * The session's attachment, or null when it has none.
  *
- * Only *absent* is null. Anything that means "there may be an attachment and I cannot read
- * it" throws, so a caller that must not act on a guess does not get one. The turn-end hook
+ * Null covers two cases that are the same fact from the caller's side: this session never
+ * attached, and this session's claim on the handle has since been taken by another session
+ * (the fork case). It does NOT cover "there may be an attachment and I cannot read it" —
+ * that throws, so a caller which must not act on a guess does not get one. The turn-end hook
  * catches and degrades to silence; `kild send` lets it through and fails.
+ *
+ * Read-only by design: this runs on every turn from a hook, and a read path that mutates
+ * state is a read path that can fail somebody's turn.
  */
 export async function findAttachment(session: string): Promise<Attachment | null> {
-  return readRecord(recordPath(session));
+  const record = await readRecord(recordPath(session));
+  if (!record) return null;
+  const owner = await readClaim(record.kildId, record.handle);
+  return owner === session ? record : null;
 }

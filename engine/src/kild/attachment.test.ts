@@ -75,7 +75,10 @@ describe('supersession — the fork case', () => {
     for (const session of ['s1', 's2', 's3', 's4']) {
       await recordAttachment(session, 'kild-a', 'kild');
     }
-    expect(await fs.readdir(path.join(home, 'attached'))).toEqual(['s4.json']);
+    const records = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
+      f.endsWith('.json'),
+    );
+    expect(records).toEqual(['s4.json']);
   });
 });
 
@@ -107,47 +110,75 @@ describe('unreadable is not the same fact as absent', () => {
   });
 
   test('a record without attachedAt still resolves', async () => {
-    await fs.mkdir(path.join(home, 'attached'), { recursive: true });
+    await fs.mkdir(path.join(home, 'attached', 'claims', 'kild-a'), { recursive: true });
+    await fs.writeFile(path.join(home, 'attached', 'claims', 'kild-a', 'kild'), 's\n');
     await fs.writeFile(recordFile('s'), JSON.stringify({ kildId: 'kild-a', handle: 'kild' }));
     expect(await findAttachment('s')).toMatchObject({ attachedAt: 0 });
+  });
+
+  test('a record nobody claims is not an attachment', async () => {
+    // Only the claim decides who holds a handle. A record with no claim behind it is a
+    // leftover, not a licence to act as that handle.
+    await fs.mkdir(path.join(home, 'attached'), { recursive: true });
+    await fs.writeFile(recordFile('orphan'), JSON.stringify({ kildId: 'k', handle: 'kild' }));
+    expect(await findAttachment('orphan')).toBeNull();
   });
 });
 
 describe('concurrent attaches', () => {
+  /** How many of these sessions consider themselves attached. Exactly one may. */
+  async function resolving(sessions: string[]): Promise<string[]> {
+    const held = await Promise.all(
+      sessions.map(async (s) => ((await findAttachment(s)) ? s : null)),
+    );
+    return held.filter((s): s is string => s !== null);
+  }
+
   test('two sessions claiming one handle at once leave exactly one attached', async () => {
-    // Without mutual exclusion each supersede scan sees the other's freshly written record as
-    // somebody else's and deletes it, leaving NEITHER attached — data loss in precisely the
-    // fork case this record exists to serve.
+    // The scan-and-delete this replaced lost BOTH records here: each saw the other's freshly
+    // written file as somebody else's and deleted it. An atomic claim cannot do that — there
+    // is no intermediate state for a second writer to observe.
     await Promise.all([
       recordAttachment('race-a', 'kild-x', 'claude'),
       recordAttachment('race-b', 'kild-x', 'claude'),
     ]);
-    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
-      f.endsWith('.json'),
-    );
-    expect(survivors).toHaveLength(1);
+    expect(await resolving(['race-a', 'race-b'])).toHaveLength(1);
   });
 
   test('many sessions racing on one handle still leave exactly one', async () => {
-    await Promise.all(
-      ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => recordAttachment(`many-${s}`, 'kild-y', 'kild')),
+    const sessions = ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => `many-${s}`);
+    await Promise.all(sessions.map((s) => recordAttachment(s, 'kild-y', 'kild')));
+    expect(await resolving(sessions)).toHaveLength(1);
+  });
+
+  test('the survivor is the one the claim names, and it resolves correctly', async () => {
+    const sessions = ['w-1', 'w-2', 'w-3'];
+    await Promise.all(sessions.map((s) => recordAttachment(s, 'kild-w', 'kild')));
+    const [winner] = await resolving(sessions);
+    expect(winner).toBeDefined();
+    const claim = await fs.readFile(
+      path.join(home, 'attached', 'claims', 'kild-w', 'kild'),
+      'utf8',
     );
-    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
-      f.endsWith('.json'),
-    );
-    expect(survivors).toHaveLength(1);
+    expect(claim.trim()).toBe(winner);
+    expect(await findAttachment(winner as string)).toMatchObject({ kildId: 'kild-w' });
   });
 
   test('concurrent attaches to DIFFERENT handles all survive', async () => {
-    await Promise.all([
-      recordAttachment('h-1', 'kild-z', 'alpha'),
-      recordAttachment('h-2', 'kild-z', 'beta'),
-      recordAttachment('h-3', 'kild-z', 'gamma'),
-    ]);
-    const survivors = (await fs.readdir(path.join(home, 'attached'))).filter((f) =>
-      f.endsWith('.json'),
-    );
-    expect(survivors).toHaveLength(3);
+    const pairs: Array<[string, string]> = [
+      ['h-1', 'alpha'],
+      ['h-2', 'beta'],
+      ['h-3', 'gamma'],
+    ];
+    await Promise.all(pairs.map(([s, h]) => recordAttachment(s, 'kild-z', h)));
+    expect(await resolving(pairs.map(([s]) => s))).toHaveLength(3);
+  });
+
+  test('a superseded session reads as not attached, never as somebody else', async () => {
+    await recordAttachment('first', 'kild-q', 'kild');
+    await recordAttachment('second', 'kild-q', 'kild');
+    expect(await findAttachment('first')).toBeNull();
+    expect(await findAttachment('second')).toMatchObject({ kildId: 'kild-q', handle: 'kild' });
   });
 });
 
