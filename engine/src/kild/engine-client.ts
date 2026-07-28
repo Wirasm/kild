@@ -58,16 +58,25 @@ export async function newKild(req: NewKildRequest): Promise<NewKildResponse> {
 const selfAgentId = (): string | undefined => process.env.KILD_AGENT_ID || undefined;
 
 /** `to` names the agents being addressed, exactly as the in-kild `send` tool does, and
- *  like it, it is required — the engine has no default recipient to fall back to. */
+ *  like it, it is required — the engine has no default recipient to fall back to.
+ *
+ *  `token` is the attached-harness credential from `attach`. An agent kild spawned proves
+ *  itself with `agentId`; an attached one has no such process and this is the only way it
+ *  can name itself as the thing it is already addressed as. Presenting neither is correct
+ *  for a human's shell and lands on the log as the unattributed label. */
 export async function sendMessage(
   kildId: string,
   to: string[],
   text: string,
   agentId: string | undefined = selfAgentId(),
+  token?: string,
 ): Promise<KildActionResponse> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ to, text, ...(agentId ? { agentId } : {}) }),
   });
 }

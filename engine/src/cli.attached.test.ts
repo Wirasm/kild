@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,14 +24,23 @@ interface Drained {
 
 let engine: ReturnType<typeof Bun.serve> | undefined;
 let engineUrl = '';
+/** Throwaway `$KILD_HOME` — attachment records land here, never in the operator's config. */
+let kildHome = '';
 /** What the next /drain call answers with — set per test. */
 let drainResponse: { status: number; body: unknown } = {
   status: 200,
   body: { ok: true, messages: [], idle: true, capped: false },
 };
 let drainRequests: Array<{ method: string; path: string; body: unknown }> = [];
+/** `Authorization` per request, in order. Kept beside `drainRequests` rather than inside it
+ *  so the exact-shape assertions already written here keep passing. */
+let authHeaders: Array<string | null> = [];
+/** What an `attach` answers with, when a test needs it to differ from `drainResponse` — a
+ *  send mints its credential through attach, so those tests need both to be distinct. */
+let attachResponse: { status: number; body: unknown } | undefined;
 
-beforeAll(() => {
+beforeAll(async () => {
+  kildHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'kild-cli-')));
   engine = Bun.serve({
     port: 0, // ephemeral — never the operator's 4517
     hostname: '127.0.0.1',
@@ -40,17 +51,52 @@ beforeAll(() => {
         path: url.pathname,
         body: await request.json().catch(() => undefined),
       });
+      authHeaders.push(request.headers.get('authorization'));
+      if (url.pathname.endsWith('/agents/attach') && attachResponse) {
+        return Response.json(attachResponse.body, { status: attachResponse.status });
+      }
       return Response.json(drainResponse.body, { status: drainResponse.status });
     },
   });
   engineUrl = `http://127.0.0.1:${engine.port}`;
 });
 
-afterAll(() => engine?.stop(true));
+afterAll(async () => {
+  engine?.stop(true);
+  await fs.rm(kildHome, { recursive: true, force: true });
+});
 
-async function runCli(args: string[], engineOverride?: string) {
+/**
+ * The variables the CLI resolves an identity from, scrubbed on every run unless a test asks
+ * for one by name.
+ *
+ * Inheriting the ambient environment made this suite depend on whose machine it ran on: an
+ * operator whose own session is attached exports `KILD_KILD_ID`, `KILD_HANDLE` and
+ * `CLAUDE_CODE_SESSION_ID`, and the CLI under test would resolve THEIR attachment and issue
+ * calls no test expected. `KILD_HOME` is redirected rather than dropped so a run can never
+ * write an attachment record into the operator's real config directory.
+ */
+const IDENTITY_ENV = [
+  'KILD_KILD_ID',
+  'KILD_HANDLE',
+  'KILD_AGENT_ID',
+  'CLAUDE_CODE_SESSION_ID',
+] as const;
+
+async function runCli(
+  args: string[],
+  engineOverride?: string,
+  identity: Partial<Record<(typeof IDENTITY_ENV)[number], string>> = {},
+) {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    KILD_ENGINE: engineOverride ?? engineUrl,
+    KILD_HOME: kildHome,
+  };
+  for (const key of IDENTITY_ENV) delete env[key];
+  Object.assign(env, identity);
   const proc = Bun.spawn(['bun', 'run', CLI, ...args], {
-    env: { ...process.env, KILD_ENGINE: engineOverride ?? engineUrl },
+    env: env as Record<string, string>,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -221,5 +267,114 @@ test('attach sends the handle to the engine and reports what happened', async ()
   expect(drainRequests).toEqual([
     { method: 'POST', path: '/api/kilds/kild-1/agents/attach', body: { handle: 'claude' } },
   ]);
+  withNoMail();
+});
+
+/**
+ * Attach discovery: what a session can work out about itself without being told.
+ *
+ * A process's environment is fixed at exec time, so a session cannot be handed the id of a
+ * kild opened after it started — and a resumed or forked session cannot be handed anything
+ * at all, because its environment is rebuilt from a settings file the shell does not own.
+ * The session id is the only thing that survives, so it is what the attachment is keyed to.
+ */
+test('attach records the session, and inbox with no arguments resolves it', async () => {
+  drainResponse = { status: 200, body: { ok: true, message: "@kild attached to kild 'demo'." } };
+  const attached = await runCli(['attach', 'kild-9', '--as', 'kild'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-discovery',
+  });
+  expect(attached.exitCode).toBe(0);
+
+  withNoMail();
+  drainRequests = [];
+  // No id, no --as, and nothing in the environment — exactly a hook on a session that
+  // attached mid-flight.
+  const drained = await runCli(['inbox', '--format', 'claude-stop'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-discovery',
+  });
+  expect(drained.exitCode).toBe(0);
+  expect(drainRequests).toEqual([
+    { method: 'POST', path: '/api/kilds/kild-9/inbox/drain', body: { handle: 'kild' } },
+  ]);
+});
+
+test('an actual attach outranks a stale kild id in the environment', async () => {
+  drainResponse = { status: 200, body: { ok: true, message: 'attached' } };
+  await runCli(['attach', 'kild-live', '--as', 'kild'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-stale',
+  });
+
+  withNoMail();
+  drainRequests = [];
+  // A harness settings file can re-inject a kild id on every start, including resumes, and
+  // no shell can clear it. Ranking it below a real attach is what stops a session draining
+  // an archived kild forever while reporting nothing wrong.
+  const drained = await runCli(['inbox', '--format', 'claude-stop'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-stale',
+    KILD_KILD_ID: 'kild-archived',
+  });
+  expect(drained.exitCode).toBe(0);
+  expect(drainRequests[0]?.path).toBe('/api/kilds/kild-live/inbox/drain');
+});
+
+test('an attached send presents the attach token, so the log names the sender', async () => {
+  attachResponse = { status: 200, body: { ok: true, message: 'attached', token: 'tok-xyz' } };
+  await runCli(['attach', 'kild-9', '--as', 'kild'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-send',
+  });
+
+  drainResponse = { status: 200, body: { ok: true, message: 'Sent to the kild.' } };
+  drainRequests = [];
+  authHeaders = [];
+  const sent = await runCli(['send', 'kild-9', '--to', 'claude', 'hello'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-send',
+  });
+  expect(sent.exitCode).toBe(0);
+
+  // The credential is minted through the idempotent attach at call time rather than stored:
+  // tokens live in engine memory and a copy on disk would outlive them.
+  const message = drainRequests.findIndex((r) => r.path === '/api/kilds/kild-9/messages');
+  expect(message).toBeGreaterThanOrEqual(0);
+  expect(authHeaders[message]).toBe('Bearer tok-xyz');
+  attachResponse = undefined;
+  withNoMail();
+});
+
+test('an agent the engine spawned sends as itself and never attaches a shadow handle', async () => {
+  drainResponse = { status: 200, body: { ok: true, message: 'Sent to the kild.' } };
+  drainRequests = [];
+  authHeaders = [];
+  // The engine sets KILD_KILD_ID and KILD_HANDLE on the agents it spawns as well, so without
+  // the agent-id guard this send would attach a second, shadow copy of the agent over its own
+  // handle and then speak through it.
+  const sent = await runCli(['send', 'kild-9', '--to', 'claude', 'hi'], undefined, {
+    KILD_AGENT_ID: 'agent-7',
+    KILD_KILD_ID: 'kild-9',
+    KILD_HANDLE: 'coder',
+  });
+  expect(sent.exitCode).toBe(0);
+  expect(drainRequests.map((r) => r.path)).toEqual(['/api/kilds/kild-9/messages']);
+  expect(drainRequests[0]?.body).toMatchObject({ agentId: 'agent-7' });
+  expect(authHeaders[0]).toBeNull();
+  withNoMail();
+});
+
+test('a send to a kild this session is not attached to presents no credential', async () => {
+  drainResponse = { status: 200, body: { ok: true, message: 'attached' } };
+  await runCli(['attach', 'kild-mine', '--as', 'kild'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-scope',
+  });
+
+  drainResponse = { status: 200, body: { ok: true, message: 'Sent to the kild.' } };
+  drainRequests = [];
+  authHeaders = [];
+  // A handle is unique within one kild and means nothing outside it, so there is no identity
+  // to present — and attaching one here would silently claim a handle in someone else's kild.
+  const sent = await runCli(['send', 'kild-other', '--to', 'claude', 'hi'], undefined, {
+    CLAUDE_CODE_SESSION_ID: 'sess-scope',
+  });
+  expect(sent.exitCode).toBe(0);
+  expect(drainRequests.map((r) => r.path)).toEqual(['/api/kilds/kild-other/messages']);
+  expect(authHeaders[0]).toBeNull();
   withNoMail();
 });

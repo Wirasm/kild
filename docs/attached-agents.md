@@ -22,6 +22,7 @@ cannot do — including `stop`.
 kild attach <kild-id> --as claude     # register; idempotent, spawns nothing
 kild inbox  <kild-id> --as claude     # destructive read of the inbox
 kild inbox  <kild-id> --as claude --format claude-stop   # ...shaped as a Stop hook
+kild inbox --format claude-stop       # ...or omit both: resolve what this session attached to
 ```
 
 Over REST (`POST` for both — a drain mutates, so a GET would let a proxy or a retry silently
@@ -44,6 +45,43 @@ engine attributes your messages to **that handle**. Without it an attached sende
 session to be recognised by and reads as the unattributed label `human`, so two attached
 agents in one kild were indistinguishable on the log. Re-attaching returns the same token; it
 dies with the kild. Details: `docs/api-surface.md` §4.
+
+`kild send` does this for you: it mints the token through the idempotent `attach` at call
+time and presents it. **The token is never written to disk** — it lives in engine memory and
+dies with the engine, so a stored copy would outlive it and be rejected as unknown on the
+next send. Minting is a loopback round-trip and always fresh.
+
+An agent the engine **spawned** is deliberately excluded: it already proves itself with
+`KILD_AGENT_ID`, and since the engine sets `KILD_KILD_ID`/`KILD_HANDLE` on owned agents too,
+attaching one would claim a second, shadow handle over the agent's own.
+
+### Finding your kild without being told
+
+A process's environment is fixed at exec time, so a session cannot be handed the id of a kild
+opened *after* it started — which is the normal case, since you decide to delegate mid-session.
+A resumed or forked session is worse: its environment is rebuilt from a harness settings file
+the shell does not own, so nothing you export can reach it.
+
+`attach` therefore records `{kild, handle}` against the **harness session id** — an opaque
+string kild stores and hands back. Only the hook knows where that id comes from; the engine
+never learns about any harness. `kild inbox` and `kild send` resolve it, so attaching
+mid-session Just Works with no relaunch.
+
+Resolution order, highest first:
+
+1. an explicit argument (`<id>`, `--as`, `--session`);
+2. **this session's recorded attach**;
+3. `KILD_KILD_ID` / `KILD_HANDLE`.
+
+The record outranks the environment on purpose. A harness settings file can re-inject a kild
+id on every start including resumes, it cannot be cleared from a shell, and a stale entry
+pointing at an archived kild would otherwise drain nothing forever while reporting success.
+An `attach` is a deliberate act naming a kild that existed; ambient config loses to it.
+
+Records live in `$KILD_HOME/attached/<session>.json`. Attaching supersedes any other session
+holding the same `(kild, handle)`, so forks cannot accumulate one record per relaunch and two
+sessions can never race on one destructive inbox. An unreadable or malformed record reads as
+*not attached* — a turn-end hook must degrade to silence, never to an error.
 
 ## Inbox semantics
 

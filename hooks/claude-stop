@@ -28,20 +28,35 @@
 # previous generation did.
 set -eu
 
-# Not in a kild → this session is completely unaffected. The common case, and the fastest.
-[ -n "${KILD_KILD_ID:-}" ] || exit 0
 # No kild on PATH (another machine, a stale wiring) → silence, never a hook error.
 command -v kild >/dev/null 2>&1 || exit 0
 
-# Consume the hook payload on stdin so Claude Code never writes into a closed pipe. kild
-# reads nothing from it: the kild and handle come from the environment, and the loop guard
-# is the engine's consecutive-wake cap rather than the payload's `stop_hook_active` — so it
-# lives in one place and no hook can opt out of it.
-cat >/dev/null 2>&1 || true
+# Consume the payload on stdin so Claude Code never writes into a closed pipe. It carries
+# `session_id` — the key `attach` recorded under — which is why this no longer discards it.
+# That id is the ONLY channel that survives a fork: `--resume`/`--fork-session` mints a new
+# session, and a harness settings file can re-inject a stale kild id on every start, so
+# neither the environment nor the launching shell can be trusted to name the right kild.
+#
+# The id and handle are left to `kild inbox` to resolve. It ranks this session's recorded
+# attachment ABOVE $KILD_KILD_ID for that reason: a stale settings-file value cannot win
+# over a real attach. Passing --as only when $KILD_HANDLE is set keeps "pin up front"
+# working without overriding the handle the record already knows.
+PAYLOAD=$(cat 2>/dev/null || true)
+SESSION="${CLAUDE_CODE_SESSION_ID:-}"
+if [ -z "$SESSION" ]; then
+  SESSION=$(printf '%s' "$PAYLOAD" |
+    sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+fi
+
+# Nothing to resolve from → this session is completely unaffected, and fast.
+[ -n "${KILD_KILD_ID:-}" ] || [ -n "$SESSION" ] || exit 0
 
 # stderr is discarded: stray chatter on a hook reads as a failure. Any non-zero exit from
-# the CLI (it should never produce one in this mode) degrades to silence as well.
-kild inbox "$KILD_KILD_ID" \
-  --as "${KILD_HANDLE:-claude}" \
+# the CLI (it should never produce one in this mode) degrades to silence as well. The loop
+# guard is the engine's consecutive-wake cap, not the payload's `stop_hook_active`, so it
+# lives in one place and no hook can opt out of it.
+kild inbox \
+  ${SESSION:+--session "$SESSION"} \
+  ${KILD_HANDLE:+--as "$KILD_HANDLE"} \
   --format claude-stop 2>/dev/null || exit 0
 exit 0
