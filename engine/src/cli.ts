@@ -34,6 +34,14 @@ import {
 import { compactLiveKilds, formatCompactGitSummary } from './kild/kilds-status.ts';
 import { GENERAL_PERSONA, listPersonas } from './kild/personas.ts';
 import { addProject, findProject, loadProjects, removeProject } from './kild/projects.ts';
+import {
+  pollResult,
+  WATCH_DEFAULT_TIMEOUT_S,
+  WATCH_EXIT,
+  WATCH_POLL_MS,
+  WATCH_TOLERATED_FAILURES,
+  watchSummary,
+} from './kild/watch.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -56,6 +64,8 @@ const { values, positionals } = parseArgs({
     execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
     task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
     session: { type: 'string' }, // `kild attach|inbox|send --session <id>`: the harness session
+    timeout: { type: 'string' }, // `kild watch --timeout <seconds>`: how long to wait
+    interval: { type: 'string' }, // `kild watch --interval <seconds>`: wake latency vs load
   },
 });
 
@@ -115,6 +125,8 @@ async function dispatch(): Promise<void> {
       return kildAttach(action);
     case 'inbox':
       return kildInbox(action);
+    case 'watch':
+      return kildWatch(action);
     case 'log': {
       if (!action) throw new Error('usage: kild log <id>');
       return kildLog(action);
@@ -127,7 +139,7 @@ async function dispatch(): Promise<void> {
       return agentsList();
     default:
       console.error(
-        'usage: kild <ls|new|send|spawn|stop|rm|land|attach|inbox|log|show|agents|persona|project|run> …',
+        'usage: kild <ls|new|send|spawn|stop|rm|land|attach|inbox|watch|log|show|agents|persona|project|run> …',
       );
       process.exit(2);
   }
@@ -330,6 +342,154 @@ async function kildAttach(id: string | undefined): Promise<void> {
  * never stop the operator from finishing a turn. Without the flag it is an ordinary CLI
  * verb and failures are ordinary loud errors.
  */
+/**
+ * `kild watch [<id> --as <handle>] [--since <seq>] [--timeout <seconds>]` — block until
+ * somebody else speaks in the kild, then exit.
+ *
+ * The wake path a turn-end hook cannot provide: a hook fires when a turn ends, so an idle
+ * harness is unreachable until its operator happens to prompt it. Run this in whatever
+ * background facility the harness has and react to its exit.
+ *
+ * It reads the LOG, never the inbox, so it is non-destructive and cannot eat what the Stop
+ * hook is there to deliver. Exit codes carry the outcome ({@link WATCH_EXIT}) — in particular
+ * a quiet engine and a dead one are different codes, so a harness built on this cannot inherit
+ * the silent-failure shape it exists to remove.
+ */
+async function kildWatch(idArg: string | undefined): Promise<never> {
+  const { kildId: id, handle } = await resolveAttachment(idArg, values.as);
+  if (!id || !handle) {
+    throw new Error(
+      'usage: kild watch [<id> --as <handle>] [--since <seq>] [--timeout <s>] [--interval <s>]\n' +
+        '  omit id/--as to use the kild this session attached to\n' +
+        '  waits for somebody else to speak, then exits: 0 mail, 2 quiet, 3 engine unreachable\n' +
+        '  NON-DESTRUCTIVE — it reads the log and consumes nothing. Your mail is still\n' +
+        '  waiting afterwards; drain it with `kild inbox`.',
+    );
+  }
+  const timeout = values.timeout === undefined ? WATCH_DEFAULT_TIMEOUT_S : Number(values.timeout);
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    throw new Error(`--timeout must be a positive number of seconds (got ${values.timeout})`);
+  }
+
+  // Default to the log's current end, so a watcher started now waits for what happens NEXT
+  // rather than firing immediately on the conversation it was started in the middle of.
+  //
+  // This first call needs the same unreachable handling as the poll loop. Left bare it threw
+  // to the top-level catch and exited 1 — a *usage* code — so a harness starting a watcher
+  // against a dead engine could not tell "the engine is gone" from "you typed it wrong". That
+  // is the distinction the exit codes exist for, defeated at the one moment it matters most.
+  // Narrowing does not survive into a closure, so pin it once the guard above has run.
+  const kildId = id;
+  // Wake latency, and the gap between tolerated retries. Tunable because a harness that
+  // wants a snappier wake should not have to fork the CLI to get one.
+  const interval = values.interval === undefined ? WATCH_POLL_MS : Number(values.interval) * 1000;
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error(`--interval must be a positive number of seconds (got ${values.interval})`);
+  }
+  const started = Date.now();
+  const deadline = started + timeout * 1000;
+  function sleep(): Promise<unknown> {
+    return new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  let failures = 0;
+
+  /**
+   * Ask once. Returns the batch, or null when the failure was tolerated and the caller should
+   * wait and try again; exits `unreachable` once tolerance runs out.
+   *
+   * ONE place that knows how much transient failure is acceptable, used by both the bootstrap
+   * fetch and the poll loop. They had separate copies of this decision and immediately drifted:
+   * the loop retried with no delay at all, so three "tolerated" failures burned in about eight
+   * milliseconds and a merely-restarting engine was declared dead — the exact opposite of what
+   * the tolerance exists for — while the bootstrap fetch tolerated nothing whatsoever.
+   */
+  async function poll(
+    since: number | undefined,
+  ): Promise<Awaited<ReturnType<typeof kildMessages>> | null> {
+    try {
+      const batch = await kildMessages(kildId, since);
+      failures = 0;
+      return batch;
+    } catch (err) {
+      if (++failures < WATCH_TOLERATED_FAILURES) return null;
+      console.error(`kild: engine unreachable after ${failures} attempts: ${errText(err)}`);
+      process.exit(WATCH_EXIT.unreachable);
+    }
+  }
+
+  /**
+   * Wait for the next poll, or report that the window has closed.
+   *
+   * The ONE definition of "is there room for another attempt", because there were two and one
+   * of them was wrong — twice. First the failure path skipped the wait entirely; then the fix
+   * unified failure *tolerance* into `poll()` but left the *deadline* inline at each call
+   * site, so the bootstrap fetch had no deadline check at all and a single blip could overrun
+   * a one-second window by six seconds. Both bugs were the same shape: one decision, two
+   * copies, one of them updated.
+   */
+  async function waitForNextPoll(): Promise<boolean> {
+    if (Date.now() + interval >= deadline) return false;
+    await sleep();
+    return true;
+  }
+
+  function expire(): never {
+    // Report the window that actually elapsed. Printing the requested `--timeout` made the
+    // message a lie in exactly the case worth reporting — the one where waiting overran it.
+    console.error(`kild: nothing new in ${Math.round((Date.now() - started) / 1000)}s`);
+    process.exit(WATCH_EXIT.quiet);
+  }
+
+  // Default to the log's current end, so a watcher started now waits for what happens NEXT
+  // rather than firing immediately on the conversation it was started in the middle of. A
+  // blip here is tolerated exactly as one in the loop is — starting an instant before an
+  // engine finishes restarting must not be reported as an engine that is gone.
+  let cursor = parseSince();
+  while (cursor === undefined) {
+    const batch = await poll(undefined);
+    if (batch) cursor = batch.at(-1)?.seq ?? 0;
+    else if (!(await waitForNextPoll())) expire();
+  }
+
+  // Poll FIRST, then sleep: a watcher handed an explicit `--since` that is already behind the
+  // conversation reacts at once instead of after an interval of avoidable silence.
+  for (;;) {
+    const batch = await poll(cursor);
+    if (!batch) {
+      // Tolerated failure — wait like any other quiet interval rather than spinning.
+      if (!(await waitForNextPoll())) break;
+      continue;
+    }
+    const { incoming, cursor: next } = pollResult(batch, handle, cursor);
+    cursor = next;
+    if (incoming.length > 0) {
+      // Say plainly that nothing was consumed. The obvious wrong assumption about a wake verb
+      // is that it also marks-as-seen, and a harness built on that would drop every message it
+      // was woken for while looking entirely correct.
+      console.log(
+        json
+          ? JSON.stringify(
+              { kildId: id, handle, since: cursor, consumed: false, messages: incoming },
+              null,
+              2,
+            )
+          : `${watchSummary(incoming)} (nothing consumed — still in your inbox)\n` +
+              // Derived from the OLDEST incoming seq, not from arithmetic on the cursor.
+              // `cursor - incoming.length` assumed the new messages were the highest-numbered
+              // ones in the batch, so a single own-message with a higher seq made the printed
+              // command skip past the very message that woke the watcher — a wrong answer
+              // handed over with the confidence of a working command.
+              `  read with: kild log ${id} --since ${Math.min(...incoming.map((m) => m.seq)) - 1}\n` +
+              `  drain with: kild inbox`,
+      );
+      process.exit(WATCH_EXIT.mail);
+    }
+    // Same single definition as the failure path uses: no room for another attempt ends it.
+    if (!(await waitForNextPoll())) break;
+  }
+  expire();
+}
+
 async function kildInbox(idArg: string | undefined): Promise<void> {
   const claudeStop = values.format === 'claude-stop';
   // Omitting both resolves the kild this session attached to — the case the environment
