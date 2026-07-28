@@ -73,12 +73,17 @@ export function claudeStopOutput(input: {
 
   return {
     decision: 'block',
-    reason: `kild: ${count} unread ${plural} for @${handle} from ${senders}`,
+    // NOT "unread". The drain that produced this notice already consumed them — by the time
+    // anyone reads this sentence the inbox is empty, so a reader who follows "unread" to
+    // `kild inbox` finds nothing and concludes the counter is lying. It is not; it is
+    // reporting a delivery that already happened. Saying so is the whole fix.
+    reason: `kild: ${count} new ${plural} for @${handle} from ${senders}`,
     hookSpecificOutput: {
       hookEventName: 'Stop',
       additionalContext:
-        `[kild] You are @${handle} in kild ${input.kildId}. ${count} unread ${plural} ` +
-        `from ${senders}. Read the thread with \`kild log ${input.kildId}\` and reply ` +
+        `[kild] You are @${handle} in kild ${input.kildId}. ${count} new ${plural} ` +
+        `from ${senders}, delivered to you just now — your inbox is empty again, so ` +
+        `\`kild inbox\` will report nothing. Read them with \`kild log ${input.kildId}\` and reply ` +
         // `--to` is REQUIRED — the engine never infers a recipient. This instruction used to
         // omit it, so an agent that followed it verbatim got a usage error instead of
         // delivering its reply.
