@@ -609,7 +609,7 @@
           <tr><td class="mono">POST /api/kilds/:id/agents</td><td>Spawn an <code>owned</code> agent into the kild (handle, persona, model).</td><td class="mono"><span class="was">invite_agent / room_add</span></td></tr>
           <tr><td class="mono seal-t">POST /api/kilds/:id/agents/attach</td><td>Register an <code>attached</code> agent — the honryo. Idempotent; addressable at once.</td><td class="mono"><span class="was">joinRoom (room join)</span></td></tr>
           <tr><td class="mono">POST /api/kilds/:id/messages</td><td>Send — <code>{ from, to[], text }</code> into recipients' inboxes.</td><td class="mono"><span class="was">postRoom / room_post</span></td></tr>
-          <tr><td class="mono">GET /api/kilds/:id/inbox?as=</td><td>Drain an attached agent's inbox (the pull side).</td><td class="mono"><span class="was">drainRoom (room drain)</span></td></tr>
+          <tr><td class="mono">POST /api/kilds/:id/inbox/drain</td><td>Drain an attached agent's inbox (the pull side). POST, never GET — it MUTATES, so a cache or a retry on a GET would silently eat somebody's mail.</td><td class="mono"><span class="was">drainRoom (room drain)</span></td></tr>
           <tr><td class="mono">GET /api/kilds</td><td>List + observe: participants, git status, cost rollup, collisions.</td><td class="mono"><span class="was">getLiveRooms / rooms_status</span></td></tr>
           <tr><td class="mono">GET /api/kilds/:id</td><td>One kild — detail + full message log.</td><td class="mono"><span class="was">room show / room log</span></td></tr>
           <tr><td class="mono d-new">POST /api/kilds/:id/land</td><td>Merge toward base; return the collision/merge report.</td><td class="mono">new — was implicit prune</td></tr>
