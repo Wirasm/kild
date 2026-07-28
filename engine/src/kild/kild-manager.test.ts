@@ -6,7 +6,7 @@ import type { AgentCallbacks } from './agent-manager.ts';
 import { DEFAULT_WAKE_CAP } from './inbox.ts';
 import { formatDelivery, KildManager } from './kild-manager.ts';
 import { KildRegistry } from './kild-registry.ts';
-import type { AgentSpec } from './kild-types.ts';
+import type { AgentSpec, KildActionSuccess } from './kild-types.ts';
 import { worktreePath } from './worktree.ts';
 
 let tmp: string;
@@ -31,6 +31,9 @@ function fixture(options?: {
 }) {
   const spawned: Array<{ id: string; persona?: string; forkFrom?: string }> = [];
   const stopped: string[] = [];
+  /** Sessions that died on their own — a crash, not a `stop`, so nothing marked the roster.
+   *  The case only `prompt()`'s return value can reveal. */
+  const dead = new Set<string>();
   const callbacks = new Map<string, AgentCallbacks | undefined>();
   const prompted: Array<{ id: string; text: string; from?: string }> = [];
   let spawnCount = 0;
@@ -52,6 +55,12 @@ function fixture(options?: {
         spawned.push({ id, persona: req.persona, forkFrom: req.forkFrom });
       },
       prompt: (id, text, from) => {
+        // The substrate answers whether the process was there, and a stopped session is
+        // NOT. Returning `true` unconditionally is what made the silent-send-loss bug
+        // invisible to this suite while it was reproducible on a live engine: the mock was
+        // more forgiving than the thing it stands for (`AgentManager.prompt` returns false
+        // for an id it has no session for, and `stop()` deletes the session).
+        if (stopped.includes(id) || dead.has(id)) return false;
         prompted.push({ id, text, from });
         return true;
       },
@@ -67,7 +76,8 @@ function fixture(options?: {
   });
 
   const emitAgent = (agent: string, event: unknown) => agentBus?.({ agent, event });
-  return { manager, spawned, stopped, callbacks, prompted, emitAgent };
+  const killSession = (id: string) => dead.add(id);
+  return { manager, spawned, stopped, callbacks, prompted, emitAgent, killSession };
 }
 
 async function newKild(manager: KildManager, agents: AgentSpec[], kildId: string = 'kild-1') {
@@ -474,6 +484,87 @@ test('invitedBy rides the cheap roster view, so five identical personas are attr
   // Absent, not invented: nobody in the kild invited this one.
   expect(roster.find((a) => a.handle === 'reviewer-api')?.invitedBy).toBeUndefined();
   expect(roster.find((a) => a.handle === 'orchestrator')?.invitedBy).toBeUndefined();
+});
+
+// ── A handle with nothing behind it ───────────────────────────────────────────────────
+// A stopped agent stays on the roster (its handle never rebinds, its transcript stays
+// addressable), so membership alone said "yes" to a send nothing could receive: it
+// validated, the substrate's `false` was discarded, and the sender was told "Sent to the
+// kild." while `idle` was flipped on a process that would never emit `agent_end` to flip it
+// back. Two shapes, two fixes: `stop` is known in advance, a crash is only discoverable at
+// the moment of delivery.
+
+test('a send to a STOPPED agent is refused, and nothing is recorded', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  expect(manager.stopAgent('kild-1', 'coder')).toMatchObject({ ok: true });
+
+  const result = await send(manager, ['coder'], 'more work');
+  expect(result).toMatchObject({ ok: false, code: 'rejected' });
+  // The refusal names who CAN still read something — the stopped agent is not an option.
+  expect((result as { message: string }).message).toContain('@coder');
+  expect((result as { message: string }).message).toContain('@reviewer');
+  // Never recorded: a message nothing can receive must not read back as delivered.
+  expect(manager.messages('kild-1')).toEqual([]);
+  expect(prompted).toEqual([]);
+});
+
+test('a stopped agent does not have its idle state corrupted by a send', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  manager.stopAgent('kild-1', 'coder');
+  const before = manager.liveIdentities()[0]?.agents.find((a) => a.handle === 'coder');
+  expect(before).toMatchObject({ stopped: true, idle: true });
+
+  await send(manager, ['coder'], 'more work');
+  // Unchanged. It used to come back `idle: false` for a session that was already gone,
+  // with nothing left that could ever set it back.
+  expect(manager.liveIdentities()[0]?.agents.find((a) => a.handle === 'coder')).toMatchObject({
+    stopped: true,
+    idle: true,
+  });
+});
+
+test('a mixed send is refused wholesale, like an unknown recipient already is', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  manager.stopAgent('kild-1', 'coder');
+  expect(await send(manager, ['reviewer', 'coder'], 'both of you')).toMatchObject({
+    ok: false,
+    code: 'rejected',
+  });
+  // A partial send is the thing the sender would not be told about.
+  expect(prompted).toEqual([]);
+  expect(manager.messages('kild-1')).toEqual([]);
+});
+
+test('a session that DIED is discovered at delivery: the roster learns and the sender is told', async () => {
+  const { manager, killSession } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  // A crash, not a stop — nothing marked the roster, so validation cannot know. Only the
+  // substrate's answer reveals it.
+  killSession('s-1');
+
+  const result = await send(manager, ['coder'], 'are you there?');
+  expect(result).toMatchObject({ ok: true });
+  const value = (result as { value: KildActionSuccess }).value;
+  expect(value.message).toContain('did not receive it');
+  expect(value.deliveredTo).toEqual([]); // NOT "delivered to coder"
+  // The roster now reflects reality, so the next send is refused up front.
+  expect(manager.liveIdentities()[0]?.agents.find((a) => a.handle === 'coder')).toMatchObject({
+    stopped: true,
+    idle: true,
+  });
+  expect(await send(manager, ['coder'], 'again')).toMatchObject({ ok: false, code: 'rejected' });
+});
+
+test('one dead recipient does not swallow a live one', async () => {
+  const { manager, killSession, prompted } = fixture();
+  await newKild(manager, [{ handle: 'coder' }, { handle: 'reviewer' }]);
+  killSession('s-1');
+  const result = await send(manager, ['coder', 'reviewer'], 'status?');
+  expect((result as { value: KildActionSuccess }).value.deliveredTo).toEqual(['reviewer']);
+  expect(prompted.map((p) => p.id)).toEqual(['s-2']);
 });
 
 // ── The message cursor: seq, not ts ──────────────────────────────────────────────────
