@@ -78,10 +78,24 @@ id on every start including resumes, it cannot be cleared from a shell, and a st
 pointing at an archived kild would otherwise drain nothing forever while reporting success.
 An `attach` is a deliberate act naming a kild that existed; ambient config loses to it.
 
-Records live in `$KILD_HOME/attached/<session>.json`. Attaching supersedes any other session
-holding the same `(kild, handle)`, so forks cannot accumulate one record per relaunch and two
-sessions can never race on one destructive inbox. An unreadable or malformed record reads as
-*not attached* — a turn-end hook must degrade to silence, never to an error.
+Two files back this:
+
+```
+$KILD_HOME/attached/<session>.json          what this session attached to
+$KILD_HOME/attached/claims/<kild>/<handle>  which session currently holds that handle
+```
+
+The claim is written by atomic rename, so concurrent attaches to one handle resolve to exactly
+one winner — a session resolves only if the claim still names it. Superseded records are left
+on disk rather than deleted: deletion cannot be made race-free, it is not what makes this
+correct, and nothing scans the directory (every read is a direct path lookup), so the cost is
+bytes. An unreadable or malformed record reads as *not attached* — a turn-end hook must degrade
+to silence, never to an error.
+
+> **Pick handles that differ by more than case.** On a case-insensitive filesystem (the macOS
+> default) `Alice` and `alice` are two agents to the engine but one claim file, so the second
+> attach silently takes the first one's handle and the first session reads as not attached. It
+> can never resolve to the *wrong* identity, but it does go quiet.
 
 ## Inbox semantics
 

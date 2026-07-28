@@ -79,8 +79,19 @@ function recordPath(session: string): string {
   return path.join(attachmentsDir(), `${safeSegment('session id', session)}.json`);
 }
 
-/** Kild and handle are separate path segments rather than one joined name: a separator
- *  inside either value could otherwise make two different pairs collide on one filename. */
+/**
+ * Kild and handle are separate path segments rather than one joined name: a separator inside
+ * either value could otherwise make two different pairs collide on one filename.
+ *
+ * KNOWN GAP, deliberately not closed here: on a case-insensitive filesystem (the macOS
+ * default) two handles differing only in case — `Alice` and `alice` — are distinct agents to
+ * the engine's roster but fold to ONE claim file. The second attach overwrites the first, and
+ * the first session then reads as not attached. It fails closed, never to somebody else's
+ * identity, so it cannot mis-attribute; but it does go quiet, which is the failure this file
+ * exists to make impossible. Handles that differ only in case are ambiguous to a reader too,
+ * so the durable fix is for the engine to refuse them on the roster rather than for this file
+ * to encode around them — that is a change to agent admission, not to storage.
+ */
 function claimPath(kildId: string, handle: string): string {
   return path.join(
     attachmentsDir(),
