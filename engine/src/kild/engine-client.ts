@@ -29,8 +29,39 @@ export interface KildActionResponse {
   message: string;
 }
 
+/**
+ * How long any engine call may take before it is a failure rather than a wait.
+ *
+ * `fetch` has no timeout of its own, so a connection the engine ACCEPTS and then never
+ * answers hangs forever. That is not a hypothetical: it is the shape where a caller looks
+ * patient while it is actually dead, and it defeats every deadline built on top of it —
+ * `kild watch` could sit inside one poll past its whole window and report neither mail nor
+ * an unreachable engine, which is exactly the distinction its exit codes exist to draw.
+ *
+ * Generous on purpose. This is a backstop against hanging forever, not a latency budget: it
+ * has to clear the slowest legitimate call (a land's merge, a new kild's worktree) without
+ * argument. Anything needing tighter bounds passes its own `signal` — the drain does, because
+ * it runs inside a turn-end hook where a stall costs the operator a visible pause.
+ */
+const ENGINE_TIMEOUT_MS = 30_000;
+
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${ENGINE}${path}`, init);
+  // A caller's own signal wins outright rather than being combined: it is a narrower deadline
+  // chosen for a reason, and silently capping it at the default would make the tighter bound a
+  // lie. Nothing here may be slower than a caller asked for.
+  const signal = init?.signal ?? AbortSignal.timeout(ENGINE_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${ENGINE}${path}`, { ...init, signal });
+  } catch (err) {
+    // A timeout arrives as an opaque abort. Say what actually happened — "the operation was
+    // aborted" tells a caller nothing about whether to retry, and a hook that swallows it
+    // would be swallowing the one symptom that distinguishes a wedged engine from a quiet one.
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`${path} timed out — the engine accepted the connection and did not answer`);
+    }
+    throw err;
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `${path} failed (${response.status})`);
@@ -127,9 +158,16 @@ export async function getKild(kildId: string): Promise<KildStatus> {
 
 /** A kild's message log, cursored by `seq`. `since` is exclusive — pass the last seq you
  *  saw. Works for an archived kild too: its log is the read-only record. */
-export async function kildMessages(kildId: string, since?: number): Promise<Message[]> {
+export async function kildMessages(
+  kildId: string,
+  since?: number,
+  timeoutMs?: number,
+): Promise<Message[]> {
   const suffix = since === undefined ? '' : `?since=${since}`;
-  return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`);
+  return engineFetch(
+    `/api/kilds/${encodeURIComponent(kildId)}/messages${suffix}`,
+    timeoutMs === undefined ? undefined : { signal: AbortSignal.timeout(timeoutMs) },
+  );
 }
 
 export interface AttachResponse extends KildActionResponse {

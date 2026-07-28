@@ -45,6 +45,24 @@ export const WATCH_TOLERATED_FAILURES = 3;
  *  is not immortal. */
 export const WATCH_DEFAULT_TIMEOUT_S = 1_800;
 
+/** Floor for a single poll's request timeout. A deliberately tiny `--interval` must not turn a
+ *  healthy engine into a failing one just because a loopback round-trip took a few more
+ *  milliseconds than the cadence. */
+export const WATCH_REQUEST_FLOOR_MS = 1_000;
+
+/**
+ * How long ONE poll may wait for an answer.
+ *
+ * A poll that outlasts its own cadence is not waiting, it is stuck: without this the request
+ * inherits the client's 30s backstop and a single hung call can swallow a whole short window,
+ * so a wedged engine looks patient rather than unreachable — the precise distinction the exit
+ * codes exist to draw. Bounding each attempt turns a hang into a tolerated failure, and three
+ * of those into an honest `unreachable`.
+ */
+export function watchRequestTimeout(intervalMs: number): number {
+  return Math.max(intervalMs, WATCH_REQUEST_FLOOR_MS);
+}
+
 /** What one poll concluded. */
 export interface WatchPoll {
   /** Messages from somebody other than the watcher, in arrival order. Empty means keep going. */

@@ -40,6 +40,7 @@ import {
   WATCH_EXIT,
   WATCH_POLL_MS,
   WATCH_TOLERATED_FAILURES,
+  watchRequestTimeout,
   watchSummary,
 } from './kild/watch.ts';
 
@@ -407,7 +408,7 @@ async function kildWatch(idArg: string | undefined): Promise<never> {
     since: number | undefined,
   ): Promise<Awaited<ReturnType<typeof kildMessages>> | null> {
     try {
-      const batch = await kildMessages(kildId, since);
+      const batch = await kildMessages(kildId, since, watchRequestTimeout(interval));
       failures = 0;
       return batch;
     } catch (err) {

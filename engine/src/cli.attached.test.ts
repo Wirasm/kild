@@ -38,6 +38,12 @@ let authHeaders: Array<string | null> = [];
 /** What an `attach` answers with, when a test needs it to differ from `drainResponse` — a
  *  send mints its credential through attach, so those tests need both to be distinct. */
 let attachResponse: { status: number; body: unknown } | undefined;
+/** Milliseconds a `/messages` request is left hanging before answering. The failure mode this
+ *  models is NOT a refused connection — it is one the engine ACCEPTS and never answers, which
+ *  `fetch` will wait on forever unless something bounds it. */
+let messagesHangMs = 0;
+/** Same, for the drain — it carries its own tighter bound, so it needs its own hang. */
+let drainHangMs = 0;
 /** What `GET /messages` answers with. `kild watch` reads the log, never the inbox, so its
  *  tests drive this rather than `drainResponse`. */
 let messagesResponse: { status: number; body: unknown } | undefined;
@@ -57,6 +63,12 @@ beforeAll(async () => {
       authHeaders.push(request.headers.get('authorization'));
       if (url.pathname.endsWith('/agents/attach') && attachResponse) {
         return Response.json(attachResponse.body, { status: attachResponse.status });
+      }
+      if (url.pathname.endsWith('/inbox/drain') && drainHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, drainHangMs));
+      }
+      if (url.pathname.endsWith('/messages') && messagesHangMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, messagesHangMs));
       }
       if (url.pathname.endsWith('/messages') && messagesResponse) {
         return Response.json(messagesResponse.body, { status: messagesResponse.status });
@@ -645,3 +657,50 @@ test('the quiet message reports the time that actually elapsed', async () => {
   expect(quiet.stderr).toMatch(/nothing new in \d+s/);
   messagesResponse = undefined;
 });
+
+test('a hung engine is unreachable, not patient', async () => {
+  // The gap that survived the watch review: `fetch` has no timeout, so a connection the engine
+  // ACCEPTS and never answers hangs inside a single poll regardless of any deadline built on
+  // top of it. A watcher would sit past its whole window reporting neither mail nor a dead
+  // engine — defeating the exit-3 distinction it exists to draw.
+  messagesHangMs = 30_000;
+  const started = Date.now();
+  const hung = await runCli([
+    'watch',
+    'kild-9',
+    '--as',
+    'kild',
+    '--since',
+    '1',
+    '--timeout',
+    '60',
+    '--interval',
+    '0.1',
+  ]);
+  const elapsed = Date.now() - started;
+  expect(hung.exitCode).toBe(3);
+  expect(hung.stderr).toContain('unreachable');
+  expect(hung.stderr).toContain('timed out'); // the cause rides the report, not just "aborted"
+
+  // Three attempts, each bounded by the 1s request floor — not the 60s window, and certainly
+  // not the 30s hang.
+  expect(elapsed).toBeLessThan(15_000);
+  messagesHangMs = 0;
+}, 30_000);
+
+test('a drain against a hung engine times out, and says so', async () => {
+  // The drain carries its own 1.5s bound because it runs inside a turn-end hook. This proves
+  // the bound is actually applied and that the message names the cause — an opaque "aborted"
+  // tells a caller nothing about whether to retry.
+  messagesHangMs = 0;
+  drainHangMs = 10_000;
+  const loud = await runCli(['inbox', 'kild-9', '--as', 'kild']);
+  expect(loud.exitCode).toBe(1);
+  expect(loud.stderr).toContain('timed out');
+
+  // ...and the same failure inside the hook is silence, because a hook may never block a turn.
+  const hook = await runCli(['inbox', 'kild-9', '--as', 'kild', '--format', 'claude-stop']);
+  expect(hook.stdout).toBe('');
+  expect(hook.exitCode).toBe(0);
+  drainHangMs = 0;
+}, 30_000);
