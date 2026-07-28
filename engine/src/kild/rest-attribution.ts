@@ -11,10 +11,10 @@ import type { CommandResult } from './kild-types.ts';
  * whose persona is `coder` is `reviewer` on the log.
  *
  * Two credentials produce one, and a caller presents at most one of them:
- * - a **kild session id** — the handle of the agent kild runs in that session, which is
- *   kild-level knowledge and is therefore answered by the kild manager;
+ * - an **agent id** — the handle of the agent kild runs under that id, which is kild-level
+ *   knowledge and is therefore answered by the kild manager;
  * - a **bearer token minted at `attach`** — the handle a harness kild does not own claimed.
- *   An attached agent has no kild session by definition, which is why it needs this: it is
+ *   An attached agent has no agent process by definition, which is why it needs this: it is
  *   the only way it can name itself as the thing it is already addressed as.
  *
  * A caller with neither gets {@link UNATTRIBUTED}: a label written on the message, not a
@@ -29,8 +29,9 @@ interface AttributionInput {
   /** The kild the request addresses, when it addresses one. A token is scoped to a single
    *  kild, so this is what the scope is checked against. */
   kildId?: string;
-  /** A kild session id (`KILD_SESSION_ID`) — the agent-side credential. */
-  sessionId?: string;
+  /** An agent id (`KILD_AGENT_ID`, set by the engine on every agent it spawns) — the
+   *  agent-side credential. */
+  agentId?: string;
   /** A bearer token from `Authorization: Bearer <token>` — the attached-harness credential. */
   token?: string;
   /** A caller-asserted sender. Always a rejection; kept in the shape so the rejection is
@@ -46,21 +47,21 @@ export interface NewKildAttributionInput {
 
 export interface SendAttributionInput {
   kildId: string;
-  sessionId?: string;
+  agentId?: string;
   token?: string;
   from?: string;
 }
 
 export interface StopAttributionInput {
   kildId: string;
-  sessionId?: string;
+  agentId?: string;
   token?: string;
   from?: string;
 }
 
 export interface SpawnAttributionInput {
   kildId: string;
-  sessionId?: string;
+  agentId?: string;
   token?: string;
   /** A caller-asserted spawner, in whatever shape it arrived. Rejected on PRESENCE, not on
    *  type — the spawner is written to the roster as `invitedBy` and is the sender of the new
@@ -70,9 +71,9 @@ export interface SpawnAttributionInput {
 }
 
 interface RestAttributionDeps {
-  /** The handle the agent running this kild session speaks as. Kild-level knowledge: a
-   *  handle belongs to an agent's membership of a kild, not to the session substrate. */
-  handleForSession(sessionId: string): CommandResult<string>;
+  /** The handle the agent running under this id speaks as. Kild-level knowledge: a handle
+   *  belongs to an agent's membership of a kild, not to the process substrate. */
+  handleForAgentId(agentId: string): CommandResult<string>;
   /** The (kild, handle) a bearer token stands for; undefined when nothing minted it. */
   identifyToken(token: string): AttachIdentity | undefined;
 }
@@ -107,18 +108,18 @@ function resolveActor(input: AttributionInput, deps: RestAttributionDeps): Comma
     return reject('from is not allowed; actor identity is engine-derived');
   }
   // The token wins when both are presented. It is scoped to the very kild being addressed,
-  // while a session id names its bearer's handle in whatever kild that session belongs to —
+  // while an agent id names its bearer's handle in whatever kild that agent belongs to —
   // possibly a different one. The nearer identity is the truer one.
   if (input.token !== undefined) return resolveTokenActor(input.token, input.kildId, deps);
-  if (input.sessionId === undefined) return { ok: true, value: UNATTRIBUTED };
-  return deps.handleForSession(input.sessionId);
+  if (input.agentId === undefined) return { ok: true, value: UNATTRIBUTED };
+  return deps.handleForAgentId(input.agentId);
 }
 
 export function resolveNewKildActor(
   input: NewKildAttributionInput,
   deps: RestAttributionDeps,
 ): CommandResult<string> {
-  return resolveActor({ sessionId: input.openedBy, token: input.token, from: input.from }, deps);
+  return resolveActor({ agentId: input.openedBy, token: input.token, from: input.from }, deps);
 }
 
 export function resolveSendActor(
@@ -146,8 +147,5 @@ export function resolveSpawnActor(
   if (input.invitedBy !== undefined) {
     return reject('invitedBy is not allowed; the spawner is engine-derived');
   }
-  return resolveActor(
-    { kildId: input.kildId, sessionId: input.sessionId, token: input.token },
-    deps,
-  );
+  return resolveActor({ kildId: input.kildId, agentId: input.agentId, token: input.token }, deps);
 }

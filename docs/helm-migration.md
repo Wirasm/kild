@@ -376,7 +376,7 @@ It used to be omitted for owned agents (absent meant owned), which made
 ### Attach returns a credential, and it is optional
 
 Every attached sender used to be attributed as `'human'`, because attribution came from a
-kild session id and an attached harness has none. Two attached agents were indistinguishable.
+an agent id and an attached harness has none. Two attached agents were indistinguishable.
 
 `POST /api/kilds/:id/agents/attach` now also returns a **token**. Send it as
 `Authorization: Bearer <token>` and the message is attributed to **that handle**:
@@ -407,7 +407,8 @@ running the same persona are finally distinguishable.
 
 Worth stating because it reads like an open item and is not. `from` is **not** client-supplied
 attribution — supplying it is a hard rejection (`rest-attribution.ts`: *"from is not allowed;
-actor identity is engine-derived"*). The actor is resolved from the caller's `sessionId`, or is
+actor identity is engine-derived"*). The actor is resolved from the caller's `agentId` (renamed
+from `sessionId` — `session` means pi's conversation and nothing else), or is
 the human when no session is given. The field survives in the request schema only so that a
 client passing it gets a loud error instead of being silently ignored.
 

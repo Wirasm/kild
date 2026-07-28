@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentCallbacks } from './agent-manager.ts';
 import { DEFAULT_WAKE_CAP } from './inbox.ts';
-import { formatDelivery, KildManager } from './kild-manager.ts';
+import { formatDelivery } from './kild-delivery.ts';
+import { KildManager } from './kild-manager.ts';
 import { KildRegistry } from './kild-registry.ts';
 import type { AgentSpec, KildActionSuccess } from './kild-types.ts';
 import { worktreePath } from './worktree.ts';
@@ -1296,13 +1297,13 @@ test('an ordinary spawn carries no forkFrom, so a fresh agent starts fresh', asy
 // ── Attribution ───────────────────────────────────────────────────────────────
 // A message's `from` is the sender's HANDLE — the thing recipients address and the thing
 // `to[]` names. Both credentials resolve here because a handle is kild-level knowledge:
-// a kild session id (owned agents) and an attach token (harnesses kild does not own).
+// an agent id (owned agents) and an attach token (harnesses kild does not own).
 
 test('an owned agent is attributed to its HANDLE, never to the persona it runs', async () => {
   const { manager } = fixture();
   // The case that was attributed outright wrongly: handle `reviewer`, persona `coder`.
   await newKild(manager, [{ handle: 'reviewer', persona: 'coder' }]);
-  expect(manager.handleForSession('s-1')).toEqual({ ok: true, value: 'reviewer' });
+  expect(manager.handleForAgentId('s-1')).toEqual({ ok: true, value: 'reviewer' });
 });
 
 test('two agents sharing one persona are two senders on the log', async () => {
@@ -1311,8 +1312,8 @@ test('two agents sharing one persona are two senders on the log', async () => {
     { handle: 'left', persona: 'coder' },
     { handle: 'right', persona: 'coder' },
   ]);
-  for (const session of ['s-1', 's-2']) {
-    const actor = manager.handleForSession(session);
+  for (const agentId of ['s-1', 's-2']) {
+    const actor = manager.handleForAgentId(agentId);
     expect(actor).toMatchObject({ ok: true });
     if (actor.ok) await manager.send('kild-1', actor.value, ['left', 'right'], 'ping');
   }
@@ -1320,13 +1321,13 @@ test('two agents sharing one persona are two senders on the log', async () => {
   expect(manager.messages('kild-1')?.map((m) => m.from)).toEqual(['left', 'right']);
 });
 
-test('a session in no live kild has no handle to be attributed to', () => {
+test('an agent id in no live kild has no handle to be attributed to', () => {
   const { manager } = fixture();
   // An agent kild spawned outside a kild is nobody's peer — there is no handle to invent.
-  expect(manager.handleForSession('never-a-kild-agent')).toEqual({
+  expect(manager.handleForAgentId('never-a-kild-agent')).toEqual({
     ok: false,
     code: 'rejected',
-    message: 'unknown session: never-a-kild-agent',
+    message: 'unknown agent id: never-a-kild-agent',
   });
 });
 

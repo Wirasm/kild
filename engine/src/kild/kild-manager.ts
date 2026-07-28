@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 
 import { type AgentCallbacks, agentManager, type SpawnRequest } from './agent-manager.ts';
 import { type AttachIdentity, type AttachSuccess, AttachTokens } from './attach-token.ts';
-import { configuredCloseHook, configuredMemoryDir } from './config.ts';
-import { type KildCloseEvent, runCloseHook } from './hooks.ts';
 import { Inbox, type InboxDrain } from './inbox.ts';
+import { closeKild } from './kild-close.ts';
+import {
+  deliverMessage,
+  stoppedRecipients,
+  traceSend,
+  unknownRecipients,
+} from './kild-delivery.ts';
 import { KildRegistry } from './kild-registry.ts';
 import {
   type AgentSpec,
@@ -30,7 +34,6 @@ import {
   type SpawnContext,
   type StopOut,
 } from './kild-types.ts';
-import { appendKildLog, collectLedgerFacts, kildTranscriptPath } from './memory.ts';
 import { GENERAL_PERSONA, listPersonas } from './personas.ts';
 import { resolveBaseBranch, worktreePath } from './worktree.ts';
 import { kildGitStatus } from './worktree-status.ts';
@@ -38,46 +41,6 @@ import { kildGitStatus } from './worktree-status.ts';
 /** Soft cap on kild size — a cheap loop/scale guard in v1 (loop control is otherwise
  *  just the human kill switch). */
 const MAX_AGENTS = 8;
-
-/** The single chokepoint every kild message flows through: one structured trace line so a
- *  whole kild reads back as an ordered log (grep `kild.send`). Kept dead simple — swap
- *  the body for a real logger later without touching call sites. Programmatic tracers
- *  should instead subscribe to the manager (every message is broadcast as a `message`). */
-function traceSend(kildName: string, message: Message): void {
-  console.error(
-    JSON.stringify({
-      t: 'kild.send',
-      kild: kildName,
-      from: message.from,
-      to: message.to,
-      chars: message.text.length,
-    }),
-  );
-}
-
-/** How a delivered message reads to the agent receiving it: who, where, what. */
-export function formatDelivery(kildName: string, from: string, text: string): string {
-  return `[#${kildName}] @${from}: ${text}`;
-}
-
-/** Named recipients that are not in this kild's roster. The one addressing question the
- *  engine still answers, and it answers it with "no" — the sender names recipients, so
- *  the only thing left to check is whether those names exist. */
-function unknownRecipients(kild: Kild, to: string[]): string[] {
-  const handles = new Set(kild.agents.map((agent) => agent.handle));
-  return to.filter((recipient) => !handles.has(recipient));
-}
-
-/** Named recipients whose session is gone. A stopped agent STAYS on the roster — its handle
- *  never rebinds and its transcript stays addressable — so membership alone said "yes" to a
- *  send nothing could receive: it validated, `prompt()` returned false into a discarded
- *  return value, and the sender was told "Sent to the kild." A stopped handle is a real
- *  address with no reader, which is a rejection, not a delivery. */
-function stoppedRecipients(kild: Kild, to: string[]): string[] {
-  return to.filter((recipient) =>
-    kild.agents.some((agent) => agent.handle === recipient && agent.stopped),
-  );
-}
 
 interface AgentRuntime {
   subscribe(
@@ -449,14 +412,14 @@ export class KildManager {
   // persona — which named the wrong thing (two agents on one persona were
   // indistinguishable) and asked the wrong layer.
 
-  /** The handle the agent running this kild session speaks as.
+  /** The handle the agent running under this agent id speaks as.
    *
-   *  Rejects a session that is in no live kild: an agent kild spawned outside a kild has no
-   *  handle, and there is nothing to invent one from. If it wants a name on a kild's log it
-   *  attaches for one. */
-  handleForSession(sessionId: string): CommandResult<string> {
-    const located = this.registry.locateAgent(sessionId);
-    if (!located) return fail('rejected', `unknown session: ${sessionId}`);
+   *  Rejects an id that is in no live kild: an agent spawned outside a kild has no handle,
+   *  and there is nothing to invent one from. If it wants a name on a kild's log it attaches
+   *  for one. */
+  handleForAgentId(agentId: string): CommandResult<string> {
+    const located = this.registry.locateAgent(agentId);
+    if (!located) return fail('rejected', `unknown agent id: ${agentId}`);
     return ok(located.agent.handle);
   }
 
@@ -470,7 +433,7 @@ export class KildManager {
    *  agent gets an inbox and is addressable from the moment it attaches.
    *
    *  It also gets a TOKEN: the credential that makes it attributable when it sends, since
-   *  it has no kild session to be recognised by (see {@link AttachTokens}). Attaching is the
+   *  it has no agent process to be recognised by (see {@link AttachTokens}). Attaching is the
    *  one moment a harness becomes addressable, so it is the one moment it can be given an
    *  identity.
    *
@@ -562,66 +525,17 @@ export class KildManager {
     const archived = this.registry.remove(kildId);
     if (archived) this.broadcast({ archivedKild: archivedKildView(archived) });
     this.broadcast({ kilds: this.registry.summaries() });
-    if (archived) await this.close(kild);
-    return ok({ message: `Kild '${kild.name}' stopped.` });
-  }
-
-  /**
-   * The close lifecycle: write the ledger entry, emit the close event, run the declared
-   * hook. All three are mechanism — the engine states facts and fires what config
-   * declares; it has no opinion about what should be made of them.
-   *
-   * A stop must never fail because of any of this, so every failure is logged loud and
-   * swallowed here, at the one boundary where that is the right call.
-   */
-  private async close(kild: Kild): Promise<void> {
-    const dir = kild.worktree ? worktreePath(kild.worktree) : kild.cwd;
-    const memoryDir = await configuredMemoryDir(kild.cwd);
-    const ledgerPath = path.join(memoryDir, 'LOG.md');
-    try {
-      // Facts at the moment of stopping — after this the worktree can be landed or
-      // pruned and the answers change.
-      appendKildLog(
-        kild,
-        memoryDir,
-        await collectLedgerFacts(dir, kild.base, kild.landedSha, kild.landed),
-      );
-    } catch (err) {
-      console.error(
-        `kild: ledger append failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
-      );
-    }
-
-    const event: KildCloseEvent = {
-      kildId: kild.id,
-      name: kild.name,
-      cwd: kild.cwd,
-      worktree: kild.worktree,
-      base: kild.base,
-      transcriptPath: kildTranscriptPath(kild.id),
-      ledgerPath,
-    };
-    this.broadcast({ kildClosed: event });
-
-    try {
-      const hook = await configuredCloseHook(kild.cwd);
-      if (!hook) return;
-      // Not awaited: a hook is someone else's work, and a slow one must not hold a stop
-      // open. Its own failures are already captured inside.
-      void runCloseHook(hook, event, (spec, prompt) => {
-        const id = this.createId();
-        this.sessions.spawn(id, spec);
-        this.sessions.prompt(id, prompt, 'kild');
-      }).catch((err) => {
-        console.error(
-          `kild: onClose hook failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
-        );
+    if (archived) {
+      await closeKild(kild, {
+        announce: (event) => this.broadcast({ kildClosed: event }),
+        spawnHookAgent: (spec, prompt) => {
+          const id = this.createId();
+          this.sessions.spawn(id, spec);
+          this.sessions.prompt(id, prompt, 'kild');
+        },
       });
-    } catch (err) {
-      console.error(
-        `kild: onClose hook failed for '${kild.name}': ${err instanceof Error ? err.message : err}`,
-      );
     }
+    return ok({ message: `Kild '${kild.name}' stopped.` });
   }
 
   /** Spawn one agent session, wired so its control lines come back here. `invitedBy` is
@@ -792,7 +706,14 @@ export class KildManager {
     if (!message) return fail('not_found', `no such kild: ${kildId}`);
     traceSend(kild.name, message);
     this.broadcast({ message });
-    const undelivered = this.deliver(kild, message);
+    const undelivered = deliverMessage(kild, message, (id, text, from) =>
+      this.sessions.prompt(id, text, from),
+    );
+    if (undelivered.length > 0) {
+      // The roster just learned something about itself — write it down and say so.
+      this.registry.persistNow(kildId);
+      this.broadcast({ kilds: this.registry.summaries() });
+    }
     const intended = to.filter((t) => t !== from);
     return ok({
       message: undelivered.length
@@ -850,54 +771,6 @@ export class KildManager {
     this.registry.persistNow(kild.id);
     this.broadcast({ kilds: this.registry.summaries() });
     return ok(handles);
-  }
-
-  /**
-   * The whole of delivery: for each named recipient, push or queue. Returns the handles that
-   * could NOT be reached.
-   *
-   * Two branches, and they differ only in transport — an `owned` agent is a process kild
-   * can prompt, an `attached` one is a harness that pulls from its inbox. The single
-   * exception is the sender: an agent is never delivered its own message.
-   *
-   * `prompt()` answers whether the process was there, and that answer used to be discarded:
-   * a session that had died on its own (a crash — not a `stop`, so nothing marked the roster)
-   * reported a successful send into nothing, and flipped `idle` false on an agent that would
-   * never emit `agent_end` to flip it back. Delivery is the moment the engine finds out, so
-   * it is the moment the roster learns: an unreachable agent is marked stopped, its idle
-   * state is left honest, and the sender is told.
-   */
-  private deliver(kild: Kild, message: Message): string[] {
-    const undelivered: string[] = [];
-    for (const handle of message.to) {
-      if (handle === message.from) continue;
-      const agent = kild.agents.find((candidate) => candidate.handle === handle);
-      if (!agent) continue;
-      if (agent.ownership === 'attached') {
-        // `idle` deliberately does NOT flip here — the harness really is idle until it
-        // takes its next turn; the drain is what moves it.
-        agent.inbox.enqueue({ from: message.from, text: message.text, ts: Date.now() });
-        continue;
-      }
-      const delivered = this.sessions.prompt(
-        agent.id,
-        formatDelivery(kild.name, message.from, message.text),
-        message.from,
-      );
-      if (delivered) {
-        // A delivered turn reactivates the agent: it is no longer waiting.
-        agent.idle = false;
-        continue;
-      }
-      undelivered.push(agent.handle);
-      agent.stopped = true;
-      agent.idle = true;
-    }
-    if (undelivered.length > 0) {
-      this.registry.persistNow(kild.id);
-      this.broadcast({ kilds: this.registry.summaries() });
-    }
-    return undelivered;
   }
 
   private async validateAgents(
