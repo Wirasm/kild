@@ -765,3 +765,36 @@ test('`kild show` reports an unreachable engine instead of an empty log', async 
   messagesHangMs = 0;
   engineTimeoutMs = '30000';
 }, 20_000);
+
+test.each([
+  ['abc', 'non-numeric'],
+  ['', 'empty'],
+  ['0', 'zero'],
+  ['-5', 'negative'],
+  ['30s', 'a unit suffix'],
+])('KILD_ENGINE_TIMEOUT_MS=%s is refused (%s)', async (value) => {
+  // An unusable override must not degrade into a timeout of zero, which aborts every request
+  // the instant it is made and looks exactly like an engine refusing to talk. Nor into a
+  // cryptic RangeError from AbortSignal, which names neither the variable nor the fix.
+  engineTimeoutMs = value;
+  const bad = await runCli(['log', 'kild-9']);
+  expect(bad.exitCode).toBe(1);
+  expect(bad.stderr).toContain('KILD_ENGINE_TIMEOUT_MS');
+  engineTimeoutMs = '30000';
+});
+
+test('an engine failure whose text contains "timed out" is NOT reported as maybe-completed', async () => {
+  // `land`/`rm` report an unknown outcome on a real timeout, because a client abort does not
+  // stop server-side work. Deciding that by searching the message for "timed out" would
+  // misread a relayed git error as "your merge may have gone through" — and send an operator
+  // looking for a merge that never happened.
+  drainResponse = {
+    status: 409,
+    body: { error: 'git merge failed: operation timed out talking to the object store' },
+  };
+  const landed = await runCli(['land', 'kild-9', '--execute']);
+  expect(landed.exitCode).toBe(1);
+  expect(landed.stderr).toContain('timed out talking to the object store');
+  expect(landed.stderr).not.toContain('may still be completing');
+  withNoMail();
+});

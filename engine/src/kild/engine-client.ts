@@ -46,7 +46,34 @@ export interface KildActionResponse {
  * detection, or a tree on a network mount, can legitimately exceed it, and an operator who
  * hits that needs a way out that is not editing the source.
  */
-const ENGINE_TIMEOUT_MS = Number(process.env.KILD_ENGINE_TIMEOUT_MS ?? 30_000);
+const ENGINE_TIMEOUT_MS = engineTimeoutMs();
+
+/**
+ * The error `engineFetch` throws when OUR deadline fired — a TYPE, not a phrase.
+ *
+ * Callers need to tell "the engine never answered" from "the engine answered with a failure",
+ * because for a mutating call the first means the outcome is unknown and the second means it
+ * did not happen. Deciding that by looking for "timed out" in the message would be reading
+ * intent out of prose, which this codebase forbids for exactly the reason it is wrong here:
+ * an engine-side error relayed verbatim (a git message, a 409 body) can contain those words
+ * and would be misread as "your merge might have gone through".
+ */
+export class EngineTimeout extends Error {}
+
+/** Parsed once, loudly. An unusable override must not degrade into a timeout of zero, which
+ *  aborts every request the instant it is made — a misconfiguration that would look exactly
+ *  like an engine that is refusing to talk. */
+function engineTimeoutMs(): number {
+  const raw = process.env.KILD_ENGINE_TIMEOUT_MS;
+  if (raw === undefined) return 30_000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `KILD_ENGINE_TIMEOUT_MS must be a positive number of milliseconds (got ${JSON.stringify(raw)})`,
+    );
+  }
+  return parsed;
+}
 
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // A caller's own signal wins outright rather than being combined: it is a narrower deadline
@@ -62,7 +89,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
     // name. Name-matching would relabel the first future caller that cancels for any other
     // reason — a Ctrl-C, say — as "the engine did not answer", which is the opposite of true.
     if (signal.aborted && ourDeadline) {
-      throw new Error(
+      throw new EngineTimeout(
         `${path} timed out after ${ENGINE_TIMEOUT_MS}ms — the engine accepted the connection ` +
           'and did not answer (set KILD_ENGINE_TIMEOUT_MS to allow longer)',
         { cause: err },

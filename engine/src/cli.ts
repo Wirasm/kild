@@ -17,6 +17,7 @@ import {
   attachAgent,
   disposeKild,
   drainInbox,
+  EngineTimeout,
   getKild,
   kildMessages,
   kildsStatus,
@@ -571,7 +572,10 @@ async function mayHaveHappened<T>(verb: string, call: () => Promise<T>): Promise
   try {
     return await call();
   } catch (err) {
-    if (!errText(err).includes('timed out')) throw err;
+    // Typed, not string-matched. An engine-side failure whose message merely CONTAINS "timed
+    // out" — a relayed git error, a 409 body — must never be reported as "this may have
+    // completed", because that sends an operator to check for a merge that never happened.
+    if (!(err instanceof EngineTimeout)) throw err;
     throw new Error(
       `${verb} timed out — the engine does NOT cancel work when the client gives up, so this ` +
         `may still be completing or already done. Check with \`kild ls\` and git before ` +
