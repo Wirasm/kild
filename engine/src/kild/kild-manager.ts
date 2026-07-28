@@ -580,7 +580,11 @@ export class KildManager {
     kild.agents.push({
       handle: spec.handle,
       id: agentId,
-      persona: spec.persona,
+      // The RESOLVED persona — what the process actually runs, which is the explicit one or
+      // the handle. Storing the unresolved `spec.persona` recorded `undefined` for an agent
+      // demonstrably running a persona, so the roster, the wire and the ledger each gave a
+      // different answer and none of them the true one.
+      persona: spec.resolvedPersona,
       model: spec.model,
       invitedBy,
     });

@@ -366,7 +366,10 @@ test('liveIdentities carries identity and roster only — no cost, no log, no gi
       {
         handle: 'coder',
         ownership: 'owned',
-        persona: undefined,
+        // The RESOLVED persona: spawned with no explicit one, so it runs its handle. The
+        // roster used to store `undefined` while the process ran `coder`, so the wire and
+        // the ledger each reported a different persona and neither the true one.
+        persona: 'coder',
         model: undefined,
         idle: undefined,
         stopped: undefined,

@@ -173,7 +173,7 @@ test('a git failure is recorded as unknown, never as an invented land result', (
   expect(entry).toContain('- landed: unknown — git: base ref not found: main');
 });
 
-test('an agent with no reported spend and an attached agent still get a line', () => {
+test('an agent whose persona was never recorded is not given an invented one', () => {
   const entry = formatKildLogEntry(
     kild('/p', {
       agents: [
@@ -184,8 +184,25 @@ test('an agent with no reported spend and an attached agent still get a line', (
     facts(),
     new Date('2026-07-24T12:00:00Z'),
   );
-  expect(entry).toContain('- agent @coder (default)\n');
+  // Not `(default)`. The roster records the persona that actually ran, so a genuinely
+  // absent one (a kild persisted before it was recorded) is reported as absent rather than
+  // named — the ledger holds facts, and `default` here was a guess that read as one.
+  expect(entry).toContain('- agent @coder\n');
+  expect(entry).not.toContain('default');
   expect(entry).toContain('- attached @claude');
+});
+
+test('a recorded persona and model both ride the agent line', () => {
+  const entry = formatKildLogEntry(
+    kild('/p', {
+      agents: [{ handle: 'reviewer', id: 's-1', persona: 'coder', model: 'anthropic/opus' }],
+    }),
+    facts(),
+    new Date('2026-07-24T12:00:00Z'),
+  );
+  // The handle and the persona differ on purpose: attribution used to report the persona as
+  // if it were the name, which made two agents sharing a persona indistinguishable.
+  expect(entry).toContain('- agent @reviewer (coder, anthropic/opus)');
 });
 
 // ── the facts themselves, against a real repo ────────────────────────────────
