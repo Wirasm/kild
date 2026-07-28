@@ -34,7 +34,7 @@ answer to "who is this addressed to?" was allowed to exist.
 More than expected. From `inbox.ts`, on the wake cap:
 
 > *"THE loop guard: waking an attached harness costs the owner real credits, and **two attached
-> participants replying to each other would otherwise wake each other forever.** It lives here —
+> agents replying to each other would otherwise wake each other forever.** It lives here —
 > in the engine — so every harness inherits it and no hook can opt out."*
 
 The primary failure mode of agent-to-agent comms already has a guard, deliberately placed where

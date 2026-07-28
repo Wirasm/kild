@@ -236,10 +236,10 @@ deleted behaviour: lead routing, idle nudge, decision-blocked close, operator no
 | `HANDOVER.md` | **RESHAPE** — supersede the room-patching roadmap (slices 5/6 are subsumed by this teardown). |
 | `README.md` · `engine/README.md` | **RESHAPE** — drop the "Flue layer" src-map lines; Room→kild. |
 | `engine/COMPARISON.md` | **DIE** (or move to an `archive/`) — historical Flue-vs-Rust decision record; the Flue bet it defends is now being deleted. |
-| `docs/attached-participants.md` | **RESHAPE (keep)** — this is the honryo transport spec; rename room→kild. |
+| `docs/attached-participants.md` | **DONE** — rewritten as `docs/attached-agents.md` (the transport spec, against the shipped surface). |
 | `docs/fleet-observability.md` · `docs/room-mailbox-notes.md` · `docs/pi-extension-plan.md` | **DIE** — trackers/review-notes for work now either done or being torn out. |
 | `docs/upstream-worktree-sandbox.md` | **DIE** — tied to the Flue sandbox being deleted. |
-| `docs/manual-smoke-skills-profile.md` | **RESHAPE** — retarget `kild operator` → new verbs. |
+| `docs/manual-smoke-skills-profile.md` | **DONE** — retargeted off `kild operator`; notes what the profile does *not* scope. |
 
 ---
 

@@ -143,9 +143,10 @@ side: **whatever tooling writes files into every worktree should gitignore them.
 `git status --porcelain` already respects `.gitignore`, so ignored litter stops registering
 as dirty and normal cleanup starts working again.
 
-For trees already stranded, `kild worktree rm <name> --project <p> --force` bypasses the
-dirty check. Confirm the branch is merged first — force discards untracked files without
-listing them.
+For trees already stranded, `kild rm <name> --force` bypasses the authored-commits refusal —
+there is no `kild worktree` group any more, the worktree family folded into the kild
+collection. It LISTS what it discarded (and says so explicitly when git could not produce
+that list), and the `kild/<name>` branch always survives, so force costs no commits.
 
 ---
 

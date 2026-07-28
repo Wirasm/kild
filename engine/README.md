@@ -29,12 +29,12 @@ ChatGPT OAuth work natively).
 src/
   server.ts        HTTP (projects/kilds/agents/open) + WS (kilds) — API server + daemon
   cli.ts           the `kild` CLI — kild/project/persona/run
-  worker.ts        per-session subprocess; ensures the worktree, then createAgentSession({cwd})
+  agent.ts         per-agent subprocess; ensures the worktree, then createAgentSession({cwd})
   kild/
     config.ts      kild config (plugins, base branch, memory) + state dir (~/.config/kild)
     projects.ts    project registry
-    agents.ts      agents from .kild/.claude/.pi convention dirs
-    sessions.ts    SessionManager: coding-agent SDK sessions → UiEvent stream
+    personas.ts    personas from .kild/.claude/.pi convention dirs
+    agent-manager.ts  one subprocess per agent: coding-agent SDK sessions → UiEvent stream
     worktree.ts    git worktree CRUD + ensureWorktree + merge-prune
     kild-trees.ts  the kild inventory as GIT knows it (so a record-less tree is addressable)
     kild-disposal.ts  the disposal guard: authored commits refuse, litter does not

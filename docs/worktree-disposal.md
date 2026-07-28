@@ -70,6 +70,11 @@ engine change.
 
 ## Reclaiming what is already stranded
 
-`forceRemoveWorktree` (`kild worktree rm --force`) still works and bypasses the dirty check —
-it is the explicit destructive verb, which is exactly what this situation calls for. Confirm the
-branch is merged before forcing, because force discards untracked files without listing them.
+`kild rm <id|worktree-name> --force` (there is no `kild worktree` group — the worktree family
+was folded into the kild collection, see `api-surface.md` §3) is the explicit destructive verb,
+which is exactly what this situation calls for. It bypasses the authored-commits refusal; the
+`kild/<name>` branch always survives, so no commit is lost.
+
+Unlike the old force path, it **lists what it discarded** — and when git cannot produce that
+list it says so (`discardedError`) rather than reporting an empty one, which would read as
+"nothing was lost" at the moment something was.

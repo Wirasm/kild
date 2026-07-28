@@ -58,4 +58,5 @@ One inhabitant type: the **agent**. No ranks, no lead, no operator, no privilege
 
 `docs/VOCABULARY.md` (naming) · `docs/upgrading.md` (what an existing setup must change) ·
 `docs/helm-migration.md` (the API, for clients) · `docs/onclose-hook.md` (the lifecycle seam) ·
+`docs/attached-agents.md` (the harness-kild-does-not-own transport) ·
 `docs/api-surface.md` and `docs/DEMOLITION.md` (why the shape is what it is)
