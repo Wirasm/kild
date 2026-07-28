@@ -222,3 +222,53 @@ The registry itself is load-bearing and stays — it scopes the unscoped `GET /a
 resolves `--project` / `project=` — but a loopback write route for a local file the operator
 owns was a second way to do what `kild project add` already does. Cheap to reinstate if a UI
 ever wants a project picker; there is no reason to carry it until one does.
+
+## 10. Failure shapes a client cannot learn from the routes
+
+Two responses on this surface are not what their status code suggests. Both were found by a
+client porting against it, in both cases after the wrong guess had already shipped — so they
+are written down rather than changed. Neither is a defect; each is a real distinction the wire
+makes and the docs did not.
+
+### `POST /api/kilds/:id/land` returns 409 from two places, with different bodies
+
+```
+refused merge        409  { ...full land report, dryRun: false }   // landMerge said !merged
+unresolvable target  409  { error, code }                          // resolveKild refused first
+```
+
+`kildResultStatus` maps every non-`not_found` failure to 409, so a kild that is archived,
+orphaned or otherwise unaddressable answers with a bare `{error, code}` — while a merge that
+genuinely would not apply answers with the **entire** report, which also contains an `error`.
+A real example of the bare form:
+
+```json
+{ "error": "kild c8971dd5 is archived (its agents are gone) — address its tree as 'sidebar-observe'",
+  "code": "invalid_state" }
+```
+
+**Discriminate on a field only the report carries — `wouldMerge` — never on the presence of
+`error`.** A client that decodes every 409 as a report throws on the bare one and replaces that
+message with a decode failure. That is worse than the original error: the message names the fix
+(address the tree by name), and losing it makes a correctly-behaving engine look broken.
+
+The two really are different kinds of failure — one is "this merge will not apply", the other
+is "there is nothing here to merge" — which is why the shapes differ and why this is a
+documentation fix rather than an API change.
+
+### `GET /api/kilds/:id/agents/:handle/transcript` refuses for an attached agent
+
+```
+owned     200  { entries: [{ role, text, toolCalls? }], total }
+attached  404  { error: "agent @claude has no pi session file (yet)" }
+```
+
+`ownership` decides the **source**, not the fidelity. An attached agent is a harness kild does
+not own, so there is no pi session to read and the route refuses rather than returning an empty
+transcript — empty would assert that the agent has done nothing, when the truth is that the
+question has no answer here. A client should read the kild's message log for those agents
+instead; it is a different source, not a thinner view of the same one.
+
+One detail of the `owned` shape that quietly breaks a careless renderer: an assistant turn that
+**only** calls tools has `text: ""` with the calls in `toolCalls`. Rendering `text` alone drops
+precisely the turns that did something.
