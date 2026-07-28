@@ -165,11 +165,34 @@ that list), and the `kild/<name>` branch always survives, so force costs no comm
 | Var | Status |
 |---|---|
 | `KILD_HOME` · `KILD_PORT` · `KILD_ENGINE` | unchanged |
-| `KILD_ROOM` → `KILD_KILD_ID` | renamed (Stop-hook wiring) |
-| `KILD_PARTICIPANT` → `KILD_HANDLE` | renamed (Stop-hook wiring) |
+| `KILD_ROOM` → `KILD_KILD_ID` | renamed (Stop-hook wiring), and **demoted** — see below |
+| `KILD_PARTICIPANT` → `KILD_HANDLE` | renamed (Stop-hook wiring), and **demoted** — see below |
 | `KILD_OPERATOR` | **removed** — the operator tier is gone |
 | `KILD_ROLE=worker` → `KILD_ROLE=agent` | renamed (internal; only matters if you invoke the worker directly) |
 | `KILD_SESSION_ID` → `KILD_AGENT_ID` | renamed (internal — the engine sets it on every agent it spawns). `session` means pi's conversation and nothing else, and this is the engine's own id for an agent's process. The REST field it is presented as renamed with it: `sessionId` → `agentId`. |
+
+## Attaching no longer needs the environment
+
+`kild attach` now records `{kild, handle}` against the harness session id, and `kild inbox` /
+`kild send` resolve it. Two consequences for an existing setup:
+
+- **`kild attach <id> --as <handle>` is the whole setup.** You no longer have to relaunch a
+  session from a prepared shell to attach it to a kild opened after it started. Re-wire the
+  Stop hook by copying `hooks/claude-stop` again — it now reads `session_id` off the hook
+  payload instead of gating on `$KILD_KILD_ID`.
+- **`KILD_KILD_ID` / `KILD_HANDLE` still work, but they now LOSE to an actual attach.** They
+  were the highest-priority source and are now the lowest. If you pinned a session by
+  exporting them, that still works; if you export them *and* attach, the attach wins.
+
+  This inversion is deliberate. A harness settings file (`.claude/settings.local.json` and
+  friends) is re-read on every session start including resumes, outranks anything a shell
+  exports, and cannot be cleared from the shell — so a stale entry naming an archived kild is
+  invisible and would drain nothing forever while reporting success. **Check yours now:** a
+  leftover `KILD_ROOM`/`KILD_PARTICIPANT` there is exactly this trap, and renaming the vars
+  did not remove it.
+
+- **The hook's `claude` handle default is gone.** It guessed a handle for a session that had
+  not said which one it held; the record now knows. Set `KILD_HANDLE` if you want to pin one.
 
 ## For helm and other API clients
 

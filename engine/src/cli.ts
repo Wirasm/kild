@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { findAttachment, recordAttachment } from './kild/attachment.ts';
 import { claudeStopOutput } from './kild/claude-stop.ts';
 import {
   attachAgent,
@@ -54,6 +55,7 @@ const { values, positionals } = parseArgs({
     since: { type: 'string' }, // `kild log --since <seq>`: only messages after that cursor
     execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
     task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
+    session: { type: 'string' }, // `kild attach|inbox|send --session <id>`: the harness session
   },
 });
 
@@ -245,13 +247,75 @@ async function kildCwd(): Promise<string> {
   return (await resolveProjectFlag()) ?? process.cwd();
 }
 
+/**
+ * The harness session this invocation belongs to, when it belongs to one.
+ *
+ * `--session` wins so a harness that knows its own id can say so outright; otherwise take
+ * the one Claude Code exports to the tools it runs. A plain human's shell has neither and
+ * is simply not a harness session, which is correct.
+ *
+ * A `function` declaration, not a `const` arrow: `dispatch()` runs at the top of this
+ * module, so anything it reaches has to be hoisted or it is still in the temporal dead zone
+ * when the first command calls it.
+ */
+function harnessSession(): string | undefined {
+  return values.session ?? process.env.CLAUDE_CODE_SESSION_ID ?? undefined;
+}
+
+/**
+ * The (kild, handle) this invocation acts as, resolved field by field:
+ * **an explicit argument, then this session's recorded attachment, then the environment.**
+ *
+ * The record outranks the environment, which is the opposite of what it looks like it should
+ * be, and the reason is worth keeping: an environment variable here is ambient configuration
+ * that nobody re-reads, while a record exists only because THIS session ran `kild attach` —
+ * a deliberate, recent act naming a kild that existed at the time. When the two disagree, the
+ * deliberate act is the truer one.
+ *
+ * It is also the only ordering that survives the trap this was found in. A harness's settings
+ * file can carry a kild id, that file is re-read on every start including resumes, and it
+ * outranks anything a shell exports — so a stale entry pointing at an ARCHIVED kild is
+ * invisible, unkillable from the shell, and drains nothing forever while reporting success.
+ * Ranking it below an actual attach means a real attach always wins, and the stale value can
+ * only ever be a fallback for a session that never attached at all.
+ *
+ * Pinning up front still works, which was the point of keeping the environment at all. Fields
+ * resolve independently, so a hook that passes `--as` and lets the id resolve works too.
+ */
+async function resolveAttachment(
+  id: string | undefined,
+  handle: string | undefined,
+): Promise<{ kildId?: string; handle?: string }> {
+  if (id && handle) return { kildId: id, handle };
+  const session = harnessSession();
+  // Deliberately NOT guarded. An unreadable record means "there may be an attachment and I
+  // cannot read it", and a `kild send` that swallowed that would post the message with no
+  // credential — silently unattributed, which is the exact bug this file exists to fix. The
+  // one caller allowed to degrade to silence is the turn-end hook, and it does so at its own
+  // call site where it knows it is a hook.
+  const record = session ? await findAttachment(session) : null;
+  return {
+    kildId: id ?? record?.kildId ?? process.env.KILD_KILD_ID ?? undefined,
+    handle: handle ?? record?.handle ?? process.env.KILD_HANDLE ?? undefined,
+  };
+}
+
 /** `kild attach <id> --as <handle>` — register an ATTACHED agent: a harness kild
  *  does not own (the Claude Code session you are driving) claiming a `@handle` in the
- *  kild. Nothing is spawned; the handle is addressable immediately. Idempotent. */
+ *  kild. Nothing is spawned; the handle is addressable immediately. Idempotent.
+ *
+ *  The attachment is also recorded against this session's own id, which is what lets the
+ *  session find its handle again later without carrying it in the environment. That is the
+ *  whole of what makes attaching mid-session work: a process's environment is fixed at exec
+ *  time, so a session opened before the kild existed can never be told about it any other
+ *  way. The token is deliberately NOT recorded — it dies with the engine, so a copy on disk
+ *  would go stale and be rejected; `send` mints a fresh one from the idempotent attach. */
 async function kildAttach(id: string | undefined): Promise<void> {
   const handle = values.as;
   if (!id || !handle) throw new Error('usage: kild attach <id> --as <handle>');
   const result = await attachAgent(id, handle);
+  const session = harnessSession();
+  if (session) await recordAttachment(session, id, handle);
   console.log(json ? JSON.stringify(result, null, 2) : result.message);
 }
 
@@ -266,12 +330,29 @@ async function kildAttach(id: string | undefined): Promise<void> {
  * never stop the operator from finishing a turn. Without the flag it is an ordinary CLI
  * verb and failures are ordinary loud errors.
  */
-async function kildInbox(id: string | undefined): Promise<void> {
+async function kildInbox(idArg: string | undefined): Promise<void> {
   const claudeStop = values.format === 'claude-stop';
-  const handle = values.as;
+  // Omitting both resolves the kild this session attached to — the case the environment
+  // could never serve, since a session that started before the kild existed has no way to
+  // be told about it.
+  //
+  // This is the one place the hook contract applies: as a hook, an unresolvable or unreadable
+  // attachment is silence; as an ordinary verb it is a loud error naming the real cause, not a
+  // usage message that sends the operator looking at their own syntax.
+  let resolved: { kildId?: string; handle?: string };
+  try {
+    resolved = await resolveAttachment(idArg, values.as);
+  } catch (err) {
+    if (!claudeStop) throw err;
+    return;
+  }
+  const { kildId: id, handle } = resolved;
   if (!id || !handle) {
-    if (claudeStop) return; // misconfigured hook → silence, never a blocked turn
-    throw new Error('usage: kild inbox <id> --as <handle> [--format claude-stop]');
+    if (claudeStop) return; // not attached → silence, never a blocked turn
+    throw new Error(
+      'usage: kild inbox [<id> --as <handle>] [--session <id>] [--format claude-stop]\n' +
+        '  omit id/--as to use the kild this session attached to',
+    );
   }
   if (values.format !== undefined && !claudeStop) {
     throw new Error(`unknown --format: ${values.format} (supported: claude-stop)`);
@@ -547,9 +628,36 @@ async function kildSend(id: string, text: string): Promise<void> {
       `kild ${id}`,
     );
   }
-  const res = await sendMessage(id, to, text);
+  const res = await sendMessage(id, to, text, undefined, await attachedSendToken(id));
   if (json) console.log(JSON.stringify(res, null, 2));
   else console.error(res.message);
+}
+
+/**
+ * The attached-harness credential for a send, when this invocation is one.
+ *
+ * Without it an attached sender presents nothing and lands on the log as the unattributed
+ * label — indistinguishable from the operator typing, and from every other attached agent in
+ * the kild. That is the whole bug: the engine has minted this credential at `attach` all
+ * along and the CLI threw it away.
+ *
+ * Three cases produce no token, all of them correct:
+ *  - an agent the engine SPAWNED — it proves itself with `KILD_AGENT_ID`, and the engine sets
+ *    `KILD_KILD_ID`/`KILD_HANDLE` on it too, so without this guard a spawned agent would
+ *    attach a second, shadow copy of itself over its own handle;
+ *  - a send to any kild other than the one this session attached to — a handle is unique
+ *    within one kild and means nothing outside it, so there is no identity to present;
+ *  - a plain human's shell, which has no attachment at all.
+ *
+ * Minting is not guarded: if we resolved a handle for this very kild and `attach` then fails,
+ * that is a real failure to report. Falling back to sending unattributed would silently
+ * reintroduce the bug at exactly the moment it matters.
+ */
+async function attachedSendToken(kildId: string): Promise<string | undefined> {
+  if (process.env.KILD_AGENT_ID) return undefined;
+  const { kildId: attachedTo, handle } = await resolveAttachment(undefined, values.as);
+  if (!handle || attachedTo !== kildId) return undefined;
+  return (await attachAgent(kildId, handle)).token;
 }
 
 /** `kild stop <id>` — stop a specific kild by id. With `--as <handle>` it stops that ONE
