@@ -153,7 +153,7 @@ export async function runAgent(): Promise<never> {
 
   let preamble = personaName ? await resolvePersonaInstructions(personaName, cwd) : null;
   // Every session gets the generic mechanism guide (how to operate) on top of everything,
-  // above the persona — so even a bare `default` session is competent. One-shot: it rides
+  // above the persona — so even a bare `general` session is competent. One-shot: it rides
   // only the first delivered turn. The kild-comms part is conditional inside the prompt.
   // A delegating (in-kild) session also gets the configured model catalog so it can pick
   // a model per fan-out agent.

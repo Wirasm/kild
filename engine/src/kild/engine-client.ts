@@ -152,10 +152,13 @@ export async function drainInbox(kildId: string, handle: string): Promise<DrainI
 }
 
 /** Spawn an agent into a live kild. Unlike the WS frame this ANSWERS: a rejection comes
- *  back as a thrown error carrying the engine's reason, never a silent no-op. */
+ *  back as a thrown error carrying the engine's reason, never a silent no-op.
+ *
+ *  `task` rides the same request but is NOT part of the spec — it is the new agent's first
+ *  message, delivered from whoever the engine resolves this caller to be. */
 export async function spawnKildAgent(
   kildId: string,
-  agent: AgentSpec,
+  agent: AgentSpec & { task?: string },
 ): Promise<{ ok: true; handle: string; message: string }> {
   return engineFetch(`/api/kilds/${encodeURIComponent(kildId)}/agents`, {
     method: 'POST',

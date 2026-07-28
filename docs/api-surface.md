@@ -106,6 +106,38 @@ error the migration guide made; see the `collidesWith` note there.)
 **Give messages a monotonic `seq`.** `ts` is `Date.now()` and can go backwards, so it cannot be
 a cursor. Add `seq` and let clients page with `?since=<seq>`.
 
+## 6. `task` on spawn, and `invitedBy` on the wire
+
+**Decision: `spawn` takes an optional `task`, delivered as the new agent's first message.**
+Not a new concept and not a stored field — it fuses `spawn` + `send` exactly as `kickoff`
+already does for `POST /api/kilds`, because every real delegation was spawn-then-send and a
+spawn on its own produces an agent that sits idle. One tool call instead of two, and the
+mechanism an agent has to learn is unchanged: a task is a message.
+
+**It is not stored on the agent.** The record of what an agent was asked to do is message
+`seq n` on the kild log, which a later revision naturally follows. A copy on the roster would
+be a second answer that goes stale the moment the spawner says "actually, do X instead" — and
+the log already had the true one.
+
+**Consequence, and the thing that had to be right:** the spawner is now a *message sender*.
+`POST /api/kilds/:id/agents` used to take `invitedBy` from the request body, which was
+harmless while it was only roster metadata. Once it becomes the `from` of a message it is a
+forgery path, so the route stopped trusting it: the spawner is resolved from the caller's
+credential like every other actor (§4), and a present `invitedBy` is a `409` naming that
+field. An agent's own `spawn` control line carries no sender and cannot — the engine takes it
+from the session the line arrived on. The agent says what it wants done; the engine says who
+asked.
+
+**`invitedBy` is exposed on the cheap roster view.** It was already recorded and already free
+to read; omitting it just meant nobody could see the spawn edge. It is what tells five agents
+running one persona apart by origin, and it is ground truth where inferring the same thing
+from the log would be guesswork.
+
+**Identification stays deliberately plain:** the spawner chooses the handle (mandatory,
+unique), `invitedBy` says who spawned it, and the first message says what it was for. No
+generated ids for the agent to juggle, no `task` index, no per-instance naming scheme in the
+engine.
+
 ## Not adopted yet
 
 Deleting `GET|POST /api/projects` is proposed on the grounds that no client uses them. Confirmed

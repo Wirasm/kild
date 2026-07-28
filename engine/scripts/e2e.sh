@@ -109,6 +109,22 @@ chk "ownership axis on a live kild's agents"    "$LIVE" "ownership"
 chk "the attached harness is owned by nobody"   "$LIVE" '"ownership":"attached"'
 chk "the spawned agent is owned"                "$LIVE" '"ownership":"owned"'  
 
+echo "══ 4b. spawn with a task: the fused spawn+send"
+SPT=$(curl -s -X POST $E/api/kilds/$ID/agents -H 'content-type: application/json' \
+  -d '{"handle":"reviewer","persona":"general","task":"review the auth diff"}')
+chk "spawn with a task succeeds"                "$SPT" '"ok":true'
+chk "and says who it was tasked as"             "$SPT" "Tasked it as"
+TM=$(curl -s "$E/api/kilds/$ID/messages")
+chk "the task is on the log as a message"       "$TM" "review the auth diff"
+chk "sent from the engine-derived spawner"      "$TM" '"from":"human"'
+LV=$(curl -s "$E/api/kilds")
+chk "invitedBy is on the cheap roster"          "$LV" '"invitedBy":"human"'
+FORGE=$(curl -s -o "$RIG/forge" -w '%{http_code}' -X POST $E/api/kilds/$ID/agents \
+  -H 'content-type: application/json' -d '{"handle":"forged","invitedBy":"coder","task":"do X"}')
+chk "a caller-asserted invitedBy is refused"    "$FORGE" "409"
+chk "and the refusal names that field"          "$(cat $RIG/forge)" "invitedBy is not allowed"
+chkno "nothing was spawned for it"              "$(curl -s $E/api/kilds)" "forged"
+
 echo "══ 5. messages are their own cursored resource"
 M=$(curl -s "$E/api/kilds/$ID/messages")
 chk "seq is present"                           "$M" '"seq"'

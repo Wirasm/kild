@@ -53,6 +53,7 @@ const { values, positionals } = parseArgs({
     git: { type: 'boolean', default: false }, // `kild ls --git`: pay for git/cost state
     since: { type: 'string' }, // `kild log --since <seq>`: only messages after that cursor
     execute: { type: 'boolean', default: false }, // `kild land --execute`: merge for real
+    task: { type: 'string' }, // `kild spawn --task <text>`: the new agent's first message
   },
 });
 
@@ -92,7 +93,9 @@ async function dispatch(): Promise<void> {
     }
     case 'spawn': {
       if (!action || !values.as) {
-        throw new Error('usage: kild spawn <id> --as <handle> [--persona p] [--model m]');
+        throw new Error(
+          'usage: kild spawn <id> --as <handle> [--persona p] [--model m] [--task <text>]',
+        );
       }
       return kildSpawn(action, values.as);
     }
@@ -217,8 +220,8 @@ async function agentsList(): Promise<void> {
 
 /**
  * `kild new <goal>` — opens a kild of agents (`--agents a,b,c`, each a
- * persona from the project's own personas; with none, one general-purpose `default`
- * agent), sends the goal to the agents named by `--to`, and streams every message. With
+ * persona from the project's own personas; with none, one `general` agent), sends the goal
+ * to the agents named by `--to`, and streams every message. With
  * `--worktree <name>` the whole kild shares one `kild/<name>` tree (agents attach to it).
  * You can keep typing to send more messages to the same recipients.
  * The run ends when the kild does: an agent stops it with its `stop` tool
@@ -414,14 +417,17 @@ function roster(agents: Array<{ handle: string; model?: string; stopped?: boolea
     .join(', ');
 }
 
-/** `kild spawn <id> --as <handle> [--persona p] [--model m]` — add an agent to a live
- *  kild. Answers: a rejection (unknown persona, duplicate handle, capacity) is an error
- *  with the engine's reason, not a shrug. */
+/** `kild spawn <id> --as <handle> [--persona p] [--model m] [--task <text>]` — add an agent
+ *  to a live kild. `--task` is its first message (attributed to the human, like every other
+ *  send from this CLI); without one the agent starts idle until something sends to it.
+ *  Answers: a rejection (unknown persona, duplicate handle, capacity) is an error with the
+ *  engine's reason, not a shrug. */
 async function kildSpawn(id: string, handle: string): Promise<void> {
   const res = await spawnKildAgent(id, {
     handle,
     persona: values.persona,
     model: values.model,
+    task: values.task,
   });
   console.log(json ? JSON.stringify(res, null, 2) : res.message);
 }

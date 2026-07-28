@@ -46,7 +46,7 @@ One word per concept. See `docs/VOCABULARY.md`.
 | `kild log <id> [--since <seq>]` | Read a kild's message thread. Each message carries a monotonic `seq`; `--since` is an **exclusive cursor** — pass the last seq you saw to get only what arrived after it. Works on a **stopped/archived** kild too (its log is the read-only record). Listings never carry messages |
 | `kild show <id>` | One live-or-orphan kild in detail: agents, git state, full log |
 | `kild send <id> <text…> --to a,b` | Send a message to named recipients in a live kild. **There is no lead and no default** — the engine never infers a recipient. `--to` is only omittable when the kild has exactly one agent, and the CLI then resolves that handle and sends it explicitly |
-| `kild spawn <id> --as <handle>` | Add an agent to a live kild (`--persona`, `--model`). Errors are reported — an unknown persona or duplicate handle fails loudly |
+| `kild spawn <id> --as <handle>` | Add an agent to a live kild (`--persona`, `--model`). `--task <text>` gives it its first message so it starts working; without one it sits idle until something sends to it. Errors are reported — an unknown persona or duplicate handle fails loudly |
 | `kild stop <id>` | Stop a live kild by id. With `--as <handle>` stops **that one agent** and leaves the kild running |
 | `kild land <id> [--execute]` | Without `--execute`: a **dry run** that touches nothing and reports what would merge and what collides. With it: merges the kild's branch into its base in the project's main checkout and prints the merge sha |
 | `kild rm <id> [--force]` | Dispose of a kild's worktree. Refused when the branch carries commits its base does not have (unlanded work); uncommitted files are discarded and listed, not a refusal. **The `kild/<name>` branch always survives**, so `--force` loses no commits |
@@ -72,6 +72,7 @@ Add `--json` to any command for machine-readable output on stdout.
 `--project <name|path>` · `--persona <name>` · `--model <ref>` · `--worktree <name>` ·
 `--base <branch>` · `--agents a,b,c` (for `kild new`) · `--to a,b` (for `kild send`) ·
 `--as <handle>` (for `attach`/`inbox`/`spawn`, and `stop` to stop one agent) ·
+`--task <text>` (for `kild spawn`) ·
 `--state live|orphan|reclaimable` · `--git` (both for `kild ls`) · `--since <seq>` (for
 `kild log`) · `--execute` (for `kild land`) ·
 `--detach` · `--force` · `--json`
@@ -125,9 +126,14 @@ at its own turn boundary rather than being pushed to.
 
 ## Delegation is asynchronous
 
-Inside a kild, `spawn` + `send` is fire-and-forget: you delegate and keep going; a
-delegate's message wakes you automatically. Don't busy-wait re-asking an agent that
-already replied.
+Inside a kild, spawning is fire-and-forget: you delegate and keep going; a delegate's
+message wakes you automatically. Don't busy-wait re-asking an agent that already replied.
+
+Pass `task` (the tool) or `--task` (the CLI) when you spawn — it is delivered as the new
+agent's first message, from you, so it starts working immediately. A spawn with no task
+produces an agent sitting idle until something sends to it. The handle is yours to choose,
+so make it tell things apart: five `reviewer`s collide, `reviewer-auth` / `reviewer-api` do
+not, and what each was asked is the first message on the log.
 
 **Reaching another agent requires an explicit `send`.** Your normal output is private —
 narration is not delivered to anyone. If you finish delegated work without sending your

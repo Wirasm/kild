@@ -109,6 +109,12 @@ export interface AgentIdentity {
   ownership: Ownership;
   persona?: string;
   model?: string;
+  /** Who spawned this agent (see {@link AgentBase.invitedBy}). On the CHEAP view because
+   *  it is the only thing that tells five identical `reviewer` personas apart by origin:
+   *  filter a roster by `invitedBy` and you have exactly the agents one delegator started.
+   *  It was already recorded and already free to read — omitting it just meant nobody
+   *  could see it. */
+  invitedBy?: string;
   /** Attention state: finished a turn and waiting for input (see {@link AgentBase.idle}). */
   idle?: boolean;
   /** True once the agent's session was stopped individually (see {@link AgentBase.stopped}). */
@@ -136,6 +142,7 @@ export function agentIdentity(agent: Agent): AgentIdentity {
     ownership: agent.ownership ?? 'owned',
     persona: agent.persona,
     model: agent.model,
+    invitedBy: agent.invitedBy,
     idle: agent.idle,
     stopped: agent.stopped,
   };
@@ -229,6 +236,30 @@ export interface AgentSpec {
    *  agent's session safe. A fork is a snapshot: it diverges from the moment it is taken and
    *  does not follow the original. */
   forkFrom?: string;
+}
+
+/**
+ * Who is spawning an agent, and what they are spawning it to do. The two travel together
+ * because the second is meaningless without the first: a task is a MESSAGE, and a message
+ * has a sender.
+ *
+ * `task` is delivery convenience, not a new concept and not a stored field — it fuses
+ * `spawn` + `send` the way `POST /api/kilds`'s `kickoff` already does for create, because a
+ * spawned agent with no first message just sits there. The record of what an agent was
+ * asked to do is message `seq 1` on the kild log, where a later revision of that task can
+ * follow it. A copy on the roster would be a second answer that goes stale the moment the
+ * spawner says "actually, do X instead".
+ */
+export interface SpawnContext {
+  /** The spawner's handle — the ground-truth spawn edge (stored as
+   *  {@link AgentBase.invitedBy}) and the `from` of `task`. Engine-derived at every call
+   *  site: an agent's control line carries its own handle, and a REST caller is resolved
+   *  from its credential (never asserted), because a sender a caller chose for itself is
+   *  a forgery, not an identity. */
+  invitedBy?: string;
+  /** First message to deliver to the new agent, sent from {@link invitedBy} as an ordinary
+   *  directed message. Requires a sender. */
+  task?: string;
 }
 
 /** Spec to create a kild: who the agents are and where they run. */
@@ -374,6 +405,8 @@ export interface SpawnOut {
   handle: string;
   persona?: string;
   model?: string;
+  /** What the new agent is being spawned to do — see {@link SpawnContext.task}. */
+  task?: string;
 }
 
 /** Agent→engine control line: an agent called `stop`. */
