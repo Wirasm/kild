@@ -58,6 +58,17 @@ export interface StopAttributionInput {
   from?: string;
 }
 
+export interface SpawnAttributionInput {
+  kildId: string;
+  sessionId?: string;
+  token?: string;
+  /** A caller-asserted spawner, in whatever shape it arrived. Rejected on PRESENCE, not on
+   *  type — the spawner is written to the roster as `invitedBy` and is the sender of the new
+   *  agent's `task`, so no value a caller chose for itself is acceptable and there is nothing
+   *  to validate. */
+  invitedBy?: unknown;
+}
+
 interface RestAttributionDeps {
   /** The handle the agent running this kild session speaks as. Kild-level knowledge: a
    *  handle belongs to an agent's membership of a kild, not to the session substrate. */
@@ -122,4 +133,21 @@ export function resolveStopActor(
   deps: RestAttributionDeps,
 ): CommandResult<string> {
   return resolveActor(input, deps);
+}
+
+/** Who is spawning — the handle recorded as the new agent's `invitedBy` and used as the
+ *  sender of its `task`. Derived exactly like a send's actor, because a task IS a send. */
+export function resolveSpawnActor(
+  input: SpawnAttributionInput,
+  deps: RestAttributionDeps,
+): CommandResult<string> {
+  // Named after the field the caller actually sent, so the rejection is actionable rather
+  // than a message about a `from` it never wrote.
+  if (input.invitedBy !== undefined) {
+    return reject('invitedBy is not allowed; the spawner is engine-derived');
+  }
+  return resolveActor(
+    { kildId: input.kildId, sessionId: input.sessionId, token: input.token },
+    deps,
+  );
 }

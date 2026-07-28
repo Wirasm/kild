@@ -24,6 +24,7 @@ import {
   type NewKildSpec,
   type NewKildSuccess,
   type SendOut,
+  type SpawnContext,
   type SpawnOut,
   type StopOut,
 } from './kild-types.ts';
@@ -368,24 +369,50 @@ export class KildManager {
     return ok({ message: `Stopped @${agent.handle} in kild '${kild.name}'.` });
   }
 
-  /** Spawn an agent into a live kild. `invitedBy` is the spawning agent's handle, absent
-   *  when the operator spawns directly. Observers learn about the new roster from the
-   *  `{kilds}` broadcast — a join is an event, not a message anyone was sent. */
+  /**
+   * Spawn an agent into a live kild. {@link SpawnContext} says who is spawning and, if they
+   * gave one, what the new agent is being spawned to do. Observers learn about the new
+   * roster from the `{kilds}` broadcast — a join is an event, not a message anyone was sent.
+   *
+   * A `task` is delivered afterwards as an ordinary message from the spawner, so it lands on
+   * the log and reads to the new agent exactly like every later instruction. If that send
+   * fails the spawn still succeeded — the agent exists and is addressable — so it is
+   * reported, not rolled back: killing a working agent because its first message did not
+   * land would be the worse outcome.
+   */
   async spawnAgent(
     kildId: string,
     spec: AgentSpec,
-    invitedBy?: string,
+    context: SpawnContext = {},
   ): Promise<CommandResult<KildActionSuccess>> {
     const kild = this.registry.get(kildId);
     if (!kild) return fail('not_found', `no such kild: ${kildId}`);
+    // Refused up front rather than defaulted: a task is a message, and inventing a sender
+    // for it would put a name on the log that nobody proved.
+    if (context.task !== undefined && context.invitedBy === undefined) {
+      return fail('rejected', 'a task needs a sender: spawn from an identified caller');
+    }
 
     const validated = await this.validateAgents(kild.cwd, [spec], kild.agents);
     if (!validated.ok) return validated;
 
-    const result = this.startAgent(kild, validated.value[0] as ValidatedAgentSpec, invitedBy);
+    const result = this.startAgent(
+      kild,
+      validated.value[0] as ValidatedAgentSpec,
+      context.invitedBy,
+    );
     if (!result.ok) return result;
     this.broadcast({ kilds: this.registry.summaries() });
-    return ok({ message: `Spawned @${spec.handle} into the kild.` });
+
+    const spawned = `Spawned @${spec.handle} into the kild.`;
+    if (context.task === undefined || context.invitedBy === undefined)
+      return ok({ message: spawned });
+    const sent = await this.send(kildId, context.invitedBy, [spec.handle], context.task);
+    return ok({
+      message: sent.ok
+        ? `${spawned} Tasked it as @${context.invitedBy}.`
+        : `${spawned} Its task was NOT delivered (${sent.message}) — send it yourself.`,
+    });
   }
 
   // ── Attribution ─────────────────────────────────────────────────────────────
@@ -638,12 +665,13 @@ export class KildManager {
   ): Promise<CommandResult<KildActionSuccess>> {
     const located = this.registry.locateAgent(agentId);
     if (!located) return fail('not_found', `agent '${agentId}' is not in a live kild`);
-    // The spawner is the calling agent — recorded as the new agent's `invitedBy`, so its
-    // idle/done notice routes back here (hierarchical delegation signalling).
+    // The spawner is the calling agent — recorded as the new agent's `invitedBy` and used as
+    // the sender of its `task`. Taken from the located session, never from the control line:
+    // the agent says what it wants done, the engine says who asked.
     return this.spawnAgent(
       located.kild.id,
       { handle: spec.handle, persona: spec.persona, model: spec.model },
-      located.agent.handle,
+      { invitedBy: located.agent.handle, task: spec.task },
     );
   }
 

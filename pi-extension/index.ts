@@ -883,7 +883,7 @@ export default function (pi: PiExtensionAPI) {
         Type.Array(
           Type.Object({
             handle: Type.String({ description: 'The agent’s @handle, addressable within the kild.' }),
-            persona: Type.Optional(Type.String({ description: 'Persona to run (see kild_personas); "default" is no persona.' })),
+            persona: Type.Optional(Type.String({ description: 'Persona to run (see kild_personas); "general" is the built-in no-specialisation one.' })),
             model: Type.Optional(Type.String({ description: 'provider/model ref, e.g. openai-codex/gpt-5.6-sol.' })),
           }),
         ),
@@ -953,17 +953,26 @@ export default function (pi: PiExtensionAPI) {
     label: 'kild: spawn agent',
     description:
       'Spawn an owned agent into an existing live kild. It works in the same tree as the ' +
-      'kild’s other agents and is addressable by its @handle immediately. The engine ' +
-      'ANSWERS: a rejection (unknown kild, duplicate handle, unknown persona, capacity) ' +
-      'comes back as an error with its reason, never a silent no-op.',
+      'kild’s other agents and is addressable by its @handle immediately. Pass `task` to ' +
+      'give it its first assignment — without one it starts idle and does nothing until ' +
+      'something sends to it. The engine ANSWERS: a rejection (unknown kild, duplicate ' +
+      'handle, unknown persona, capacity) comes back as an error with its reason, never a ' +
+      'silent no-op.',
     parameters: Type.Object({
       id: Type.String({ description: 'Kild id.' }),
-      handle: Type.String({ description: 'The new agent’s @handle. Must be unused in this kild.' }),
-      persona: Type.Optional(Type.String({ description: 'Persona to run (see kild_personas); "default" is no persona.' })),
+      handle: Type.String({ description: 'The new agent’s @handle. Must be unused in this kild. Spawning one persona several times? Give each a handle you can tell apart, e.g. reviewer-auth.' }),
+      persona: Type.Optional(Type.String({ description: 'Persona to run (see kild_personas); "general" is the built-in no-specialisation one.' })),
       model: Type.Optional(Type.String({ description: 'provider/model ref, e.g. openai-codex/gpt-5.6-sol.' })),
+      task: Type.Optional(Type.String({ description: 'What this agent is being spawned to do, delivered as its first message: the goal, the outcome, and how it is judged done. It is attributed to "human" (this session presents no kild credential), so name in the text who to report back to. Appears on the kild log; revise it later with kild_send.' })),
     }),
     async execute(_id, params) {
-      const p = params as { id: string; handle: string; persona?: string; model?: string };
+      const p = params as {
+        id: string;
+        handle: string;
+        persona?: string;
+        model?: string;
+        task?: string;
+      };
       const handle = p.handle.replace(/^@/, '');
       // POST, not the fire-and-forget WS frame: this route returns the typed error
       // (404 not_found / 409 rejected) instead of logging it inside the engine.
@@ -973,6 +982,7 @@ export default function (pi: PiExtensionAPI) {
           handle,
           ...(p.persona ? { persona: p.persona } : {}),
           ...(p.model ? { model: p.model } : {}),
+          ...(p.task ? { task: p.task } : {}),
         }),
       );
       return {
@@ -1361,7 +1371,7 @@ export default function (pi: PiExtensionAPI) {
     description:
       'List the personas available in a project (its .claude/agents, .pi/agents, and ' +
       'config-plugged packs) — the valid `persona` values for kild_new and kild_spawn. ' +
-      '"default" is always available and means no persona.',
+      '"general" is always available: the built-in, no-specialisation persona.',
     parameters: Type.Object({
       project: Type.Optional(Type.String({ description: 'Registered project name. Mutually exclusive with path.' })),
       path: Type.Optional(Type.String({ description: 'Absolute project directory. Mutually exclusive with project. Omit both for global-only personas.' })),

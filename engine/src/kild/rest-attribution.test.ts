@@ -4,6 +4,7 @@ import type { AttachIdentity } from './attach-token.ts';
 import {
   resolveNewKildActor,
   resolveSendActor,
+  resolveSpawnActor,
   resolveStopActor,
   UNATTRIBUTED,
 } from './rest-attribution.ts';
@@ -169,6 +170,56 @@ test('the token wins over a session id: it is scoped to the kild being addressed
   expect(
     resolveSendActor({ kildId: 'kild-1', sessionId: 'coder-session', token: 'tok-claude' }, deps),
   ).toEqual({ ok: true, value: 'claude' });
+});
+
+// ── Spawning: the same derivation, because a `task` IS a send ──────────────────
+// The spawner is written to the roster as `invitedBy` AND is the sender of the new agent's
+// `task`. A caller-supplied `invitedBy` would therefore have been a forgery path for message
+// senders, which is why the route stopped trusting it.
+
+test('the spawner is derived from a session id, like every other actor', () => {
+  expect(resolveSpawnActor({ kildId: 'kild-1', sessionId: 'coder-session' }, deps)).toEqual({
+    ok: true,
+    value: 'coder',
+  });
+});
+
+test('an attached harness spawns as the handle its token names', () => {
+  expect(resolveSpawnActor({ kildId: 'kild-1', token: 'tok-claude' }, deps)).toEqual({
+    ok: true,
+    value: 'claude',
+  });
+});
+
+test('a credential-less spawn is labelled — the CLI and curl keep working', () => {
+  expect(resolveSpawnActor({ kildId: 'kild-1' }, deps)).toEqual({ ok: true, value: UNATTRIBUTED });
+});
+
+test('a caller-asserted invitedBy is rejected, and the error names that field', () => {
+  expect(resolveSpawnActor({ kildId: 'kild-1', invitedBy: 'orchestrator' }, deps)).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'invitedBy is not allowed; the spawner is engine-derived',
+  });
+});
+
+test('invitedBy is rejected on presence, not on type — there is nothing to validate', () => {
+  // Any value a caller chose for itself is unacceptable, so a non-string is the same
+  // rejection rather than a separate "must be a string" answer.
+  for (const invitedBy of [42, null, { handle: 'orchestrator' }, ['a']]) {
+    expect(resolveSpawnActor({ kildId: 'kild-1', invitedBy }, deps)).toMatchObject({
+      ok: false,
+      code: 'rejected',
+    });
+  }
+});
+
+test('an unknown spawn credential rejects rather than spawning as somebody', () => {
+  expect(resolveSpawnActor({ kildId: 'kild-1', token: 'not-a-token' }, deps)).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'unknown attach token',
+  });
 });
 
 test('a token plus a caller-asserted from is still a rejection', () => {

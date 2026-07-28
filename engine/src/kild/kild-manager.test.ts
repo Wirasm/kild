@@ -273,6 +273,96 @@ test('spawning an agent records no message — a roster change is an event, not 
   expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['coder', 'reviewer']);
 });
 
+// ── task-on-spawn: the fused spawn+send ────────────────────────────────────────────────
+// A spawn with no first message produces an agent that sits idle, so every real delegation
+// was spawn-then-send. `task` fuses them exactly as `kickoff` does for create. It is NOT a
+// stored field: the record of what an agent was asked to do is its first message, which a
+// later revision can follow — a copy on the roster would go stale silently.
+
+test('task is delivered as the new agent’s first message, from the spawner', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+
+  const result = await manager.spawnAgent(
+    'kild-1',
+    { handle: 'reviewer' },
+    { invitedBy: 'orchestrator', task: 'review the auth diff' },
+  );
+  expect(result).toMatchObject({ ok: true });
+
+  const log = manager.messages('kild-1') ?? [];
+  expect(log).toHaveLength(1);
+  expect(log[0]).toMatchObject({
+    seq: 1,
+    from: 'orchestrator',
+    to: ['reviewer'],
+    text: 'review the auth diff',
+  });
+  // …and it actually reached the process, not just the log.
+  expect(prompted.at(-1)).toMatchObject({
+    id: 's-2',
+    text: formatDelivery('demo', 'orchestrator', 'review the auth diff'),
+  });
+});
+
+test('a spawn with no task delivers nothing — the agent starts idle', async () => {
+  const { manager, prompted } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  await manager.spawnAgent('kild-1', { handle: 'reviewer' }, { invitedBy: 'orchestrator' });
+  expect(manager.messages('kild-1')).toEqual([]);
+  expect(prompted).toEqual([]);
+});
+
+test('a task with no sender is refused before anything is spawned', async () => {
+  const { manager, spawned } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  expect(await manager.spawnAgent('kild-1', { handle: 'reviewer' }, { task: 'do X' })).toEqual({
+    ok: false,
+    code: 'rejected',
+    message: 'a task needs a sender: spawn from an identified caller',
+  });
+  expect(spawned).toHaveLength(1); // only the creator's own agent
+  expect(manager.liveKilds()[0]?.agents.map((a) => a.handle)).toEqual(['orchestrator']);
+});
+
+test('an agent’s spawn control line tasks the new agent as ITSELF, whatever the line says', async () => {
+  const { manager, callbacks } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  // The control line carries no sender and cannot: the engine takes it from the session it
+  // arrived on. An agent says what it wants done; the engine says who asked.
+  await callbacks.get('s-1')?.onSpawn?.({
+    kind: 'spawn',
+    handle: 'reviewer',
+    persona: 'reviewer',
+    task: 'review the auth diff',
+  });
+  expect(manager.messages('kild-1')?.[0]).toMatchObject({
+    from: 'orchestrator',
+    to: ['reviewer'],
+    text: 'review the auth diff',
+  });
+  expect(manager.liveKilds()[0]?.agents.find((a) => a.handle === 'reviewer')).toMatchObject({
+    invitedBy: 'orchestrator',
+  });
+});
+
+test('invitedBy rides the cheap roster view, so five identical personas are attributable', async () => {
+  const { manager } = fixture();
+  await newKild(manager, [{ handle: 'orchestrator' }]);
+  await manager.spawnAgent(
+    'kild-1',
+    { handle: 'reviewer-auth', persona: 'reviewer' },
+    { invitedBy: 'orchestrator' },
+  );
+  await manager.spawnAgent('kild-1', { handle: 'reviewer-api', persona: 'reviewer' });
+
+  const roster = manager.liveIdentities()[0]?.agents ?? [];
+  expect(roster.find((a) => a.handle === 'reviewer-auth')?.invitedBy).toBe('orchestrator');
+  // Absent, not invented: nobody in the kild invited this one.
+  expect(roster.find((a) => a.handle === 'reviewer-api')?.invitedBy).toBeUndefined();
+  expect(roster.find((a) => a.handle === 'orchestrator')?.invitedBy).toBeUndefined();
+});
+
 // ── The message cursor: seq, not ts ──────────────────────────────────────────────────
 
 test('seq is strictly increasing within a kild — ts is not, and cannot be', async () => {

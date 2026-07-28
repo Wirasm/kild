@@ -95,7 +95,7 @@ transcript route is removed in the follow-up commit; do not build against it.
 
 ```diff
 - { name, kind: 'spawned'|'attached', persona, model, piSessionId, piSessionFile, idle, posted, tokens, cost }
-+ { handle, ownership: 'owned'|'attached', persona, model, piSessionId, piSessionFile, idle, tokens, cost }
++ { handle, ownership: 'owned'|'attached', persona, model, invitedBy?, piSessionId, piSessionFile, idle, tokens, cost }
 ```
 
 - `name` → **`handle`** (the `@name` you address)
@@ -103,6 +103,11 @@ transcript route is removed in the follow-up commit; do not build against it.
 - **`posted` is gone.** It backed a reporting norm that moved to PRP.
 - **`idle` stays** — it is state, not a norm: an agent that finished a turn and is waiting.
   Still safe to render as an attention signal.
+- **`invitedBy` is new** (on the cheap view too): the handle that spawned this agent, absent
+  for the kild's initial roster. It is the spawn edge as ground truth rather than something
+  to infer from the log — enough to draw who-delegated-to-whom, and the only thing that tells
+  five agents on one persona apart by origin. A spawn through the API with no credential
+  reads as `"human"`, exactly as its sends do.
 
 ### Message (was room message)
 
@@ -144,6 +149,14 @@ Deriving them in helm from `git.changedFiles` is the correct approach, not a wor
 - `POST /api/kilds/:id/inbox/drain` — `{name}` → `{handle}`
 - `POST /api/kilds/:id/stop` — the `force` field is **gone** (it existed only to bury open
   decisions, which no longer exist)
+- `POST /api/kilds/:id/agents` — takes an optional **`task`**, the new agent's first message.
+  It is delivered as an ordinary directed message from whoever the engine resolves the caller
+  to be, so it lands on the log at `seq n` and needs no separate `POST /messages`. Same
+  convenience as `kickoff` on create, for the same reason: an agent nobody has said anything
+  to just idles. There is **no** `invitedBy` field to send — presence of one is a `409`, and
+  the spawner is derived from the credential (session id or Bearer token) like every other
+  actor. That is not new strictness, it is the same rule `from` has always had; it matters
+  more here because the spawner is now a *message sender*.
 
 ## WebSocket
 
@@ -171,6 +184,11 @@ Connect to `/ws` as before. Frame names changed.
 | `room_close` | `kild_stop` |
 
 `spawn`, `prompt`, and `stop` (the bare-agent verbs) keep their names.
+
+`kild_spawn` also takes an optional `task` — `{ type, id, agent, task? }` — with the same
+meaning as on the REST route. This transport carries no credential, so the task is sent from
+`"human"`, exactly as `kild_send` is. Prefer `POST /api/kilds/:id/agents` when you care
+whether the spawn worked: the frame is still fire-and-forget.
 
 `UiEvent` payloads are unchanged — `text`, `tool_start`, `stats`, `model`, `pi_session`,
 `agent_end`, `session_end`, `error` all keep their shapes.
@@ -217,7 +235,9 @@ Deleted: `POST /api/agents`, `POST /api/agents/:id/prompt`, `POST /api/agents/:i
 `GET /api/agents/:id/transcript`.
 
 - **`POST /api/kilds/:id/agents`** — spawn into a kild. New, and it *answers*: spawning was
-  WS-only and fire-and-forget, so a caller could never learn it failed.
+  WS-only and fire-and-forget, so a caller could never learn it failed. Takes an optional
+  `task` (the new agent's first message, sent from the derived spawner) and records the
+  spawner as the agent's `invitedBy`.
 - **`DELETE /api/kilds/:id/agents/:handle`** — stop one agent, kild keeps running. The agent
   stays on the roster marked `stopped`, so its transcript stays addressable.
 - **`GET /api/kilds/:id/agents/:handle/transcript`** — the only transcript route.
@@ -278,6 +298,8 @@ out — deliberate, but it will surface in the UI.
 - [ ] Handle land's refusal when the main checkout is off-base or dirty
 - [ ] Derive `collidesWith` client-side from `status`'s `changedFiles[]` — it is not a server field
 - [ ] Drop any `ownership ?? 'owned'` — it is always present now
+- [ ] Spawn with `task` instead of spawn-then-post; stop sending `invitedBy` (it is a `409`)
+- [ ] Render `agent.invitedBy` if you want the delegation tree — it is ground truth now
 - [ ] Optional: keep the token from `attach` and send it as `Bearer`, so helm's own messages read as its handle rather than `human`
 - [ ] Un-pin
 

@@ -25,6 +25,7 @@ import { addProject, findProject, loadProjects } from './kild/projects.ts';
 import {
   resolveNewKildActor,
   resolveSendActor,
+  resolveSpawnActor,
   resolveStopActor,
   UNATTRIBUTED,
 } from './kild/rest-attribution.ts';
@@ -634,6 +635,8 @@ app.post('/api/kilds/:id/agents', async (c) => {
     persona?: unknown;
     model?: unknown;
     invitedBy?: unknown;
+    sessionId?: unknown;
+    task?: unknown;
     forkFrom?: unknown;
   };
   if (typeof body.handle !== 'string' || !body.handle.trim()) {
@@ -645,8 +648,16 @@ app.post('/api/kilds/:id/agents', async (c) => {
   if (body.model !== undefined && typeof body.model !== 'string') {
     return c.json({ error: 'model must be a string' }, 400);
   }
-  if (body.invitedBy !== undefined && typeof body.invitedBy !== 'string') {
-    return c.json({ error: 'invitedBy must be a string' }, 400);
+  if (body.sessionId !== undefined && typeof body.sessionId !== 'string') {
+    return c.json({ error: 'sessionId must be a string' }, 400);
+  }
+  // No `invitedBy` check here: presence alone is a rejection, whatever its type, and
+  // resolveSpawnActor is the one place that says so.
+  // `task` is the new agent's first message, delivered from whoever spawned it. Same
+  // convenience as `kickoff` on create, and here for the same reason: an agent nobody has
+  // said anything to just idles.
+  if (body.task !== undefined && (typeof body.task !== 'string' || !body.task.trim())) {
+    return c.json({ error: 'task must be a non-empty string' }, 400);
   }
   // `forkFrom` seeds the new agent from a COPY of an existing pi session file — the way to
   // branch off a conversation, including a LIVE one, since the source is never written.
@@ -662,15 +673,30 @@ app.post('/api/kilds/:id/agents', async (c) => {
       return c.json({ error: `forkFrom is not an existing session file: ${body.forkFrom}` }, 400);
     }
   }
+  // The spawner is DERIVED, never asserted: it is written to the roster as `invitedBy` and
+  // is the sender of `task`, so a caller-chosen name would be a forgery on the kild log.
+  // An identified agent spawning through REST gets its own handle; the CLI, curl and a UI
+  // client present no credential and read as the unattributed label, exactly as their sends do.
+  const id = c.req.param('id');
+  const spawner = resolveSpawnActor(
+    {
+      kildId: id,
+      sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      token: bearerToken(c),
+      invitedBy: body.invitedBy,
+    },
+    kildManager,
+  );
+  if (!spawner.ok) return c.json({ error: spawner.message }, kildResultStatus(spawner));
   const result = await kildManager.spawnAgent(
-    c.req.param('id'),
+    id,
     {
       handle: body.handle.trim(),
       persona: body.persona,
       model: body.model,
       forkFrom: typeof body.forkFrom === 'string' ? body.forkFrom : undefined,
     },
-    body.invitedBy,
+    { invitedBy: spawner.value, task: typeof body.task === 'string' ? body.task : undefined },
   );
   if (!result.ok) {
     return c.json({ error: result.message, code: result.code }, kildResultStatus(result));
@@ -956,6 +982,9 @@ type ClientMessage =
       type: 'kild_spawn';
       id: string;
       agent: { handle: string; persona?: string; model?: string };
+      /** First message for the new agent, delivered from the unattributed label — the same
+       *  sender `kild_send` uses on this transport, which carries no credential. */
+      task?: string;
     }
   | { type: 'kild_stop'; id: string };
 
@@ -996,6 +1025,7 @@ function parseClientMessage(data: string): ClientMessage | null {
     return m as ClientMessage;
   }
   if (m.type === 'kild_spawn' && typeof m.agent === 'object' && m.agent !== null) {
+    if (m.task !== undefined && typeof m.task !== 'string') return null;
     return m as ClientMessage;
   }
   if (m.type === 'kild_stop') return m as ClientMessage;
@@ -1064,7 +1094,12 @@ app.get(
             kildManager.send(msg.id, UNATTRIBUTED, msg.to, msg.text),
           );
         } else if (msg.type === 'kild_spawn') {
-          enqueue(`kild_spawn ${msg.id}`, () => kildManager.spawnAgent(msg.id, msg.agent));
+          enqueue(`kild_spawn ${msg.id}`, () =>
+            kildManager.spawnAgent(msg.id, msg.agent, {
+              invitedBy: UNATTRIBUTED,
+              task: msg.task,
+            }),
+          );
         } else if (msg.type === 'kild_stop') {
           enqueue(`kild_stop ${msg.id}`, () => kildManager.stop(msg.id));
         }

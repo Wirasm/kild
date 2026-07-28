@@ -295,6 +295,27 @@ test('POST /api/kilds/:id/agents validates its body before touching a kild', asy
   expect(await (await post('/api/kilds/k/agents', { handle: 'a', model: 7 })).json()).toEqual({
     error: 'model must be a string',
   });
+  expect(await (await post('/api/kilds/k/agents', { handle: 'a', task: '' })).json()).toEqual({
+    error: 'task must be a non-empty string',
+  });
+  expect(await (await post('/api/kilds/k/agents', { handle: 'a', task: 7 })).json()).toEqual({
+    error: 'task must be a non-empty string',
+  });
+});
+
+// A spawn's actor is written to the roster as `invitedBy` AND is the sender of the new
+// agent's `task`. The route used to take `invitedBy` from the body, which — once a task
+// became a message — would have been a forgery path for message senders. It is derived now.
+test('POST /api/kilds/:id/agents refuses a caller-asserted invitedBy', async () => {
+  const res = await post('/api/kilds/no-such-kild/agents', {
+    handle: 'reviewer',
+    invitedBy: 'orchestrator',
+  });
+  expect(await res.json()).toEqual({
+    error: 'invitedBy is not allowed; the spawner is engine-derived',
+  });
+  // Refused before the kild is even looked up: a forged sender is not a routing question.
+  expect(res.status).toBe(409);
 });
 
 test('DELETE /api/kilds/:id/agents/:handle is the stop verb for one agent', async () => {
